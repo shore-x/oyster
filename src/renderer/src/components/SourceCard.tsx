@@ -69,9 +69,9 @@ export function SourceCard(props: SourceCardProps) {
             <div class="empty-source__title">
               {props.source.discoveryState === 'needs_permission' ? '无法读取历史记录' : '默认目录中没有可用数据'}
             </div>
-            <div class="empty-source__hint">
-              {props.source.errorMessage || '可以选择一个自定义的历史记录目录。'}
-            </div>
+            <Show when={props.source.errorMessage}>
+              <div class="empty-source__hint">{props.source.errorMessage}</div>
+            </Show>
           </div>
           <button class="button button--secondary" onClick={props.onChooseRoot}>
             <Icon name="folder" />选择目录

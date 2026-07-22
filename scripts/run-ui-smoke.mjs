@@ -26,8 +26,13 @@ const semantics = JSON.parse(await readFile(`${capturePath}.json`, 'utf8'))
 if (semantics.title !== 'Agent 数据来源') throw new Error('Expected page title was not rendered')
 if (semantics.sourceCards !== 3) throw new Error(`Expected 3 source cards, got ${semantics.sourceCards}`)
 if (semantics.dragRegion !== 'drag') throw new Error('Right-side window drag region is missing')
+if (!semantics.primaryButtonColor.includes('37, 99, 235')) throw new Error('Functional primary action is not blue')
+if (semantics.buttonAlignment !== 'center') throw new Error('Button content is not centered')
 if (semantics.overflowX) throw new Error('Page has unexpected horizontal overflow')
 if (!semantics.primaryActions.includes('探测本机 Agent')) throw new Error('Discovery action is missing')
 if (!semantics.bodyText.includes('正在导入原始记录')) throw new Error('Import progress state is missing')
+for (const removedCopy of ['KNOWLEDGE SOURCES', '数据仅保存在本机', 'LOCAL KNOWLEDGE HUB']) {
+  if (semantics.bodyText.includes(removedCopy)) throw new Error(`Redundant copy is still rendered: ${removedCopy}`)
+}
 
 console.log(`UI smoke test passed: ${capturePath}`)

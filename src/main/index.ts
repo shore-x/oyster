@@ -66,6 +66,8 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     title: document.querySelector('h1')?.textContent,
     sourceCards: document.querySelectorAll('[data-testid="source-card"]').length,
     dragRegion: getComputedStyle(document.querySelector('[data-testid="window-drag-region"]')).getPropertyValue('-webkit-app-region'),
+    primaryButtonColor: getComputedStyle(document.querySelector('.button--primary')).backgroundColor,
+    buttonAlignment: getComputedStyle(document.querySelector('.button')).justifyContent,
     primaryActions: Array.from(document.querySelectorAll('button')).map((button) => button.textContent?.trim()),
     overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
     bodyText: document.body.innerText

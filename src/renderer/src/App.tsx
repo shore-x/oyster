@@ -19,28 +19,23 @@ export function App() {
         <nav aria-label="主导航">
           <div class="nav-item nav-item--active"><Icon name="archive" /><span>数据来源</span></div>
         </nav>
-        <div class="sidebar__footer">Local knowledge hub</div>
       </aside>
 
       <main class="content">
         <div class="window-drag-region" data-testid="window-drag-region" aria-hidden="true" />
         <header class="page-header">
           <div>
-            <div class="eyebrow">KNOWLEDGE SOURCES</div>
             <h1>Agent 数据来源</h1>
-            <p>发现本机 Agent，扫描历史记录并导入到本地知识库。</p>
+            <div class="page-summary">
+              <span><strong>{foundCount()}</strong> 个来源</span>
+              <span class="page-summary__separator">·</span>
+              <span><strong>{totalSessions()}</strong> 个会话</span>
+            </div>
           </div>
           <button class="button button--primary button--detect" onClick={controller.detectAgents} disabled={controller.detecting()}>
             <Icon name="refresh" />{controller.detecting() ? '探测中…' : '探测本机 Agent'}
           </button>
         </header>
-
-        <div class="summary-line">
-          <span><strong>{foundCount()}</strong> 个来源已发现</span>
-          <span class="summary-line__divider" />
-          <span><strong>{totalSessions()}</strong> 个历史会话</span>
-          <span class="summary-line__note">数据仅保存在本机</span>
-        </div>
 
         <Show when={controller.error()}>
           <div class="page-error"><Icon name="warning" />{controller.error()}</div>
