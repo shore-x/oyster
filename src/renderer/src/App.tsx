@@ -23,6 +23,7 @@ export function App() {
       </aside>
 
       <main class="content">
+        <div class="window-drag-region" data-testid="window-drag-region" aria-hidden="true" />
         <header class="page-header">
           <div>
             <div class="eyebrow">KNOWLEDGE SOURCES</div>

@@ -65,6 +65,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   const semantics = await window.webContents.executeJavaScript(`(() => ({
     title: document.querySelector('h1')?.textContent,
     sourceCards: document.querySelectorAll('[data-testid="source-card"]').length,
+    dragRegion: getComputedStyle(document.querySelector('[data-testid="window-drag-region"]')).getPropertyValue('-webkit-app-region'),
     primaryActions: Array.from(document.querySelectorAll('button')).map((button) => button.textContent?.trim()),
     overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
     bodyText: document.body.innerText

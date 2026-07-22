@@ -25,6 +25,7 @@ if (exitCode !== 0) throw new Error(`Electron UI smoke test exited with code ${e
 const semantics = JSON.parse(await readFile(`${capturePath}.json`, 'utf8'))
 if (semantics.title !== 'Agent 数据来源') throw new Error('Expected page title was not rendered')
 if (semantics.sourceCards !== 3) throw new Error(`Expected 3 source cards, got ${semantics.sourceCards}`)
+if (semantics.dragRegion !== 'drag') throw new Error('Right-side window drag region is missing')
 if (semantics.overflowX) throw new Error('Page has unexpected horizontal overflow')
 if (!semantics.primaryActions.includes('探测本机 Agent')) throw new Error('Discovery action is missing')
 if (!semantics.bodyText.includes('正在导入原始记录')) throw new Error('Import progress state is missing')
