@@ -39,8 +39,6 @@ describe('DiscoveryService', () => {
     await service.initialize()
     let snapshot = await service.detectAgents()
     expect(snapshot.sources[0].discoveryState).toBe('found')
-
-    snapshot = await service.scanSource('source:claude')
     expect(snapshot.sources[0].scanState).toBe('scanning')
     await service.waitForIdle('source:claude')
     snapshot = service.snapshot()
@@ -82,7 +80,6 @@ describe('DiscoveryService', () => {
     )
     await service.initialize()
     await service.detectAgents()
-    await service.scanSource('source:claude')
     await service.waitForIdle()
     expect(service.snapshot().sources[0].sessionCount).toBe(1)
 

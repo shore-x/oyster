@@ -6,6 +6,7 @@ import { discoveryChannels } from '../shared/channels'
 import type { DiscoverySnapshot } from '../shared/discovery'
 import { createDefaultAdapters, createDetectionContext } from './discovery/adapters'
 import { DiscoveryService } from './discovery/discovery-service'
+import { nearestExistingDirectory } from './discovery/path-utils'
 import { FileRawEvidenceStore, MemoryRawEvidenceStore } from './discovery/raw-evidence-store'
 import { InMemoryDiscoveryRepository, JsonDiscoveryRepository } from './discovery/repository'
 import { createFixtureState } from './fixture-state'
@@ -38,8 +39,11 @@ function registerIpc(service: DiscoveryService): void {
   ipcMain.handle(discoveryChannels.cancelRun, (_event, runId: string) => service.cancelRun(runId))
   ipcMain.handle(discoveryChannels.chooseSourceRoot, async (_event, sourceId: string) => {
     const owner = BrowserWindow.getFocusedWindow() || mainWindow
+    const source = service.snapshot().sources.find((candidate) => candidate.id === sourceId)
+    const defaultPath = await nearestExistingDirectory(source?.rootPath || app.getPath('home'), app.getPath('home'))
     const result = await dialog.showOpenDialog(owner!, {
       title: '选择历史记录目录',
+      defaultPath,
       properties: ['openDirectory']
     })
     if (result.canceled || !result.filePaths[0]) return service.snapshot()

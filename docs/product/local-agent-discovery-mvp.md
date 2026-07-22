@@ -358,6 +358,7 @@ Adapter 负责文件模式和 header 差异；统计、任务、进度、错误�
 第一条纵向切片已经落地，入口为 Electron 的“Agent 数据来源”页面：
 
 - 已实现 Claude Code、Pi、Codex 的内置 Adapter；
+- 用户点击“探测本机 Agent”后，会自动扫描所有已发现来源并刷新文件、会话和字节统计；来源卡片仍可单独重新扫描；
 - 被动探测只做目录/权限/可执行文件检查，不执行 Agent、login shell 或包管理器；
 - 扫描由用户按钮触发，递归读取 JSONL metadata 与最多 96 KB 的 header；
 - 已实现来源统计、Codex active/archive 去重、增量 fingerprint、missing 标记；

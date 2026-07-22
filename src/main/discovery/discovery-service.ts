@@ -153,6 +153,12 @@ export class DiscoveryService {
       })
     )
     await this.persistAndEmit()
+
+    for (const source of this.state.sources) {
+      if (source.discoveryState === 'found' && !this.activeOperations.has(source.id)) {
+        await this.scanSource(source.id)
+      }
+    }
     return this.snapshot()
   }
 
