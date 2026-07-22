@@ -121,7 +121,7 @@ export function SourceCard(props: SourceCardProps) {
         <div class="source-card__actions">
           <Show when={isRunning()} fallback={
             <>
-              <button class="button button--secondary" onClick={props.onChooseRoot}>
+              <button class="button button--ghost" onClick={props.onChooseRoot}>
                 <Icon name="folder" />更改目录
               </button>
               <button class="button button--secondary" onClick={props.onScan}>
@@ -137,7 +137,7 @@ export function SourceCard(props: SourceCardProps) {
               </Show>
             </>
           }>
-            <button class="button button--secondary" onClick={props.onCancel}>
+            <button class="button button--danger-quiet" onClick={props.onCancel}>
               <Icon name="stop" />取消
             </button>
           </Show>

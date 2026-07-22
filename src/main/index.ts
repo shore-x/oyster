@@ -76,7 +76,7 @@ async function createMainWindow(): Promise<void> {
     minWidth: 880,
     minHeight: 620,
     show: false,
-    backgroundColor: '#f5f5f2',
+    backgroundColor: '#fafafa',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     trafficLightPosition: { x: 18, y: 18 },
     webPreferences: {
