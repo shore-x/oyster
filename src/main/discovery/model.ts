@@ -1,8 +1,15 @@
-import type { AgentSource, AgentType, HistorySession, SyncRun } from '../../shared/discovery'
+import type {
+  AgentSource,
+  AgentType,
+  ArtifactKind,
+  HistoryArtifact,
+  InstructionScope,
+  SyncRun
+} from '../../shared/discovery'
 
 export interface DiscoveryStateData {
   sources: AgentSource[]
-  sessions: HistorySession[]
+  artifacts: HistoryArtifact[]
   runs: SyncRun[]
 }
 
@@ -20,11 +27,14 @@ export interface DetectionResult {
   errorMessage?: string
 }
 
-export interface SessionCandidate {
+export interface ArtifactCandidate {
+  kind: ArtifactKind
   externalId: string
   relativePath: string
+  sourcePath: string
   title?: string
   projectPath?: string
+  instructionScope?: InstructionScope
   startedAt?: string
   updatedAt?: string
   sizeBytes: number
@@ -32,7 +42,7 @@ export interface SessionCandidate {
 }
 
 export type ScanEntry =
-  | { kind: 'session'; candidate: SessionCandidate }
+  | { kind: 'artifact'; candidate: ArtifactCandidate }
   | { kind: 'invalid'; relativePath: string; sizeBytes: number }
 
 export interface AgentHistoryAdapter {
@@ -40,8 +50,8 @@ export interface AgentHistoryAdapter {
   readonly displayName: string
   defaultRoot(context: DetectionContext): string
   detect(context: DetectionContext, rootOverride?: string): Promise<DetectionResult>
-  scan(rootPath: string, signal: AbortSignal): AsyncGenerator<ScanEntry>
-  resolveSessionPath(rootPath: string, relativePath: string): string
+  scan(rootPath: string, signal: AbortSignal, context?: DetectionContext): AsyncGenerator<ScanEntry>
+  resolveArtifactPath(rootPath: string, artifact: HistoryArtifact): string
 }
 
 export interface DiscoveryRepository {
@@ -51,13 +61,20 @@ export interface DiscoveryRepository {
 
 export interface RawEvidenceInput {
   sourceId: string
-  sessionId: string
+  artifactId: string
+  artifactKind: ArtifactKind
   absolutePath: string
   fingerprint: string
   signal: AbortSignal
   onProgress(bytes: number): void
 }
 
+export interface RawEvidenceReceipt {
+  id: string
+  contentHash: string
+  sizeBytes: number
+}
+
 export interface RawEvidenceStore {
-  importFile(input: RawEvidenceInput): Promise<string>
+  importFile(input: RawEvidenceInput): Promise<RawEvidenceReceipt>
 }

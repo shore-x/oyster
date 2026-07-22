@@ -1,13 +1,15 @@
 # Oyster
 
-Oyster 是一个独立于 Agent Harness 的本地知识库维护中心。当前纵向切片先完成 Claude Code、Pi、Codex 的历史来源发现、统计和 Raw Evidence 导入；知识提取、搜索和上下文注入将在此基础上继续构建。
+Oyster 是一个独立于 Agent Harness 的本地知识库维护中心。当前纵向切片先完成 Claude Code、Pi、Codex 的会话 transcript 与人类指令发现、统计和 Raw Evidence 导入；知识提取、搜索和上下文注入将在此基础上继续构建。
 
 ## 当前可用功能
 
 - 主动探测 Claude Code、Pi、Codex 的默认目录、环境变量目录和 CLI 路径；
 - 手工选择自定义历史目录；
-- 有界读取 JSONL header，统计文件、会话、字节数、时间范围和异常文件；
-- 只读导入原始历史，按 session fingerprint 跳过未变化的数据；
+- 有界读取 JSONL header，统计文件、会话、人类指令、字节数、时间范围和异常文件；
+- 按各 Agent 的官方层级发现 `CLAUDE.md`、`AGENTS.md`、rules 和 system prompt files，明确排除 Agent 自动 memory；
+- 只读、逐字节导入异构原始文件，保留扩展名，并记录 SHA-256 与 provenance manifest；
+- 按 artifact fingerprint 跳过未变化的数据；
 - 展示扫描、导入、取消、失败与恢复后的状态；
 - Codex `sessions` / `archived_sessions` 去重；
 - Electron Renderer 与文件系统业务逻辑通过 typed preload API 隔离。
@@ -50,7 +52,7 @@ src/renderer     页面、视图状态和用户动作
 src/preload      typed IPC bridge
 src/main         Electron 生命周期和 IPC composition root
 src/main/discovery
-  adapters       各 Agent 的定位与 header 解析
+  adapters       各 Agent 的定位、header 解析与人类指令发现
   discovery-service  扫描、统计、任务与幂等规则
   repository     可替换的状态持久化边界
   raw-evidence-store 原始文件的只读导入边界

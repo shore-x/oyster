@@ -18,14 +18,20 @@ describe('DiscoveryService', () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), 'oyster-service-'))
     temporaryDirectories.push(homeDirectory)
     const historyRoot = join(homeDirectory, '.claude', 'projects', 'demo')
+    const projectRoot = join(homeDirectory, 'work', 'demo')
     await mkdir(historyRoot, { recursive: true })
+    await mkdir(join(historyRoot, 'memory'), { recursive: true })
+    await mkdir(projectRoot, { recursive: true })
+    await writeFile(join(homeDirectory, '.claude', 'CLAUDE.md'), '# User instructions\n')
+    await writeFile(join(projectRoot, 'CLAUDE.md'), '# Project instructions\n')
+    await writeFile(join(historyRoot, 'memory', 'MEMORY.md'), '# Agent generated memory\n')
     await writeFile(
       join(historyRoot, 'one.jsonl'),
-      '{"sessionId":"one","cwd":"/demo","timestamp":"2026-07-01T00:00:00.000Z"}\n'
+      `${JSON.stringify({ sessionId: 'one', cwd: projectRoot, timestamp: '2026-07-01T00:00:00.000Z' })}\n`
     )
     await writeFile(
       join(historyRoot, 'two.jsonl'),
-      '{"sessionId":"two","cwd":"/demo","timestamp":"2026-07-02T00:00:00.000Z"}\n'
+      `${JSON.stringify({ sessionId: 'two', cwd: projectRoot, timestamp: '2026-07-02T00:00:00.000Z' })}\n`
     )
     await writeFile(join(historyRoot, 'unknown.jsonl'), '{"type":"other"}\n')
 
@@ -44,22 +50,28 @@ describe('DiscoveryService', () => {
     snapshot = service.snapshot()
     expect(snapshot.sources[0]).toMatchObject({
       scanState: 'ready',
-      fileCount: 3,
+      fileCount: 5,
       sessionCount: 2,
+      instructionFileCount: 2,
       invalidFileCount: 1,
-      syncedSessionCount: 0
+      syncedSessionCount: 0,
+      syncedInstructionFileCount: 0
     })
 
     await service.importSource('source:claude')
     await service.waitForIdle('source:claude')
     snapshot = service.snapshot()
     expect(snapshot.sources[0].syncedSessionCount).toBe(2)
+    expect(snapshot.sources[0].syncedInstructionFileCount).toBe(2)
     expect(snapshot.sources[0].syncedBytes).toBe(snapshot.sources[0].totalBytes)
-    expect(evidenceStore.records.size).toBe(2)
+    expect(evidenceStore.records.size).toBe(4)
+    expect([...evidenceStore.records.values()].map((value) => value.toString('utf8'))).not.toContain(
+      '# Agent generated memory\n'
+    )
 
     await service.importSource('source:claude')
     await service.waitForIdle('source:claude')
-    expect(evidenceStore.records.size).toBe(2)
+    expect(evidenceStore.records.size).toBe(4)
     expect(service.snapshot().runs[0]).toMatchObject({ kind: 'import', totalFiles: 0, state: 'completed' })
   })
 
@@ -84,6 +96,11 @@ describe('DiscoveryService', () => {
     expect(service.snapshot().sources[0].sessionCount).toBe(1)
 
     const snapshot = await service.setSourceRoot('source:claude', secondRoot)
-    expect(snapshot.sources[0]).toMatchObject({ rootPath: secondRoot, sessionCount: 0, scanState: 'idle' })
+    expect(snapshot.sources[0]).toMatchObject({
+      rootPath: secondRoot,
+      sessionCount: 0,
+      instructionFileCount: 0,
+      scanState: 'idle'
+    })
   })
 })

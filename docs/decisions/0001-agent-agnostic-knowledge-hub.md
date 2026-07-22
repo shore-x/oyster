@@ -16,13 +16,20 @@ Oyster 的主要产品身份是：本地优先、跨 Agent、跨项目的知识�
 
 系统采用三个明确分层：
 
-1. Raw Evidence：保留 Harness 原始记录和来源；
+1. Raw Evidence：保留 Harness 原始 transcript 和人类编写的指令及其来源，不导入 Agent 自动生成的 memory；
 2. Canonical Activity：标准化 Session、Turn、Message、Tool 和 Artifact 等活动；
 3. Derived Knowledge：由规则、LLM 和用户审查生成的可修订知识。
 
 历史导入和实时插件进入同一幂等 Ingestion Pipeline。输出侧优先通过 MCP 和本地 API 提供 Pull-based Search/Context。自动上下文注入、内置 Agent、浏览器和执行能力延后，在不改变知识所有权与安全边界的前提下增加。
 
 “Data Lake”只作为保真收集与分层加工的类比，不采用企业数据湖基础设施作为 MVP 默认路线。
+
+历史导入遵循以下策略：
+
+- Conversation transcript 与人类编写的 Agent 指令是必须保存的两类原始证据；
+- 每个 Harness 的 JSONL、Markdown 或其他格式按源文件字节和扩展名保存，导入时不统一 Schema、不拼接指令与 transcript；
+- 轻量 header/metadata 解析只用于 catalog、统计和增量判断，完整标准化与 LLM 理解发生在后续可重建层；
+- Agent 自动生成的 memory 不导入。它属于外部 Agent 的派生结果，而且扫描时的当前版本不能证明某个历史 turn 实际看到的版本；未来精确上下文由实时 Connector 的 turn-level snapshot 解决。
 
 ## Consequences
 

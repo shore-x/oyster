@@ -85,7 +85,7 @@ Oyster 不应照搬其“迁移到另一个 Harness”的目标。Oyster 的区�
 
 ## 4. 领域模型：不要问“装没装”
 
-本节是长期概念模型。第一阶段只实现 `AgentSource / HistorySession / SyncRun` 三个持久化对象，避免为尚未支持的多 Realm、多 Profile 和第三方 Connector 提前建模。
+本节是长期概念模型。第一阶段只实现 `AgentSource / HistoryArtifact / SyncRun` 三个持久化对象，避免为尚未支持的多 Realm、多 Profile 和第三方 Connector 提前建模。
 
 发现结果应表达以下对象：
 
@@ -139,15 +139,17 @@ UI 可以从证据派生便于理解的状态，但底层不要只保存状态�
 
 | 类别 | 例子 | MVP 处理 |
 | --- | --- | --- |
-| Conversation | user/assistant 消息、工具调用、分支、compaction | 导入 Raw Evidence，并标准化为 Canonical Activity |
-| Agent-generated memory | Claude auto memory、Codex local memories | 作为已有派生知识导入，保留“由外部 Agent 生成”身份，不当作原始事实 |
-| Human-authored instructions | `CLAUDE.md`、`AGENTS.md`、rules | 单独预览和导入；标记作用域与来源，不混入聊天时间线 |
+| Conversation | user/assistant 消息、工具调用、分支、compaction | MVP 必须导入 Raw Evidence；后续标准化为 Canonical Activity |
+| Human-authored instructions | `CLAUDE.md`、`AGENTS.md`、rules、system prompt files | MVP 必须作为独立 Raw Evidence 导入；标记作用域与来源，不混入聊天时间线 |
+| Agent-generated memory | Claude auto memory、Codex local memories | 不导入；它是 Agent 生成的派生结果，既不是原始事实，也无法可靠证明某个历史 turn 实际加载了哪个版本 |
 | Prompt/skill/template | Pi prompts、Agent skills | 后续 setup importer；不属于本轮 Conversation MVP |
 | Config | settings、模型、Hook/MCP 配置 | 默认只读取定位所需的非秘密字段；不进入知识库 |
 | Credentials/secrets | `auth.json`、OAuth、API key、keychain | 永不导入，永不在发现日志中记录内容 |
 | Index/cache | SQLite state、session index、UI cache | 只在枚举需要时只读使用，不作为第一份 Raw Evidence |
 
-Claude/Codex 的 memory 已经是模型加工结果。Oyster 可以保留并搜索它们，但必须在 provenance 中标记 `source_artifact_kind=agent_memory`，不能把它们提升成与 transcript 同等级的事实证据。
+Conversation 与 Human Instruction 都保持上游原始字节和格式，不在导入时拼接、清洗或重序列化。Importer 允许进行确定性的 metadata/header 解析以建立 catalog，但解析结果必须引用 Raw Evidence，且不能替代原始文件。
+
+自动 memory 明确排除。历史回填时读取到的当前 memory 文件无法证明它在某次模型调用时的内容或加载状态；未来如果实时 Connector 能在 turn 边界捕获精确 context snapshot，则 snapshot 中已经注入的 memory 片段属于该次 context evidence，而不是回头导入一个可变 memory 目录。
 
 ## 6. 探测阶段与授权边界
 
@@ -220,7 +222,7 @@ user override
 | --- | --- | --- |
 | 完整会话 | `<claude-root>/projects/<project>/<session-id>.jsonl` | 官方记录位置；项目名由工作目录派生，不能仅凭目录名恢复真实路径 |
 | Prompt history | `<claude-root>/history.jsonl` | 适合辅助发现/搜索，不等价于完整 transcript |
-| Auto memory | `<claude-root>/projects/<project>/memory/` | `MEMORY.md` 与 topic 文件；设置 `autoMemoryDirectory` 时可以重定向 |
+| Auto memory | `<claude-root>/projects/<project>/memory/` | 明确排除，不扫描、不导入 |
 | 用户指令 | `<claude-root>/CLAUDE.md` | 人工维护的全局指令 |
 | 项目指令 | `CLAUDE.md`、`.claude/CLAUDE.md`、`.claude/rules/**/*.md` | 只在已知/已授权项目中发现 |
 
@@ -229,7 +231,7 @@ user override
 - 会话文件后缀为 `.jsonl`；
 - 在有限行数内应出现可识别的 session/message 记录和 session ID；
 - unknown record 必须保留，不能因为未识别就丢弃整个文件；
-- `memory/` 下的 Markdown 只能归类为 `memory`，不能混入 Conversation；
+- `memory/` 下的 Markdown 必须排除，不能因为递归扫描指令而进入 Raw Evidence；
 - 官方说明 transcript 可能包含工具读取到的凭证，整个来源按高敏数据处理。
 
 兼容注意：社区工具还发现 Claude 桌面端 local-agent-mode 的独立 session root，以及类似 `.claude-*` 的备用配置根。这些只能作为 `implementation_detail` 候选，UI 必须展示实际路径和证据，不得静默合并到默认 Claude 来源。
@@ -290,7 +292,7 @@ user override
 | Resume-grade session | `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl` | 官方说明 `CODEX_HOME` 包含 sessions；具体布局来自上游源码和当前实现 |
 | Archived session | `$CODEX_HOME/archived_sessions/` | 上游源码/当前实现细节，需独立枚举 |
 | History log | `$CODEX_HOME/history.jsonl` | 官方配置 `history.persistence` 控制；与 resume-grade rollout 分开探测和导入 |
-| Local memories | `$CODEX_HOME/memories/` | 官方说明含摘要、durable entries、近期输入和支持证据；默认功能可关闭 |
+| Local memories | `$CODEX_HOME/memories/` | 明确排除，不扫描、不导入 |
 | 用户/项目指令 | `AGENTS.md` 与项目层级 `.codex/` 规则 | 人工维护的指导，不是聊天历史 |
 
 格式探针：
@@ -303,7 +305,7 @@ user override
 - `state_*.sqlite`、`session_index.jsonl` 可辅助枚举，但 rollout 是 MVP 的首选 Raw Evidence；
 - `auth.json`、keychain、访问令牌始终排除。
 
-需要在 Manifest 中明确：`CODEX_HOME` 是公开配置边界，`memories/` 是公开数据类别；rollout 的具体文件名和事件 Schema 仍可能演进，必须由 Connector 版本和 Fixture 管理。
+需要在 Manifest 中明确：`CODEX_HOME` 是公开配置边界，`memories/` 是显式 excluded locator；rollout 的具体文件名和事件 Schema 仍可能演进，必须由 Connector 版本和 Fixture 管理。
 
 ## 9. Runtime 发现
 
@@ -364,11 +366,11 @@ agent / realm / source kind
 resolved root and why it was selected
 contract level and detected format/version
 permission state
-session/file count and total bytes
+session/instruction/file count and total bytes
 oldest/newest timestamps when derivable
 project count and unresolved project count
 supported / partial / corrupt / unknown counts
-memory and instruction items as separate selectable categories
+conversation and human instruction items as separate categories
 excluded sensitive paths
 warnings and estimated import cost/time
 ```
@@ -397,11 +399,12 @@ artifacts:
   - kind: archive
     locator: archived_sessions
     contract_level: upstream_source
-  - kind: memory
-    locator: memories
+  - kind: human_instruction
+    locator: AGENTS.md
     contract_level: documented
 excluded:
   - auth.json
+  - memories/**
 permissions:
   discovery: metadata
   probe: bounded_read
@@ -448,7 +451,7 @@ preview(selection) -> ImportPreview
 - 启动时只做纯文件系统 presence，login shell/`--help` 延迟为主动 capability probe；
 - content sniff 从自动启动扫描改为用户选中来源后的有界验证，以满足 Oyster 的隐私底线；
 - 用证据列表和 contract level 替代单一 available/installed；
-- 将 memory、instructions 和 conversation 分开导入，并保留各自 provenance。
+- 将 instructions 和 conversation 分开导入并保留各自 provenance；把 Agent 自动 memory 作为显式排除项。
 
 ### Reject
 
@@ -477,9 +480,9 @@ preview(selection) -> ImportPreview
 
 ### P1：三个第一方 Probe
 
-- Claude：config root、projects transcript、history、auto memory、instructions；
+- Claude：config root、projects transcript、human instructions，并显式排除 auto memory；
 - Pi：agent root、session override、versioned JSONL header、instructions；
-- Codex：`CODEX_HOME`、active/archive rollouts、history、memories；
+- Codex：`CODEX_HOME`、active/archive rollouts、human instructions，并显式排除 `memories/`；
 - 每个 Connector 提供正常、旧版本、空目录、错误目录、权限拒绝、损坏 header、损坏尾行、大目录 Fixture。
 
 ### P2：Inventory 与导入预览
@@ -524,14 +527,14 @@ preview(selection) -> ImportPreview
 | 发现所有自定义目录 | 中高 | 环境变量和持久设置可覆盖大部分；一次性 CLI 参数只能靠手工或未来插件注册 |
 | 准确判断 Agent 可执行能力 | 中高 | 主动 `--version/--help` 可确认；桌面 PATH、同名命令和 App/IDE realm 增加复杂度 |
 | 在不读正文时确认格式 | 中 | 只能确认候选路径；可靠签名需要用户授权后的有限 header read |
-| 统一导入聊天与记忆 | 高，但必须分类型 | 数据可读；语义和可信级别不同，不能走同一标准化模型 |
+| 保真导入会话与人类指令 | 高 | 两类都是确定性的文件证据；保持异构原始格式并在后续分层处理 |
 | 长期覆盖二十余种 Agent | 中高 | prior art 已证明可做；维护成本取决于 Connector 隔离、Fixture 和版本治理 |
 
-建议下一步先实现 **P0 Discovery Core + 三个 Connector 的 passive probe/probe/inventory**，产出真实的 Import Preview JSON 和 UI。只有当预览能稳定区分 Conversation、Memory、Instructions、Config 和 Credentials 后，再开始完整 transcript Parser。这样最早验证的是 Oyster 的长期接入边界，而不是某一个 JSONL 格式的临时解析器。
+建议下一步继续完善 **P0 Discovery Core + 三个 Connector 的 passive probe/probe/inventory**，产出真实的 Import Preview JSON 和 UI。预览必须稳定区分 Conversation、Human Instruction、Excluded Agent Memory、Config 和 Credentials，再开始完整 transcript Parser。这样最早验证的是 Oyster 的长期接入边界，而不是某一个 JSONL 格式的临时解析器。
 
 ## 17. 已落地的 MVP 架构
 
-2026-07-22 已完成 Conversation 来源的第一条可运行纵向切片。实现采用以下边界：
+2026-07-22 已完成 Conversation + Human Instruction 来源的第一条可运行纵向切片。实现采用以下边界：
 
 ```text
 Solid Renderer
@@ -543,8 +546,8 @@ Solid Renderer
       → RawEvidenceStore
 ```
 
-`DiscoveryService` 不依赖 Electron；Adapter 只负责路径定位、有限 header 验证和 session candidate 生成；统一 Service 负责统计、fingerprint、任务、取消、失败隔离和同步覆盖率。Renderer 不包含路径规则，也不把页面状态当作业务真相。
+`DiscoveryService` 不依赖 Electron；Adapter 只负责路径定位、有限 header 验证和 artifact candidate 生成；统一 Service 负责统计、fingerprint、任务、取消、失败隔离和同步覆盖率。Renderer 不包含路径规则，也不把页面状态当作业务真相。
 
-Bootstrap 阶段使用原子替换的 JSON repository 保存 `AgentSource / HistorySession / SyncRun`，Raw Evidence 使用独立目录保存不可变 JSONL 副本。二者都通过接口注入，后续切换 SQLite 和 content-addressed blob storage 时无需改变 UI/Adapter 契约。
+Bootstrap 阶段使用原子替换的 JSON repository 保存 `AgentSource / HistoryArtifact / SyncRun`，并兼容迁移旧的 `sessions` 集合。Raw Evidence 使用独立目录保存不可变 payload 与 manifest：payload 保持源文件扩展名和字节，manifest 记录 artifact kind、原始定位、fingerprint、SHA-256、大小和导入时间。后续切换 SQLite 和 content-addressed blob storage 时无需改变 UI/Adapter 契约。
 
-当前实现刻意只覆盖 Conversation JSONL。发现动作不会读取 transcript；用户点击扫描后才读取有限 header，点击导入后才完整复制文件。Memory、Instructions、Config 和 Credentials 没有进入扫描模式，因此不会因为目录递归而意外混入 Raw Evidence。
+当前实现覆盖 Conversation JSONL 与 Human Instruction Markdown。发现动作不会读取 transcript；用户点击扫描后才读取有限 header，并从 session header 的项目路径和各 Agent 的官方层级规则定位指令。点击导入后才完整复制文件。Claude/Codex 自动 memory、Config 和 Credentials 不进入扫描模式；测试明确验证 `memory/`、`memories/` 不会混入 Raw Evidence。

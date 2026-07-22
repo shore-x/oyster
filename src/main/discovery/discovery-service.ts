@@ -3,8 +3,9 @@ import { homedir } from 'node:os'
 import type {
   AgentSource,
   AgentType,
+  ArtifactKind,
   DiscoverySnapshot,
-  HistorySession,
+  HistoryArtifact,
   SyncRun
 } from '../../shared/discovery'
 import { AGENT_TYPES } from '../../shared/discovery'
@@ -15,7 +16,7 @@ import type {
   DiscoveryRepository,
   DiscoveryStateData,
   RawEvidenceStore,
-  SessionCandidate
+  ArtifactCandidate
 } from './model'
 
 type SnapshotListener = (snapshot: DiscoverySnapshot) => void
@@ -38,14 +39,15 @@ function clone<T>(value: T): T {
   return structuredClone(value)
 }
 
-function fingerprint(sourceId: string, candidate: SessionCandidate): string {
+function fingerprint(sourceId: string, candidate: ArtifactCandidate): string {
   return createHash('sha256')
     .update(`${sourceId}\0${candidate.externalId}\0${candidate.sizeBytes}\0${candidate.modifiedAt}`)
     .digest('hex')
 }
 
-function sessionId(sourceId: string, externalId: string): string {
-  return createHash('sha256').update(`${sourceId}\0${externalId}`).digest('hex').slice(0, 32)
+function artifactId(sourceId: string, kind: ArtifactKind, externalId: string): string {
+  const key = kind === 'conversation' ? `${sourceId}\0${externalId}` : `${sourceId}\0${kind}\0${externalId}`
+  return createHash('sha256').update(key).digest('hex').slice(0, 32)
 }
 
 function errorMessage(error: unknown): string {
@@ -57,7 +59,7 @@ function isAbortError(error: unknown): boolean {
 }
 
 export class DiscoveryService {
-  private state: DiscoveryStateData = { sources: [], sessions: [], runs: [] }
+  private state: DiscoveryStateData = { sources: [], artifacts: [], runs: [] }
   private readonly listeners = new Set<SnapshotListener>()
   private readonly activeOperations = new Map<string, ActiveOperation>()
   private readonly adapterByType = new Map<AgentType, AgentHistoryAdapter>()
@@ -89,11 +91,18 @@ export class DiscoveryService {
         scanState: 'idle',
         fileCount: 0,
         sessionCount: 0,
+        instructionFileCount: 0,
         totalBytes: 0,
         invalidFileCount: 0,
         syncedBytes: 0,
-        syncedSessionCount: 0
+        syncedSessionCount: 0,
+        syncedInstructionFileCount: 0
       })
+    }
+
+    for (const source of this.state.sources) {
+      source.instructionFileCount ??= 0
+      source.syncedInstructionFileCount ??= 0
     }
 
     if (this.options.recoverInterruptedRuns !== false) {
@@ -103,8 +112,8 @@ export class DiscoveryService {
         run.finishedAt = stamp
         run.errorMessage = '应用在任务完成前退出'
       }
-      for (const session of this.state.sessions) {
-        if (session.syncState === 'syncing') session.syncState = 'pending'
+      for (const artifact of this.state.artifacts) {
+        if (artifact.syncState === 'syncing') artifact.syncState = 'pending'
       }
       for (const source of this.state.sources) {
         if (source.scanState === 'scanning') source.scanState = 'idle'
@@ -170,15 +179,17 @@ export class DiscoveryService {
     source.scanState = 'idle'
     source.fileCount = 0
     source.sessionCount = 0
+    source.instructionFileCount = 0
     source.totalBytes = 0
     source.invalidFileCount = 0
     source.syncedBytes = 0
     source.syncedSessionCount = 0
+    source.syncedInstructionFileCount = 0
     source.oldestSessionAt = undefined
     source.latestSessionAt = undefined
     source.lastScannedAt = undefined
     source.lastSyncedAt = undefined
-    this.state.sessions = this.state.sessions.filter((session) => session.sourceId !== sourceId)
+    this.state.artifacts = this.state.artifacts.filter((artifact) => artifact.sourceId !== sourceId)
 
     const detection = await adapter.detect(this.detectionContext, rootPath)
     source.executablePath = detection.executablePath
@@ -224,20 +235,20 @@ export class DiscoveryService {
   async importSource(sourceId: string): Promise<DiscoverySnapshot> {
     const source = this.requireSource(sourceId)
     if (source.scanState !== 'ready' || this.activeOperations.has(sourceId)) return this.snapshot()
-    const sessions = this.state.sessions.filter(
-      (session) =>
-        session.sourceId === sourceId &&
-        session.syncState !== 'missing' &&
-        session.syncedFingerprint !== session.fingerprint
+    const artifacts = this.state.artifacts.filter(
+      (artifact) =>
+        artifact.sourceId === sourceId &&
+        artifact.syncState !== 'missing' &&
+        artifact.syncedFingerprint !== artifact.fingerprint
     )
     const run: SyncRun = {
       id: randomUUID(),
       sourceId,
       kind: 'import',
       state: 'running',
-      totalFiles: sessions.length,
+      totalFiles: artifacts.length,
       processedFiles: 0,
-      totalBytes: sessions.reduce((total, session) => total + session.sizeBytes, 0),
+      totalBytes: artifacts.reduce((total, artifact) => total + artifact.sizeBytes, 0),
       processedBytes: 0,
       invalidFiles: 0,
       startedAt: now()
@@ -246,7 +257,7 @@ export class DiscoveryService {
     const operation: ActiveOperation = { runId: run.id, controller: new AbortController() }
     this.activeOperations.set(sourceId, operation)
     await this.persistAndEmit()
-    operation.task = this.performImport(source, run, sessions, operation.controller.signal)
+    operation.task = this.performImport(source, run, artifacts, operation.controller.signal)
     return this.snapshot()
   }
 
@@ -276,30 +287,33 @@ export class DiscoveryService {
     let latest: string | undefined
 
     try {
-      for await (const entry of adapter.scan(source.rootPath, signal)) {
+      for await (const entry of adapter.scan(source.rootPath, signal, this.detectionContext)) {
         signal.throwIfAborted()
         run.totalFiles += 1
         run.processedFiles += 1
-        const bytes = entry.kind === 'session' ? entry.candidate.sizeBytes : entry.sizeBytes
+        const bytes = entry.kind === 'artifact' ? entry.candidate.sizeBytes : entry.sizeBytes
         run.totalBytes += bytes
         run.processedBytes += bytes
         if (entry.kind === 'invalid') {
           run.invalidFiles += 1
         } else {
           const candidate = entry.candidate
-          const id = sessionId(source.id, candidate.externalId)
+          const id = artifactId(source.id, candidate.kind, candidate.externalId)
           observed.add(id)
           const nextFingerprint = fingerprint(source.id, candidate)
-          const existing = this.state.sessions.find((session) => session.id === id)
+          const existing = this.state.artifacts.find((artifact) => artifact.id === id)
           const nextState =
             existing?.syncedFingerprint === nextFingerprint ? ('synced' as const) : ('pending' as const)
-          const session: HistorySession = {
+          const artifact: HistoryArtifact = {
             id,
             sourceId: source.id,
+            kind: candidate.kind,
             externalId: candidate.externalId,
             relativePath: candidate.relativePath,
+            sourcePath: candidate.sourcePath,
             title: candidate.title,
             projectPath: candidate.projectPath,
+            instructionScope: candidate.instructionScope,
             startedAt: candidate.startedAt,
             updatedAt: candidate.updatedAt,
             sizeBytes: candidate.sizeBytes,
@@ -307,26 +321,32 @@ export class DiscoveryService {
             fingerprint: nextFingerprint,
             syncState: nextState,
             rawEvidenceId: nextState === 'synced' ? existing?.rawEvidenceId : undefined,
+            rawContentHash: nextState === 'synced' ? existing?.rawContentHash : undefined,
             syncedFingerprint: existing?.syncedFingerprint,
             errorMessage: undefined
           }
-          if (existing) Object.assign(existing, session)
-          else this.state.sessions.push(session)
+          if (existing) Object.assign(existing, artifact)
+          else this.state.artifacts.push(artifact)
 
-          const sessionDate = candidate.startedAt || candidate.modifiedAt
-          if (!oldest || sessionDate < oldest) oldest = sessionDate
-          if (!latest || sessionDate > latest) latest = sessionDate
+          if (candidate.kind === 'conversation') {
+            const sessionDate = candidate.startedAt || candidate.modifiedAt
+            if (!oldest || sessionDate < oldest) oldest = sessionDate
+            if (!latest || sessionDate > latest) latest = sessionDate
+          }
         }
         if (run.processedFiles % 25 === 0) this.emit()
       }
 
-      for (const session of this.state.sessions) {
-        if (session.sourceId === source.id && !observed.has(session.id)) session.syncState = 'missing'
+      for (const artifact of this.state.artifacts) {
+        if (artifact.sourceId === source.id && !observed.has(artifact.id)) artifact.syncState = 'missing'
       }
-      const currentSessions = this.currentSessions(source.id)
+      const currentArtifacts = this.currentArtifacts(source.id)
       source.fileCount = run.totalFiles
-      source.sessionCount = currentSessions.length
-      source.totalBytes = currentSessions.reduce((total, session) => total + session.sizeBytes, 0)
+      source.sessionCount = currentArtifacts.filter((artifact) => artifact.kind === 'conversation').length
+      source.instructionFileCount = currentArtifacts.filter(
+        (artifact) => artifact.kind === 'human_instruction'
+      ).length
+      source.totalBytes = currentArtifacts.reduce((total, artifact) => total + artifact.sizeBytes, 0)
       source.invalidFileCount = run.invalidFiles
       source.oldestSessionAt = oldest
       source.latestSessionAt = latest
@@ -354,58 +374,60 @@ export class DiscoveryService {
   private async performImport(
     source: AgentSource,
     run: SyncRun,
-    sessions: HistorySession[],
+    artifacts: HistoryArtifact[],
     signal: AbortSignal
   ): Promise<void> {
     const adapter = this.requireAdapter(source.agentType)
     let failures = 0
-    let activeSession: HistorySession | undefined
+    let activeArtifact: HistoryArtifact | undefined
 
     try {
-      for (const session of sessions) {
+      for (const artifact of artifacts) {
         signal.throwIfAborted()
-        activeSession = session
-        session.syncState = 'syncing'
+        activeArtifact = artifact
+        artifact.syncState = 'syncing'
         this.emit()
-        let sessionProgress = 0
+        let artifactProgress = 0
         try {
-          const rawEvidenceId = await this.rawEvidenceStore.importFile({
+          const receipt = await this.rawEvidenceStore.importFile({
             sourceId: source.id,
-            sessionId: session.id,
-            absolutePath: adapter.resolveSessionPath(source.rootPath, session.relativePath),
-            fingerprint: session.fingerprint,
+            artifactId: artifact.id,
+            artifactKind: artifact.kind,
+            absolutePath: adapter.resolveArtifactPath(source.rootPath, artifact),
+            fingerprint: artifact.fingerprint,
             signal,
             onProgress: (bytes) => {
-              const acceptedBytes = Math.max(0, Math.min(bytes, session.sizeBytes - sessionProgress))
-              sessionProgress += acceptedBytes
+              const acceptedBytes = Math.max(0, Math.min(bytes, artifact.sizeBytes - artifactProgress))
+              artifactProgress += acceptedBytes
               run.processedBytes += acceptedBytes
               this.emit()
             }
           })
-          session.rawEvidenceId = rawEvidenceId
-          session.syncedFingerprint = session.fingerprint
-          session.syncState = 'synced'
-          session.errorMessage = undefined
+          artifact.rawEvidenceId = receipt.id
+          artifact.rawContentHash = receipt.contentHash
+          artifact.syncedFingerprint = artifact.fingerprint
+          artifact.syncState = 'synced'
+          artifact.errorMessage = undefined
         } catch (error) {
           if (signal.aborted || isAbortError(error)) throw error
           failures += 1
-          session.syncState = 'failed'
-          session.errorMessage = errorMessage(error)
+          artifact.syncState = 'failed'
+          artifact.errorMessage = errorMessage(error)
         }
-        run.processedBytes += Math.max(0, session.sizeBytes - sessionProgress)
-        activeSession = undefined
+        run.processedBytes += Math.max(0, artifact.sizeBytes - artifactProgress)
+        activeArtifact = undefined
         run.processedFiles += 1
         this.recalculateSync(source)
         await this.persistAndEmit()
       }
 
       run.state = failures > 0 ? 'failed' : 'completed'
-      run.errorMessage = failures > 0 ? `${failures} 个会话导入失败` : undefined
+      run.errorMessage = failures > 0 ? `${failures} 个文件导入失败` : undefined
       run.finishedAt = now()
       source.lastSyncedAt = now()
     } catch (error) {
       const cancelled = signal.aborted || isAbortError(error)
-      if (activeSession?.syncState === 'syncing') activeSession.syncState = 'pending'
+      if (activeArtifact?.syncState === 'syncing') activeArtifact.syncState = 'pending'
       run.state = cancelled ? 'cancelled' : 'failed'
       run.finishedAt = now()
       run.errorMessage = cancelled ? undefined : errorMessage(error)
@@ -416,19 +438,22 @@ export class DiscoveryService {
     }
   }
 
-  private currentSessions(sourceId: string): HistorySession[] {
-    return this.state.sessions.filter(
-      (session) => session.sourceId === sourceId && session.syncState !== 'missing'
+  private currentArtifacts(sourceId: string): HistoryArtifact[] {
+    return this.state.artifacts.filter(
+      (artifact) => artifact.sourceId === sourceId && artifact.syncState !== 'missing'
     )
   }
 
   private recalculateSync(source: AgentSource): void {
-    const sessions = this.currentSessions(source.id)
-    const synced = sessions.filter(
-      (session) => session.syncState === 'synced' && session.syncedFingerprint === session.fingerprint
+    const artifacts = this.currentArtifacts(source.id)
+    const synced = artifacts.filter(
+      (artifact) => artifact.syncState === 'synced' && artifact.syncedFingerprint === artifact.fingerprint
     )
-    source.syncedSessionCount = synced.length
-    source.syncedBytes = synced.reduce((total, session) => total + session.sizeBytes, 0)
+    source.syncedSessionCount = synced.filter((artifact) => artifact.kind === 'conversation').length
+    source.syncedInstructionFileCount = synced.filter(
+      (artifact) => artifact.kind === 'human_instruction'
+    ).length
+    source.syncedBytes = synced.reduce((total, artifact) => total + artifact.sizeBytes, 0)
   }
 
   private addRun(run: SyncRun): void {

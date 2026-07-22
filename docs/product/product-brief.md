@@ -29,7 +29,7 @@ Oyster 是一个独立于 Claude Code、Pi、Codex 等 Agent Harness 的、本�
 Oyster 向用户提供四个核心能力：
 
 1. **发现与接入**：发现本机 Agent 的可执行程序、应用、配置和数据目录，明确展示每个来源支持历史导入、实时采集或上下文输出中的哪些能力。
-2. **保真收集**：批量导入已有聊天历史，并通过 Harness 插件或 Hook 在 turn/session 边界增量采集；原始记录不因统一模型而丢失。
+2. **保真收集**：批量导入已有聊天 transcript 与人类编写的 Agent 指令，并通过 Harness 插件或 Hook 在 turn/session 边界增量采集；不同 Harness 的原始格式不因统一模型而丢失，Agent 自动生成的 memory 不作为历史导入来源。
 3. **知识加工**：把异构记录转为带出处的事件、材料、结论、决策、问题、尝试和关系，支持搜索、修订、冲突与删除。
 4. **安全供给**：通过本地 API 和 MCP 等开放边界向第三方 Agent 提供检索；未来可在用户授权、Scope 和 Token Budget 内生成并注入 Context Packet。
 
@@ -61,7 +61,7 @@ Oyster 必须把三个层次分开，避免把模型总结覆盖到原始事实�
 
 | 层次 | 内容 | 规则 |
 | --- | --- | --- |
-| Raw Evidence | Harness 原始记录、来源 Locator、校验和、采集时间、格式版本 | 保真、追加式、可删除；不为统一 Schema 破坏原始数据 |
+| Raw Evidence | Harness 原始 transcript、人类指令、来源 Locator、校验和、采集时间、格式版本 | 保真、追加式、可删除；不为统一 Schema 破坏原始数据；不导入 Agent 自动 memory |
 | Canonical Activity | Session、Turn、Message、Tool Call/Result、Compaction、Artifact 等标准化事件 | 可重建、版本化；始终引用 Raw Evidence |
 | Derived Knowledge | 决策、事实、偏好、问题、尝试、结果、摘要、实体与关系 | 可修订、可冲突、带置信度和出处；不得伪装成原始事实 |
 
@@ -87,7 +87,7 @@ Oyster 启动后执行本地发现，并分别报告：
 ### 6.2 首次历史导入
 
 1. 用户选择 Claude Code、Pi 或 Codex 来源；
-2. Oyster 预览将访问的目录、记录数量、项目范围和敏感信息风险；
+2. Oyster 预览将访问的 transcript/人类指令目录、记录数量、项目范围和敏感信息风险；
 3. 用户选择全部、按项目、按时间或按会话导入；
 4. Connector 保存 Raw Evidence，并生成 Canonical Activity；
 5. 导入可以中断和恢复，重复执行不产生重复记录；

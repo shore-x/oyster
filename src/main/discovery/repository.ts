@@ -1,8 +1,12 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import type { HistoryArtifact } from '../../shared/discovery'
 import type { DiscoveryStateData, DiscoveryRepository } from './model'
 
-const EMPTY_STATE: DiscoveryStateData = { sources: [], sessions: [], runs: [] }
+const EMPTY_STATE: DiscoveryStateData = { sources: [], artifacts: [], runs: [] }
+
+type LegacyHistorySession = Omit<HistoryArtifact, 'kind'> & { kind?: HistoryArtifact['kind'] }
+type StoredDiscoveryState = Partial<DiscoveryStateData> & { sessions?: LegacyHistorySession[] }
 
 function cloneState(state: DiscoveryStateData): DiscoveryStateData {
   return structuredClone(state)
@@ -15,10 +19,11 @@ export class JsonDiscoveryRepository implements DiscoveryRepository {
 
   async load(): Promise<DiscoveryStateData> {
     try {
-      const value = JSON.parse(await readFile(this.filePath, 'utf8')) as DiscoveryStateData
+      const value = JSON.parse(await readFile(this.filePath, 'utf8')) as StoredDiscoveryState
+      const artifacts = value.artifacts ?? value.sessions?.map((session) => ({ ...session, kind: 'conversation' as const }))
       return {
         sources: value.sources ?? [],
-        sessions: value.sessions ?? [],
+        artifacts: artifacts ?? [],
         runs: value.runs ?? []
       }
     } catch (error) {

@@ -46,7 +46,11 @@ export function SourceCard(props: SourceCardProps) {
     if (props.source.totalBytes === 0) return 0
     return Math.min(100, (props.source.syncedBytes / props.source.totalBytes) * 100)
   })
-  const pendingSessions = createMemo(() => props.source.sessionCount - props.source.syncedSessionCount)
+  const artifactCount = createMemo(() => props.source.sessionCount + props.source.instructionFileCount)
+  const syncedArtifactCount = createMemo(
+    () => props.source.syncedSessionCount + props.source.syncedInstructionFileCount
+  )
+  const pendingArtifacts = createMemo(() => artifactCount() - syncedArtifactCount())
 
   return (
     <article class="source-card" data-testid="source-card">
@@ -77,8 +81,11 @@ export function SourceCard(props: SourceCardProps) {
         </div>
       }>
         <div class="metrics">
-          <div><span class="metric__label">会话</span><strong>{props.source.sessionCount}</strong></div>
-          <div><span class="metric__label">文件</span><strong>{props.source.fileCount}</strong></div>
+          <div>
+            <span class="metric__label">会话 · 文件</span>
+            <strong>{props.source.sessionCount} · {props.source.fileCount}</strong>
+          </div>
+          <div><span class="metric__label">指令</span><strong>{props.source.instructionFileCount}</strong></div>
           <div><span class="metric__label">数据量</span><strong>{formatBytes(props.source.totalBytes)}</strong></div>
           <div><span class="metric__label">时间范围</span><strong>{formatDate(props.source.oldestSessionAt)} – {formatDate(props.source.latestSessionAt)}</strong></div>
         </div>
@@ -90,8 +97,8 @@ export function SourceCard(props: SourceCardProps) {
               {scanRun() && isRunning()
                 ? `${scanRun()!.processedFiles} 个文件 · ${formatBytes(scanRun()!.processedBytes)}`
                 : importRun() && isRunning()
-                ? `${importRun()!.processedFiles} / ${importRun()!.totalFiles} 个会话`
-                : `${props.source.syncedSessionCount} / ${props.source.sessionCount} 个会话`}
+                ? `${importRun()!.processedFiles} / ${importRun()!.totalFiles} 个文件`
+                : `${syncedArtifactCount()} / ${artifactCount()} 项`}
             </span>
           </div>
           <div
@@ -123,12 +130,12 @@ export function SourceCard(props: SourceCardProps) {
               <Button variant="secondary" icon="refresh" onClick={props.onScan}>
                 {props.source.scanState === 'ready' ? '重新扫描' : '扫描记录'}
               </Button>
-              <Show when={props.source.scanState === 'ready' && pendingSessions() > 0}>
+              <Show when={props.source.scanState === 'ready' && pendingArtifacts() > 0}>
                 <Button variant="primary" icon="download" onClick={props.onImport}>
-                  导入 {pendingSessions()} 个会话
+                  导入 {pendingArtifacts()} 项
                 </Button>
               </Show>
-              <Show when={props.source.scanState === 'ready' && pendingSessions() === 0 && props.source.sessionCount > 0}>
+              <Show when={props.source.scanState === 'ready' && pendingArtifacts() === 0 && artifactCount() > 0}>
                 <span class="complete-label"><Icon name="check" />已全部导入</span>
               </Show>
             </>
