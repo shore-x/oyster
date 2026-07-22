@@ -62,16 +62,26 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   const image = await window.webContents.capturePage()
   await mkdir(dirname(capturePath), { recursive: true })
   await writeFile(capturePath, image.toPNG())
-  const semantics = await window.webContents.executeJavaScript(`(() => ({
-    title: document.querySelector('h1')?.textContent,
-    sourceCards: document.querySelectorAll('[data-testid="source-card"]').length,
-    dragRegion: getComputedStyle(document.querySelector('[data-testid="window-drag-region"]')).getPropertyValue('-webkit-app-region'),
-    primaryButtonColor: getComputedStyle(document.querySelector('.button--primary')).backgroundColor,
-    buttonAlignment: getComputedStyle(document.querySelector('.button')).justifyContent,
-    primaryActions: Array.from(document.querySelectorAll('button')).map((button) => button.textContent?.trim()),
-    overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-    bodyText: document.body.innerText
-  }))()`)
+  const semantics = await window.webContents.executeJavaScript(`(() => {
+    const primaryButton = document.querySelector('.ui-button--primary')
+    const primaryLabel = primaryButton.querySelector('.ui-button__label')
+    const primaryBounds = primaryButton.getBoundingClientRect()
+    const labelBounds = primaryLabel.getBoundingClientRect()
+    return {
+      title: document.querySelector('h1')?.textContent,
+      sourceCards: document.querySelectorAll('[data-testid="source-card"]').length,
+      dragRegion: getComputedStyle(document.querySelector('[data-testid="window-drag-region"]')).getPropertyValue('-webkit-app-region'),
+      primaryButtonColor: getComputedStyle(primaryButton).backgroundColor,
+      secondaryButtonColor: getComputedStyle(document.querySelector('.ui-button--secondary')).color,
+      buttonLabelCenterDelta: Math.abs((primaryBounds.left + primaryBounds.width / 2) - (labelBounds.left + labelBounds.width / 2)),
+      buttonCount: document.querySelectorAll('button').length,
+      sharedButtonCount: document.querySelectorAll('.ui-button').length,
+      buttonIconCount: Array.from(document.querySelectorAll('.ui-button')).filter((button) => button.querySelector('.ui-button__icon .ui-icon')?.childElementCount > 0).length,
+      primaryActions: Array.from(document.querySelectorAll('button')).map((button) => button.textContent?.trim()),
+      overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      bodyText: document.body.innerText
+    }
+  })()`)
   await writeFile(`${capturePath}.json`, `${JSON.stringify(semantics, null, 2)}\n`, 'utf8')
   app.quit()
 }

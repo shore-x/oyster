@@ -1,6 +1,6 @@
 import { Show, createMemo } from 'solid-js'
 import type { AgentSource, SyncRun } from '../../../shared/discovery'
-import { Icon } from './Icon'
+import { Button, Icon } from '../ui'
 
 interface SourceCardProps {
   source: AgentSource
@@ -73,9 +73,7 @@ export function SourceCard(props: SourceCardProps) {
               <div class="empty-source__hint">{props.source.errorMessage}</div>
             </Show>
           </div>
-          <button class="button button--secondary" onClick={props.onChooseRoot}>
-            <Icon name="folder" />选择目录
-          </button>
+          <Button variant="secondary" icon="folder" onClick={props.onChooseRoot}>选择目录</Button>
         </div>
       }>
         <div class="metrics">
@@ -121,25 +119,21 @@ export function SourceCard(props: SourceCardProps) {
         <div class="source-card__actions">
           <Show when={isRunning()} fallback={
             <>
-              <button class="button button--ghost" onClick={props.onChooseRoot}>
-                <Icon name="folder" />更改目录
-              </button>
-              <button class="button button--secondary" onClick={props.onScan}>
-                <Icon name="refresh" />{props.source.scanState === 'ready' ? '重新扫描' : '扫描记录'}
-              </button>
+              <Button variant="ghost" icon="folder" onClick={props.onChooseRoot}>更改目录</Button>
+              <Button variant="secondary" icon="refresh" onClick={props.onScan}>
+                {props.source.scanState === 'ready' ? '重新扫描' : '扫描记录'}
+              </Button>
               <Show when={props.source.scanState === 'ready' && pendingSessions() > 0}>
-                <button class="button button--primary" onClick={props.onImport}>
-                  <Icon name="download" />导入 {pendingSessions()} 个会话
-                </button>
+                <Button variant="primary" icon="download" onClick={props.onImport}>
+                  导入 {pendingSessions()} 个会话
+                </Button>
               </Show>
               <Show when={props.source.scanState === 'ready' && pendingSessions() === 0 && props.source.sessionCount > 0}>
                 <span class="complete-label"><Icon name="check" />已全部导入</span>
               </Show>
             </>
           }>
-            <button class="button button--danger-quiet" onClick={props.onCancel}>
-              <Icon name="stop" />取消
-            </button>
+            <Button variant="danger" icon="stop" onClick={props.onCancel}>取消</Button>
           </Show>
         </div>
       </Show>

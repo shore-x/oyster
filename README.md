@@ -46,6 +46,7 @@ npm run test:ui
 
 ```text
 src/renderer     页面、视图状态和用户动作
+  src/ui         共享 Button/Icon 组件、design tokens 与控件样式
 src/preload      typed IPC bridge
 src/main         Electron 生命周期和 IPC composition root
 src/main/discovery

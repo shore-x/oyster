@@ -1,7 +1,7 @@
 import { For, Show, createMemo } from 'solid-js'
 import { createDiscoveryController } from './discovery-controller'
-import { Icon } from './components/Icon'
 import { SourceCard } from './components/SourceCard'
+import { Button, Icon } from './ui'
 
 export function App() {
   const controller = createDiscoveryController()
@@ -32,9 +32,15 @@ export function App() {
               <span><strong>{totalSessions()}</strong> 个会话</span>
             </div>
           </div>
-          <button class="button button--primary button--detect" onClick={controller.detectAgents} disabled={controller.detecting()}>
-            <Icon name="refresh" />{controller.detecting() ? '探测中…' : '探测本机 Agent'}
-          </button>
+          <Button
+            variant="primary"
+            size="wide"
+            icon="refresh"
+            onClick={controller.detectAgents}
+            disabled={controller.detecting()}
+          >
+            {controller.detecting() ? '探测中…' : '探测本机 Agent'}
+          </Button>
         </header>
 
         <Show when={controller.error()}>
