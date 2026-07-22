@@ -17,9 +17,19 @@ Oyster 是一个独立于 Agent Harness 的本地知识库维护中心。当前�
 需要 Node.js 22 或更新版本。
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
+
+`npm run dev` 会先检查 Electron npm 包对应的桌面端二进制。如果依赖安装时因为 `--ignore-scripts`、网络中断或缓存不完整而缺少 `node_modules/electron/path.txt`，启动脚本会自动执行 Electron 官方安装器进行修复。
+
+如果二进制下载仍然失败，可以单独重试并查看完整错误：
+
+```bash
+npm run electron:ensure
+```
+
+Electron 二进制来自 GitHub Releases。需要代理的环境可设置 `ELECTRON_GET_USE_PROXY` 和系统代理变量；无法访问 GitHub 的环境可按 [Electron 官方安装说明](https://www.electronjs.org/docs/latest/tutorial/installation)配置 `ELECTRON_MIRROR`。这些变量只影响 Electron 二进制下载，不应提交个人代理地址到仓库。
 
 验证命令：
 

@@ -6,11 +6,12 @@
   "main": "out/main/index.js",
   "description": "Agent-agnostic local knowledge hub",
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "node scripts/ensure-electron.mjs && electron-vite dev",
+    "electron:ensure": "node scripts/ensure-electron.mjs",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:ui": "npm run build && node scripts/run-ui-smoke.mjs"
+    "test:ui": "node scripts/ensure-electron.mjs && npm run build && node scripts/run-ui-smoke.mjs"
   },
   "dependencies": {
     "solid-js": "^1.9.9"
