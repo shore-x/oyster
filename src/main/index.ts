@@ -1,33 +1,45 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { discoveryChannels } from '../shared/channels'
-import type { DiscoverySnapshot } from '../shared/discovery'
+import { AGENT_TYPES, type DiscoverySnapshot } from '../shared/discovery'
 import { createDefaultAdapters, createDetectionContext } from './discovery/adapters'
 import { DiscoveryService } from './discovery/discovery-service'
 import { nearestExistingDirectory } from './discovery/path-utils'
-import { FileRawEvidenceStore, MemoryRawEvidenceStore } from './discovery/raw-evidence-store'
+import {
+  ensureRawEvidenceDirectories,
+  FileRawEvidenceStore,
+  MemoryRawEvidenceStore
+} from './discovery/raw-evidence-store'
 import { InMemoryDiscoveryRepository, JsonDiscoveryRepository } from './discovery/repository'
 import { createFixtureState } from './fixture-state'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 let mainWindow: BrowserWindow | undefined
 
+function rawEvidenceRootPath(): string {
+  return join(app.getPath('userData'), 'raw-evidence')
+}
+
+function fixtureMode(): boolean {
+  return process.env.OYSTER_FIXTURE_MODE === '1'
+}
+
 function createService(): DiscoveryService {
-  const fixtureMode = process.env.OYSTER_FIXTURE_MODE === '1'
-  const repository = fixtureMode
+  const useFixtures = fixtureMode()
+  const repository = useFixtures
     ? new InMemoryDiscoveryRepository(createFixtureState())
     : new JsonDiscoveryRepository(join(app.getPath('userData'), 'discovery-state.json'))
-  const evidenceStore = fixtureMode
+  const evidenceStore = useFixtures
     ? new MemoryRawEvidenceStore()
-    : new FileRawEvidenceStore(join(app.getPath('userData'), 'raw-evidence'))
+    : new FileRawEvidenceStore(rawEvidenceRootPath())
   return new DiscoveryService(
     repository,
     evidenceStore,
     createDefaultAdapters(),
     createDetectionContext(app.getPath('home')),
-    { recoverInterruptedRuns: !fixtureMode }
+    { recoverInterruptedRuns: !useFixtures }
   )
 }
 
@@ -37,6 +49,12 @@ function registerIpc(service: DiscoveryService): void {
   ipcMain.handle(discoveryChannels.scanSource, (_event, sourceId: string) => service.scanSource(sourceId))
   ipcMain.handle(discoveryChannels.importSource, (_event, sourceId: string) => service.importSource(sourceId))
   ipcMain.handle(discoveryChannels.cancelRun, (_event, runId: string) => service.cancelRun(runId))
+  ipcMain.handle(discoveryChannels.openRawEvidenceDirectory, async () => {
+    const rootPath = rawEvidenceRootPath()
+    await ensureRawEvidenceDirectories(rootPath, AGENT_TYPES.map((agentType) => `source:${agentType}`))
+    const error = await shell.openPath(rootPath)
+    if (error) throw new Error(`无法打开导入目录：${error}`)
+  })
   ipcMain.handle(discoveryChannels.chooseSourceRoot, async (_event, sourceId: string) => {
     const owner = BrowserWindow.getFocusedWindow() || mainWindow
     const source = service.snapshot().sources.find((candidate) => candidate.id === sourceId)
@@ -118,6 +136,12 @@ async function createMainWindow(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  if (!fixtureMode()) {
+    await ensureRawEvidenceDirectories(
+      rawEvidenceRootPath(),
+      AGENT_TYPES.map((agentType) => `source:${agentType}`)
+    )
+  }
   const service = createService()
   await service.initialize()
   registerIpc(service)

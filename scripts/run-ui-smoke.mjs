@@ -33,6 +33,7 @@ if (semantics.buttonCount !== semantics.sharedButtonCount) throw new Error('A bu
 if (semantics.buttonIconCount < semantics.sharedButtonCount) throw new Error('A shared button icon was not rendered')
 if (semantics.overflowX) throw new Error('Page has unexpected horizontal overflow')
 if (!semantics.primaryActions.includes('探测本机 Agent')) throw new Error('Discovery action is missing')
+if (!semantics.primaryActions.includes('打开导入目录')) throw new Error('Raw Evidence directory action is missing')
 if (!semantics.bodyText.includes('正在导入原始记录')) throw new Error('Import progress state is missing')
 for (const removedCopy of ['KNOWLEDGE SOURCES', '数据仅保存在本机', 'LOCAL KNOWLEDGE HUB']) {
   if (semantics.bodyText.includes(removedCopy)) throw new Error(`Redundant copy is still rendered: ${removedCopy}`)

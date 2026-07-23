@@ -17,6 +17,7 @@ nav { -webkit-app-region: no-drag; }
 .content { grid-column: 2; width: min(880px, calc(100vw - 196px)); margin: 0 auto; padding: 60px 42px 52px; }
 .window-drag-region { position: fixed; z-index: 20; top: 0; right: 0; left: 196px; height: 48px; -webkit-app-region: drag; }
 .page-header { display: flex; align-items: center; justify-content: space-between; gap: 28px; -webkit-app-region: drag; }
+.page-header__actions { display: flex; align-items: center; gap: 8px; -webkit-app-region: no-drag; }
 h1 { margin: 0 0 8px; font-size: 26px; line-height: 1.15; letter-spacing: -.035em; font-weight: 680; }
 .page-summary { display: flex; align-items: center; gap: 7px; color: var(--text-tertiary); font-size: 12px; }
 .page-summary strong { color: var(--text-secondary); font-weight: 650; }

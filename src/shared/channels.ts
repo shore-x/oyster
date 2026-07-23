@@ -5,5 +5,6 @@ export const discoveryChannels = {
   scanSource: 'discovery:scan-source',
   importSource: 'discovery:import-source',
   cancelRun: 'discovery:cancel-run',
-  chooseSourceRoot: 'discovery:choose-source-root'
+  chooseSourceRoot: 'discovery:choose-source-root',
+  openRawEvidenceDirectory: 'discovery:open-raw-evidence-directory'
 } as const

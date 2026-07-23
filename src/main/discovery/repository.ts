@@ -8,6 +8,10 @@ const EMPTY_STATE: DiscoveryStateData = { sources: [], artifacts: [], runs: [] }
 type LegacyHistorySession = Omit<HistoryArtifact, 'kind'> & { kind?: HistoryArtifact['kind'] }
 type StoredDiscoveryState = Partial<DiscoveryStateData> & { sessions?: LegacyHistorySession[] }
 
+function migrateRawEvidenceId(rawEvidenceId?: string): string | undefined {
+  return rawEvidenceId?.replace(/^source:(claude|pi|codex)\//, '$1/')
+}
+
 function cloneState(state: DiscoveryStateData): DiscoveryStateData {
   return structuredClone(state)
 }
@@ -20,7 +24,11 @@ export class JsonDiscoveryRepository implements DiscoveryRepository {
   async load(): Promise<DiscoveryStateData> {
     try {
       const value = JSON.parse(await readFile(this.filePath, 'utf8')) as StoredDiscoveryState
-      const artifacts = value.artifacts ?? value.sessions?.map((session) => ({ ...session, kind: 'conversation' as const }))
+      const storedArtifacts = value.artifacts ?? value.sessions?.map((session) => ({ ...session, kind: 'conversation' as const }))
+      const artifacts = storedArtifacts?.map((artifact) => ({
+        ...artifact,
+        rawEvidenceId: migrateRawEvidenceId(artifact.rawEvidenceId)
+      }))
       return {
         sources: value.sources ?? [],
         artifacts: artifacts ?? [],

@@ -28,7 +28,8 @@ describe('JsonDiscoveryRepository', () => {
             sizeBytes: 10,
             modifiedAt: '2026-07-22T00:00:00.000Z',
             fingerprint: 'legacy-fingerprint',
-            syncState: 'synced'
+            syncState: 'synced',
+            rawEvidenceId: 'source:claude/artifact/evidence'
           }
         ],
         runs: []
@@ -40,7 +41,8 @@ describe('JsonDiscoveryRepository', () => {
       expect.objectContaining({
         id: 'legacy-session',
         kind: 'conversation',
-        externalId: 'upstream-session'
+        externalId: 'upstream-session',
+        rawEvidenceId: 'claude/artifact/evidence'
       })
     ])
   })

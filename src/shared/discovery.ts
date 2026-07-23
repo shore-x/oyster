@@ -81,5 +81,6 @@ export interface DiscoveryApi {
   importSource(sourceId: string): Promise<DiscoverySnapshot>
   cancelRun(runId: string): Promise<DiscoverySnapshot>
   chooseSourceRoot(sourceId: string): Promise<DiscoverySnapshot>
+  openRawEvidenceDirectory(): Promise<void>
   subscribe(listener: (snapshot: DiscoverySnapshot) => void): () => void
 }

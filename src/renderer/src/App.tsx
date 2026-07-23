@@ -32,15 +32,24 @@ export function App() {
               <span><strong>{totalSessions()}</strong> 个会话</span>
             </div>
           </div>
-          <Button
-            variant="primary"
-            size="wide"
-            icon="refresh"
-            onClick={controller.detectAgents}
-            disabled={controller.detecting()}
-          >
-            {controller.detecting() ? '探测中…' : '探测本机 Agent'}
-          </Button>
+          <div class="page-header__actions">
+            <Button
+              variant="secondary"
+              icon="folder"
+              onClick={() => void controller.openRawEvidenceDirectory()}
+            >
+              打开导入目录
+            </Button>
+            <Button
+              variant="primary"
+              size="wide"
+              icon="refresh"
+              onClick={controller.detectAgents}
+              disabled={controller.detecting()}
+            >
+              {controller.detecting() ? '探测中…' : '探测本机 Agent'}
+            </Button>
+          </div>
         </header>
 
         <Show when={controller.error()}>

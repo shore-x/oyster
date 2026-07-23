@@ -548,6 +548,6 @@ Solid Renderer
 
 `DiscoveryService` 不依赖 Electron；Adapter 只负责路径定位、有限 header 验证和 artifact candidate 生成；统一 Service 负责统计、fingerprint、任务、取消、失败隔离和同步覆盖率。Renderer 不包含路径规则，也不把页面状态当作业务真相。
 
-Bootstrap 阶段使用原子替换的 JSON repository 保存 `AgentSource / HistoryArtifact / SyncRun`，并兼容迁移旧的 `sessions` 集合。Raw Evidence 使用独立目录保存不可变 payload 与 manifest：payload 保持源文件扩展名和字节，manifest 记录 artifact kind、原始定位、fingerprint、SHA-256、大小和导入时间。后续切换 SQLite 和 content-addressed blob storage 时无需改变 UI/Adapter 契约。
+Bootstrap 阶段使用原子替换的 JSON repository 保存 `AgentSource / HistoryArtifact / SyncRun`，并兼容迁移旧的 `sessions` 集合。Raw Evidence 使用独立目录保存不可变 payload 与 manifest：payload 保持源文件扩展名和字节，manifest 记录 artifact kind、原始定位、fingerprint、SHA-256、大小和导入时间。根目录按 `claude/`、`pi/`、`codex/` 分区，避免 `:` 等 Windows 非法路径字符；UI 通过 Electron Shell 交给 Finder、Windows 资源管理器或当前平台文件管理器打开统一根目录。后续切换 SQLite 和 content-addressed blob storage 时无需改变 UI/Adapter 契约。
 
 当前实现覆盖 Conversation JSONL 与 Human Instruction Markdown。发现动作不会读取 transcript；用户点击扫描后才读取有限 header，并从 session header 的项目路径和各 Agent 的官方层级规则定位指令。点击导入后才完整复制文件。Claude/Codex 自动 memory、Config 和 Credentials 不进入扫描模式；测试明确验证 `memory/`、`memories/` 不会混入 Raw Evidence。

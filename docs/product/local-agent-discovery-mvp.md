@@ -86,6 +86,8 @@ Scanning… 607 sessions found · 1.4 GB
 
 不要在扫描尚未完成时显示百分比。只有扫描完成、同步任务获得固定快照后才显示确定百分比。
 
+页面提供一个统一的“打开导入目录”按钮，由操作系统默认文件管理器打开 Oyster 的 Raw Evidence 根目录。根目录下使用 `claude/`、`pi/`、`codex/` 子目录区分来源，不在每张来源卡片重复提供入口。
+
 ### 2.4 同步 Raw Evidence
 
 同步流程只做四件事：
@@ -382,6 +384,7 @@ Adapter 负责文件模式和 header 差异；统计、任务、进度、错误�
 - 已实现 Raw Evidence 按原扩展名逐字节复制、SHA-256 与 provenance manifest、任务进度、取消、逐 artifact 失败隔离和未完成任务恢复；
 - Agent 自动生成的 memory 明确排除，不进入扫描统计、同步队列或 Raw Evidence；
 - 已实现目录选择、重新扫描、增量导入及三类错误/空态 UI；
+- 已实现统一 Raw Evidence 目录入口，在 Finder、Windows 资源管理器或当前平台文件管理器中打开，并按 Agent 使用跨平台安全的子目录；
 - Renderer 只依赖 preload 暴露的 typed API，不直接访问 Node、文件系统或持久化实现；
 - 已用脱敏 Fixture 覆盖三个 Adapter，并有 Service 幂等测试和 Electron 截图烟雾测试。
 

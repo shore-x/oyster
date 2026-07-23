@@ -17,6 +17,15 @@ export function createDiscoveryController() {
     }
   }
 
+  async function runCommand(action: () => Promise<void>): Promise<void> {
+    try {
+      setError(undefined)
+      await action()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
   onMount(() => {
     const unsubscribe = window.oyster.discovery.subscribe(setSnapshot)
     void run(() => window.oyster.discovery.getSnapshot())
@@ -35,6 +44,7 @@ export function createDiscoveryController() {
     scanSource: (sourceId: string) => run(() => window.oyster.discovery.scanSource(sourceId)),
     importSource: (sourceId: string) => run(() => window.oyster.discovery.importSource(sourceId)),
     cancelRun: (runId: string) => run(() => window.oyster.discovery.cancelRun(runId)),
-    chooseSourceRoot: (sourceId: string) => run(() => window.oyster.discovery.chooseSourceRoot(sourceId))
+    chooseSourceRoot: (sourceId: string) => run(() => window.oyster.discovery.chooseSourceRoot(sourceId)),
+    openRawEvidenceDirectory: () => runCommand(() => window.oyster.discovery.openRawEvidenceDirectory())
   }
 }

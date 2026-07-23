@@ -26,13 +26,43 @@ function safeExtension(filePath: string): string {
   return /^\.[a-z0-9]{1,12}$/i.test(extension) ? extension : ''
 }
 
+export function rawEvidenceSourceDirectoryName(sourceId: string): string {
+  const builtInSource = sourceId.match(/^source:([a-z0-9_-]+)$/i)?.[1]
+  if (builtInSource) return builtInSource.toLowerCase()
+  return `source-${createHash('sha256').update(sourceId).digest('hex').slice(0, 16)}`
+}
+
+export async function ensureRawEvidenceSourceDirectory(rootPath: string, sourceId: string): Promise<string> {
+  const directoryName = rawEvidenceSourceDirectoryName(sourceId)
+  const sourcePath = join(rootPath, directoryName)
+  await mkdir(rootPath, { recursive: true })
+
+  if (process.platform !== 'win32' && directoryName !== sourceId) {
+    try {
+      await rename(join(rootPath, sourceId), sourcePath)
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code !== 'ENOENT' && code !== 'EEXIST' && code !== 'ENOTEMPTY') throw error
+    }
+  }
+
+  await mkdir(sourcePath, { recursive: true })
+  return sourcePath
+}
+
+export async function ensureRawEvidenceDirectories(rootPath: string, sourceIds: string[]): Promise<void> {
+  await Promise.all(sourceIds.map((sourceId) => ensureRawEvidenceSourceDirectory(rootPath, sourceId)))
+}
+
 export class FileRawEvidenceStore implements RawEvidenceStore {
   constructor(private readonly rootPath: string) {}
 
   async importFile(input: RawEvidenceInput): Promise<RawEvidenceReceipt> {
     const artifactKey = createHash('sha256').update(input.artifactId).digest('hex').slice(0, 24)
     const evidenceId = randomUUID()
-    const evidencePath = join(this.rootPath, input.sourceId, artifactKey, evidenceId)
+    const sourceDirectoryName = rawEvidenceSourceDirectoryName(input.sourceId)
+    const sourceDirectory = await ensureRawEvidenceSourceDirectory(this.rootPath, input.sourceId)
+    const evidencePath = join(sourceDirectory, artifactKey, evidenceId)
     const storedFileName = `payload${safeExtension(input.absolutePath)}`
     const destination = join(evidencePath, storedFileName)
     const manifestPath = join(evidencePath, 'manifest.json')
@@ -60,7 +90,7 @@ export class FileRawEvidenceStore implements RawEvidenceStore {
         { signal: input.signal }
       )
       const receipt: RawEvidenceReceipt = {
-        id: `${input.sourceId}/${artifactKey}/${evidenceId}`,
+        id: `${sourceDirectoryName}/${artifactKey}/${evidenceId}`,
         contentHash: contentHash.digest('hex'),
         sizeBytes
       }
