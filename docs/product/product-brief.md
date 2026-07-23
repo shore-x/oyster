@@ -5,6 +5,8 @@
 > 日期：2026-07-22
 >
 > 决策记录：[ADR-0001：将 Oyster 定位为 Agent-Agnostic Knowledge Hub](../decisions/0001-agent-agnostic-knowledge-hub.md)
+>
+> 知识模型原则：[知识模型与 Attention 驱动投影](../architecture/knowledge-model-and-projection.md)
 
 ## 1. 一句话定位
 
@@ -30,7 +32,7 @@ Oyster 向用户提供四个核心能力：
 
 1. **发现与接入**：发现本机 Agent 的可执行程序、应用、配置和数据目录，明确展示每个来源支持历史导入、实时采集或上下文输出中的哪些能力。
 2. **保真收集**：批量导入已有聊天 transcript 与人类编写的 Agent 指令，并通过 Harness 插件或 Hook 在 turn/session 边界增量采集；不同 Harness 的原始格式不因统一模型而丢失，Agent 自动生成的 memory 不作为历史导入来源。
-3. **知识加工**：把异构记录转为带出处的事件、材料、结论、决策、问题、尝试和关系，支持搜索、修订、冲突与删除。
+3. **知识加工**：把异构记录转为带出处、可修订的理解及其关系；决策、问题、尝试等是可配置的提取视角，不是固定本体。
 4. **安全供给**：通过本地 API 和 MCP 等开放边界向第三方 Agent 提供检索；未来可在用户授权、Scope 和 Token Budget 内生成并注入 Context Packet。
 
 ## 4. 产品身份与边界
@@ -57,15 +59,17 @@ Oyster 不是：
 
 ## 5. 核心领域分层
 
-Oyster 必须把三个层次分开，避免把模型总结覆盖到原始事实之上：
+Oyster 必须把三个认识论层次分开，避免把模型总结覆盖到原始事实之上。现有 Raw Evidence 与 Canonical Activity 是观察层的两个子层，不是额外的认识论层：
 
 | 层次 | 内容 | 规则 |
 | --- | --- | --- |
-| Raw Evidence | Harness 原始 transcript、人类指令、来源 Locator、校验和、采集时间、格式版本 | 保真、追加式、可删除；不为统一 Schema 破坏原始数据；不导入 Agent 自动 memory |
-| Canonical Activity | Session、Turn、Message、Tool Call/Result、Compaction、Artifact 等标准化事件 | 可重建、版本化；始终引用 Raw Evidence |
-| Derived Knowledge | 决策、事实、偏好、问题、尝试、结果、摘要、实体与关系 | 可修订、可冲突、带置信度和出处；不得伪装成原始事实 |
+| 观察层 | Raw Evidence，以及可重建的 Session、Message、Tool Call/Result 等 Canonical Activity | 保真或确定性生成、追加式、可删除；不得把模型解释伪装成来源事实 |
+| 知识层 | 从观察或已有知识形成的可引用理解，以及知识之间可修订的关系 | 允许多个解释和多级抽象；不预设 Decision、Problem 等为全局类型 |
+| 投影层 | 在用户 Attention 下生成的 Markdown 视图、概览或 Context Packet | 与目标相关、可重建、可并存；不是证据，不自动回流为知识 |
 
 删除权高于追加式存储：用户删除来源时，系统先建立 Tombstone 并停止供给，随后物理清除 Raw Evidence、索引和所有派生数据。这里的“不可变”表示正常加工不覆写证据，不表示无限期保留。
+
+层间与知识间关系的最小原则见[《知识模型与 Attention 驱动投影》](../architecture/knowledge-model-and-projection.md)。
 
 ## 6. MVP 用户流程
 
@@ -105,9 +109,9 @@ MVP 的“实时”定义为 **turn 级近实时**，不是 token streaming。�
 用户可以对选定项目或会话运行知识加工：
 
 - 确定项目、仓库、Topic 和 Session 的关系；
-- 提取决策、需求、约束、问题、尝试、结果和用户明确偏好；
-- 生成可检查的摘要、关键词、实体和关系；
-- 将相互矛盾的 Claim 并列呈现，而不是静默覆盖；
+- 根据用户选择的 Attention/加工策略提取相关理解；早期策略可以关注决策、需求、约束、问题、尝试、结果和明确偏好；
+- 生成可检查的摘要、关键词、实体与关系候选，但不把相似或模型推断直接宣布为事实；
+- 追加新的理解，并把补充、限定、修订或可能冲突的内容并列呈现，而不是静默覆盖；
 - 从每个 Knowledge Item 回到原始消息、工具结果和来源文件；
 - 接受、修改、拒绝、固定或删除派生知识；
 - 在模型、Prompt 或算法升级后重新生成派生层，不重写 Raw Evidence。
@@ -131,10 +135,10 @@ MVP 提供本地搜索 UI，以及只读优先的 MCP 能力：
 - 三个第一方 Connector 的历史导入；
 - 统一的 Connector Plugin API 与版本化 Capability Manifest；
 - 三个 Harness 的 turn/session 级实时增量采集路径；
-- Raw Evidence、Canonical Activity、Derived Knowledge 三层存储；
+- 观察、知识、投影三层职责分离；观察层继续保留 Raw Evidence 与 Canonical Activity 两个子层；
 - 可恢复、幂等的导入游标和失败队列；
 - 项目/会话浏览、全文搜索、基础筛选和出处跳转；
-- 至少提取决策、问题、尝试、结果四类知识；
+- 提供至少一个可替换的初始 Attention/提取策略，优先覆盖决策、问题、尝试和结果，但不将其固化为核心本体；
 - 用户审查、纠正、删除和重新加工；
 - 可替换的 LLM Provider 接口，以及至少一个可配置 Provider；本地模型支持不作为 MVP 硬依赖；
 - 密钥进入系统钥匙串，不进入会话、日志和模型输入；

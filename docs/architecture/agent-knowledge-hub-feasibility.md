@@ -5,6 +5,8 @@
 > 结论：**有条件可行，建议推进 MVP。** 历史导入、turn 级实时采集和 MCP 检索在 Claude Code、Pi、Codex 上均存在可实施路径；真正困难的部分不是“读到聊天”，而是格式演进、知识质量、安全删除、跨项目身份解析和上下文供给治理。
 >
 > 发现与存量数据定位的专项设计见[《本机 Agent 发现与存量数据定位》](agent-discovery-and-history-import.md)。
+>
+> 知识层次、关系与投影的后续设计见[《知识模型与 Attention 驱动投影》](knowledge-model-and-projection.md)。
 
 ## 1. 研究问题
 
@@ -86,10 +88,13 @@ History Scan ┘         └── cursor/retry ─┘                  v
                                                    Knowledge Pipeline
                                                classify/extract/link/review
                                                            │
+                                                           v
+                                            Attention-driven Projection
+                                                           │
                                       ┌────────────────────┴─────────────┐
                                       v                                  v
                               Search & Workbench                 Context Service
-                              FTS / filters / graph              MCP / local API
+                              FTS / filters / views              MCP / local API
 ```
 
 ### 5.1 Connector Host
@@ -157,14 +162,14 @@ Pipeline 采用版本化 Job：
 1. 确定新的或变化的 Canonical Activity 范围；
 2. Secret/PII 分类和允许发送的字段裁剪；
 3. 确定性分段和基础全文索引；
-4. LLM/规则提取 Claim、Decision、Problem、Attempt、Outcome；
-5. 用 evidence refs、project/topic、actor、valid time 连接候选；
-6. 去重和冲突检测，但不静默覆盖；
-7. 用户审查或按策略发布为可检索知识；
+4. LLM/规则按当前 Attention/加工策略提取带出处的知识候选；Decision、Problem、Attempt、Outcome 只是可替换的早期视角；
+5. 用 evidence refs 或已有知识建立派生链，并保留 project/topic、actor、valid time 等适用上下文；
+6. 发现可能的重复、补充、修订或冲突，但不把这些模型判断固化为不可质疑的关系，也不静默覆盖；
+7. 用户审查或按策略发布为可检索知识，并按用户 Attention 生成可重建投影；
 8. 记录 model、prompt、pipeline version 和成本；
 9. 算法更新时只重建派生层。
 
-建议的知识状态：`candidate`、`accepted`、`rejected`、`superseded`、`conflicting`。状态不是“真/假”替代品，所有 Claim 仍应展示证据和适用范围。
+`candidate`、`accepted`、`rejected`、`superseded`、`conflicting` 可以作为首轮评测的临时工作流词汇，但不是知识本体或“真/假”替代品。所有知识仍应展示证据、适用范围和派生链；在验证真实维护流程前，不把这些状态固定为长期 Schema。
 
 ### 5.6 Search 与 Context Service
 
@@ -190,9 +195,9 @@ MCP 输出采用：
 
 与 Mem0/OpenMemory 路线接近，集成简单，但依赖 Agent 主动保存，无法完整回填已有历史，也不能解释未被 Agent 写入的失败和决策。可作为输出接口，不作为核心存储模型。
 
-### 方案 C：Raw + Canonical + Knowledge 三层、Connector 双路径
+### 方案 C：观察 + 知识 + 投影三层、Connector 双路径
 
-成本高于 A/B，但能够吸收 Schema 演进、离线补采、重处理、出处、冲突和删除需求。推荐采用。
+观察层内部继续区分 Raw Evidence 与 Canonical Activity。该方案成本高于 A/B，但能够吸收 Schema 演进、离线补采、重处理、出处、冲突、用户 Attention 和删除需求。推荐采用。
 
 ### 方案 D：直接成为新的 Agent Harness
 
@@ -213,8 +218,9 @@ MCP 输出采用：
 - 不直接实现完整 OTel 或 PROV 标准，只保留适合个人 Agent 活动的最小语义；
 - MCP 是消费边界，不是内部领域模型；
 - Hook/Extension 是低延迟提示，不是唯一数据通道；
-- “Data Lake”收敛为本地三层存储，不采用大数据基础设施；
-- LLM Memory Extraction 输出候选 Claim，必须绑定 evidence 与 pipeline version。
+- “Data Lake”收敛为本地分层存储，不采用大数据基础设施；
+- LLM Knowledge Extraction 输出候选理解，必须绑定 evidence/knowledge dependency 与 pipeline version；
+- Markdown/Wiki 作为 Attention 驱动的投影视图，不作为唯一知识真相。
 
 ### Reject
 
@@ -264,7 +270,7 @@ MCP 输出采用：
 
 ### Spike 3：知识与检索
 
-- 从真实脱敏会话建立 50–100 个用户标注的 Decision/Problem/Attempt/Outcome；
+- 从真实脱敏会话建立 50–100 个用户标注的目标查询与期望证据；Decision/Problem/Attempt/Outcome 可作为第一组 Attention 视角，但不限定全部样本；
 - 比较 FTS、FTS + Embedding、可选 rerank；
 - 记录 Claim 精确率、引用正确率、用户编辑率、Recall@k 和 Token 成本；
 - 验证冲突、过期和跨项目误合并。
