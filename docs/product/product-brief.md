@@ -6,7 +6,7 @@
 >
 > 决策记录：[ADR-0001：将 Oyster 定位为 Agent-Agnostic Knowledge Hub](../decisions/0001-agent-agnostic-knowledge-hub.md)
 >
-> 知识模型原则：[知识模型与 Attention 驱动投影](../architecture/knowledge-model-and-projection.md)
+> 知识模型原则：[知识模型与协作式投影](../architecture/knowledge-model-and-projection.md)
 
 ## 1. 一句话定位
 
@@ -65,11 +65,11 @@ Oyster 必须把三个认识论层次分开，避免把模型总结覆盖到原�
 | --- | --- | --- |
 | 观察层 | Raw Evidence，以及可重建的 Session、Message、Tool Call/Result 等 Canonical Activity | 保真或确定性生成、追加式、可删除；不得把模型解释伪装成来源事实 |
 | 知识层 | 从观察或已有知识形成的可引用理解，以及知识之间可修订的关系 | 允许多个解释和多级抽象；不预设 Decision、Problem 等为全局类型 |
-| 投影层 | 在用户 Attention 下生成的 Markdown 视图、概览或 Context Packet | 与目标相关、可重建、可并存；不是证据，不自动回流为知识 |
+| 投影层 | 持久 Markdown 协作文档，以及按需生成的临时 Context Packet | 持久文档由知识和 Attention 初始化，再由用户与 Agent 共同维护；更新必须基于当前文档，不得全量重建并覆盖人工编辑。临时消费视图不要求持久化 |
 
 删除权高于追加式存储：用户删除来源时，系统先建立 Tombstone 并停止供给，随后物理清除 Raw Evidence、索引和所有派生数据。这里的“不可变”表示正常加工不覆写证据，不表示无限期保留。
 
-层间与知识间关系的最小原则见[《知识模型与 Attention 驱动投影》](../architecture/knowledge-model-and-projection.md)。
+层间与知识间关系的最小原则见[《知识模型与协作式投影》](../architecture/knowledge-model-and-projection.md)。
 
 ## 6. MVP 用户流程
 
@@ -115,6 +115,8 @@ MVP 的“实时”定义为 **turn 级近实时**，不是 token streaming。�
 - 从每个 Knowledge Item 回到原始消息、工具结果和来源文件；
 - 接受、修改、拒绝、固定或删除派生知识；
 - 在模型、Prompt 或算法升级后重新生成派生层，不重写 Raw Evidence。
+
+持久投影文档允许用户直接编辑，也允许用户委托 Agent 编辑。首次文档可以由知识和 Attention 初始化；后续知识更新必须以当前文档为基础形成新修订，无论当前版本是否经过人工编辑。编辑行为或编辑指令如何作为观察重新进入知识加工，属于后续产品设计，不在此阶段规定。为单次查询或运行生成的临时 Context Packet 不受这一持久协作规则约束。
 
 ### 6.5 检索和供给上下文
 

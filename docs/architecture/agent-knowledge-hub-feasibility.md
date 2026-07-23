@@ -6,7 +6,7 @@
 >
 > 发现与存量数据定位的专项设计见[《本机 Agent 发现与存量数据定位》](agent-discovery-and-history-import.md)。
 >
-> 知识层次、关系与投影的后续设计见[《知识模型与 Attention 驱动投影》](knowledge-model-and-projection.md)。
+> 知识层次、关系与投影的后续设计见[《知识模型与协作式投影》](knowledge-model-and-projection.md)。
 
 ## 1. 研究问题
 
@@ -89,7 +89,7 @@ History Scan ┘         └── cursor/retry ─┘                  v
                                                classify/extract/link/review
                                                            │
                                                            v
-                                            Attention-driven Projection
+                                            Collaborative Projection Update
                                                            │
                                       ┌────────────────────┴─────────────┐
                                       v                                  v
@@ -165,7 +165,7 @@ Pipeline 采用版本化 Job：
 4. LLM/规则按当前 Attention/加工策略提取带出处的知识候选；Decision、Problem、Attempt、Outcome 只是可替换的早期视角；
 5. 用 evidence refs 或已有知识建立派生链，并保留 project/topic、actor、valid time 等适用上下文；
 6. 发现可能的重复、补充、修订或冲突，但不把这些模型判断固化为不可质疑的关系，也不静默覆盖；
-7. 用户审查或按策略发布为可检索知识，并按用户 Attention 生成可重建投影；
+7. 用户审查或按策略发布为可检索知识；首次按 Attention 初始化持久投影文档，后续以当前协作文档为输入形成新修订；
 8. 记录 model、prompt、pipeline version 和成本；
 9. 算法更新时只重建派生层。
 
@@ -220,7 +220,7 @@ MCP 输出采用：
 - Hook/Extension 是低延迟提示，不是唯一数据通道；
 - “Data Lake”收敛为本地分层存储，不采用大数据基础设施；
 - LLM Knowledge Extraction 输出候选理解，必须绑定 evidence/knowledge dependency 与 pipeline version；
-- Markdown/Wiki 作为 Attention 驱动的投影视图，不作为唯一知识真相。
+- Markdown/Wiki 作为用户与 Agent 共同维护的投影文档，不作为唯一知识真相，也不被下层全量重建覆盖。
 
 ### Reject
 

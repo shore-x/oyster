@@ -2,7 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-07-22
-- 关联文档：[Product Brief](../product/product-brief.md)、[本地 Agent 发现与历史同步 MVP](../product/local-agent-discovery-mvp.md)、[可行性分析](../architecture/agent-knowledge-hub-feasibility.md)、[本机 Agent 发现与存量数据定位](../architecture/agent-discovery-and-history-import.md)、[知识模型与 Attention 驱动投影](../architecture/knowledge-model-and-projection.md)
+- 关联文档：[Product Brief](../product/product-brief.md)、[本地 Agent 发现与历史同步 MVP](../product/local-agent-discovery-mvp.md)、[可行性分析](../architecture/agent-knowledge-hub-feasibility.md)、[本机 Agent 发现与存量数据定位](../architecture/agent-discovery-and-history-import.md)、[知识模型与协作式投影](../architecture/knowledge-model-and-projection.md)
 
 ## Context
 
@@ -20,7 +20,7 @@ Oyster 的主要产品身份是：本地优先、跨 Agent、跨项目的知识�
 2. Canonical Activity：标准化 Session、Turn、Message、Tool 和 Artifact 等活动；
 3. Derived Knowledge：由规则、LLM 和用户审查生成的可修订知识。
 
-2026-07-23 的知识模型分析对这三个加工/存储阶段作了进一步的认识论澄清：Raw Evidence 与 Canonical Activity 共同属于“观察层”，Derived Knowledge 属于“知识层”，其上还有按用户 Attention 生成且可重建的“投影层”。这不改变原始证据与派生结果分离的决策，也不要求投影成为新的事实存储。
+2026-07-23 的知识模型分析对这三个加工/存储阶段作了进一步的认识论澄清：Raw Evidence 与 Canonical Activity 共同属于“观察层”，Derived Knowledge 属于“知识层”，其上还有由知识和 Attention 初始化、由用户与 Agent 共同维护的“投影层”。投影文档不是新的世界事实存储，也不是可由下层覆盖式重建的纯派生物；后续更新必须基于当前文档版本。
 
 历史导入和实时插件进入同一幂等 Ingestion Pipeline。输出侧优先通过 MCP 和本地 API 提供 Pull-based Search/Context。自动上下文注入、内置 Agent、浏览器和执行能力延后，在不改变知识所有权与安全边界的前提下增加。
 

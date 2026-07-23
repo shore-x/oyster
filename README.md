@@ -62,4 +62,4 @@ src/shared       Main / Preload / Renderer 共用契约
 
 生产模式把索引状态写入 Electron `userData/discovery-state.json`，把不可变原始副本写入 `userData/raw-evidence/`。该目录提供统一入口，并使用跨平台安全的 `claude/`、`pi/`、`codex/` 子目录隔离来源；旧版 macOS 的 `source:<agent>/` 目录会在安全时自动迁移。上游 Agent 目录始终只读。JSON repository 是当前 bootstrap 实现，接口已与业务层隔离，数据量验证后可以替换为 SQLite。
 
-产品范围与详细规则见[本地 Agent 发现与历史同步 MVP](docs/product/local-agent-discovery-mvp.md)、[发现/导入架构](docs/architecture/agent-discovery-and-history-import.md)和[知识模型与 Attention 驱动投影](docs/architecture/knowledge-model-and-projection.md)。
+产品范围与详细规则见[本地 Agent 发现与历史同步 MVP](docs/product/local-agent-discovery-mvp.md)、[发现/导入架构](docs/architecture/agent-discovery-and-history-import.md)和[知识模型与协作式投影](docs/architecture/knowledge-model-and-projection.md)。
