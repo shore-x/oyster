@@ -55,7 +55,71 @@ export interface KnowledgeProcessingSnapshot {
   stages: ProcessingStageView[]
   connections: ProcessingConnectionView[]
   runningStageIds: ProcessingStageId[]
+  preprocessingProgress?: ObservationPreprocessingProgress
+  debugTraces: KnowledgeProcessingDebugTrace[]
   configurationError?: string
+}
+
+export interface ObservationPreprocessingProgress {
+  phase: 'preparing' | 'mapping' | 'assembling'
+  completedSegments: number
+  totalSegments?: number
+}
+
+export type ProcessingDebugTraceOrigin = 'stage_debug' | 'full_chain'
+export type ProcessingDebugStatus = 'running' | 'completed' | 'failed' | 'cancelled'
+
+export interface PreprocessingModelCallTrace {
+  id: string
+  sequence: number
+  kind: 'segment_map' | 'navigation_merge'
+  status: ProcessingDebugStatus
+  selector: string
+  sectionIds: string[]
+  startedAt: string
+  completedAt?: string
+  durationMs?: number
+  output?: string
+  outputTruncated?: boolean
+  error?: string
+}
+
+export interface ObservationPreprocessingDebugTrace {
+  phase: 'preparing' | 'mapping' | 'assembling' | 'completed'
+  completedSegments: number
+  totalSegments?: number
+  calls: PreprocessingModelCallTrace[]
+}
+
+export interface KnowledgeMaintenanceTraceEvent {
+  id: string
+  sequence: number
+  kind: 'model_call' | 'tool_call'
+  label: string
+  status: ProcessingDebugStatus
+  startedAt: string
+  completedAt?: string
+  durationMs?: number
+  detail?: string
+}
+
+export interface KnowledgeMaintenanceDebugTrace {
+  modelCallCount: number
+  toolCallCount: number
+  events: KnowledgeMaintenanceTraceEvent[]
+}
+
+/** Bounded, in-memory diagnostics for the latest confirmed run in each UI origin. */
+export interface KnowledgeProcessingDebugTrace {
+  id: string
+  origin: ProcessingDebugTraceOrigin
+  status: ProcessingDebugStatus
+  currentStageId: ProcessingStageId
+  startedAt: string
+  completedAt?: string
+  error?: string
+  preprocessing?: ObservationPreprocessingDebugTrace
+  maintenance?: KnowledgeMaintenanceDebugTrace
 }
 
 export interface SaveProcessingStageInput {
@@ -101,6 +165,8 @@ export interface ObservationPreprocessingResult {
   runId: string
   evidenceMap: string
   sourceRef: string
+  segmentCount: number
+  debugTrace: KnowledgeProcessingDebugTrace
   durationMs: number
   completedAt: string
   execution: ProcessingExecutionSummary
@@ -110,6 +176,7 @@ export interface KnowledgeMaintenanceResult {
   stageId: 'knowledge_maintenance_agent'
   preprocessingRunId: string
   contribution: KnowledgeContributionDraft
+  debugTrace: KnowledgeProcessingDebugTrace
   durationMs: number
   completedAt: string
   execution: ProcessingExecutionSummary

@@ -172,9 +172,27 @@ if (processing.promptRestore.customizedBeforeRestore !== 'Customized') {
 if (!processing.promptRestore.matchesOriginal || processing.promptRestore.defaultAfterRestore !== 'Default') {
   throw new Error('Restore default did not reset an unsaved prompt draft after a successful save')
 }
+if (processing.trace.panelCount !== 2) throw new Error('Both processing debug trace panels must be rendered')
+if (processing.trace.preprocessingCallCount !== 1) throw new Error('The fixture preprocessing call is missing')
+if (!processing.trace.preprocessingOutput?.includes('# Evidence Map')) {
+  throw new Error('The preprocessing model output is not visible in the debug trace')
+}
+if (processing.trace.maintenanceEventCount !== 3) {
+  throw new Error(`Expected 3 safe maintenance trace events, got ${processing.trace.maintenanceEventCount}`)
+}
+for (const requiredCopy of ['模型输出可能复述原始材料', '模型轮次 1', '读取原始观察证据', '提交 Knowledge Contribution']) {
+  if (!processing.trace.bodyText.includes(requiredCopy)) {
+    throw new Error(`Knowledge processing trace is missing: ${requiredCopy}`)
+  }
+}
+if (processing.trace.overflowX) throw new Error('Debug trace view has unexpected horizontal overflow')
 const processingImage = await readFile(join(dirname(capturePath), 'knowledge-processing.png'))
 if (processingImage.length === 0) throw new Error('Knowledge processing screenshot is empty')
 const stageDebugImage = await readFile(join(dirname(capturePath), 'knowledge-processing-stage-debug.png'))
 if (stageDebugImage.length === 0) throw new Error('Knowledge processing stage-debug screenshot is empty')
+const preprocessingTraceImage = await readFile(join(dirname(capturePath), 'knowledge-processing-trace-preprocessing.png'))
+if (preprocessingTraceImage.length === 0) throw new Error('Preprocessing trace screenshot is empty')
+const maintenanceTraceImage = await readFile(join(dirname(capturePath), 'knowledge-processing-trace-maintenance.png'))
+if (maintenanceTraceImage.length === 0) throw new Error('Maintenance trace screenshot is empty')
 
 console.log(`UI smoke test passed: ${capturePath}`)

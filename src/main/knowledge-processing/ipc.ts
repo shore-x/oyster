@@ -114,7 +114,7 @@ export function registerKnowledgeProcessingIpc(
         `思考强度：${maintainerBinding.reasoningEffort ?? '模型默认'}`,
         `目的地：${maintainerConnection.destination}`,
         '',
-        '所选 Session 会在运行时从 Agent 的原始目录读取并发送给预处理模型；维护 Agent 会收到 Evidence Map，并可按需读取本次原始证据和 Sandbox 中的已有知识。模型调用可能消耗额度或产生费用。',
+        '所选 Session 会在运行时从 Agent 的原始目录读取并发送给预处理模型；长 Session 会在单次运行上限内自动分段并产生多次模型调用（最多 32 个原始分段、63 次预处理调用）。维护 Agent 会收到 Evidence Map，并可按需展开局部地图、读取本次原始证据和 Sandbox 中的已有知识。模型调用可能消耗额度或产生费用；失败或取消前已经发起的调用也可能计费。',
         '所有 Knowledge Statement 只会写入一次性 Knowledge Sandbox，不影响正式知识库。'
       ].join('\n'),
       buttons: ['取消', '运行'],
@@ -160,7 +160,7 @@ export function registerKnowledgeProcessingIpc(
       validateSessionSelection(input)
       const binding = await confirmRun(
         'observation_preprocessor',
-        '这会从 Agent 的原始目录读取所选 Session，并把当前 System Prompt、原始 Observation 和 Attention 发送给所选模型；可能消耗额度或产生费用。',
+        '这会从 Agent 的原始目录读取所选 Session，并把当前 System Prompt、原始 Observation 和 Attention 发送给所选模型；长 Session 会在单次运行上限内自动分段并产生多次模型调用（最多 32 个原始分段、63 次预处理调用），可能消耗额度或产生费用。失败或取消前已经发起的调用也可能计费。',
         '输出只是可丢弃的 Evidence Map，不会写入知识层。'
       )
       return binding ? sessionPreprocessor.run(input, binding) : undefined

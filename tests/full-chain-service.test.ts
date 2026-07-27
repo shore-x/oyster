@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AiBackendSnapshot, AiConnection } from '../src/shared/ai-backends'
 import type { AvailableSessionSummary } from '../src/shared/discovery'
 import type {
@@ -15,7 +15,10 @@ import {
   type KnowledgeAgentFactory,
   type KnowledgeFullChainBindings
 } from '../src/main/knowledge-processing/full-chain-service'
-import { KnowledgeProcessingService } from '../src/main/knowledge-processing/knowledge-processing-service'
+import {
+  KnowledgeProcessingService,
+  type KnowledgeProcessingServiceOptions
+} from '../src/main/knowledge-processing/knowledge-processing-service'
 import type {
   AiBackendPort,
   KnowledgeAgentRunInput,
@@ -86,6 +89,11 @@ function modelRuntime(modelId: string): ModelRuntime {
 
 class FakeAiBackend implements AiBackendPort {
   readonly connections = [modelConnection('model:preprocessor'), modelConnection('model:maintainer')]
+  readonly generationCalls: Array<{
+    connectionId: string
+    modelId: string
+    request: ModelGenerationRequest
+  }> = []
   generationHandler?: (
     connectionId: string,
     modelId: string,
@@ -105,6 +113,7 @@ class FakeAiBackend implements AiBackendPort {
     modelId: string,
     request: ModelGenerationRequest
   ): Promise<{ text: string }> {
+    this.generationCalls.push({ connectionId, modelId, request })
     request.signal?.throwIfAborted()
     if (this.generationHandler) return this.generationHandler(connectionId, modelId, request)
     return { text: '# Evidence Map\n\n- Explicit preference at L000001-L000002.' }
@@ -222,7 +231,10 @@ interface Harness {
   createFullChain(factory?: KnowledgeAgentFactory): KnowledgeFullChainService
 }
 
-async function createHarness(discovery = fakeDiscovery()): Promise<Harness> {
+async function createHarness(
+  discovery = fakeDiscovery(),
+  serviceOptions?: KnowledgeProcessingServiceOptions
+): Promise<Harness> {
   const directory = await mkdtemp(join(tmpdir(), 'oyster-full-chain-'))
   temporaryDirectories.push(directory)
   const manager = await SqliteKnowledgeStoreManager.open(join(directory, 'knowledge'))
@@ -232,7 +244,8 @@ async function createHarness(discovery = fakeDiscovery()): Promise<Harness> {
     backend,
     new StaticAgent(async () => {
       throw new Error('The full chain must use the Sandbox-bound Agent runtime')
-    })
+    }),
+    serviceOptions
   )
   await processing.initialize()
   await processing.saveStage({
@@ -349,6 +362,85 @@ describe('KnowledgeFullChainService', () => {
       .toBeUndefined()
   })
 
+  it('keeps global provenance through segmented preprocessing and Sandbox commit', async () => {
+    const discovery = fakeDiscovery({
+      content: 'line-one\nline-two\nline-three\nline-four'
+    })
+    const harness = await createHarness(discovery, {
+      evidenceMapPlanner: {
+        segmentCharacters: 40,
+        adjacentContextCharacters: 18,
+        mergeCharacters: 1_000
+      }
+    })
+    harness.backend.generationHandler = async (_connectionId, _modelId, request) => {
+      if (request.prompt.includes('BEGIN_EVIDENCE_MAP_MATERIALS')) {
+        return { text: 'ROOT NAVIGATION' }
+      }
+      if (request.prompt.includes('L000001-L000002')) return { text: 'LEAF A' }
+      if (request.prompt.includes('L000003-L000004')) return { text: 'LEAF B' }
+      throw new Error('unexpected preprocessing prompt')
+    }
+    const fullChain = harness.createFullChain(() => new StaticAgent(async (input) => {
+      expect(input.evidenceMap).toContain('ROOT NAVIGATION')
+      expect(input.evidenceMapSections).toEqual([
+        { id: 'M000001', selector: 'L000001-L000002', content: 'LEAF A' },
+        { id: 'M000002', selector: 'L000003-L000004', content: 'LEAF B' }
+      ])
+      return {
+        contribution: {
+          runRef: input.contributionRunRef,
+          statements: [{
+            localRef: 'last-range',
+            title: 'Last range knowledge',
+            content: 'Knowledge grounded in the final global range.',
+            sources: [{ sourceRef: input.sourceRef, selector: 'L000004-L000004' }]
+          }]
+        },
+        modelCallCount: 1,
+        toolCalls: ['submit_knowledge_contribution']
+      }
+    }))
+    const fullChainTraceSnapshots: Array<ReturnType<typeof harness.processing.snapshot>['debugTraces'][number]> = []
+    harness.processing.subscribe((snapshot) => {
+      const trace = snapshot.debugTraces.find((candidate) => candidate.origin === 'full_chain')
+      if (trace) fullChainTraceSnapshots.push(trace)
+    })
+
+    const result = await fullChain.run(runInput(discovery.session), harness.bindings)
+
+    expect(result.preprocessing).toMatchObject({
+      segmentCount: 2,
+      execution: { modelCallCount: 3 }
+    })
+    expect(result.maintenance.debugTrace).toMatchObject({
+      id: result.runId,
+      origin: 'full_chain',
+      status: 'completed',
+      preprocessing: {
+        totalSegments: 2,
+        calls: [
+          { kind: 'segment_map', output: 'LEAF A' },
+          { kind: 'segment_map', output: 'LEAF B' },
+          { kind: 'navigation_merge', output: 'ROOT NAVIGATION' }
+        ]
+      },
+      maintenance: { modelCallCount: 1 }
+    })
+    expect(result.preprocessing.debugTrace).toEqual(result.maintenance.debugTrace)
+    const currentRunTraces = fullChainTraceSnapshots.filter((trace) => trace.id === result.runId)
+    expect(currentRunTraces.at(-1)?.status).toBe('completed')
+    expect(currentRunTraces.slice(0, -1).every((trace) => trace.status === 'running')).toBe(true)
+    expect(harness.backend.generationCalls).toHaveLength(3)
+    expect(result.knowledge.statements[0].sources).toEqual([
+      expect.objectContaining({
+        sourceRef: result.sourceRef,
+        selector: 'L000004-L000004'
+      })
+    ])
+    expect(harness.manager.production.listStatements({ includeRevised: true })).toEqual([])
+  })
+
   it('creates a fresh isolated Sandbox for every repeated run', async () => {
     const harness = await createHarness()
     const firstService = harness.createFullChain(normalAgentFactory({ titlePrefix: 'First run' }))
@@ -379,6 +471,8 @@ describe('KnowledgeFullChainService', () => {
     const discovery = fakeDiscovery()
     const harness = await createHarness(discovery)
     const fullChain = harness.createFullChain()
+    harness.processing.beginFullChainDebugTrace({ id: 'previous-full-chain', origin: 'full_chain' })
+    harness.processing.completeFullChainDebugTrace({ id: 'previous-full-chain', origin: 'full_chain' })
 
     await expect(fullChain.run({
       ...runInput(discovery.session),
@@ -387,6 +481,12 @@ describe('KnowledgeFullChainService', () => {
 
     expect(await harness.manager.listSandboxes()).toEqual([])
     expect(harness.manager.production.listStatements({ includeRevised: true })).toEqual([])
+    expect(harness.processing.snapshot().debugTraces.find((trace) => trace.origin === 'full_chain'))
+      .toMatchObject({
+        id: expect.not.stringMatching(/^previous-full-chain$/),
+        status: 'failed',
+        currentStageId: 'observation_preprocessor'
+      })
   })
 
   it('rejects an Agent-forged sourceRef and removes the partially created Sandbox', async () => {
@@ -414,6 +514,37 @@ describe('KnowledgeFullChainService', () => {
 
     expect(await harness.manager.listSandboxes()).toEqual([])
     expect(harness.manager.production.listStatements({ includeRevised: true })).toEqual([])
+    expect(harness.processing.snapshot().debugTraces.find((trace) => trace.origin === 'full_chain'))
+      .toMatchObject({
+        status: 'failed',
+        currentStageId: 'knowledge_maintenance_agent'
+      })
+  })
+
+  it('preserves the processing error and failed trace when Sandbox cleanup also fails', async () => {
+    const harness = await createHarness()
+    const reflectedSecret = 'provider reflected RAW_SESSION_SECRET'
+    harness.backend.generationHandler = async () => {
+      throw new Error(reflectedSecret)
+    }
+    const discard = vi.spyOn(harness.manager, 'discardSandbox').mockRejectedValue(
+      new Error('cleanup failed')
+    )
+
+    try {
+      await expect(harness.createFullChain().run(
+        runInput(harness.discovery.session),
+        harness.bindings
+      )).rejects.toThrow(reflectedSecret)
+      const trace = harness.processing.snapshot().debugTraces.find(
+        (candidate) => candidate.origin === 'full_chain'
+      )
+      expect(trace).toMatchObject({ status: 'failed' })
+      expect(JSON.stringify(trace)).not.toContain('RAW_SESSION_SECRET')
+      expect(JSON.stringify(trace)).not.toContain('cleanup failed')
+    } finally {
+      discard.mockRestore()
+    }
   })
 
   it('makes the full-chain lease and manual processing stages mutually exclusive', async () => {
@@ -474,6 +605,11 @@ describe('KnowledgeFullChainService', () => {
     expect(harness.processing.snapshot().runningStageIds).toEqual([])
     expect(await harness.manager.listSandboxes()).toEqual([])
     expect(harness.manager.production.listStatements({ includeRevised: true })).toEqual([])
+    expect(harness.processing.snapshot().debugTraces.find((trace) => trace.origin === 'full_chain'))
+      .toMatchObject({
+        status: 'cancelled',
+        currentStageId: 'observation_preprocessor'
+      })
 
     harness.backend.generationHandler = undefined
     await expect(harness.processing.runObservationPreprocessor({ observation: 'lease was released' }))

@@ -6,6 +6,33 @@ import { KnowledgeProcessingService } from './knowledge-processing-service'
 export class FixtureKnowledgeAgentRuntime implements KnowledgeAgentRuntime {
   async run(input: KnowledgeAgentRunInput): Promise<KnowledgeAgentRunResult> {
     input.signal.throwIfAborted()
+    input.onTrace?.({ type: 'model_started', callNumber: 1 })
+    input.onTrace?.({
+      type: 'model_completed',
+      callNumber: 1,
+      status: 'completed',
+      detail: 'stop=toolUse · tokens=48 · tools=read_evidence, submit_knowledge_contribution'
+    })
+    input.onTrace?.({ type: 'tool_started', toolCallId: 'fixture-read', toolName: 'read_evidence' })
+    input.onTrace?.({
+      type: 'tool_completed',
+      toolCallId: 'fixture-read',
+      toolName: 'read_evidence',
+      status: 'completed',
+      detail: 'L000001-L000001 · 1 行'
+    })
+    input.onTrace?.({
+      type: 'tool_started',
+      toolCallId: 'fixture-submit',
+      toolName: 'submit_knowledge_contribution'
+    })
+    input.onTrace?.({
+      type: 'tool_completed',
+      toolCallId: 'fixture-submit',
+      toolName: 'submit_knowledge_contribution',
+      status: 'completed',
+      detail: '捕获 1 条候选 Statement'
+    })
     return {
       contribution: {
         runRef: input.contributionRunRef,

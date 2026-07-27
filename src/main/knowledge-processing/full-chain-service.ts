@@ -16,6 +16,7 @@ import {
 } from './session'
 import {
   KnowledgeProcessingService,
+  type ProcessingDebugTraceContext,
   type ProcessingRunLease,
   type ProcessingStageRunBinding
 } from './knowledge-processing-service'
@@ -42,6 +43,19 @@ function validateInput(input: RunKnowledgeFullChainInput): void {
   if (input.attention !== undefined && typeof input.attention !== 'string') {
     throw new Error('Attention 格式无效')
   }
+}
+
+function observationLineCount(content: string): number {
+  let count = 1
+  for (let index = 0; index < content.length; index++) {
+    if (content[index] === '\n') {
+      count++
+    } else if (content[index] === '\r') {
+      count++
+      if (content[index + 1] === '\n') index++
+    }
+  }
+  return count
 }
 
 function validateContribution(
@@ -101,6 +115,7 @@ export class KnowledgeFullChainService {
 
     const lease = this.processing.acquireExclusiveRun()
     const runId = randomUUID()
+    const debugTrace: ProcessingDebugTraceContext = { id: runId, origin: 'full_chain' }
     const controller = new AbortController()
     const active: ActiveFullChainRun = { runId, controller, lease }
     this.active = active
@@ -108,9 +123,10 @@ export class KnowledgeFullChainService {
     let sandboxId: string | undefined
 
     try {
+      this.processing.beginFullChainDebugTrace(debugTrace)
       const { session, evidence, sourceRef } = await loadSessionMaterial(this.discovery, input)
       controller.signal.throwIfAborted()
-      const observationLines = evidence.content.split(/\r\n|\r|\n/)
+      const lineCount = observationLineCount(evidence.content)
       const sandbox = await this.stores.createSandbox()
       sandboxId = sandbox.id
       active.sandboxId = sandbox.id
@@ -122,7 +138,9 @@ export class KnowledgeFullChainService {
       }, undefined, {
         binding: structuredClone(bindings.preprocessor),
         lease,
-        sourceRef
+        sourceRef,
+        allowSegmentedObservation: true,
+        debugTrace
       })
       controller.signal.throwIfAborted()
 
@@ -134,7 +152,8 @@ export class KnowledgeFullChainService {
         binding: structuredClone(bindings.maintainer),
         lease,
         knowledgeAgent: this.knowledgeAgentFactory(sandbox.store),
-        contributionRunRef
+        contributionRunRef,
+        debugTrace
       })
       controller.signal.throwIfAborted()
 
@@ -142,7 +161,7 @@ export class KnowledgeFullChainService {
         maintenance.contribution,
         contributionRunRef,
         sourceRef,
-        observationLines.length
+        lineCount
       )
       controller.signal.throwIfAborted()
       const commit = sandbox.store.commit(maintenance.contribution)
@@ -161,15 +180,17 @@ export class KnowledgeFullChainService {
           // A stale disposable Sandbox must not turn a completed new run into a failure.
         }
       }
+      controller.signal.throwIfAborted()
       this.ownedSandboxes.add(sandbox.id)
+      const completedDebugTrace = this.processing.completeFullChainDebugTrace(debugTrace)
 
       return {
         runId,
         session: structuredClone(session),
         sandbox: { id: sandbox.id, baselineCreatedAt: sandbox.baselineCreatedAt },
         sourceRef,
-        preprocessing,
-        maintenance,
+        preprocessing: { ...preprocessing, debugTrace: completedDebugTrace },
+        maintenance: { ...maintenance, debugTrace: completedDebugTrace },
         commit,
         knowledge: {
           createdStatementIds: commit.statements.map((statement) => statement.id),
@@ -179,7 +200,18 @@ export class KnowledgeFullChainService {
         completedAt: new Date().toISOString()
       }
     } catch (error) {
-      if (sandboxId) await this.stores.discardSandbox(sandboxId)
+      this.processing.failFullChainDebugTrace(
+        debugTrace,
+        controller.signal.aborted ? 'cancelled' : 'failed',
+        error
+      )
+      if (sandboxId) {
+        try {
+          await this.stores.discardSandbox(sandboxId)
+        } catch {
+          // Preserve the processing failure/cancellation. Stale Sandboxes are cleaned on startup.
+        }
+      }
       throw error
     } finally {
       if (this.active === active) this.active = undefined

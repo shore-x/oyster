@@ -33,10 +33,20 @@ const MAX_TOTAL_TOOL_OUTPUT_CHARS = 96 * 1_024
 const MAX_SEARCH_RESULTS = 20
 const MAX_SEARCH_OUTPUT_CHARS = 16 * 1_024
 const MAX_STATEMENT_OUTPUT_CHARS = 32 * 1_024
+const MAX_EVIDENCE_MAP_SECTION_OUTPUT_CHARS = 32 * 1_024
 const MAX_CONTRIBUTION_CHARS = 64 * 1_024
 const MAX_STATEMENTS_PER_CONTRIBUTION = 100
 const MAX_EVIDENCE_MAP_CHARS = 128 * 1_024
 const MAX_ATTENTION_CHARS = 16 * 1_024
+const UNKNOWN_TRACE_TOOL_NAME = '未知工具'
+
+const TRACEABLE_TOOL_NAMES = new Set([
+  'search_knowledge',
+  'read_knowledge_statement',
+  'read_evidence_map_section',
+  'read_evidence',
+  'submit_knowledge_contribution'
+])
 
 const SOURCE_SELECTOR = /^L(\d{6})-L(\d{6})$/
 
@@ -52,6 +62,10 @@ const readKnowledgeParameters = Type.Object({
 const readEvidenceParameters = Type.Object({
   sourceRef: Type.String({ minLength: 1, maxLength: 512 }),
   selector: Type.String({ pattern: '^L\\d{6}-L\\d{6}$' })
+}, { additionalProperties: false })
+
+const readEvidenceMapSectionParameters = Type.Object({
+  sectionId: Type.String({ minLength: 1, maxLength: 64 })
 }, { additionalProperties: false })
 
 const contributionSourceParameters = Type.Object({
@@ -138,6 +152,61 @@ function normalizedSearchKey(query: string): string {
   return query.replace(/\s+/g, ' ').trim().toLowerCase()
 }
 
+function safeTraceInteger(value: unknown): number | undefined {
+  return Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : undefined
+}
+
+function safeTraceToolName(value: string): string {
+  return TRACEABLE_TOOL_NAMES.has(value) ? value : UNKNOWN_TRACE_TOOL_NAME
+}
+
+function safeTraceDetails(toolName: string, result: unknown, isError: boolean): string | undefined {
+  if (isError) return '工具调用失败'
+  if (!result || typeof result !== 'object') return undefined
+  const details = (result as { details?: unknown }).details
+  if (!details || typeof details !== 'object') return undefined
+  const record = details as Record<string, unknown>
+  if (toolName === 'search_knowledge') {
+    const count = safeTraceInteger(record.count)
+    return count === undefined ? undefined : `返回 ${count} 条候选知识`
+  }
+  if (toolName === 'read_knowledge_statement') {
+    return typeof record.found === 'boolean' ? (record.found ? '已找到 Statement' : '未找到 Statement') : undefined
+  }
+  if (toolName === 'read_evidence_map_section') {
+    const sectionId = typeof record.sectionId === 'string' && /^M\d{6}$/.test(record.sectionId)
+      ? record.sectionId
+      : undefined
+    const selector = typeof record.selector === 'string' && /^L\d{6}-L\d{6}$/.test(record.selector)
+      ? record.selector
+      : undefined
+    return [sectionId, selector].filter(Boolean).join(' · ') || undefined
+  }
+  if (toolName === 'read_evidence') {
+    const selector = typeof record.selector === 'string' && /^L\d{6}-L\d{6}$/.test(record.selector)
+      ? record.selector
+      : undefined
+    const lineCount = safeTraceInteger(record.lineCount)
+    return [selector, lineCount === undefined ? undefined : `${lineCount} 行`].filter(Boolean).join(' · ') || undefined
+  }
+  if (toolName === 'submit_knowledge_contribution') {
+    const statementCount = safeTraceInteger(record.statementCount)
+    return statementCount === undefined ? undefined : `捕获 ${statementCount} 条候选 Statement`
+  }
+  return undefined
+}
+
+function modelTraceDetail(message: AssistantMessage): string {
+  const toolNames = message.content
+    .filter((content) => content.type === 'toolCall')
+    .map((content) => safeTraceToolName(content.name))
+  return [
+    `stop=${message.stopReason}`,
+    `tokens=${message.usage.totalTokens}`,
+    toolNames.length ? `tools=${toolNames.join(', ')}` : undefined
+  ].filter((part): part is string => Boolean(part)).join(' · ')
+}
+
 function rangesOverlap(
   left: { start: number; end: number },
   right: { start: number; end: number }
@@ -180,6 +249,29 @@ function validateRunInput(input: KnowledgeAgentRunInput): void {
   if (input.observationLines.some((line) => typeof line !== 'string' || /[\r\n]/.test(line))) {
     throw new Error('Observation 必须按单行数组提供')
   }
+  if (!Array.isArray(input.evidenceMapSections)) throw new Error('Evidence Map 局部材料无效')
+  const sectionIds = new Set<string>()
+  for (const section of input.evidenceMapSections) {
+    const selector = section && typeof section.selector === 'string'
+      ? SOURCE_SELECTOR.exec(section.selector)
+      : undefined
+    if (
+      !section
+      || !/^M\d{6}$/.test(section.id)
+      || !selector
+      || !section.content.trim()
+      || section.content.length > MAX_EVIDENCE_MAP_SECTION_OUTPUT_CHARS
+      || sectionIds.has(section.id)
+    ) {
+      throw new Error('Evidence Map 局部材料无效')
+    }
+    const start = Number(selector[1])
+    const end = Number(selector[2])
+    if (start < 1 || end < start || end > input.observationLines.length) {
+      throw new Error('Evidence Map 局部材料超出当前 Observation 范围')
+    }
+    sectionIds.add(section.id)
+  }
   input.signal.throwIfAborted()
 }
 
@@ -217,11 +309,18 @@ function taskPrompt(input: KnowledgeAgentRunInput): string {
   const readableRange = lastLine > 0
     ? `L000001-L${String(lastLine).padStart(6, '0')}`
     : 'No readable lines'
+  const mapSections = input.evidenceMapSections.length
+    ? [
+        'Expandable Evidence Map sections available through read_evidence_map_section:',
+        ...input.evidenceMapSections.map((section) => `- ${section.id}: ${section.selector}`)
+      ].join('\n')
+    : undefined
   return [
     'Maintain the knowledge in this authorized workspace. The Evidence Map is navigation only; use tools to verify details when necessary. Follow the System Prompt\'s language policy and write Statements in the primary language of the original observation.',
     `Observation sourceRef: ${input.sourceRef}`,
     `Range available to read_evidence: ${readableRange}`,
     `Run budget: at most ${MAX_TOTAL_TOOL_OUTPUT_CHARS} total tool-output characters and ${MAX_TOTAL_EVIDENCE_LINES} original-evidence lines. Do not repeat searches, reread a Statement, or read overlapping evidence ranges.`,
+    mapSections,
     input.attention?.trim() ? `Attention:\n${input.attention.trim()}` : undefined,
     `Evidence Map:\n${input.evidenceMap.trim()}`
   ].filter((part): part is string => Boolean(part)).join('\n\n')
@@ -238,12 +337,22 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
     const toolCalls: string[] = []
     const completedSearches = new Set<string>()
     const completedStatementReads = new Set<string>()
+    const completedEvidenceMapSections = new Set<string>()
     const completedEvidenceRanges: Array<{ start: number; end: number }> = []
     let totalToolOutputCharacters = 0
     let totalEvidenceLines = 0
     let contribution: KnowledgeContributionDraft | undefined
     let fatalError: Error | undefined
     let timedOut = false
+    let activeModelCall: number | undefined
+
+    const reportTrace = (event: Parameters<NonNullable<KnowledgeAgentRunInput['onTrace']>>[0]): void => {
+      try {
+        input.onTrace?.(event)
+      } catch {
+        // Diagnostics must not change Agent execution.
+      }
+    }
 
     const fail = (error: unknown, fallback: string): Error => {
       const normalized = asError(error, fallback)
@@ -267,6 +376,8 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         return failedModelStream(model, error.message)
       }
       modelCallCount++
+      activeModelCall = modelCallCount
+      reportTrace({ type: 'model_started', callNumber: modelCallCount })
       try {
         return runtime.streamFn(model, context, options)
       } catch (error) {
@@ -334,6 +445,33 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
           }
         }
       } as AgentTool<typeof readKnowledgeParameters>,
+      ...(input.evidenceMapSections.length ? [{
+        name: 'read_evidence_map_section',
+        label: '展开 Evidence Map',
+        description: '按当前工作区提供的 section ID 展开一段局部 Evidence Map；内容仍需通过原始 Observation 核查。',
+        parameters: readEvidenceMapSectionParameters,
+        executionMode: 'sequential' as const,
+        execute: async (_toolCallId, parameters, signal) => {
+          signal?.throwIfAborted()
+          const sectionId = parameters.sectionId.trim()
+          const section = input.evidenceMapSections.find((candidate) => candidate.id === sectionId)
+          if (!section) throw new Error('Evidence Map section 不属于当前授权工作区')
+          if (completedEvidenceMapSections.has(sectionId)) {
+            throw new Error('该 Evidence Map section 已读取；请复用已有结果或展开其他 section')
+          }
+          const text = truncateWithNotice([
+            `Section: ${section.id}`,
+            `Observation range: ${section.selector}`,
+            section.content
+          ].join('\n'), MAX_EVIDENCE_MAP_SECTION_OUTPUT_CHARS)
+          recordToolOutput(text)
+          completedEvidenceMapSections.add(sectionId)
+          return {
+            content: [{ type: 'text' as const, text }],
+            details: { sectionId: section.id, selector: section.selector }
+          }
+        }
+      } as AgentTool<typeof readEvidenceMapSectionParameters>] : []),
       {
         name: 'read_evidence',
         label: '读取观察证据',
@@ -428,18 +566,58 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
     })
 
     agent.subscribe((event) => {
-      if (event.type !== 'tool_execution_start') return
-      toolCallCount++
-      toolCalls.push(event.toolName)
-      if (toolCallCount > MAX_TOOL_CALLS) {
-        fail(new Error(`Knowledge Maintenance Agent 最多允许 ${MAX_TOOL_CALLS} 次工具调用`), '工具调用次数超限')
+      if (event.type === 'message_end' && event.message.role === 'assistant') {
+        if (activeModelCall !== undefined) {
+          const status = event.message.stopReason === 'aborted' && input.signal.aborted
+            ? 'cancelled'
+            : event.message.stopReason === 'error' || event.message.stopReason === 'aborted'
+              ? 'failed'
+              : 'completed'
+          reportTrace({
+            type: 'model_completed',
+            callNumber: activeModelCall,
+            status,
+            detail: modelTraceDetail(event.message)
+          })
+          activeModelCall = undefined
+        }
         return
       }
-      if (contribution !== undefined) {
-        const message = event.toolName === 'submit_knowledge_contribution'
-          ? 'Knowledge Contribution 只能提交一次'
-          : '提交 Knowledge Contribution 后不能继续调用工具'
-        fail(new Error(message), message)
+      if (event.type === 'tool_execution_end') {
+        const toolName = safeTraceToolName(event.toolName)
+        const status = event.isError
+          ? (input.signal.aborted ? 'cancelled' : 'failed')
+          : 'completed'
+        reportTrace({
+          type: 'tool_completed',
+          toolCallId: event.toolCallId,
+          toolName,
+          status,
+          detail: status === 'cancelled'
+            ? '工具调用已取消'
+            : safeTraceDetails(event.toolName, event.result, event.isError)
+        })
+        return
+      }
+      if (event.type === 'tool_execution_start') {
+        const toolName = safeTraceToolName(event.toolName)
+        reportTrace({
+          type: 'tool_started',
+          toolCallId: event.toolCallId,
+          toolName
+        })
+        toolCallCount++
+        toolCalls.push(toolName)
+        if (toolCallCount > MAX_TOOL_CALLS) {
+          fail(new Error(`Knowledge Maintenance Agent 最多允许 ${MAX_TOOL_CALLS} 次工具调用`), '工具调用次数超限')
+          return
+        }
+        if (contribution !== undefined) {
+          const message = event.toolName === 'submit_knowledge_contribution'
+            ? 'Knowledge Contribution 只能提交一次'
+            : '提交 Knowledge Contribution 后不能继续调用工具'
+          fail(new Error(message), message)
+        }
       }
     })
 
@@ -457,6 +635,15 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
     } finally {
       clearTimeout(timeout)
       input.signal.removeEventListener('abort', abortAgent)
+      if (activeModelCall !== undefined) {
+        reportTrace({
+          type: 'model_completed',
+          callNumber: activeModelCall,
+          status: input.signal.aborted ? 'cancelled' : 'failed',
+          detail: '模型调用未正常完成'
+        })
+        activeModelCall = undefined
+      }
     }
 
     if (timedOut) throw new Error('Knowledge Maintenance Agent 运行超时（5 分钟）')

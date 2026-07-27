@@ -273,6 +273,40 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       }), 120)
     }))
   })()`)
+  const fixturePreprocessing = await knowledgeProcessingService!.runObservationPreprocessor({
+    observation: FIXTURE_SESSION_CONTENT,
+    attention: '验证调试轨迹'
+  })
+  await knowledgeProcessingService!.runKnowledgeMaintenance({
+    preprocessingRunId: fixturePreprocessing.runId
+  })
+  await new Promise((resolve) => setTimeout(resolve, 120))
+  const traceSemantics = await window.webContents.executeJavaScript(`(() => {
+    const calls = Array.from(document.querySelectorAll('[data-testid^="preprocessing-call-"]'))
+    if (calls[0]) calls[0].open = true
+    calls[0]?.scrollIntoView({ block: 'center' })
+    return {
+      panelCount: document.querySelectorAll('[data-testid="processing-debug-trace"]').length,
+      preprocessingCallCount: calls.length,
+      preprocessingOutput: calls[0]?.querySelector('pre')?.textContent,
+      maintenanceEventCount: document.querySelectorAll('[data-testid^="maintenance-event-"]').length,
+      bodyText: document.body.innerText,
+      overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
+    }
+  })()`)
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  const preprocessingTraceImage = await window.webContents.capturePage()
+  await writeFile(
+    join(dirname(capturePath), 'knowledge-processing-trace-preprocessing.png'),
+    preprocessingTraceImage.toPNG()
+  )
+  await window.webContents.executeJavaScript(`document.querySelectorAll('[data-testid="processing-debug-trace"]')[1]?.scrollIntoView({ block: 'center' })`)
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  const maintenanceTraceImage = await window.webContents.capturePage()
+  await writeFile(
+    join(dirname(capturePath), 'knowledge-processing-trace-maintenance.png'),
+    maintenanceTraceImage.toPNG()
+  )
   await writeFile(
     `${capturePath}.json`,
     `${JSON.stringify({
@@ -281,7 +315,8 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       processing: {
         fullChain: fullChainSemantics,
         ...processingSemantics,
-        promptRestore: promptRestoreSemantics
+        promptRestore: promptRestoreSemantics,
+        trace: traceSemantics
       }
     }, null, 2)}\n`,
     'utf8'

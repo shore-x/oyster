@@ -29,7 +29,8 @@ export class SessionPreprocessor {
       attention: input.attention
     }, undefined, {
       binding: structuredClone(binding),
-      sourceRef: material.sourceRef
+      sourceRef: material.sourceRef,
+      allowSegmentedObservation: true
     })
   }
 }

@@ -55,12 +55,37 @@ export interface KnowledgeAgentRunInput {
   runtime: ModelRuntime
   systemPrompt: string
   evidenceMap: string
+  evidenceMapSections: EvidenceMapSection[]
   observationLines: string[]
   sourceRef: string
   contributionRunRef: string
   attention?: string
   reasoningEffort?: ReasoningEffort
+  onTrace?: (event: KnowledgeAgentTraceEvent) => void
   signal: AbortSignal
+}
+
+export type KnowledgeAgentTraceEvent =
+  | { type: 'model_started'; callNumber: number }
+  | {
+      type: 'model_completed'
+      callNumber: number
+      status: 'completed' | 'failed' | 'cancelled'
+      detail?: string
+    }
+  | { type: 'tool_started'; toolCallId: string; toolName: string }
+  | {
+      type: 'tool_completed'
+      toolCallId: string
+      toolName: string
+      status: 'completed' | 'failed' | 'cancelled'
+      detail?: string
+    }
+
+export interface EvidenceMapSection {
+  id: string
+  selector: string
+  content: string
 }
 
 export interface KnowledgeAgentRunResult {
@@ -78,6 +103,7 @@ export interface PreprocessingWorkspace {
   sourceRef: string
   observationLines: string[]
   evidenceMap: string
+  evidenceMapSections: EvidenceMapSection[]
   attention?: string
   createdAt: number
 }

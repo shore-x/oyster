@@ -22,6 +22,7 @@ import {
 } from '../processing-configuration'
 import { Button, Icon } from '../ui'
 import { FullChainWorkspace, type FullChainResultView } from './FullChainWorkspace'
+import { ProcessingDebugTracePanel } from './ProcessingDebugTracePanel'
 
 function formatDuration(durationMs: number): string {
   if (durationMs < 1_000) return `${durationMs} ms`
@@ -69,6 +70,7 @@ function fullChainResultView(result: KnowledgeFullChainResult): FullChainResultV
     completedAt: result.completedAt,
     durationMs: result.durationMs,
     evidenceMap: result.preprocessing.evidenceMap,
+    debugTrace: result.maintenance.debugTrace,
     steps: [
       {
         id: 'session',
@@ -79,7 +81,7 @@ function fullChainResultView(result: KnowledgeFullChainResult): FullChainResultV
       {
         id: 'preprocessing',
         label: '观察预处理',
-        detail: `${result.preprocessing.execution.model} · ${formatDuration(result.preprocessing.durationMs)}`,
+        detail: `${result.preprocessing.segmentCount} 个分段 · ${result.preprocessing.execution.modelCallCount} 次模型调用 · ${formatDuration(result.preprocessing.durationMs)}`,
         state: 'completed'
       },
       {
@@ -124,6 +126,7 @@ function fullChainResultView(result: KnowledgeFullChainResult): FullChainResultV
 
 function ExecutionDetails(props: {
   execution: ProcessingExecutionSummary
+  segmentCount?: number
   durationMs: number
   completedAt: string
 }) {
@@ -136,6 +139,9 @@ function ExecutionDetails(props: {
       <div><dt>思考强度</dt><dd>{props.execution.reasoningEffort ? REASONING_LABELS[props.execution.reasoningEffort] : '模型默认'}</dd></div>
       <div><dt>Runtime</dt><dd>{runtimeLabel(props.execution.runtime)}</dd></div>
       <div><dt>模型调用</dt><dd>{props.execution.modelCallCount} 次</dd></div>
+      <Show when={props.segmentCount !== undefined}>
+        <div><dt>Observation 分段</dt><dd>{props.segmentCount} 个</dd></div>
+      </Show>
       <div><dt>工具调用</dt><dd>{props.execution.toolCalls.length ? props.execution.toolCalls.join('、') : '无'}</dd></div>
       <div><dt>耗时</dt><dd>{formatDuration(props.durationMs)}</dd></div>
       <div><dt>完成时间</dt><dd>{formatTime(props.completedAt)}</dd></div>
@@ -293,7 +299,7 @@ function PreprocessingResult(props: { result: ObservationPreprocessingResult }) 
     <section class="processing-result" data-testid="processing-result-observation_preprocessor">
       <div class="processing-result__heading">
         <div><Icon name="check" /><h3>Evidence Map</h3></div>
-        <span>可丢弃工作材料</span>
+        <span>{props.result.segmentCount} 个分段 · 可丢弃工作材料</span>
       </div>
       <pre>{props.result.evidenceMap}</pre>
       <div class="processing-result__reference">
@@ -302,6 +308,7 @@ function PreprocessingResult(props: { result: ObservationPreprocessingResult }) 
       </div>
       <ExecutionDetails
         execution={props.result.execution}
+        segmentCount={props.result.segmentCount}
         durationMs={props.result.durationMs}
         completedAt={props.result.completedAt}
       />
@@ -310,13 +317,79 @@ function PreprocessingResult(props: { result: ObservationPreprocessingResult }) 
 }
 
 function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
+  const [selectedLocalRef, setSelectedLocalRef] = createSignal<string>()
+  const selectedStatement = createMemo(() => props.result.contribution.statements.find(
+    (statement) => statement.localRef === selectedLocalRef()
+  ) ?? props.result.contribution.statements[0])
+
+  createEffect(() => {
+    const contribution = props.result.contribution
+    setSelectedLocalRef(contribution.statements[0]?.localRef)
+  })
+
   return (
     <section class="processing-result" data-testid="processing-result-knowledge_maintenance_agent">
       <div class="processing-result__heading">
         <div><Icon name="check" /><h3>Knowledge Contribution</h3></div>
         <span>候选，尚未写入知识层</span>
       </div>
-      <pre>{contributionText(props.result.contribution)}</pre>
+      <Show
+        when={props.result.contribution.statements.length}
+        fallback={<div class="sandbox-knowledge__empty processing-contribution__empty">Agent 判断本次没有需要写入的 Knowledge Statement。</div>}
+      >
+        <div class="sandbox-knowledge processing-contribution-knowledge">
+          <aside class="sandbox-knowledge__list" aria-label="候选 Knowledge Statements">
+            <div class="sandbox-knowledge__list-header">
+              <span>候选 Statements</span>
+              <strong>{props.result.contribution.statements.length}</strong>
+            </div>
+            <For each={props.result.contribution.statements}>{(statement) => (
+              <button
+                type="button"
+                class="sandbox-statement"
+                aria-selected={selectedStatement()?.localRef === statement.localRef}
+                onClick={() => setSelectedLocalRef(statement.localRef)}
+              >
+                <strong>{statement.title}</strong>
+                <span>{statement.localRef}</span>
+              </button>
+            )}</For>
+          </aside>
+          <Show when={selectedStatement()}>
+            {(statement) => (
+              <article class="sandbox-knowledge__detail">
+                <h3>{statement().title}</h3>
+                <div class="sandbox-knowledge__detail-meta">
+                  <span>Local ref · {statement().localRef}</span>
+                  <span>Contribution Draft</span>
+                </div>
+                <div class="sandbox-knowledge__content">{statement().content}</div>
+                <Show when={statement().sources?.length}>
+                  <section class="sandbox-knowledge__section">
+                    <h4>来源证据</h4>
+                    <ul><For each={statement().sources ?? []}>{(source) => (
+                      <li><code>{source.sourceRef}</code>{source.selector ? ` · ${source.selector}` : ''}</li>
+                    )}</For></ul>
+                  </section>
+                </Show>
+                <Show when={statement().relations?.length}>
+                  <section class="sandbox-knowledge__section">
+                    <h4>候选关系</h4>
+                    <ul><For each={statement().relations ?? []}>{(relation) => (
+                      <li>
+                        {relation.relation}{' · '}
+                        {relation.target.kind === 'statement'
+                          ? `Statement ${relation.target.statementId}`
+                          : `Draft ${relation.target.localRef}`}
+                      </li>
+                    )}</For></ul>
+                  </section>
+                </Show>
+              </article>
+            )}
+          </Show>
+        </div>
+      </Show>
       <div class="processing-result__reference">
         <span>Evidence Map Run</span><code>{props.result.preprocessingRunId}</code>
       </div>
@@ -370,6 +443,36 @@ export function KnowledgeProcessingPage() {
   const fullChainResult = createMemo(() => {
     const result = controller.fullChainResult()
     return result ? fullChainResultView(result) : undefined
+  })
+  const stageDebugTrace = createMemo(() => controller.debugTrace('stage_debug'))
+  const fullChainDebugTrace = createMemo(() => {
+    const liveTrace = controller.debugTrace('full_chain')
+    const resultTrace = controller.fullChainResult()?.maintenance.debugTrace
+    if (
+      !controller.isFullChainRunning()
+      && resultTrace
+      && (!liveTrace || liveTrace.id === resultTrace.id)
+    ) {
+      return resultTrace
+    }
+    return liveTrace ?? resultTrace
+  })
+  const currentPreprocessingResult = createMemo(() => {
+    const result = controller.preprocessingResult()
+    const trace = stageDebugTrace()
+    return result && (!trace || trace.id === result.debugTrace.id) ? result : undefined
+  })
+  const currentMaintenanceResult = createMemo(() => {
+    const result = controller.maintenanceResult()
+    const trace = stageDebugTrace()
+    if (!result) return undefined
+    if (!trace) return result
+    return trace.id === result.debugTrace.id
+      && trace.status === 'completed'
+      && trace.currentStageId === 'knowledge_maintenance_agent'
+      && trace.completedAt === result.debugTrace.completedAt
+      ? result
+      : undefined
   })
   const selectedPreprocessorSession = createMemo(() => controller.availableSessions().find(
     (session) => session.artifactId === preprocessorSessionId()
@@ -554,6 +657,12 @@ export function KnowledgeProcessingPage() {
           maintainer={maintainer()}
           maintainerConnection={selectedConnection(maintainer())}
           running={controller.isFullChainRunning()}
+          preprocessingProgress={controller.isFullChainRunning()
+            ? controller.snapshot().preprocessingProgress
+            : undefined}
+          maintenanceRunning={controller.isFullChainRunning()
+            && controller.snapshot().runningStageIds.includes('knowledge_maintenance_agent')}
+          debugTrace={fullChainDebugTrace()}
           locked={anyStageRunning()}
           discarding={Boolean(
             fullChainResult()
@@ -762,8 +871,20 @@ export function KnowledgeProcessingPage() {
                 </div>
               </section>
 
-              <Show when={controller.preprocessingResult()}>
-                {(result) => <PreprocessingResult result={result()} />}
+              <Show when={stageDebugTrace()?.preprocessing ? stageDebugTrace() : undefined}>
+                {(trace) => (
+                  <ProcessingDebugTracePanel
+                    trace={trace()}
+                    showMaintenance={false}
+                    title="预处理调用调试"
+                  />
+                )}
+              </Show>
+
+              <Show when={!controller.isRunning(stage().id)}>
+                <Show when={currentPreprocessingResult()}>
+                  {(result) => <PreprocessingResult result={result()} />}
+                </Show>
               </Show>
             </article>
           )}
@@ -811,7 +932,7 @@ export function KnowledgeProcessingPage() {
                 <div>
                   <h3>{stage().inputDescription}</h3>
                   <Show
-                    when={controller.preprocessingResult()}
+                    when={currentPreprocessingResult()}
                     fallback={<p>等待一次成功的观察预处理运行。</p>}
                   >
                     {(result) => (
@@ -819,8 +940,8 @@ export function KnowledgeProcessingPage() {
                     )}
                   </Show>
                 </div>
-                <span class={`processing-dependency__state${controller.preprocessingResult() ? ' processing-dependency__state--ready' : ''}`}>
-                  {controller.preprocessingResult() ? '已准备' : '未准备'}
+                <span class={`processing-dependency__state${currentPreprocessingResult() ? ' processing-dependency__state--ready' : ''}`}>
+                  {currentPreprocessingResult() ? '已准备' : '未准备'}
                 </span>
               </section>
 
@@ -837,13 +958,13 @@ export function KnowledgeProcessingPage() {
                       data-testid="run-maintainer"
                       disabled={
                         !stageConfigured(stage())
-                        || !controller.preprocessingResult()
+                        || !currentPreprocessingResult()
                         || maintenancePromptDirty()
                         || controller.isSaving(stage().id)
                         || anyStageRunning()
                       }
                       onClick={() => {
-                        const result = controller.preprocessingResult()
+                        const result = currentPreprocessingResult()
                         if (!result) return
                         void controller.runKnowledgeMaintenance({
                           preprocessingRunId: result.runId,
@@ -862,8 +983,20 @@ export function KnowledgeProcessingPage() {
                 </Show>
               </div>
 
-              <Show when={controller.maintenanceResult()}>
-                {(result) => <MaintenanceResult result={result()} />}
+              <Show when={stageDebugTrace()?.maintenance ? stageDebugTrace() : undefined}>
+                {(trace) => (
+                  <ProcessingDebugTracePanel
+                    trace={trace()}
+                    showPreprocessing={false}
+                    title="知识维护 Agent 调试"
+                  />
+                )}
+              </Show>
+
+              <Show when={!controller.isRunning(stage().id) && !controller.isRunning('observation_preprocessor')}>
+                <Show when={currentMaintenanceResult()}>
+                  {(result) => <MaintenanceResult result={result()} />}
+                </Show>
               </Show>
             </article>
           )}

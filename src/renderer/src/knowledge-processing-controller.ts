@@ -3,8 +3,10 @@ import type { AvailableSessionSummary } from '../../shared/discovery'
 import type {
   KnowledgeFullChainResult,
   KnowledgeMaintenanceResult,
+  KnowledgeProcessingDebugTrace,
   KnowledgeProcessingSnapshot,
   ObservationPreprocessingResult,
+  ProcessingDebugTraceOrigin,
   ProcessingStageId,
   RunKnowledgeFullChainInput,
   RunSessionPreprocessorInput,
@@ -16,7 +18,8 @@ import type {
 const EMPTY_SNAPSHOT: KnowledgeProcessingSnapshot = {
   stages: [],
   connections: [],
-  runningStageIds: []
+  runningStageIds: [],
+  debugTraces: []
 }
 
 export function createKnowledgeProcessingController() {
@@ -31,6 +34,7 @@ export function createKnowledgeProcessingController() {
   const [fullChainPending, setFullChainPending] = createSignal(false)
   const [fullChainResult, setFullChainResult] = createSignal<KnowledgeFullChainResult>()
   const [discardingSandboxId, setDiscardingSandboxId] = createSignal<string>()
+  const [hiddenStageDebugTraceId, setHiddenStageDebugTraceId] = createSignal<string>()
 
   function errorMessage(cause: unknown): string {
     return cause instanceof Error ? cause.message : String(cause)
@@ -53,8 +57,23 @@ export function createKnowledgeProcessingController() {
   }
 
   function invalidateInputResults(): void {
+    const currentTrace = snapshot().debugTraces.find((trace) => trace.origin === 'stage_debug')
+    setHiddenStageDebugTraceId(currentTrace?.id)
     setPreprocessingResult(undefined)
     setMaintenanceResult(undefined)
+  }
+
+  function debugTrace(origin: ProcessingDebugTraceOrigin): KnowledgeProcessingDebugTrace | undefined {
+    const trace = snapshot().debugTraces.find((candidate) => candidate.origin === origin)
+    if (
+      origin === 'stage_debug'
+      && trace
+      && trace.id === hiddenStageDebugTraceId()
+      && trace.status !== 'running'
+    ) {
+      return undefined
+    }
+    return trace
   }
 
   onMount(() => {
@@ -191,6 +210,7 @@ export function createKnowledgeProcessingController() {
     availableSessions,
     sessionsLoading,
     fullChainResult,
+    debugTrace,
     isFullChainRunning: fullChainPending,
     isDiscardingSandbox: (sandboxId: string) => discardingSandboxId() === sandboxId,
     invalidateInputResults,

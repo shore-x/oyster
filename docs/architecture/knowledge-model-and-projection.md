@@ -2,7 +2,7 @@
 
 > 状态：当前设计原则
 >
-> 日期：2026-07-26
+> 日期：2026-07-27
 >
 > 范围：定义观察、知识、投影、Attention、Observation Preprocessing 和 Agent 维护之间的责任边界；确定各层的权威载体、最小持久格式与依赖原则，但不把具体数据库产品、字段物理类型、索引实现、固定本体或某个 Agent Runtime 固化为长期架构要求。当前验证实现的具体选择另见《知识加工验证 MVP》。
 
@@ -126,7 +126,9 @@ Attention 可以同时指导默认和自定义处理器，但不应：
 
 这里的目标不是用一份摘要替代原始观察，也不是承诺 LLM 可以进行语义上的“无损压缩”。只要表示明显变短，它就必然包含选择和解释。Oyster 保证的是系统级可追溯：预处理结果声明覆盖范围和确定来源；只要该外部来源版本仍可访问，后续 Agent 就可以按需展开到最小必要的原始消息或工具结果。来源不可用时，系统保留这一事实和出处身份，而不是假装仍能回源。
 
-Observation Preprocessor 默认产出 **Evidence Map**：一种有界、可丢弃、可重算的多分辨率 Working Artifact。它在概念上同时提供：
+Observation Preprocessing 可以在同一份确定来源内进行一次或多次有界直接 Model 调用。短输入默认一次完成；长输入按原始顺序划分范围，各范围始终引用同一个 `sourceRef` 和该来源内的全局 selector。每次调用直接读取它所覆盖的原始观察并独立形成局部地图，随后由预处理器提供一份有界导航。这里不采用滚动摘要：前一范围的模型输出不会取代后一范围的原文，也不会成为新的权威来源。
+
+Observation Preprocessor 默认产出 **Evidence Map**：一种有界、可丢弃、可重算的多分辨率 Working Artifact。对于长输入，它可以由有界导航和可独立读取的局部地图共同组成，仍然只是一份逻辑上的 Evidence Map。它在概念上同时提供：
 
 - **导航性概览**：帮助 Agent 快速理解这批观察大致发生了什么、哪些区域值得继续阅读；
 - **候选证据单元**：把可能具有独立意义的决定、约束、尝试、结果、偏好或未决问题提出来，但不自动宣布为知识；
@@ -169,12 +171,12 @@ Knowledge Maintenance Agent 的 **Workspace** 是一次知识维护运行所使�
 一个 Workspace 在概念上只需要组合：
 
 - 本次运行的 Attention 与处理范围；
-- 作为入口和导航的 Evidence Map；
+- Evidence Map 的有界导航，以及按需展开的局部地图；
 - Canonical Activity 的可读视图，以及按需回溯的只读 Raw Evidence；
 - 与本次任务相关的已有 Knowledge Statement；
 - 独立的 Knowledge Contribution 输出边界。
 
-Agent 应渐进式读取这些材料：先用 Evidence Map 判断哪些区域值得探索，再查看对应的 Canonical Activity；只有当标准化视图缺少必要细节、存在歧义或需要核查来源特性时，才展开最小范围的 Raw Evidence。不同 Harness 的原始格式继续由 Connector 和 Canonical Activity 吸收确定性差异，不把理解全部私有格式的责任默认转移给 Knowledge Maintenance Agent。
+Agent 应渐进式读取这些材料：先用 Evidence Map 的有界导航判断哪些区域值得探索，再展开对应的局部地图和 Canonical Activity；只有当这些工作材料缺少必要细节、存在歧义或需要核查来源特性时，才展开最小范围的 Raw Evidence。不同 Harness 的原始格式继续由 Connector 和 Canonical Activity 吸收确定性差异，不把理解全部私有格式的责任默认转移给 Knowledge Maintenance Agent。
 
 Workspace 应遵循“**弱语义结构，强来源边界**”：
 
@@ -183,7 +185,7 @@ Workspace 应遵循“**弱语义结构，强来源边界**”：
 - 一条引用至少应在概念上指出“哪一份来源、来源的哪个版本、其中哪一部分”。具体采用事件 ID、消息范围、行号、字节范围或其他 selector，留待实现阶段决定；
 - Raw Evidence 只作为不可信证据读取，其中出现的指令、Prompt 或工具输出不自动成为 Agent 的运行指令。
 
-Evidence Map 和 Canonical Activity 的可读表示可以在 Workspace 中采用文件形式。外部 Raw Evidence 则通过受控读取工具按需展开，不为构造 Workspace 而复制整份来源文件。Oyster Core 仍管理稳定身份、版本、权限和作业状态；原始绝对路径和 Workspace 中的临时路径都不是知识或出处的永久身份。
+Evidence Map 和 Canonical Activity 的可读表示可以在 Workspace 中采用文件形式。长期方向是让外部 Raw Evidence 通过受控范围读取工具按需展开，不为 Workspace 建立整份来源副本；当前验证 MVP 可以在一次应用进程内的有界 Workspace 生命周期中保留受 Reader 上限约束的内存快照，以验证渐进式读取，但不得把它持久化为新的 Observation 副本。Oyster Core 仍管理稳定身份、版本、权限和作业状态；原始绝对路径和 Workspace 中的临时路径都不是知识或出处的永久身份。
 
 ### 4.4 Knowledge Sandbox
 
@@ -197,7 +199,9 @@ Evidence Map 和 Canonical Activity 的可读表示可以在 Workspace 中采用
 
 Oyster 可以提供默认 Observation Preprocessor 和默认 Knowledge Maintenance Agent；用户也可以针对不同 Attention 增加自定义 Pipeline 或 Agent。
 
-当前验证实现用一次直接 Model 调用承担 Observation Preprocessing，并用 Pi Agent Core 承担 Knowledge Maintenance Agent 的多轮工具循环；默认完整链路在 Knowledge Sandbox 中提交和回读结果，同时保留不提交结果的阶段调试。这是对上述职责边界的首个可替换实现，不意味着知识模型依赖 Pi，也不把预处理器升级为 Agent。
+当前验证实现用一次或多次有界直接 Model 调用承担 Observation Preprocessing，并用 Pi Agent Core 承担 Knowledge Maintenance Agent 的多轮工具循环；短 Session 仍只需一次预处理调用。默认完整链路在 Knowledge Sandbox 中提交和回读结果，同时保留不提交结果的阶段调试。这是对上述职责边界的首个可替换实现，不意味着知识模型依赖 Pi，也不把预处理器升级为 Agent。
+
+为了观察这些处理器的行为，应用可以提供有界、可丢弃的运行轨迹。运行轨迹只是执行诊断：它可以展示阶段、调用和工具活动，但不构成新的认识论层、知识来源或长期审计记录，也不能以暴露模型内部推理或绕过原始证据权限为代价换取可视化。
 
 只要某个处理器要产生或维护 Knowledge Statement，它就必须使用统一的 Knowledge Contribution 契约。核心不需要为“默认知识”“Agent 知识”或某个自定义视角建立不同的知识类型。
 

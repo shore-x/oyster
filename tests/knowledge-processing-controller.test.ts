@@ -4,6 +4,7 @@ import type { AvailableSessionSummary } from '../src/shared/discovery'
 import type {
   KnowledgeFullChainResult,
   KnowledgeMaintenanceResult,
+  KnowledgeProcessingDebugTrace,
   KnowledgeProcessingApi,
   KnowledgeProcessingSnapshot,
   ObservationPreprocessingResult
@@ -13,7 +14,25 @@ import { createKnowledgeProcessingController } from '../src/renderer/src/knowled
 const SNAPSHOT: KnowledgeProcessingSnapshot = {
   stages: [],
   connections: [],
-  runningStageIds: []
+  runningStageIds: [],
+  debugTraces: []
+}
+
+function debugTrace(
+  id: string,
+  stageId: 'observation_preprocessor' | 'knowledge_maintenance_agent'
+): KnowledgeProcessingDebugTrace {
+  return {
+    id,
+    origin: 'stage_debug',
+    status: 'completed',
+    currentStageId: stageId,
+    startedAt: '2026-07-26T00:00:00.000Z',
+    completedAt: '2026-07-26T00:00:01.000Z',
+    ...(stageId === 'observation_preprocessor'
+      ? { preprocessing: { phase: 'completed' as const, completedSegments: 1, totalSegments: 1, calls: [] } }
+      : { maintenance: { modelCallCount: 2, toolCallCount: 1, events: [] } })
+  }
 }
 
 function preprocessingResult(runId = 'preprocess-1'): ObservationPreprocessingResult {
@@ -22,6 +41,8 @@ function preprocessingResult(runId = 'preprocess-1'): ObservationPreprocessingRe
     runId,
     evidenceMap: '# Evidence Map',
     sourceRef: `workspace:${runId}:observation`,
+    segmentCount: 1,
+    debugTrace: debugTrace(runId, 'observation_preprocessor'),
     durationMs: 10,
     completedAt: '2026-07-26T00:00:00.000Z',
     execution: {
@@ -49,6 +70,7 @@ function maintenanceResult(): KnowledgeMaintenanceResult {
         content: 'Candidate content'
       }]
     },
+    debugTrace: debugTrace('preprocess-1', 'knowledge_maintenance_agent'),
     durationMs: 20,
     completedAt: '2026-07-26T00:00:01.000Z',
     execution: {

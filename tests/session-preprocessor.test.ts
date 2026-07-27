@@ -42,6 +42,21 @@ function preprocessingResult(sourceRef: string): ObservationPreprocessingResult 
     runId: 'preprocessing-run-1',
     evidenceMap: '# Evidence Map\n\n- Concise summaries are preferred.',
     sourceRef,
+    segmentCount: 1,
+    debugTrace: {
+      id: 'preprocessing-run-1',
+      origin: 'stage_debug',
+      status: 'completed',
+      currentStageId: 'observation_preprocessor',
+      startedAt: '2026-07-26T00:00:00.000Z',
+      completedAt: '2026-07-26T00:00:01.000Z',
+      preprocessing: {
+        phase: 'completed',
+        completedSegments: 1,
+        totalSegments: 1,
+        calls: []
+      }
+    },
     durationMs: 1,
     completedAt: '2026-07-26T00:00:01.000Z',
     execution: {
@@ -134,7 +149,8 @@ describe('SessionPreprocessor', () => {
       attention
     }, undefined, {
       binding,
-      sourceRef
+      sourceRef,
+      allowSegmentedObservation: true
     })
     expect(result.sourceRef).toBe(sourceRef)
   })
@@ -161,6 +177,27 @@ describe('SessionPreprocessor', () => {
 
     expect(harness.readAvailableSession).not.toHaveBeenCalled()
     expect(harness.runObservationPreprocessor).not.toHaveBeenCalled()
+  })
+
+  it('allows an external Session above the former single-call limit to reach segmented preprocessing', async () => {
+    const content = `${'event\n'.repeat(20_001)}final`
+    expect(Buffer.byteLength(content)).toBeGreaterThan(120_000)
+    const harness = createHarness({ content })
+
+    await expect(harness.service.run({
+      artifactId: harness.availableSession.artifactId,
+      expectedRevision: harness.availableSession.revision
+    }, binding)).resolves.toMatchObject({ segmentCount: 1 })
+
+    expect(harness.readAvailableSession).toHaveBeenCalledWith(
+      expect.any(Object),
+      MAX_SESSION_OBSERVATION_BYTES
+    )
+    expect(harness.runObservationPreprocessor).toHaveBeenCalledWith(
+      expect.objectContaining({ observation: content }),
+      undefined,
+      expect.objectContaining({ allowSegmentedObservation: true })
+    )
   })
 
   it('rejects raw evidence above the byte limit without invoking preprocessing', async () => {

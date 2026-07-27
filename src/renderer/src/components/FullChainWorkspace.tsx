@@ -1,6 +1,11 @@
 import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
 import type { AvailableSessionSummary } from '../../../shared/discovery'
-import type { ProcessingConnectionView, ProcessingStageView } from '../../../shared/knowledge-processing'
+import type {
+  KnowledgeProcessingDebugTrace,
+  ObservationPreprocessingProgress,
+  ProcessingConnectionView,
+  ProcessingStageView
+} from '../../../shared/knowledge-processing'
 import {
   backendLabel,
   connectionStatusLabel,
@@ -10,6 +15,7 @@ import {
   selectedStageModel
 } from '../processing-configuration'
 import { Button, Icon } from '../ui'
+import { ProcessingDebugTracePanel } from './ProcessingDebugTracePanel'
 
 export type FullChainStepState = 'pending' | 'running' | 'completed' | 'failed'
 
@@ -56,6 +62,7 @@ export interface FullChainResultView {
   completedAt?: string
   durationMs?: number
   evidenceMap?: string
+  debugTrace: KnowledgeProcessingDebugTrace
   steps: FullChainStepView[]
   contributions: SandboxContributionView[]
   statements: SandboxStatementView[]
@@ -71,6 +78,9 @@ export interface FullChainWorkspaceProps {
   maintainer?: ProcessingStageView
   maintainerConnection?: ProcessingConnectionView
   running: boolean
+  preprocessingProgress?: ObservationPreprocessingProgress
+  maintenanceRunning: boolean
+  debugTrace?: KnowledgeProcessingDebugTrace
   locked: boolean
   discarding: boolean
   result?: FullChainResultView
@@ -149,6 +159,14 @@ function stepMarker(step: FullChainStepView, index: number): string {
   return String(index + 1)
 }
 
+function preprocessingProgressText(progress: ObservationPreprocessingProgress): string {
+  if (progress.phase === 'preparing') return '正在准备 Observation 分段…'
+  if (progress.phase === 'assembling') return '局部映射已完成，正在组装导航地图…'
+  return progress.totalSegments
+    ? `正在生成局部 Evidence Map · ${progress.completedSegments} / ${progress.totalSegments} 个分段`
+    : '正在生成局部 Evidence Map…'
+}
+
 export function FullChainWorkspace(props: FullChainWorkspaceProps) {
   const [output, setOutput] = createSignal<'knowledge' | 'evidence' | 'contributions'>('knowledge')
   const [selectedStatementId, setSelectedStatementId] = createSignal<string>()
@@ -178,6 +196,11 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
     return undefined
   })
   const canRun = createMemo(() => !disabledReason())
+  const visibleDebugTrace = createMemo(() => props.debugTrace ?? props.result?.debugTrace)
+  const resultMatchesTrace = createMemo(() => {
+    const trace = visibleDebugTrace()
+    return !trace || !props.result || trace.id === props.result.debugTrace.id
+  })
 
   let previousRunId: string | undefined
   createEffect(() => {
@@ -284,7 +307,11 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
 
           <div class="full-chain-form__actions">
             <p data-testid="full-chain-disabled-reason">
-              {disabledReason() || 'Session 与两个阶段配置完整，可以运行隔离测试。'}
+              {props.preprocessingProgress
+                ? preprocessingProgressText(props.preprocessingProgress)
+                : props.maintenanceRunning
+                  ? '观察预处理已完成，Knowledge Maintenance Agent 正在运行…'
+                : disabledReason() || 'Session 与两个阶段配置完整，可以运行隔离测试。'}
             </p>
             <Show
               when={props.running}
@@ -311,14 +338,28 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
         </div>
       </section>
 
-      <Show when={props.result}>
-        {(result) => (
-          <>
+      <Show when={visibleDebugTrace()}>
+        {(trace) => (
+          <ProcessingDebugTracePanel
+            trace={trace()}
+            title="完整链路运行调试"
+          />
+        )}
+      </Show>
+
+      <Show when={!props.running}>
+        <Show when={props.result}>
+          {(result) => (
+            <>
             <section class="full-chain-card" data-testid="full-chain-run-result" aria-label="完整链路运行结果">
               <div class="full-chain-card__heading">
                 <div>
-                  <h2>运行结果</h2>
-                  <p>本次隔离运行会展示各阶段结果；失败不会影响正式知识库。</p>
+                  <h2>{resultMatchesTrace() ? '运行结果' : '上一次成功结果'}</h2>
+                  <p>
+                    {resultMatchesTrace()
+                      ? '本次隔离运行会展示各阶段结果；失败不会影响正式知识库。'
+                      : '当前调试运行没有产出完整结果；以下内容来自上一次成功的隔离运行。'}
+                  </p>
                 </div>
                 <div class="full-chain-card__heading-actions">
                   <span class="sandbox-badge">隔离运行</span>
@@ -434,8 +475,9 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
                 </Show>
               </Show>
             </section>
-          </>
-        )}
+            </>
+          )}
+        </Show>
       </Show>
     </div>
   )

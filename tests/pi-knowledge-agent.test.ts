@@ -17,6 +17,7 @@ import { ModelConnectionFailureError } from '../src/main/ai-backends/model'
 import type { ModelRuntime } from '../src/main/ai-backends/model'
 import type {
   KnowledgeAgentRunInput,
+  KnowledgeAgentTraceEvent,
   KnowledgeReader,
   KnowledgeStatementRecord
 } from '../src/main/knowledge-processing/model'
@@ -58,6 +59,7 @@ function runInput(overrides: Partial<KnowledgeAgentRunInput> = {}): KnowledgeAge
     },
     systemPrompt: 'Maintain knowledge using only authorized Oyster tools.',
     evidenceMap: 'Preference candidate at L000001-L000002.',
+    evidenceMapSections: [],
     observationLines: ['RAW_SECRET prefers concise output', 'The user rejected verbose output'],
     sourceRef: 'observation:test:1',
     contributionRunRef: 'test-run:1',
@@ -236,8 +238,12 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       }
     ])
     const agent = new PiKnowledgeMaintenanceAgent(reader)
+    const traceEvents: KnowledgeAgentTraceEvent[] = []
 
-    const result = await agent.run(runInput({ runtime: runtime.runtime }))
+    const result = await agent.run(runInput({
+      runtime: runtime.runtime,
+      onTrace: (event) => traceEvents.push(event)
+    }))
 
     expect(result).toEqual({
       contribution: {
@@ -249,6 +255,204 @@ describe('PiKnowledgeMaintenanceAgent', () => {
     })
     expect(reader.searchCalls).toEqual([{ query: 'output preference', limit: 5 }])
     expect(reader.readCalls).toEqual(['statement:1'])
+    expect(traceEvents.filter((event) => event.type === 'model_started')).toHaveLength(4)
+    expect(traceEvents.filter((event) => event.type === 'model_completed')).toHaveLength(4)
+    expect(traceEvents.filter((event) => event.type === 'tool_started')).toHaveLength(4)
+    expect(traceEvents.filter((event) => event.type === 'tool_completed')).toEqual([
+      expect.objectContaining({ toolName: 'search_knowledge', status: 'completed', detail: '返回 1 条候选知识' }),
+      expect.objectContaining({ toolName: 'read_knowledge_statement', status: 'completed', detail: '已找到 Statement' }),
+      expect.objectContaining({ toolName: 'read_evidence', status: 'completed', detail: 'L000001-L000002 · 2 行' }),
+      expect.objectContaining({ toolName: 'submit_knowledge_contribution', status: 'completed', detail: '捕获 1 条候选 Statement' })
+    ])
+    expect(JSON.stringify(traceEvents)).not.toContain('RAW_SECRET')
+    expect(JSON.stringify(traceEvents)).not.toContain('Known preference')
+    expect(JSON.stringify(traceEvents)).not.toContain('Candidate\n\nThe user prefers')
+  })
+
+  it('does not let a failing debug trace callback change the Agent result', async () => {
+    const runtime = fauxRuntime([
+      fauxAssistantMessage(fauxToolCall(
+        'submit_knowledge_contribution',
+        contributionSubmission('Trace callback isolation')
+      ), { stopReason: 'toolUse' })
+    ])
+
+    await expect(new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
+      runtime: runtime.runtime,
+      onTrace: () => {
+        throw new Error('trace sink failed')
+      }
+    }))).resolves.toMatchObject({
+      contribution: { statements: [{ content: 'Trace callback isolation' }] },
+      modelCallCount: 1
+    })
+  })
+
+  it('redacts an unknown model-generated tool name from traces and execution summaries', async () => {
+    const traceEvents: KnowledgeAgentTraceEvent[] = []
+    const runtime = fauxRuntime([
+      fauxAssistantMessage(
+        fauxToolCall('RAW_SECRET_IN_TOOL_NAME', { copiedEvidence: 'RAW_SECRET_IN_ARGUMENTS' }),
+        { stopReason: 'toolUse' }
+      ),
+      fauxAssistantMessage(fauxToolCall(
+        'submit_knowledge_contribution',
+        contributionSubmission('Recovered after an unknown tool request.')
+      ), { stopReason: 'toolUse' })
+    ])
+
+    const result = await new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
+      runtime: runtime.runtime,
+      onTrace: (event) => traceEvents.push(event)
+    }))
+
+    expect(result.toolCalls).toEqual(['未知工具', 'submit_knowledge_contribution'])
+    expect(traceEvents).toContainEqual(expect.objectContaining({
+      type: 'tool_completed',
+      toolName: '未知工具',
+      status: 'failed',
+      detail: '工具调用失败'
+    }))
+    expect(JSON.stringify(traceEvents)).not.toContain('RAW_SECRET_IN_TOOL_NAME')
+    expect(JSON.stringify(traceEvents)).not.toContain('RAW_SECRET_IN_ARGUMENTS')
+  })
+
+  it('reports an externally cancelled in-flight tool as cancelled', async () => {
+    const controller = new AbortController()
+    const traceEvents: KnowledgeAgentTraceEvent[] = []
+    const runtime = fauxRuntime([
+      fauxAssistantMessage(fauxToolCall('read_evidence', {
+        sourceRef: 'observation:test:1',
+        selector: 'L000001-L000001'
+      }), { stopReason: 'toolUse' })
+    ])
+
+    const run = new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
+      runtime: runtime.runtime,
+      signal: controller.signal,
+      onTrace: (event) => {
+        traceEvents.push(event)
+        if (event.type === 'tool_started') controller.abort(new Error('cancel current tool'))
+      }
+    }))
+
+    await expect(run).rejects.toThrow('cancel current tool')
+    expect(traceEvents).toContainEqual(expect.objectContaining({
+      type: 'tool_completed',
+      toolName: 'read_evidence',
+      status: 'cancelled',
+      detail: '工具调用已取消'
+    }))
+    expect(JSON.stringify(traceEvents)).not.toContain('工具调用失败')
+  })
+
+  it('keeps a normal tool validation error classified as failed', async () => {
+    const traceEvents: KnowledgeAgentTraceEvent[] = []
+    const runtime = fauxRuntime([
+      fauxAssistantMessage(fauxToolCall('read_evidence', {
+        sourceRef: 'observation:outside-workspace',
+        selector: 'L000001-L000001'
+      }), { stopReason: 'toolUse' }),
+      fauxAssistantMessage(fauxToolCall(
+        'submit_knowledge_contribution',
+        contributionSubmission('Recovered after a rejected evidence read.')
+      ), { stopReason: 'toolUse' })
+    ])
+
+    await new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
+      runtime: runtime.runtime,
+      onTrace: (event) => traceEvents.push(event)
+    }))
+
+    expect(traceEvents).toContainEqual(expect.objectContaining({
+      type: 'tool_completed',
+      toolName: 'read_evidence',
+      status: 'failed'
+    }))
+  })
+
+  it('expands only an authorized local Evidence Map section before reading its raw range', async () => {
+    const sectionToolNames = [
+      'search_knowledge',
+      'read_knowledge_statement',
+      'read_evidence_map_section',
+      'read_evidence',
+      'submit_knowledge_contribution'
+    ]
+    const runtime = fauxRuntime([
+      (context) => {
+        const initial = JSON.stringify(context.messages)
+        expect(context.tools?.map((tool) => tool.name)).toEqual(sectionToolNames)
+        expect(initial).toContain('ROOT NAVIGATION')
+        expect(initial).toContain('M000001: L000001-L000001')
+        expect(initial).not.toContain('LEAF_A_SECRET')
+        expect(initial).not.toContain('LEAF_B_SECRET')
+        expect(initial).not.toContain('RAW_B_SECRET')
+        return fauxAssistantMessage(
+          fauxToolCall('read_evidence_map_section', { sectionId: 'M999999' }),
+          { stopReason: 'toolUse' }
+        )
+      },
+      (context) => {
+        const denied = lastToolResult(context)
+        expect(denied.isError).toBe(true)
+        expect(textContent(denied)).not.toContain('LEAF_A_SECRET')
+        expect(textContent(denied)).not.toContain('LEAF_B_SECRET')
+        return fauxAssistantMessage(
+          fauxToolCall('read_evidence_map_section', { sectionId: 'M000002' }),
+          { stopReason: 'toolUse' }
+        )
+      },
+      (context) => {
+        const section = textContent(lastToolResult(context))
+        expect(section).toContain('M000002')
+        expect(section).toContain('L000002-L000002')
+        expect(section).toContain('LEAF_B_SECRET')
+        expect(section).not.toContain('LEAF_A_SECRET')
+        return fauxAssistantMessage(fauxToolCall('read_evidence', {
+          sourceRef: 'observation:test:1',
+          selector: 'L000002-L000002'
+        }), { stopReason: 'toolUse' })
+      },
+      (context) => {
+        expect(textContent(lastToolResult(context))).toContain('L000002 RAW_B_SECRET')
+        return fauxAssistantMessage(fauxToolCall('submit_knowledge_contribution', {
+          statements: [{
+            localRef: 'candidate-1',
+            title: 'Candidate knowledge',
+            content: 'Verified from the second range.',
+            sources: [{
+              sourceRef: 'observation:test:1',
+              selector: 'L000002-L000002'
+            }]
+          }]
+        }), { stopReason: 'toolUse' })
+      }
+    ])
+    const agent = new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader())
+
+    const result = await agent.run(runInput({
+      runtime: runtime.runtime,
+      evidenceMap: 'ROOT NAVIGATION',
+      evidenceMapSections: [
+        { id: 'M000001', selector: 'L000001-L000001', content: 'LEAF_A_SECRET' },
+        { id: 'M000002', selector: 'L000002-L000002', content: 'LEAF_B_SECRET' }
+      ],
+      observationLines: ['RAW_A_SECRET', 'RAW_B_SECRET']
+    }))
+
+    expect(result).toMatchObject({
+      contribution: {
+        statements: [{ sources: [{ selector: 'L000002-L000002' }] }]
+      },
+      modelCallCount: 4,
+      toolCalls: [
+        'read_evidence_map_section',
+        'read_evidence_map_section',
+        'read_evidence',
+        'submit_knowledge_contribution'
+      ]
+    })
   })
 
   it('allows only the exact workspace sourceRef and six-digit selectors of at most 200 lines', async () => {
@@ -470,35 +674,59 @@ describe('PiKnowledgeMaintenanceAgent', () => {
     const modelFailure = fauxRuntime([
       fauxAssistantMessage('', { stopReason: 'error', errorMessage: 'provider down' })
     ])
+    const traceEvents: KnowledgeAgentTraceEvent[] = []
     const providerFailure = new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
-      runtime: modelFailure.runtime
+      runtime: modelFailure.runtime,
+      onTrace: (event) => traceEvents.push(event)
     }))
     await expect(providerFailure).rejects.toBeInstanceOf(ModelConnectionFailureError)
     await expect(providerFailure).rejects.toThrow('provider down')
+    expect(traceEvents).toContainEqual(expect.objectContaining({
+      type: 'model_completed',
+      status: 'failed'
+    }))
   })
 
   it('propagates an external abort to the active Pi run', async () => {
     const faux = fauxProvider()
     const controller = new AbortController()
     const agent = new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader())
+    const traceEvents: KnowledgeAgentTraceEvent[] = []
+    let markStarted!: () => void
+    const started = new Promise<void>((resolve) => { markStarted = resolve })
     const run = agent.run(runInput({
       runtime: waitingRuntime(faux.getModel()),
-      signal: controller.signal
+      signal: controller.signal,
+      onTrace: (event) => {
+        traceEvents.push(event)
+        if (event.type === 'model_started') markStarted()
+      }
     }))
+    await started
     controller.abort(new Error('user cancelled'))
 
     await expect(run).rejects.toThrow('user cancelled')
+    expect(traceEvents).toContainEqual(expect.objectContaining({
+      type: 'model_completed',
+      status: 'cancelled'
+    }))
   })
 
   it('aborts an active run after five minutes', async () => {
     vi.useFakeTimers()
     const faux = fauxProvider()
     const agent = new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader())
+    const traceEvents: KnowledgeAgentTraceEvent[] = []
     const assertion = expect(agent.run(runInput({
-      runtime: waitingRuntime(faux.getModel())
+      runtime: waitingRuntime(faux.getModel()),
+      onTrace: (event) => traceEvents.push(event)
     }))).rejects.toThrow('运行超时（5 分钟）')
 
     await vi.advanceTimersByTimeAsync(5 * 60_000)
     await assertion
+    expect(traceEvents).toContainEqual(expect.objectContaining({
+      type: 'model_completed',
+      status: 'failed'
+    }))
   })
 })

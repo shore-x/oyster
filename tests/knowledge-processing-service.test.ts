@@ -1,11 +1,14 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AiBackendSnapshot, AiConnection } from '../src/shared/ai-backends'
 import type { ProcessingStageId } from '../src/shared/knowledge-processing'
 import type {
   ModelGenerationRequest,
   ModelRuntime
 } from '../src/main/ai-backends/model'
-import { KnowledgeProcessingService } from '../src/main/knowledge-processing/knowledge-processing-service'
+import {
+  KnowledgeProcessingService,
+  type KnowledgeProcessingServiceOptions
+} from '../src/main/knowledge-processing/knowledge-processing-service'
 import type {
   AiBackendPort,
   KnowledgeAgentRunInput,
@@ -129,6 +132,40 @@ class FakeKnowledgeAgent implements KnowledgeAgentRuntime {
     this.calls.push(input)
     input.signal.throwIfAborted()
     if (this.handler) return this.handler(input)
+    input.onTrace?.({ type: 'model_started', callNumber: 1 })
+    input.onTrace?.({
+      type: 'model_completed',
+      callNumber: 1,
+      status: 'completed',
+      detail: 'stop=toolUse · tokens=120'
+    })
+    input.onTrace?.({ type: 'tool_started', toolCallId: 'read-1', toolName: 'read_evidence' })
+    input.onTrace?.({
+      type: 'tool_completed',
+      toolCallId: 'read-1',
+      toolName: 'read_evidence',
+      status: 'completed',
+      detail: 'L000001-L000001 · 1 行'
+    })
+    input.onTrace?.({ type: 'model_started', callNumber: 2 })
+    input.onTrace?.({
+      type: 'model_completed',
+      callNumber: 2,
+      status: 'completed',
+      detail: 'stop=toolUse · tokens=80'
+    })
+    input.onTrace?.({
+      type: 'tool_started',
+      toolCallId: 'submit-1',
+      toolName: 'submit_knowledge_contribution'
+    })
+    input.onTrace?.({
+      type: 'tool_completed',
+      toolCallId: 'submit-1',
+      toolName: 'submit_knowledge_contribution',
+      status: 'completed',
+      detail: '捕获 1 条候选 Statement'
+    })
     return {
       contribution: {
         runRef: input.contributionRunRef,
@@ -149,11 +186,12 @@ function createService(options: {
   repository?: KnowledgeProcessingRepository
   connections?: AiConnection[]
   agent?: FakeKnowledgeAgent
+  serviceOptions?: KnowledgeProcessingServiceOptions
 } = {}) {
   const repository = options.repository ?? new InMemoryKnowledgeProcessingRepository()
   const backend = new FakeAiBackend(options.connections ?? [agentConnection(), modelConnection('model:a'), modelConnection('model:b')])
   const agent = options.agent ?? new FakeKnowledgeAgent()
-  const service = new KnowledgeProcessingService(repository, backend, agent)
+  const service = new KnowledgeProcessingService(repository, backend, agent, options.serviceOptions)
   return { service, repository, backend, agent }
 }
 
@@ -173,6 +211,17 @@ function rejectWhenAborted(signal: AbortSignal): Promise<never> {
     if (signal.aborted) rejectFromSignal()
     else signal.addEventListener('abort', rejectFromSignal, { once: true })
   })
+}
+
+function deferred<T>(): {
+  promise: Promise<T>
+  resolve(value: T): void
+} {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
 }
 
 describe('KnowledgeProcessingService', () => {
@@ -398,6 +447,231 @@ describe('KnowledgeProcessingService', () => {
     expect(backend.generationCalls[0].request.prompt).toContain(
       'L000001 | first line\nL000002 | second line\nL000003 | third line'
     )
+    expect(result.segmentCount).toBe(1)
+  })
+
+  it('keeps the Evidence Map complete while bounding its debug trace copy', async () => {
+    const { service, backend } = createService()
+    await service.initialize()
+    await configure(service, 'observation_preprocessor')
+    const completeOutput = 'x'.repeat(10_000)
+    backend.generationHandler = async () => ({ text: completeOutput })
+
+    const result = await service.runObservationPreprocessor({ observation: 'one line' })
+
+    expect(result.evidenceMap).toBe(completeOutput)
+    expect(result.debugTrace.preprocessing?.calls[0]).toMatchObject({
+      status: 'completed',
+      outputTruncated: true
+    })
+    expect(result.debugTrace.preprocessing?.calls[0].output).toHaveLength(8 * 1_024)
+    expect(result.debugTrace.preprocessing?.calls[0].output?.endsWith('…')).toBe(true)
+  })
+
+  it('maps a long Observation in independent global ranges and assembles a bounded navigation map', async () => {
+    const { service, backend, agent } = createService({
+      serviceOptions: {
+        evidenceMapPlanner: {
+          segmentCharacters: 40,
+          adjacentContextCharacters: 18,
+          mergeCharacters: 1_000
+        }
+      }
+    })
+    await service.initialize()
+    await configure(service, 'observation_preprocessor', 'model:b', 'custom system prompt')
+    await configure(service, 'knowledge_maintenance_agent', 'runtime:codex', null, 'codex-small')
+    const progress: Array<ReturnType<typeof service.snapshot>['preprocessingProgress']> = []
+    const debugTraces: Array<ReturnType<typeof service.snapshot>['debugTraces'][number]> = []
+    service.subscribe((snapshot) => {
+      progress.push(snapshot.preprocessingProgress)
+      const trace = snapshot.debugTraces.find((candidate) => candidate.origin === 'stage_debug')
+      if (trace) debugTraces.push(trace)
+    })
+    backend.generationHandler = async (_connectionId, _modelId, request) => {
+      const prompt = request.prompt
+      if (prompt.includes('BEGIN_EVIDENCE_MAP_MATERIALS')) return { text: 'ROOT NAVIGATION' }
+      if (prompt.includes('primary Observation range L000001-L000002')) return { text: 'LEAF A' }
+      if (prompt.includes('primary Observation range L000003-L000004')) return { text: 'LEAF B' }
+      throw new Error('unexpected preprocessing prompt')
+    }
+
+    const result = await service.runObservationPreprocessor({
+      observation: 'line-one\nline-two\nline-three\nline-four',
+      attention: 'preserve corrections'
+    })
+
+    expect(result).toMatchObject({
+      segmentCount: 2,
+      execution: { modelCallCount: 3 }
+    })
+    expect(result.evidenceMap).toContain('ROOT NAVIGATION')
+    expect(result.evidenceMap).toContain('- M000001: L000001-L000002')
+    expect(result.evidenceMap).toContain('- M000002: L000003-L000004')
+    expect(backend.generationCalls).toHaveLength(3)
+    const firstPrompt = backend.generationCalls[0].request.prompt
+    const secondPrompt = backend.generationCalls[1].request.prompt
+    const mergePrompt = backend.generationCalls[2].request.prompt
+    expect(firstPrompt).toContain('L000001 | line-one\nL000002 | line-two')
+    expect(secondPrompt).toContain('BEGIN_ADJACENT_CONTEXT\nL000002 | line-two')
+    expect(secondPrompt).toContain('BEGIN_AUTHORIZED_OBSERVATION\nL000003 | line-three\nL000004 | line-four')
+    expect(mergePrompt).toContain('LEAF A')
+    expect(mergePrompt).toContain('LEAF B')
+    expect(mergePrompt).not.toContain('line-one')
+    expect(backend.generationCalls.every((call) => call.connectionId === 'model:b')).toBe(true)
+    expect(backend.generationCalls.every((call) => call.request.systemPrompt === 'custom system prompt')).toBe(true)
+    expect(progress).toEqual(expect.arrayContaining([
+      { phase: 'mapping', completedSegments: 0, totalSegments: 2 },
+      { phase: 'mapping', completedSegments: 2, totalSegments: 2 },
+      { phase: 'assembling', completedSegments: 2, totalSegments: 2 }
+    ]))
+    expect(result.debugTrace).toMatchObject({
+      id: result.runId,
+      origin: 'stage_debug',
+      status: 'completed',
+      preprocessing: {
+        phase: 'completed',
+        completedSegments: 2,
+        totalSegments: 2,
+        calls: [
+          { sequence: 1, kind: 'segment_map', selector: 'L000001-L000002', status: 'completed', output: 'LEAF A' },
+          { sequence: 2, kind: 'segment_map', selector: 'L000003-L000004', status: 'completed', output: 'LEAF B' },
+          { sequence: 3, kind: 'navigation_merge', selector: 'L000001-L000004', status: 'completed', output: 'ROOT NAVIGATION' }
+        ]
+      }
+    })
+    expect(debugTraces.some((trace) => trace.preprocessing?.calls.some(
+      (call) => call.status === 'completed' && call.output === 'LEAF A'
+    ))).toBe(true)
+
+    await service.runKnowledgeMaintenance({ preprocessingRunId: result.runId })
+    expect(agent.calls[0].evidenceMap).toBe(result.evidenceMap)
+    expect(agent.calls[0].evidenceMapSections).toEqual([
+      { id: 'M000001', selector: 'L000001-L000002', content: 'LEAF A' },
+      { id: 'M000002', selector: 'L000003-L000004', content: 'LEAF B' }
+    ])
+  })
+
+  it('processes an external Observation above the former 120000-byte read limit with default budgets', async () => {
+    const { service, backend } = createService()
+    await service.initialize()
+    await configure(service, 'observation_preprocessor')
+    backend.generationHandler = async (_connectionId, _modelId, request) => ({
+      text: request.prompt.includes('BEGIN_EVIDENCE_MAP_MATERIALS')
+        ? 'ROOT FOR LARGE SESSION'
+        : 'LOCAL MAP'
+    })
+    const observation = `${'a'.repeat(70_000)}\n${'b'.repeat(70_000)}`
+
+    const result = await service.runObservationPreprocessor(
+      { observation },
+      undefined,
+      { allowSegmentedObservation: true, sourceRef: 'raw:test-large@sha256:revision' }
+    )
+
+    expect(result).toMatchObject({
+      segmentCount: 2,
+      execution: { modelCallCount: 3 }
+    })
+    expect(backend.generationCalls).toHaveLength(3)
+    expect(backend.generationCalls[0].request.prompt).toContain('L000001 | a')
+    expect(backend.generationCalls[1].request.prompt).toContain('L000002 | b')
+    expect(result.evidenceMap).toContain('ROOT FOR LARGE SESSION')
+  })
+
+  it('publishes each preprocessing call and its output while the remaining calls are still running', async () => {
+    const { service, backend } = createService({
+      serviceOptions: {
+        evidenceMapPlanner: {
+          segmentCharacters: 16,
+          adjacentContextCharacters: 16,
+          mergeCharacters: 1_000
+        }
+      }
+    })
+    await service.initialize()
+    await configure(service, 'observation_preprocessor')
+    const responses = [deferred<{ text: string }>(), deferred<{ text: string }>(), deferred<{ text: string }>()]
+    backend.generationHandler = async () => responses[backend.generationCalls.length - 1].promise
+
+    const running = service.runObservationPreprocessor({ observation: 'line-1\nline-2' })
+    await vi.waitFor(() => {
+      expect(service.snapshot().debugTraces[0]?.preprocessing).toMatchObject({
+        totalSegments: 2,
+        calls: [{ sequence: 1, status: 'running' }]
+      })
+    })
+
+    responses[0].resolve({ text: 'FIRST LIVE OUTPUT' })
+    await vi.waitFor(() => {
+      expect(service.snapshot().debugTraces[0]?.preprocessing?.calls).toMatchObject([
+        { sequence: 1, status: 'completed', output: 'FIRST LIVE OUTPUT' },
+        { sequence: 2, status: 'running' }
+      ])
+    })
+
+    responses[1].resolve({ text: 'SECOND LIVE OUTPUT' })
+    await vi.waitFor(() => {
+      expect(service.snapshot().debugTraces[0]?.preprocessing?.calls).toMatchObject([
+        { sequence: 1, status: 'completed' },
+        { sequence: 2, status: 'completed', output: 'SECOND LIVE OUTPUT' },
+        { sequence: 3, kind: 'navigation_merge', status: 'running' }
+      ])
+    })
+
+    responses[2].resolve({ text: 'LIVE ROOT' })
+    await expect(running).resolves.toMatchObject({
+      debugTrace: {
+        status: 'completed',
+        preprocessing: { calls: [{}, {}, { output: 'LIVE ROOT', status: 'completed' }] }
+      }
+    })
+  })
+
+  it('does not let a throwing snapshot listener change preprocessing results', async () => {
+    const { service } = createService()
+    await service.initialize()
+    await configure(service, 'observation_preprocessor')
+    service.subscribe(() => {
+      throw new Error('renderer snapshot sink failed')
+    })
+
+    await expect(service.runObservationPreprocessor({ observation: 'safe run' })).resolves.toMatchObject({
+      evidenceMap: expect.stringContaining('Candidate evidence'),
+      debugTrace: { status: 'completed' }
+    })
+  })
+
+  it('recursively assembles navigation when all local maps do not fit one merge call', async () => {
+    const { service, backend } = createService({
+      serviceOptions: {
+        evidenceMapPlanner: {
+          segmentCharacters: 23,
+          adjacentContextCharacters: 11,
+          mergeCharacters: 170
+        }
+      }
+    })
+    await service.initialize()
+    await configure(service, 'observation_preprocessor')
+    backend.generationHandler = async (_connectionId, _modelId, request) => {
+      if (!request.prompt.includes('BEGIN_EVIDENCE_MAP_MATERIALS')) {
+        return { text: `LEAF ${backend.generationCalls.length}` }
+      }
+      return { text: backend.generationCalls.length === 4 ? 'MERGED FIRST GROUP' : 'ROOT FINAL' }
+    }
+
+    const result = await service.runObservationPreprocessor({ observation: 'a\nb\nc\nd\ne' })
+
+    expect(result).toMatchObject({
+      segmentCount: 3,
+      execution: { modelCallCount: 5 }
+    })
+    expect(result.evidenceMap).toContain('ROOT FINAL')
+    expect(result.evidenceMap).toContain('- M000003: L000005-L000005')
+    expect(backend.generationCalls.filter(
+      (call) => call.request.prompt.includes('BEGIN_EVIDENCE_MAP_MATERIALS')
+    )).toHaveLength(2)
   })
 
   it('rejects oversized observations before reserving a stage or calling a model', async () => {
@@ -409,6 +683,162 @@ describe('KnowledgeProcessingService', () => {
       .rejects.toThrow('120000')
     expect(backend.generationCalls).toHaveLength(0)
     expect(service.snapshot().runningStageIds).toEqual([])
+  })
+
+  it('rejects an indivisible oversized line without truncating or calling a model', async () => {
+    const { service, backend } = createService({
+      serviceOptions: {
+        evidenceMapPlanner: {
+          segmentCharacters: 15,
+          adjacentContextCharacters: 2,
+          mergeCharacters: 100
+        }
+      }
+    })
+    await service.initialize()
+    await configure(service, 'observation_preprocessor')
+
+    await expect(service.runObservationPreprocessor({ observation: '123456' }))
+      .rejects.toThrow('L000001 加入全局行号后超过 15')
+    expect(backend.generationCalls).toHaveLength(0)
+    expect(service.snapshot().runningStageIds).toEqual([])
+    expect(service.snapshot().preprocessingProgress).toBeUndefined()
+  })
+
+  it('rejects a run that would require too many model calls before sending any material', async () => {
+    const { service, backend } = createService({
+      serviceOptions: {
+        evidenceMapPlanner: {
+          segmentCharacters: 15,
+          adjacentContextCharacters: 2,
+          mergeCharacters: 100
+        }
+      }
+    })
+    await service.initialize()
+    await configure(service, 'observation_preprocessor')
+
+    await expect(service.runObservationPreprocessor({
+      observation: Array.from({ length: 33 }, () => '12345').join('\n')
+    })).rejects.toThrow('需要 33 个分段')
+
+    expect(backend.generationCalls).toHaveLength(0)
+    expect(service.snapshot().runningStageIds).toEqual([])
+    expect(service.snapshot().preprocessingProgress).toBeUndefined()
+  })
+
+  it('does not publish a partial workspace when a later segment fails', async () => {
+    const { service, backend, agent } = createService({
+      serviceOptions: {
+        evidenceMapPlanner: {
+          segmentCharacters: 16,
+          adjacentContextCharacters: 16,
+          mergeCharacters: 100
+        }
+      }
+    })
+    await service.initialize()
+    await configure(service, 'observation_preprocessor')
+    await configure(service, 'knowledge_maintenance_agent')
+    let failedRunId = ''
+    backend.generationHandler = async (_connectionId, _modelId, request) => {
+      failedRunId ||= request.prompt.match(/Source reference: workspace:([^:]+):observation/)?.[1] ?? ''
+      if (backend.generationCalls.length === 1) return { text: 'FIRST LEAF' }
+      throw new Error('segment two failed')
+    }
+
+    await expect(service.runObservationPreprocessor({
+      observation: 'line-1\nline-2\nline-3'
+    })).rejects.toThrow('segment two failed')
+
+    expect(failedRunId).toBeTruthy()
+    expect(backend.generationCalls).toHaveLength(2)
+    await expect(service.runKnowledgeMaintenance({ preprocessingRunId: failedRunId }))
+      .rejects.toThrow('工作区已不存在')
+    expect(agent.calls).toHaveLength(0)
+    expect(service.snapshot().runningStageIds).toEqual([])
+    expect(service.snapshot().preprocessingProgress).toBeUndefined()
+    expect(service.snapshot().debugTraces.find((trace) => trace.origin === 'stage_debug'))
+      .toMatchObject({
+        status: 'failed',
+        preprocessing: {
+          completedSegments: 1,
+          calls: [
+            { status: 'completed', output: 'FIRST LEAF' },
+            { status: 'failed', error: '观察预处理模型调用失败' }
+          ]
+        }
+      })
+  })
+
+  it('propagates cancellation to a later segment and skips navigation assembly', async () => {
+    const { service, backend } = createService({
+      serviceOptions: {
+        evidenceMapPlanner: {
+          segmentCharacters: 16,
+          adjacentContextCharacters: 16,
+          mergeCharacters: 100
+        }
+      }
+    })
+    await service.initialize()
+    await configure(service, 'observation_preprocessor')
+    let secondStarted!: () => void
+    const enteredSecondSegment = new Promise<void>((resolve) => { secondStarted = resolve })
+    backend.generationHandler = async (_connectionId, _modelId, request) => {
+      if (backend.generationCalls.length === 1) return { text: 'FIRST LEAF' }
+      secondStarted()
+      return rejectWhenAborted(request.signal!)
+    }
+
+    const running = service.runObservationPreprocessor({ observation: 'line-1\nline-2' })
+    await enteredSecondSegment
+    service.cancelRun('observation_preprocessor')
+
+    await expect(running).rejects.toThrow('用户取消')
+    expect(backend.generationCalls).toHaveLength(2)
+    expect(backend.generationCalls.some((call) => call.request.prompt.includes('BEGIN_EVIDENCE_MAP_MATERIALS')))
+      .toBe(false)
+    expect(service.snapshot().runningStageIds).toEqual([])
+    expect(service.snapshot().preprocessingProgress).toBeUndefined()
+    expect(service.snapshot().debugTraces.find((trace) => trace.origin === 'stage_debug'))
+      .toMatchObject({
+        status: 'cancelled',
+        preprocessing: {
+          calls: [
+            { status: 'completed', output: 'FIRST LEAF' },
+            { status: 'cancelled' }
+          ]
+        }
+      })
+  })
+
+  it('aborts the complete preprocessing run when its job deadline is reached', async () => {
+    vi.useFakeTimers()
+    try {
+      const { service, backend } = createService()
+      await service.initialize()
+      await configure(service, 'observation_preprocessor')
+      backend.generationHandler = async (_connectionId, _modelId, request) => (
+        rejectWhenAborted(request.signal!)
+      )
+
+      const running = service.runObservationPreprocessor({ observation: 'one line' })
+      const rejection = expect(running).rejects.toThrow('超过 30 分钟上限')
+      expect(backend.generationCalls).toHaveLength(1)
+
+      await vi.advanceTimersByTimeAsync(30 * 60_000)
+      await rejection
+      expect(service.snapshot().runningStageIds).toEqual([])
+      expect(service.snapshot().preprocessingProgress).toBeUndefined()
+      expect(service.snapshot().debugTraces.find((trace) => trace.origin === 'stage_debug'))
+        .toMatchObject({
+          status: 'failed',
+          preprocessing: { calls: [{ status: 'failed' }] }
+        })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('passes only a valid temporary preprocessing workspace to the Agent and does not persist results', async () => {
@@ -464,6 +894,21 @@ describe('KnowledgeProcessingService', () => {
         runtime: 'pi_agent_core',
         modelCallCount: 2,
         toolCalls: ['read_evidence', 'submit_knowledge_contribution']
+      },
+      debugTrace: {
+        id: preprocessing.runId,
+        origin: 'stage_debug',
+        status: 'completed',
+        maintenance: {
+          modelCallCount: 2,
+          toolCallCount: 2,
+          events: [
+            { kind: 'model_call', label: '模型轮次 1', status: 'completed' },
+            { kind: 'tool_call', label: '读取原始观察证据', status: 'completed', detail: 'L000001-L000001 · 1 行' },
+            { kind: 'model_call', label: '模型轮次 2', status: 'completed' },
+            { kind: 'tool_call', label: '提交 Knowledge Contribution', status: 'completed', detail: '捕获 1 条候选 Statement' }
+          ]
+        }
       }
     })
     expect(await repository.load()).toEqual(stateBeforeMaintenance)
@@ -471,6 +916,63 @@ describe('KnowledgeProcessingService', () => {
     service.dispose()
     await expect(service.runKnowledgeMaintenance({ preprocessingRunId: preprocessing.runId }))
       .rejects.toThrow('工作区已不存在')
+  })
+
+  it('pairs same-name Knowledge Agent tool events by their internal tool call ID', async () => {
+    const { service, agent } = createService()
+    await service.initialize()
+    await configure(service, 'observation_preprocessor')
+    await configure(service, 'knowledge_maintenance_agent')
+    const preprocessing = await service.runObservationPreprocessor({ observation: 'evidence' })
+    agent.handler = async (input) => {
+      input.onTrace?.({ type: 'model_started', callNumber: 1 })
+      input.onTrace?.({
+        type: 'model_completed',
+        callNumber: 1,
+        status: 'completed',
+        detail: 'stop=toolUse · tokens=10'
+      })
+      input.onTrace?.({ type: 'tool_started', toolCallId: 'first', toolName: 'read_evidence' })
+      input.onTrace?.({ type: 'tool_started', toolCallId: 'second', toolName: 'read_evidence' })
+      input.onTrace?.({
+        type: 'tool_completed',
+        toolCallId: 'first',
+        toolName: 'read_evidence',
+        status: 'completed',
+        detail: 'FIRST RESULT'
+      })
+      input.onTrace?.({
+        type: 'tool_completed',
+        toolCallId: 'second',
+        toolName: 'read_evidence',
+        status: 'completed',
+        detail: 'SECOND RESULT'
+      })
+      return {
+        contribution: {
+          runRef: input.contributionRunRef,
+          statements: [{
+            localRef: 'candidate',
+            title: 'Candidate',
+            content: 'Candidate content',
+            sources: [{ sourceRef: input.sourceRef, selector: 'L000001-L000001' }]
+          }]
+        },
+        modelCallCount: 1,
+        toolCalls: ['read_evidence', 'read_evidence']
+      }
+    }
+
+    const result = await service.runKnowledgeMaintenance({ preprocessingRunId: preprocessing.runId })
+    const toolEvents = result.debugTrace.maintenance?.events.filter(
+      (event) => event.kind === 'tool_call'
+    )
+    expect(toolEvents).toMatchObject([
+      { id: 'tool-call-1', detail: 'FIRST RESULT', status: 'completed' },
+      { id: 'tool-call-2', detail: 'SECOND RESULT', status: 'completed' }
+    ])
+    expect(JSON.stringify(toolEvents)).not.toContain('first')
+    expect(JSON.stringify(toolEvents)).not.toContain('second')
   })
 
   it('protects each stage from concurrent runs and propagates cancellation', async () => {
@@ -498,6 +1000,29 @@ describe('KnowledgeProcessingService', () => {
     service.cancelRun('knowledge_maintenance_agent')
     await expect(maintenanceRun).rejects.toThrow('用户取消')
     expect(service.snapshot().runningStageIds).not.toContain('knowledge_maintenance_agent')
+  })
+
+  it('rejects cross-stage concurrency before it can replace the active debug trace', async () => {
+    const { service, backend } = createService()
+    await service.initialize()
+    await configure(service, 'observation_preprocessor')
+    await configure(service, 'knowledge_maintenance_agent')
+    const ready = await service.runObservationPreprocessor({ observation: 'ready workspace' })
+    backend.generationHandler = async (_connectionId, _modelId, request) => (
+      rejectWhenAborted(request.signal!)
+    )
+
+    const activePreprocessing = service.runObservationPreprocessor({ observation: 'active run' })
+    await expect(service.runKnowledgeMaintenance({ preprocessingRunId: ready.runId }))
+      .rejects.toThrow('已有知识加工阶段正在运行')
+    expect(service.snapshot().debugTraces.find((trace) => trace.origin === 'stage_debug'))
+      .toMatchObject({
+        status: 'running',
+        currentStageId: 'observation_preprocessor'
+      })
+
+    service.cancelRun('observation_preprocessor')
+    await expect(activePreprocessing).rejects.toThrow('用户取消')
   })
 
   it('never falls back when the explicitly selected Connection fails', async () => {
