@@ -2,12 +2,14 @@ export const AI_BACKEND_KINDS = ['coding_plan', 'api'] as const
 export const MODEL_PROTOCOLS = ['openai_responses', 'openai_chat_completions'] as const
 export const MODEL_PROVIDER_IDS = ['openai', 'openai_compatible'] as const
 export const REASONING_EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
+export const CODING_PLAN_LOGIN_METHODS = ['device_code', 'browser'] as const
 
 export type AiBackendKind = (typeof AI_BACKEND_KINDS)[number]
 export type ModelProtocol = (typeof MODEL_PROTOCOLS)[number]
 export type ModelProviderId = (typeof MODEL_PROVIDER_IDS)[number]
 export type AiProviderId = 'openai_codex' | ModelProviderId
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number]
+export type CodingPlanLoginMethod = (typeof CODING_PLAN_LOGIN_METHODS)[number]
 export type AiConnectionStatus =
   | 'not_found'
   | 'needs_auth'
@@ -50,6 +52,19 @@ export interface AiConnection {
   modelConfig?: ModelConnectionConfig
   errorMessage?: string
   lastCheckedAt?: string
+  authentication?: CodingPlanAuthentication
+}
+
+export interface CodingPlanAuthentication {
+  loginMethod: CodingPlanLoginMethod
+  verificationUri?: string
+  userCode?: string
+  expiresAt?: string
+}
+
+export interface ConnectAiBackendInput {
+  connectionId: string
+  loginMethod: CodingPlanLoginMethod
 }
 
 export interface AiBackendSnapshot {
@@ -99,7 +114,8 @@ export interface TestConnectionInput {
 export interface AiBackendApi {
   getSnapshot(): Promise<AiBackendSnapshot>
   refresh(): Promise<AiBackendSnapshot>
-  connect(connectionId: string): Promise<AiBackendSnapshot>
+  connect(input: ConnectAiBackendInput): Promise<AiBackendSnapshot>
+  cancelConnect(connectionId: string): Promise<void>
   saveModelConnection(input: SaveModelConnectionInput): Promise<AiBackendSnapshot>
   discoverModels(input: DiscoverModelsInput): Promise<ModelDiscoveryResult>
   removeConnection(connectionId: string): Promise<AiBackendSnapshot>

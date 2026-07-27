@@ -1,6 +1,7 @@
 import { BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { aiBackendChannels } from '../../shared/channels'
 import type {
+  ConnectAiBackendInput,
   DiscoverModelsInput,
   SaveModelConnectionInput,
   TestConnectionInput
@@ -31,9 +32,13 @@ export function registerAiBackendIpc(
     assertTrustedSender(event)
     return service.refresh()
   })
-  ipcMain.handle(aiBackendChannels.connect, async (event, connectionId: string) => {
+  ipcMain.handle(aiBackendChannels.connect, async (event, input: ConnectAiBackendInput) => {
     assertTrustedSender(event)
-    return service.connect(connectionId)
+    return service.connect(input)
+  })
+  ipcMain.handle(aiBackendChannels.cancelConnect, (event, connectionId: string) => {
+    assertTrustedSender(event)
+    service.cancelConnect(connectionId)
   })
   ipcMain.handle(
     aiBackendChannels.discoverModels,
@@ -64,7 +69,7 @@ export function registerAiBackendIpc(
     if (!connection) throw new Error('未找到 AI Connection')
     const model = connection.models.find((candidate) => candidate.id === input.modelId)
     if (!model) throw new Error('所选 Model 不属于该 Connection')
-    const destination = connection.modelConfig?.baseUrl || 'OpenAI Codex（通过本机官方 Runtime）'
+    const destination = connection.modelConfig?.baseUrl || 'OpenAI Codex Direct Provider'
     const billing = connection.backendKind === 'coding_plan'
       ? 'ChatGPT/Codex Coding Plan'
       : 'Provider API 账户'

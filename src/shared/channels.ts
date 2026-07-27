@@ -13,6 +13,7 @@ export const aiBackendChannels = {
   getSnapshot: 'ai-backends:get-snapshot',
   refresh: 'ai-backends:refresh',
   connect: 'ai-backends:connect',
+  cancelConnect: 'ai-backends:cancel-connect',
   discoverModels: 'ai-backends:discover-models',
   saveModelConnection: 'ai-backends:save-model-connection',
   removeConnection: 'ai-backends:remove-connection',

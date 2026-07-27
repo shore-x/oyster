@@ -18,6 +18,7 @@ import {
   PiCodingPlanAdapter,
   type PiCodingPlanModels
 } from '../src/main/ai-backends/pi-coding-plan-adapter'
+import type { CodingPlanAuthentication } from '../src/shared/ai-backends'
 
 const MODEL: Model<Api> = {
   id: 'gpt-codex-small',
@@ -125,9 +126,18 @@ const UNUSED_CREDENTIALS: CredentialStore = {
   delete: async () => undefined
 }
 
-function createAdapter(models = new FakeModels(), openExternal = vi.fn(async () => undefined)) {
+function createAdapter(
+  models = new FakeModels(),
+  openExternal = vi.fn(async () => undefined),
+  authenticationTimeoutMs?: number
+) {
   return {
-    adapter: new PiCodingPlanAdapter({ credentials: UNUSED_CREDENTIALS, models, openExternal }),
+    adapter: new PiCodingPlanAdapter({
+      credentials: UNUSED_CREDENTIALS,
+      models,
+      openExternal,
+      authenticationTimeoutMs
+    }),
     models,
     openExternal
   }
@@ -179,8 +189,119 @@ describe('PiCodingPlanAdapter', () => {
       }
     }
 
-    await expect(adapter.connect()).resolves.toBeUndefined()
+    await expect(adapter.connect('browser')).resolves.toBeUndefined()
     expect(openExternal).toHaveBeenCalledWith('https://auth.openai.com/oauth/authorize')
+  })
+
+  it('selects device-code OAuth and publishes the user-visible challenge', async () => {
+    const { adapter, models, openExternal } = createAdapter()
+    models.loginHandler = async (interaction) => {
+      const method = await interaction.prompt({
+        type: 'select',
+        message: 'method',
+        options: [{ id: 'browser', label: 'Browser' }, { id: 'device_code', label: 'Device' }]
+      })
+      expect(method).toBe('device_code')
+      interaction.notify({
+        type: 'device_code',
+        userCode: 'ABCD-1234',
+        verificationUri: 'https://auth.openai.com/codex/device',
+        intervalSeconds: 5,
+        expiresInSeconds: 900
+      })
+      return {
+        type: 'oauth',
+        access: 'access',
+        refresh: 'refresh',
+        expires: Date.now() + 60_000,
+        accountId: 'account'
+      }
+    }
+    const updates: CodingPlanAuthentication[] = []
+
+    await expect(adapter.connect('device_code', (update) => updates.push(update)))
+      .resolves.toBeUndefined()
+
+    expect(updates).toEqual([{
+      loginMethod: 'device_code',
+      verificationUri: 'https://auth.openai.com/codex/device',
+      userCode: 'ABCD-1234',
+      expiresAt: expect.any(String)
+    }])
+    expect(Date.parse(updates[0].expiresAt!)).toBeGreaterThan(Date.now())
+    expect(openExternal).toHaveBeenCalledWith('https://auth.openai.com/codex/device')
+  })
+
+  it('rejects an unsafe device verification URL', async () => {
+    const { adapter, models, openExternal } = createAdapter()
+    models.loginHandler = async (interaction) => {
+      await interaction.prompt({
+        type: 'select',
+        message: 'method',
+        options: [{ id: 'device_code', label: 'Device' }]
+      })
+      interaction.notify({
+        type: 'device_code',
+        userCode: 'ABCD-1234',
+        verificationUri: 'http://attacker.example/device',
+        intervalSeconds: 5,
+        expiresInSeconds: 900
+      })
+      return {
+        type: 'oauth',
+        access: 'access',
+        refresh: 'refresh',
+        expires: Date.now() + 60_000,
+        accountId: 'account'
+      }
+    }
+
+    await expect(adapter.connect('device_code')).rejects.toThrow('不安全')
+    expect(openExternal).not.toHaveBeenCalled()
+  })
+
+  it('keeps device-code login usable when the local browser cannot be opened', async () => {
+    const models = new FakeModels()
+    const openExternal = vi.fn(async () => { throw new Error('no desktop browser') })
+    const { adapter } = createAdapter(models, openExternal)
+    models.loginHandler = async (interaction) => {
+      await interaction.prompt({
+        type: 'select',
+        message: 'method',
+        options: [{ id: 'device_code', label: 'Device' }]
+      })
+      interaction.notify({
+        type: 'device_code',
+        userCode: 'ABCD-1234',
+        verificationUri: 'https://auth.openai.com/codex/device',
+        intervalSeconds: 5,
+        expiresInSeconds: 900
+      })
+      return {
+        type: 'oauth',
+        access: 'access',
+        refresh: 'refresh',
+        expires: Date.now() + 60_000,
+        accountId: 'account'
+      }
+    }
+
+    await expect(adapter.connect('device_code')).resolves.toBeUndefined()
+    expect(openExternal).toHaveBeenCalledOnce()
+  })
+
+  it('fails clearly when Pi does not expose the requested login method', async () => {
+    const { adapter, models } = createAdapter()
+    models.loginHandler = async (interaction) => {
+      await interaction.prompt({
+        type: 'select',
+        message: 'method',
+        options: [{ id: 'browser', label: 'Browser' }]
+      })
+      throw new Error('unreachable')
+    }
+
+    await expect(adapter.connect('device_code')).rejects.toThrow('不支持设备码登录')
   })
 
   it('cancels an active OAuth flow through its AbortController', async () => {
@@ -193,10 +314,56 @@ describe('PiCodingPlanAdapter', () => {
       started()
     })
 
-    const connecting = adapter.connect()
+    const connecting = adapter.connect('device_code')
     await loginStarted
     adapter.cancelConnect()
     await expect(connecting).rejects.toThrow('用户取消')
+  })
+
+  it('times out an OAuth flow that never completes', async () => {
+    const models = new FakeModels()
+    const { adapter } = createAdapter(models, vi.fn(async () => undefined), 10)
+    models.loginHandler = (interaction) => new Promise((_resolve, reject) => {
+      interaction.signal?.addEventListener('abort', () => reject(new Error('upstream cancelled')), {
+        once: true
+      })
+    })
+
+    await expect(adapter.connect('browser')).rejects.toThrow('认证超时')
+  })
+
+  it('treats a committed credential as success when cancellation races with final browser opening', async () => {
+    const models = new FakeModels()
+    let releaseBrowser!: () => void
+    const browserReleased = new Promise<void>((resolve) => { releaseBrowser = resolve })
+    const openExternal = vi.fn(() => browserReleased)
+    const { adapter } = createAdapter(models, openExternal)
+    let loginReturned!: () => void
+    const loginCompleted = new Promise<void>((resolve) => { loginReturned = resolve })
+    models.loginHandler = async (interaction) => {
+      await interaction.prompt({
+        type: 'select',
+        message: 'method',
+        options: [{ id: 'browser', label: 'Browser' }]
+      })
+      interaction.notify({ type: 'auth_url', url: 'https://auth.openai.com/oauth/authorize' })
+      loginReturned()
+      return {
+        type: 'oauth',
+        access: 'access',
+        refresh: 'refresh',
+        expires: Date.now() + 60_000,
+        accountId: 'account'
+      }
+    }
+
+    const connecting = adapter.connect('browser')
+    await loginCompleted
+    await vi.waitFor(() => expect(openExternal).toHaveBeenCalledOnce())
+    adapter.cancelConnect()
+    releaseBrowser()
+
+    await expect(connecting).resolves.toBeUndefined()
   })
 
   it('generates with the selected model and bounded direct-call options', async () => {

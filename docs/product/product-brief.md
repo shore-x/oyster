@@ -209,7 +209,7 @@ LLM 和 Agent 都不拥有事实真相。每个加工 Job 必须保存输入 Evi
 
 - 默认本地保存，任何远程模型处理都按 Provider 和 Scope 显式授权；
 - 任何远程加工都必须明确显示所选 Connection、数据目的地和计费来源，不在连接之间静默切换；
-- Coding Plan 的登录和 Token 刷新由 Oyster 通过受支持 Provider 的 OAuth 完成，凭据仅存系统 Keychain；Oyster 不读取或复制其他应用的凭据文件、Keychain 项或浏览器会话；
+- Coding Plan 的 Browser / Device Code 登录和 Token 刷新由 Oyster 通过受支持 Provider 的 OAuth 完成，凭据仅存系统 Keychain；Oyster 不读取或复制其他应用的凭据文件、Keychain 项或浏览器会话；
 - API 密钥只由主进程从系统钥匙串读取，不返回 Renderer，不进入数据库、日志、Workspace 或模型输入；
 - 首次读取正文前预览目录、范围和风险，不后台读取全部聊天正文后再征求同意；
 - 原始聊天可能包含源码、凭证、个人信息和工具输出，按高敏数据处理；

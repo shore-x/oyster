@@ -4,13 +4,20 @@ import type {
   AiBackendSnapshot,
   AiConnection,
   AvailableModel,
+  CodingPlanAuthentication,
+  CodingPlanLoginMethod,
+  ConnectAiBackendInput,
   ConnectionTestResult,
   DiscoverModelsInput,
   ModelDiscoveryResult,
   SaveModelConnectionInput,
   TestConnectionInput
 } from '../../shared/ai-backends'
-import { MODEL_PROTOCOLS, MODEL_PROVIDER_IDS } from '../../shared/ai-backends'
+import {
+  CODING_PLAN_LOGIN_METHODS,
+  MODEL_PROTOCOLS,
+  MODEL_PROVIDER_IDS
+} from '../../shared/ai-backends'
 import { createOysterModelRuntime } from '../knowledge-processing/oyster-model-stream'
 import { CODEX_CONNECTION_ID } from './codex-adapter'
 import type { ModelRuntime, ModelGenerationRequest, ModelGenerationResult } from './model'
@@ -67,7 +74,10 @@ export interface CodingPlanBackend {
     status: 'needs_auth' | 'ready' | 'unsupported' | 'unavailable'
     errorMessage?: string
   }>
-  connect(): Promise<void>
+  connect(
+    loginMethod: CodingPlanLoginMethod,
+    onAuthenticationUpdate?: (authentication: CodingPlanAuthentication) => void
+  ): Promise<void>
   cancelConnect(): void
   generate(modelId: string, request: ModelGenerationRequest): Promise<ModelGenerationResult>
   runtime(modelId: string): ModelRuntime
@@ -159,6 +169,20 @@ function assertTestInput(input: unknown): asserts input is TestConnectionInput {
   }
 }
 
+function assertConnectInput(input: unknown): asserts input is ConnectAiBackendInput {
+  if (!input || typeof input !== 'object') throw new Error('Coding Plan 登录配置无效')
+  const value = input as Record<string, unknown>
+  if (typeof value.connectionId !== 'string' || !value.connectionId.trim()) {
+    throw new Error('Connection 配置无效')
+  }
+  if (
+    typeof value.loginMethod !== 'string'
+    || !CODING_PLAN_LOGIN_METHODS.includes(value.loginMethod as CodingPlanLoginMethod)
+  ) {
+    throw new Error('Coding Plan 登录方式无效')
+  }
+}
+
 function modelDisplayName(connection: StoredModelConnection): string {
   if (connection.providerId === 'openai') return 'OpenAI API'
   return new URL(connection.baseUrl).host
@@ -179,6 +203,7 @@ function modelDiscoveryKey(providerId: StoredModelConnection['providerId'], base
 export class AiBackendService {
   private state: AiBackendStateData = { connections: [] }
   private codingPlanConnection = initialCodingPlanConnection()
+  private codingPlanAuthenticationActive = false
   private readonly connectionStates = new Map<string, ConnectionRuntimeState>()
   private readonly apiModels = new Map<string, AvailableModel[]>()
   private readonly discoveredModelCache = new Map<string, AvailableModel[]>()
@@ -291,6 +316,7 @@ export class AiBackendService {
       this.codingPlanAdapter.inspectAuth()
     ])
     const models = this.codingPlanAdapter.listModels()
+    const authenticating = this.codingPlanAuthenticationActive
     this.codingPlanConnection = {
       id: CODEX_CONNECTION_ID,
       adapterId: 'codex',
@@ -298,14 +324,17 @@ export class AiBackendService {
       providerId: 'openai_codex',
       displayName: 'OpenAI Codex Coding Plan',
       credentialMode: 'oyster_keychain',
-      status: auth.status,
+      status: authenticating ? 'authenticating' : auth.status,
       models,
       defaultModelId: preferredModel(models),
       executablePath: discovered.executablePath,
       accountLabel: discovered.accountLabel,
       planType: discovered.planType,
-      errorMessage: auth.errorMessage,
-      lastCheckedAt: new Date().toISOString()
+      errorMessage: authenticating ? undefined : auth.errorMessage,
+      lastCheckedAt: new Date().toISOString(),
+      ...(authenticating && this.codingPlanConnection.authentication
+        ? { authentication: this.codingPlanConnection.authentication }
+        : {})
     }
     this.emit()
   }
@@ -344,19 +373,36 @@ export class AiBackendService {
     this.emit()
   }
 
-  async connect(connectionId: string): Promise<AiBackendSnapshot> {
-    if (connectionId !== CODEX_CONNECTION_ID) throw new Error('该 Connection 不支持 OAuth 登录')
+  async connect(input: ConnectAiBackendInput): Promise<AiBackendSnapshot> {
+    assertConnectInput(input)
+    if (input.connectionId !== CODEX_CONNECTION_ID) {
+      throw new Error('该 Connection 不支持 OAuth 登录')
+    }
+    if (this.codingPlanAuthenticationActive) throw new Error('Coding Plan 认证正在进行')
+    this.codingPlanAuthenticationActive = true
     this.codingPlanConnection = {
       ...this.codingPlanConnection,
       status: 'authenticating',
-      errorMessage: undefined
+      errorMessage: undefined,
+      authentication: { loginMethod: input.loginMethod }
     }
     this.emit()
     try {
-      await this.codingPlanAdapter.connect()
+      await this.codingPlanAdapter.connect(input.loginMethod, (authentication) => {
+        if (!this.codingPlanAuthenticationActive) return
+        this.codingPlanConnection = {
+          ...this.codingPlanConnection,
+          status: 'authenticating',
+          errorMessage: undefined,
+          authentication
+        }
+        this.emit()
+      })
+      this.codingPlanAuthenticationActive = false
       await this.refreshCodingPlan()
       return this.snapshot()
     } catch (error) {
+      this.codingPlanAuthenticationActive = false
       await this.refreshCodingPlan()
       throw error
     }

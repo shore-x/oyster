@@ -1,7 +1,10 @@
 import type { StreamFn } from '@earendil-works/pi-agent-core'
 import {
+  CODING_PLAN_LOGIN_METHODS,
   REASONING_EFFORTS,
   type AvailableModel,
+  type CodingPlanAuthentication,
+  type CodingPlanLoginMethod,
   type ReasoningEffort
 } from '../../shared/ai-backends'
 import {
@@ -28,6 +31,7 @@ import type {
 } from './model'
 
 const PROVIDER_ID = 'openai-codex'
+const DEFAULT_AUTHENTICATION_TIMEOUT_MS = 15 * 60_000
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000
 const MAX_REQUEST_TIMEOUT_MS = 10 * 60_000
 const DEFAULT_MAX_OUTPUT_TOKENS = 4_096
@@ -67,6 +71,7 @@ export interface PiCodingPlanAdapterOptions {
   credentials: CredentialStore
   openExternal(url: string): Promise<void>
   models?: PiCodingPlanModels
+  authenticationTimeoutMs?: number
 }
 
 function createCodingPlanModels(credentials: CredentialStore): PiCodingPlanModels {
@@ -138,7 +143,8 @@ function ensureReasoningEffort(model: Model<Api>, effort?: ReasoningEffort): voi
 
 /**
  * Model-call adapter for a ChatGPT/Codex Coding Plan authenticated by Pi OAuth.
- * It never reads the Codex Runtime token and never returns an OAuth URL to the renderer.
+ * It never reads the Codex Runtime token. Browser authorization URLs stay in the main process;
+ * only the user-visible Device Code challenge is published to the renderer.
  */
 export class PiCodingPlanAdapter {
   private readonly models: PiCodingPlanModels
@@ -173,21 +179,40 @@ export class PiCodingPlanAdapter {
     }
   }
 
-  async connect(): Promise<void> {
+  async connect(
+    loginMethod: CodingPlanLoginMethod,
+    onAuthenticationUpdate: (authentication: CodingPlanAuthentication) => void = () => undefined
+  ): Promise<void> {
+    if (!CODING_PLAN_LOGIN_METHODS.includes(loginMethod)) {
+      throw new Error('Coding Plan 登录方式无效')
+    }
     if (this.activeAuthentication) throw new Error('Coding Plan 认证正在进行')
     const controller = new AbortController()
+    const timeoutMs = this.options.authenticationTimeoutMs ?? DEFAULT_AUTHENTICATION_TIMEOUT_MS
+    const timeout = setTimeout(
+      () => controller.abort(new Error('Coding Plan 认证超时，请重新发起登录')),
+      timeoutMs
+    )
+    timeout.unref()
     this.activeAuthentication = controller
     let openFailure: Error | undefined
     let opening = Promise.resolve()
+    let credentialCommitted = false
 
     try {
       await this.models.login(PROVIDER_ID, 'oauth', {
         signal: controller.signal,
         prompt: (prompt) => {
           if (prompt.type === 'select') {
-            const browser = prompt.options.find((option) => option.id === 'browser')
-            if (!browser) throw new Error('Coding Plan OAuth 不支持浏览器登录')
-            return Promise.resolve(browser.id)
+            const selected = prompt.options.find((option) => option.id === loginMethod)
+            if (!selected) {
+              throw new Error(
+                loginMethod === 'device_code'
+                  ? 'Coding Plan OAuth 当前不支持设备码登录'
+                  : 'Coding Plan OAuth 当前不支持浏览器登录'
+              )
+            }
+            return Promise.resolve(selected.id)
           }
           if (prompt.type === 'manual_code') {
             return waitUntilAborted([prompt.signal, controller.signal])
@@ -195,10 +220,19 @@ export class PiCodingPlanAdapter {
           throw new Error('Coding Plan OAuth 请求了不受支持的交互')
         },
         notify: (event) => {
-          if (event.type !== 'auth_url') return
+          if (event.type !== 'auth_url' && event.type !== 'device_code') return
+          if (
+            (event.type === 'auth_url' && loginMethod !== 'browser')
+            || (event.type === 'device_code' && loginMethod !== 'device_code')
+          ) {
+            openFailure = new Error('Coding Plan OAuth 返回了与所选登录方式不一致的交互')
+            controller.abort(openFailure)
+            return
+          }
+          const rawUrl = event.type === 'auth_url' ? event.url : event.verificationUri
           let url: URL
           try {
-            url = new URL(event.url)
+            url = new URL(rawUrl)
           } catch {
             openFailure = new Error('Coding Plan OAuth 返回了无效登录地址')
             controller.abort(openFailure)
@@ -209,16 +243,48 @@ export class PiCodingPlanAdapter {
             controller.abort(openFailure)
             return
           }
-          opening = opening.then(() => this.options.openExternal(url.toString())).catch((error: unknown) => {
-            openFailure = error instanceof Error ? error : new Error(String(error))
-            controller.abort(openFailure)
-          })
+          if (event.type === 'device_code') {
+            const userCode = event.userCode.trim()
+            if (!userCode || userCode.length > 100) {
+              openFailure = new Error('Coding Plan OAuth 返回了无效设备码')
+              controller.abort(openFailure)
+              return
+            }
+            const expiresInSeconds = typeof event.expiresInSeconds === 'number'
+              && Number.isFinite(event.expiresInSeconds)
+              ? Math.max(0, event.expiresInSeconds)
+              : 0
+            onAuthenticationUpdate({
+              loginMethod,
+              verificationUri: url.toString(),
+              userCode,
+              ...(expiresInSeconds > 0
+                ? { expiresAt: new Date(Date.now() + expiresInSeconds * 1_000).toISOString() }
+                : {})
+            })
+          }
+          const open = opening.then(() => this.options.openExternal(url.toString()))
+          opening = event.type === 'device_code'
+            ? open.catch(() => undefined)
+            : open.catch((error: unknown) => {
+                openFailure = error instanceof Error ? error : new Error(String(error))
+                controller.abort(openFailure)
+              })
         }
       })
-      await opening
+      // Validation and browser-opening failures may abort an upstream implementation that
+      // nevertheless resolves. Preserve those failures when they happened before commit.
       if (openFailure) throw openFailure
-      controller.signal.throwIfAborted()
+      // Pi persists the credential before login() resolves. From this point success must win
+      // over a concurrent cancel/timeout, otherwise the UI would report cancellation while
+      // the newly committed credential remains active in Keychain.
+      credentialCommitted = true
+      await opening
+    } catch (error) {
+      if (controller.signal.aborted && !credentialCommitted) throw abortError(controller.signal)
+      throw error
     } finally {
+      clearTimeout(timeout)
       if (this.activeAuthentication === controller) this.activeAuthentication = undefined
     }
   }

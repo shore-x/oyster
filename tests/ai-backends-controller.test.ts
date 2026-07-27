@@ -9,16 +9,21 @@ import { createAiBackendsController } from '../src/renderer/src/ai-backends-cont
 
 const SNAPSHOT: AiBackendSnapshot = { options: [], connections: [] }
 
-function installApi(testConnection: AiBackendApi['testConnection']): void {
+function installApi(
+  testConnection: AiBackendApi['testConnection'],
+  overrides: Partial<AiBackendApi> = {}
+): void {
   const api: AiBackendApi = {
     getSnapshot: async () => SNAPSHOT,
     refresh: async () => SNAPSHOT,
     connect: async () => SNAPSHOT,
+    cancelConnect: async () => undefined,
     saveModelConnection: async () => SNAPSHOT,
     discoverModels: async () => ({ models: [] }),
     removeConnection: async () => SNAPSHOT,
     testConnection,
-    subscribe: () => () => undefined
+    subscribe: () => () => undefined,
+    ...overrides
   }
   vi.stubGlobal('window', { oyster: { aiBackends: api } })
 }
@@ -26,6 +31,62 @@ function installApi(testConnection: AiBackendApi['testConnection']): void {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('AI backends controller', () => {
+  it('uses the selected Coding Plan login method and forwards cancellation', async () => {
+    const connect = vi.fn<AiBackendApi['connect']>(async () => SNAPSHOT)
+    const cancelConnect = vi.fn<AiBackendApi['cancelConnect']>(async () => undefined)
+    installApi(async () => ({
+      connectionId: 'runtime:codex',
+      output: 'ok',
+      durationMs: 10
+    }), { connect, cancelConnect })
+
+    await createRoot(async (dispose) => {
+      try {
+        const controller = createAiBackendsController()
+        await controller.connect('runtime:codex', 'device_code')
+        await controller.cancelConnect('runtime:codex')
+
+        expect(connect).toHaveBeenCalledWith({
+          connectionId: 'runtime:codex',
+          loginMethod: 'device_code'
+        })
+        expect(cancelConnect).toHaveBeenCalledWith('runtime:codex')
+      } finally {
+        dispose()
+      }
+    })
+  })
+
+  it('does not surface an explicit login cancellation as an error', async () => {
+    let rejectConnect!: (error: Error) => void
+    const connect = vi.fn<AiBackendApi['connect']>(() => new Promise((_resolve, reject) => {
+      rejectConnect = reject
+    }))
+    const cancelConnect = vi.fn<AiBackendApi['cancelConnect']>(async () => {
+      rejectConnect(new Error('用户取消了 Coding Plan 认证'))
+    })
+    installApi(async () => ({
+      connectionId: 'runtime:codex',
+      output: 'ok',
+      durationMs: 10
+    }), { connect, cancelConnect })
+
+    await createRoot(async (dispose) => {
+      try {
+        const controller = createAiBackendsController()
+        const connecting = controller.connect('runtime:codex', 'browser')
+        await vi.waitFor(() => expect(connect).toHaveBeenCalledOnce())
+        await controller.cancelConnect('runtime:codex')
+
+        await expect(connecting).resolves.toBe(false)
+        expect(controller.error()).toBeUndefined()
+        expect(controller.busy()).toBeUndefined()
+      } finally {
+        dispose()
+      }
+    })
+  })
+
   it('tests the exact model and reasoning configuration selected by the user', async () => {
     const testConnection = vi.fn(async (input: TestConnectionInput) => ({
       connectionId: input.connectionId,

@@ -21,12 +21,67 @@ const STATUS: Record<AiConnection['status'], { label: string; tone: string }> = 
   unavailable: { label: '暂时不可用', tone: 'danger' }
 }
 
+function authenticationExpiry(value?: string): string | undefined {
+  if (!value) return undefined
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return undefined
+  return new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(date)
+}
+
 function StatusBadge(props: { connection: AiConnection }) {
   const value = () => STATUS[props.connection.status]
   return (
     <span class={`status${value().tone ? ` status--${value().tone}` : ''}`}>
       <span class="status__dot" />{value().label}
     </span>
+  )
+}
+
+export function CodingPlanAuthenticationState(props: {
+  connection: AiConnection
+  onCancel(): void
+}) {
+  return (
+    <div class="ai-authentication-state" data-testid="coding-plan-authentication-state">
+      <Show
+        when={props.connection.authentication?.loginMethod === 'device_code'}
+        fallback={(
+          <>
+            <strong>等待浏览器登录</strong>
+            <p>请在系统浏览器中完成 ChatGPT 登录。若页面仍然报错，可以取消后改用设备码。</p>
+          </>
+        )}
+      >
+        <strong>使用设备码完成登录</strong>
+        <p>请在浏览器中打开下面的验证地址并输入设备码；远程开发环境也可以在另一台设备上完成。</p>
+        <div class="ai-device-code">
+          <span>设备码</span>
+          <code data-testid="coding-plan-device-code">
+            {props.connection.authentication?.userCode || '正在申请…'}
+          </code>
+        </div>
+        <Show when={props.connection.authentication?.verificationUri}>
+          <div class="ai-device-verification-uri">
+            <span>验证地址</span>
+            <code>{props.connection.authentication?.verificationUri}</code>
+          </div>
+        </Show>
+        <Show when={authenticationExpiry(props.connection.authentication?.expiresAt)}>
+          {(expiresAt) => <p>设备码预计在 {expiresAt()} 失效。</p>}
+        </Show>
+      </Show>
+      <div class="ai-authentication-state__actions">
+        <Button
+          variant="secondary"
+          icon="stop"
+          data-testid="coding-plan-cancel-login-button"
+          onClick={props.onCancel}
+        >取消登录</Button>
+      </div>
+    </div>
   )
 }
 
@@ -342,14 +397,14 @@ export function AiBackendsPage() {
               <div class="ai-runtime-panel__header">
                 <div>
                   <h2>OpenAI Codex Coding Plan</h2>
-                  <p>通过 OAuth 使用已有订阅；测试会明确使用下方选中的模型与思考强度。</p>
+                  <p>通过 Oyster 独立 OAuth 使用已有订阅；测试会明确使用下方选中的模型与思考强度。</p>
                 </div>
                 <StatusBadge connection={connection()} />
               </div>
               <dl class="ai-runtime-details">
                 <div><dt>Provider</dt><dd>OpenAI Codex</dd></div>
-                <div><dt>账号</dt><dd>{connection().accountLabel || '—'}</dd></div>
-                <div><dt>Plan</dt><dd>{connection().planType || '—'}</dd></div>
+                <div><dt>本机 Codex 账号（仅发现）</dt><dd>{connection().accountLabel || '—'}</dd></div>
+                <div><dt>本机 Plan（仅发现）</dt><dd>{connection().planType || '—'}</dd></div>
               </dl>
               <div class="ai-model-form__row">
                 <label class="ai-field">
@@ -400,14 +455,28 @@ export function AiBackendsPage() {
               <Show when={connection().errorMessage}>
                 <p class="ai-connection-error">{connection().errorMessage}</p>
               </Show>
+              <Show when={connection().status === 'authenticating'}>
+                <CodingPlanAuthenticationState
+                  connection={connection()}
+                  onCancel={() => void controller.cancelConnect(connection().id)}
+                />
+              </Show>
               <div class="ai-runtime-panel__actions">
-                <Show when={connection().status !== 'ready'}>
+                <Show when={connection().status !== 'ready' && connection().status !== 'authenticating'}>
                   <Button
                     variant="primary"
                     icon="link"
                     disabled={Boolean(controller.busy()) || connection().status === 'not_found'}
-                    onClick={() => void controller.connect(connection().id)}
-                  >{connection().status === 'authenticating' ? '重新发起登录' : '使用 ChatGPT 登录'}</Button>
+                    data-testid="coding-plan-device-login-button"
+                    onClick={() => void controller.connect(connection().id, 'device_code')}
+                  >设备码登录（远程推荐）</Button>
+                  <Button
+                    variant="secondary"
+                    icon="link"
+                    disabled={Boolean(controller.busy()) || connection().status === 'not_found'}
+                    data-testid="coding-plan-browser-login-button"
+                    onClick={() => void controller.connect(connection().id, 'browser')}
+                  >浏览器登录</Button>
                 </Show>
                 <Show when={connection().status === 'ready'}>
                   <Button

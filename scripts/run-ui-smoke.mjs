@@ -49,6 +49,11 @@ if (semantics.ai.agent.codingPlanModel !== 'fixture-codex-small') throw new Erro
 if (semantics.ai.agent.codingPlanReasoning !== '') throw new Error('Coding Plan fixture should use the model-default reasoning effort')
 if (!semantics.ai.agent.codingPlanConfiguration?.includes('Fixture Codex Small')) throw new Error('Coding Plan test configuration is not visible')
 if (!semantics.ai.agent.bodyText.includes('Coding Plan')) throw new Error('Coding Plan choice is missing')
+for (const requiredCopy of ['Oyster 独立 OAuth', '本机 Codex 账号（仅发现）', '本机 Plan（仅发现）']) {
+  if (!semantics.ai.agent.bodyText.includes(requiredCopy)) {
+    throw new Error(`Coding Plan authentication boundary is missing: ${requiredCopy}`)
+  }
+}
 if (semantics.ai.agent.overflowX) throw new Error('AI backend page has unexpected horizontal overflow')
 if (semantics.ai.model.backendKind !== 'api') throw new Error('API backend choice did not update the form')
 if (semantics.ai.model.provider !== 'openai') throw new Error('OpenAI is not the default Model provider')

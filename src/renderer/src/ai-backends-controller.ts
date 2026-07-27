@@ -1,6 +1,7 @@
 import { createSignal, onCleanup, onMount } from 'solid-js'
 import type {
   AiBackendSnapshot,
+  CodingPlanLoginMethod,
   DiscoverModelsInput,
   ModelDiscoveryResult,
   ConnectionTestResult,
@@ -17,6 +18,14 @@ export function createAiBackendsController() {
   const [testResult, setTestResult] = createSignal<ConnectionTestResult>()
   const [testedConfiguration, setTestedConfiguration] = createSignal<TestConnectionInput>()
 
+  function errorText(cause: unknown): string {
+    return cause instanceof Error ? cause.message : String(cause)
+  }
+
+  function isCancellation(cause: unknown): boolean {
+    return /(?:取消|cancel)/i.test(errorText(cause))
+  }
+
   async function update(
     key: string,
     action: () => Promise<AiBackendSnapshot>
@@ -27,7 +36,7 @@ export function createAiBackendsController() {
       setSnapshot(await action())
       return true
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(errorText(cause))
       return false
     } finally {
       setBusy(undefined)
@@ -47,17 +56,34 @@ export function createAiBackendsController() {
     testResult,
     testedConfiguration,
     refresh: () => update('refresh', () => window.oyster.aiBackends.refresh()),
-    connect: (connectionId: string) => update(
-      `connect:${connectionId}`,
-      () => window.oyster.aiBackends.connect(connectionId)
-    ),
+    async connect(connectionId: string, loginMethod: CodingPlanLoginMethod): Promise<boolean> {
+      try {
+        setBusy(`connect:${connectionId}`)
+        setError(undefined)
+        setSnapshot(await window.oyster.aiBackends.connect({ connectionId, loginMethod }))
+        return true
+      } catch (cause) {
+        if (!isCancellation(cause)) setError(errorText(cause))
+        return false
+      } finally {
+        setBusy(undefined)
+      }
+    },
+    async cancelConnect(connectionId: string): Promise<void> {
+      try {
+        setError(undefined)
+        await window.oyster.aiBackends.cancelConnect(connectionId)
+      } catch (cause) {
+        setError(errorText(cause))
+      }
+    },
     async discoverModels(input: DiscoverModelsInput): Promise<ModelDiscoveryResult | undefined> {
       try {
         setBusy('discover-models')
         setError(undefined)
         return await window.oyster.aiBackends.discoverModels(input)
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : String(cause))
+        setError(errorText(cause))
         return undefined
       } finally {
         setBusy(undefined)
@@ -83,7 +109,7 @@ export function createAiBackendsController() {
           setTestResult(result)
         }
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : String(cause))
+        setError(errorText(cause))
       } finally {
         setBusy(undefined)
       }

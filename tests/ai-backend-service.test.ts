@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Api, Model } from '@earendil-works/pi-ai'
 import type { StreamFn } from '@earendil-works/pi-agent-core'
 import type {
   AiConnection,
   AvailableModel,
+  CodingPlanAuthentication,
+  CodingPlanLoginMethod,
   ModelProviderId,
   ReasoningEffort
 } from '../src/shared/ai-backends'
@@ -90,12 +92,28 @@ class FakeCodingPlanBackend implements CodingPlanBackend {
   ]
   calls: CodingPlanCall[] = []
   runtimeCalls: string[] = []
+  loginMethods: CodingPlanLoginMethod[] = []
+  connectHandler?: (
+    loginMethod: CodingPlanLoginMethod,
+    onAuthenticationUpdate?: (authentication: CodingPlanAuthentication) => void
+  ) => Promise<void>
+  cancelHandler?: () => void
+  cancelCalls = 0
   failure?: Error
 
   listModels(): AvailableModel[] { return structuredClone(this.models) }
   async inspectAuth() { return { status: 'ready' as const } }
-  async connect(): Promise<void> {}
-  cancelConnect(): void {}
+  async connect(
+    loginMethod: CodingPlanLoginMethod,
+    onAuthenticationUpdate?: (authentication: CodingPlanAuthentication) => void
+  ): Promise<void> {
+    this.loginMethods.push(loginMethod)
+    await this.connectHandler?.(loginMethod, onAuthenticationUpdate)
+  }
+  cancelConnect(): void {
+    this.cancelCalls += 1
+    this.cancelHandler?.()
+  }
 
   async generate(modelId: string, request: ModelGenerationRequest): Promise<{ text: string }> {
     this.calls.push({ modelId, request })
@@ -274,6 +292,82 @@ describe('AiBackendService', () => {
       request: { reasoningEffort: 'high' }
     })
     expect(model.calls).toHaveLength(0)
+  })
+
+  it('publishes a transient device-code challenge and clears it after login', async () => {
+    const { service, codingPlan } = createService()
+    await service.initialize()
+    const snapshots: AiConnection[] = []
+    const unsubscribe = service.subscribe((snapshot) => {
+      const connection = snapshot.connections.find((candidate) => candidate.id === 'runtime:codex')
+      if (connection) snapshots.push(connection)
+    })
+    codingPlan.connectHandler = async (_method, onAuthenticationUpdate) => {
+      onAuthenticationUpdate?.({
+        loginMethod: 'device_code',
+        verificationUri: 'https://auth.openai.com/codex/device',
+        userCode: 'ABCD-1234',
+        expiresAt: '2026-07-27T10:00:00.000Z'
+      })
+    }
+
+    const result = await service.connect({
+      connectionId: 'runtime:codex',
+      loginMethod: 'device_code'
+    })
+    unsubscribe()
+
+    expect(codingPlan.loginMethods).toEqual(['device_code'])
+    expect(snapshots).toContainEqual(expect.objectContaining({
+      status: 'authenticating',
+      authentication: expect.objectContaining({ userCode: 'ABCD-1234' })
+    }))
+    expect(result.connections.find((connection) => connection.id === 'runtime:codex'))
+      .toMatchObject({ status: 'ready' })
+    expect(result.connections.find((connection) => connection.id === 'runtime:codex')?.authentication)
+      .toBeUndefined()
+  })
+
+  it('validates login configuration and forwards cancellation to the active backend', async () => {
+    const { service, codingPlan } = createService()
+    await service.initialize()
+
+    await expect(service.connect({
+      connectionId: 'runtime:codex',
+      loginMethod: 'unsupported' as CodingPlanLoginMethod
+    })).rejects.toThrow('登录方式无效')
+
+    service.cancelConnect('runtime:codex')
+    expect(codingPlan.cancelCalls).toBe(1)
+  })
+
+  it('clears transient authentication state after the user cancels login', async () => {
+    const { service, codingPlan } = createService()
+    await service.initialize()
+    let rejectLogin!: (error: Error) => void
+    codingPlan.connectHandler = async (_method, onAuthenticationUpdate) => {
+      onAuthenticationUpdate?.({
+        loginMethod: 'device_code',
+        verificationUri: 'https://auth.openai.com/codex/device',
+        userCode: 'ABCD-1234'
+      })
+      return new Promise((_resolve, reject) => { rejectLogin = reject })
+    }
+    codingPlan.cancelHandler = () => rejectLogin(new Error('用户取消了 Coding Plan 认证'))
+
+    const connecting = service.connect({
+      connectionId: 'runtime:codex',
+      loginMethod: 'device_code'
+    })
+    await vi.waitFor(() => {
+      expect(service.snapshot().connections[0].authentication?.userCode).toBe('ABCD-1234')
+    })
+    service.cancelConnect('runtime:codex')
+
+    await expect(connecting).rejects.toThrow('用户取消')
+    expect(codingPlan.cancelCalls).toBe(1)
+    expect(service.snapshot().connections[0]).toMatchObject({ status: 'ready' })
+    expect(service.snapshot().connections[0].authentication).toBeUndefined()
   })
 
   it('passes a selected non-default API model to direct generation and Agent runtime', async () => {
