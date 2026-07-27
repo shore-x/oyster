@@ -1,12 +1,11 @@
 import { Show, createMemo } from 'solid-js'
-import type { AgentSource, SyncRun } from '../../../shared/discovery'
+import type { AgentSource, ScanRun } from '../../../shared/discovery'
 import { Button, Icon } from '../ui'
 
 interface SourceCardProps {
   source: AgentSource
-  run?: SyncRun
+  run?: ScanRun
   onScan(): void
-  onImport(): void
   onCancel(): void
   onChooseRoot(): void
 }
@@ -34,23 +33,8 @@ function status(source: AgentSource): { label: string; tone: string } {
 }
 
 export function SourceCard(props: SourceCardProps) {
-  const importRun = createMemo(() => (props.run?.kind === 'import' ? props.run : undefined))
-  const scanRun = createMemo(() => (props.run?.kind === 'scan' ? props.run : undefined))
   const isRunning = createMemo(() => props.run?.state === 'running' || props.run?.state === 'queued')
-  const state = createMemo(() =>
-    isRunning() && importRun() ? { label: '导入中', tone: 'active' } : status(props.source)
-  )
-  const syncPercent = createMemo(() => {
-    const run = importRun()
-    if (run && run.totalBytes > 0) return Math.min(100, (run.processedBytes / run.totalBytes) * 100)
-    if (props.source.totalBytes === 0) return 0
-    return Math.min(100, (props.source.syncedBytes / props.source.totalBytes) * 100)
-  })
-  const artifactCount = createMemo(() => props.source.sessionCount + props.source.instructionFileCount)
-  const syncedArtifactCount = createMemo(
-    () => props.source.syncedSessionCount + props.source.syncedInstructionFileCount
-  )
-  const pendingArtifacts = createMemo(() => artifactCount() - syncedArtifactCount())
+  const state = createMemo(() => status(props.source))
 
   return (
     <article class="source-card" data-testid="source-card">
@@ -90,38 +74,33 @@ export function SourceCard(props: SourceCardProps) {
           <div><span class="metric__label">时间范围</span><strong>{formatDate(props.source.oldestSessionAt)} – {formatDate(props.source.latestSessionAt)}</strong></div>
         </div>
 
-        <div class="sync-block">
-          <div class="sync-block__row">
-            <span>{scanRun() && isRunning() ? '正在扫描历史记录' : importRun() && isRunning() ? '正在导入原始记录' : '导入覆盖'}</span>
-            <span class="sync-block__value">
-              {scanRun() && isRunning()
-                ? `${scanRun()!.processedFiles} 个文件 · ${formatBytes(scanRun()!.processedBytes)}`
-                : importRun() && isRunning()
-                ? `${importRun()!.processedFiles} / ${importRun()!.totalFiles} 个文件`
-                : `${syncedArtifactCount()} / ${artifactCount()} 项`}
-            </span>
+        <Show when={isRunning()} fallback={
+          <div class="catalog-block">
+            <div class="catalog-block__row">
+              <span>本地记录目录</span>
+              <span class="catalog-block__value">{props.source.sessionCount} 个可用 Session</span>
+            </div>
+            <div class="catalog-block__meta">
+              <span>内容将在使用时从原始位置读取</span>
+              <Show when={props.source.invalidFileCount > 0}>
+                <span>{props.source.invalidFileCount} 个文件无法识别</span>
+              </Show>
+            </div>
           </div>
-          <div
-            class={`progress ${scanRun() && isRunning() ? 'progress--indeterminate' : ''}`}
-            aria-label={scanRun() && isRunning() ? '扫描进度' : '导入进度'}
-            aria-valuenow={scanRun() && isRunning() ? undefined : Math.round(syncPercent())}
-            role="progressbar"
-          >
-            <span style={{ width: scanRun() && isRunning() ? '32%' : `${syncPercent()}%` }} />
+        }>
+          <div class="catalog-block">
+            <div class="catalog-block__row">
+              <span>正在扫描历史记录</span>
+              <span class="catalog-block__value">
+                {props.run!.processedFiles} 个文件 · {formatBytes(props.run!.processedBytes)}
+              </span>
+            </div>
+            <div class="progress progress--indeterminate" aria-label="扫描进度" role="progressbar">
+              <span style={{ width: '32%' }} />
+            </div>
+            <div class="catalog-block__meta"><span>总量将在扫描完成后确认</span></div>
           </div>
-          <div class="sync-block__meta">
-            <Show when={scanRun() && isRunning()} fallback={
-              <>
-                <span>{formatBytes(importRun() && isRunning() ? importRun()!.processedBytes : props.source.syncedBytes)} 已导入</span>
-                <Show when={props.source.invalidFileCount > 0}>
-                  <span>{props.source.invalidFileCount} 个文件无法识别</span>
-                </Show>
-              </>
-            }>
-              <span>总量将在扫描完成后确认</span>
-            </Show>
-          </div>
-        </div>
+        </Show>
 
         <div class="source-card__actions">
           <Show when={isRunning()} fallback={
@@ -130,13 +109,8 @@ export function SourceCard(props: SourceCardProps) {
               <Button variant="secondary" icon="refresh" onClick={props.onScan}>
                 {props.source.scanState === 'ready' ? '重新扫描' : '扫描记录'}
               </Button>
-              <Show when={props.source.scanState === 'ready' && pendingArtifacts() > 0}>
-                <Button variant="primary" icon="download" onClick={props.onImport}>
-                  导入 {pendingArtifacts()} 项
-                </Button>
-              </Show>
-              <Show when={props.source.scanState === 'ready' && pendingArtifacts() === 0 && artifactCount() > 0}>
-                <span class="complete-label"><Icon name="check" />已全部导入</span>
+              <Show when={props.source.scanState === 'ready'}>
+                <span class="complete-label"><Icon name="check" />目录已扫描</span>
               </Show>
             </>
           }>

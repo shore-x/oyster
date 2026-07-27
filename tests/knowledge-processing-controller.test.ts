@@ -1,0 +1,261 @@
+import { createRoot } from 'solid-js'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { AvailableSessionSummary } from '../src/shared/discovery'
+import type {
+  KnowledgeFullChainResult,
+  KnowledgeMaintenanceResult,
+  KnowledgeProcessingApi,
+  KnowledgeProcessingSnapshot,
+  ObservationPreprocessingResult
+} from '../src/shared/knowledge-processing'
+import { createKnowledgeProcessingController } from '../src/renderer/src/knowledge-processing-controller'
+
+const SNAPSHOT: KnowledgeProcessingSnapshot = {
+  stages: [],
+  connections: [],
+  runningStageIds: []
+}
+
+function preprocessingResult(runId = 'preprocess-1'): ObservationPreprocessingResult {
+  return {
+    stageId: 'observation_preprocessor',
+    runId,
+    evidenceMap: '# Evidence Map',
+    sourceRef: `workspace:${runId}:observation`,
+    durationMs: 10,
+    completedAt: '2026-07-26T00:00:00.000Z',
+    execution: {
+      connectionId: 'model:fixture',
+      connectionName: 'Fixture',
+      backendKind: 'api',
+      providerId: 'openai_compatible',
+      model: 'fixture-model',
+      runtime: 'direct_model_call',
+      modelCallCount: 1,
+      toolCalls: []
+    }
+  }
+}
+
+function maintenanceResult(): KnowledgeMaintenanceResult {
+  return {
+    stageId: 'knowledge_maintenance_agent',
+    preprocessingRunId: 'preprocess-1',
+    contribution: {
+      runRef: 'maintenance-run-1',
+      statements: [{
+        localRef: 'candidate-1',
+        title: 'Candidate',
+        content: 'Candidate content'
+      }]
+    },
+    durationMs: 20,
+    completedAt: '2026-07-26T00:00:01.000Z',
+    execution: {
+      connectionId: 'model:fixture',
+      connectionName: 'Fixture',
+      backendKind: 'api',
+      providerId: 'openai_compatible',
+      model: 'fixture-model',
+      runtime: 'pi_agent_core',
+      modelCallCount: 2,
+      toolCalls: ['submit_knowledge_contribution']
+    }
+  }
+}
+
+function fullChainResult(): KnowledgeFullChainResult {
+  const session = {
+    artifactId: 'artifact-1',
+    sourceId: 'source-1',
+    agentType: 'codex' as const,
+    sourceDisplayName: 'Codex',
+    externalId: 'session-1',
+    title: 'Session one',
+    sizeBytes: 120,
+    revision: 'a'.repeat(64)
+  }
+  const preprocessing = preprocessingResult()
+  const maintenance = maintenanceResult()
+  return {
+    runId: 'full-chain-1',
+    session,
+    sandbox: { id: 'sandbox-1', baselineCreatedAt: '2026-07-26T00:00:00.000Z' },
+    sourceRef: 'raw-evidence:artifact-1',
+    preprocessing,
+    maintenance,
+    commit: {
+      contribution: { id: 'contribution-1', runRef: 'full-chain-1', createdAt: '2026-07-26T00:00:01.000Z' },
+      statements: [],
+      sources: [],
+      relations: [],
+      statementIdsByLocalRef: {}
+    },
+    knowledge: { createdStatementIds: [], statements: [] },
+    durationMs: 30,
+    completedAt: '2026-07-26T00:00:01.000Z'
+  }
+}
+
+function installApi(
+  overrides: Partial<KnowledgeProcessingApi> = {},
+  sessions: AvailableSessionSummary[] = []
+): KnowledgeProcessingApi {
+  const api: KnowledgeProcessingApi = {
+    getSnapshot: async () => SNAPSHOT,
+    saveStage: async () => SNAPSHOT,
+    runObservationPreprocessor: async () => preprocessingResult(),
+    runSessionPreprocessor: async () => preprocessingResult(),
+    runKnowledgeMaintenance: async () => maintenanceResult(),
+    runFullChain: async () => fullChainResult(),
+    cancelFullChain: async () => undefined,
+    discardSandbox: async () => undefined,
+    cancelRun: async () => undefined,
+    subscribe: () => () => undefined,
+    ...overrides
+  }
+  vi.stubGlobal('window', {
+    oyster: {
+      knowledgeProcessing: api,
+      discovery: { listAvailableSessions: async () => sessions }
+    }
+  })
+  return api
+}
+
+afterEach(() => vi.unstubAllGlobals())
+
+describe('knowledge processing controller', () => {
+  it('invalidates both derived results when processing inputs change', async () => {
+    installApi()
+    await createRoot(async (dispose) => {
+      try {
+        const controller = createKnowledgeProcessingController()
+        await controller.runObservationPreprocessor({ observation: 'Observation' })
+        await controller.runKnowledgeMaintenance({ preprocessingRunId: 'preprocess-1' })
+        expect(controller.preprocessingResult()?.runId).toBe('preprocess-1')
+        expect(controller.maintenanceResult()?.contribution.statements[0]?.title).toBe('Candidate')
+
+        controller.invalidateInputResults()
+        expect(controller.preprocessingResult()).toBeUndefined()
+        expect(controller.maintenanceResult()).toBeUndefined()
+      } finally {
+        dispose()
+      }
+    })
+  })
+
+  it('removes an older contribution after replacement preprocessing succeeds', async () => {
+    let preprocessingCalls = 0
+    installApi({
+      runObservationPreprocessor: async () => {
+        preprocessingCalls += 1
+        if (preprocessingCalls === 1) return preprocessingResult()
+        return preprocessingResult('preprocess-2')
+      }
+    })
+
+    await createRoot(async (dispose) => {
+      try {
+        const controller = createKnowledgeProcessingController()
+        await controller.runObservationPreprocessor({ observation: 'First' })
+        await controller.runKnowledgeMaintenance({ preprocessingRunId: 'preprocess-1' })
+
+        await controller.runObservationPreprocessor({ observation: 'Second' })
+        expect(controller.preprocessingResult()?.runId).toBe('preprocess-2')
+        expect(controller.maintenanceResult()).toBeUndefined()
+      } finally {
+        dispose()
+      }
+    })
+  })
+
+  it('preprocesses the exact available Session revision selected by the user', async () => {
+    const runSessionPreprocessor = vi.fn(async () => preprocessingResult('session-preprocess'))
+    installApi({ runSessionPreprocessor })
+
+    await createRoot(async (dispose) => {
+      try {
+        const controller = createKnowledgeProcessingController()
+        await controller.runKnowledgeMaintenance({ preprocessingRunId: 'preprocess-1' })
+        await controller.runSessionPreprocessor({
+          artifactId: 'artifact-1',
+          expectedRevision: 'a'.repeat(64),
+          attention: 'Focus on explicit decisions'
+        })
+
+        expect(runSessionPreprocessor).toHaveBeenCalledWith({
+          artifactId: 'artifact-1',
+          expectedRevision: 'a'.repeat(64),
+          attention: 'Focus on explicit decisions'
+        })
+        expect(controller.preprocessingResult()?.runId).toBe('session-preprocess')
+        expect(controller.maintenanceResult()).toBeUndefined()
+      } finally {
+        dispose()
+      }
+    })
+  })
+
+  it('keeps a valid contribution when a later maintenance confirmation is cancelled', async () => {
+    let maintenanceCalls = 0
+    installApi({
+      runKnowledgeMaintenance: async () => {
+        maintenanceCalls += 1
+        return maintenanceCalls === 1 ? maintenanceResult() : undefined
+      }
+    })
+
+    await createRoot(async (dispose) => {
+      try {
+        const controller = createKnowledgeProcessingController()
+        await controller.runKnowledgeMaintenance({ preprocessingRunId: 'preprocess-1' })
+        await controller.runKnowledgeMaintenance({ preprocessingRunId: 'preprocess-1' })
+
+        expect(controller.maintenanceResult()?.contribution.statements[0]?.title).toBe('Candidate')
+      } finally {
+        dispose()
+      }
+    })
+  })
+
+  it('keeps a completed sandbox result until that sandbox is explicitly discarded', async () => {
+    const discardSandbox = vi.fn(async () => undefined)
+    installApi({ discardSandbox })
+
+    await createRoot(async (dispose) => {
+      try {
+        const controller = createKnowledgeProcessingController()
+        await controller.runFullChain({
+          artifactId: 'artifact-1',
+          expectedRevision: 'a'.repeat(64)
+        })
+
+        expect(controller.fullChainResult()?.sandbox.id).toBe('sandbox-1')
+        await controller.discardSandbox('sandbox-1')
+
+        expect(discardSandbox).toHaveBeenCalledWith('sandbox-1')
+        expect(controller.fullChainResult()).toBeUndefined()
+      } finally {
+        dispose()
+      }
+    })
+  })
+
+  it('loads only the available Session summaries exposed by Discovery', async () => {
+    const session = fullChainResult().session
+    installApi({}, [session])
+
+    await createRoot(async (dispose) => {
+      try {
+        const controller = createKnowledgeProcessingController()
+        await controller.loadAvailableSessions()
+
+        expect(controller.availableSessions()).toEqual([session])
+        expect(controller.sessionsLoading()).toBe(false)
+      } finally {
+        dispose()
+      }
+    })
+  })
+})

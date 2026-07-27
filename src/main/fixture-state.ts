@@ -1,5 +1,13 @@
 import type { DiscoveryStateData } from './discovery/model'
 
+export const FIXTURE_SESSION_CONTENT = [
+  '{"type":"user","message":"我希望知识加工链路保持简洁，并且每条知识都能回溯到原始证据。"}',
+  '{"type":"assistant","message":"可以使用可丢弃的 Evidence Map，再由 Agent 按需展开原始观察。"}',
+  '{"type":"user","message":"测试写入必须与正式知识库隔离，且可以随时重复运行。"}'
+].join('\n')
+
+export const FIXTURE_SESSION_ARTIFACT_ID = 'fixture-session-001'
+
 export function createFixtureState(): DiscoveryStateData {
   return {
     sources: [
@@ -16,14 +24,10 @@ export function createFixtureState(): DiscoveryStateData {
         instructionFileCount: 4,
         totalBytes: 8_808_038,
         invalidFileCount: 2,
-        syncedBytes: 7_438_254,
-        syncedSessionCount: 31,
-        syncedInstructionFileCount: 4,
         oldestSessionAt: '2026-05-02T08:20:00.000Z',
         latestSessionAt: '2026-07-21T13:42:00.000Z',
         lastDetectedAt: '2026-07-22T04:00:00.000Z',
-        lastScannedAt: '2026-07-22T04:01:00.000Z',
-        lastSyncedAt: '2026-07-22T04:02:00.000Z'
+        lastScannedAt: '2026-07-22T04:01:00.000Z'
       },
       {
         id: 'source:pi',
@@ -31,15 +35,12 @@ export function createFixtureState(): DiscoveryStateData {
         displayName: 'Pi',
         rootPath: '/Users/demo/.pi/agent/sessions',
         discoveryState: 'found',
-        scanState: 'ready',
+        scanState: 'scanning',
         fileCount: 22,
         sessionCount: 20,
         instructionFileCount: 2,
         totalBytes: 4_194_304,
         invalidFileCount: 0,
-        syncedBytes: 1_321_206,
-        syncedSessionCount: 7,
-        syncedInstructionFileCount: 1,
         oldestSessionAt: '2026-06-11T09:00:00.000Z',
         latestSessionAt: '2026-07-22T02:18:00.000Z',
         lastDetectedAt: '2026-07-22T04:00:00.000Z',
@@ -58,19 +59,28 @@ export function createFixtureState(): DiscoveryStateData {
         instructionFileCount: 0,
         totalBytes: 0,
         invalidFileCount: 0,
-        syncedBytes: 0,
-        syncedSessionCount: 0,
-        syncedInstructionFileCount: 0,
         lastDetectedAt: '2026-07-22T04:00:00.000Z',
         errorMessage: '无法读取历史记录目录'
       }
     ],
-    artifacts: [],
+    artifacts: [{
+      id: FIXTURE_SESSION_ARTIFACT_ID,
+      sourceId: 'source:claude',
+      kind: 'conversation',
+      externalId: 'fixture-session-2026-07-21',
+      relativePath: 'fixture/session.jsonl',
+      title: '知识加工 Sandbox 设计讨论',
+      projectPath: '/Users/demo/projects/oyster',
+      startedAt: '2026-07-21T13:10:00.000Z',
+      updatedAt: '2026-07-21T13:42:00.000Z',
+      sizeBytes: Buffer.byteLength(FIXTURE_SESSION_CONTENT),
+      modifiedAt: '2026-07-21T13:42:00.000Z',
+      fingerprint: 'a'.repeat(64)
+    }],
     runs: [
       {
-        id: 'fixture-running-import',
+        id: 'fixture-running-scan',
         sourceId: 'source:pi',
-        kind: 'import',
         state: 'running',
         totalFiles: 14,
         processedFiles: 5,

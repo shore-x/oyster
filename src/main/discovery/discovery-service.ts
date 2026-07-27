@@ -4,9 +4,10 @@ import type {
   AgentSource,
   AgentType,
   ArtifactKind,
+  AvailableSessionSummary,
   DiscoverySnapshot,
   HistoryArtifact,
-  SyncRun
+  ScanRun
 } from '../../shared/discovery'
 import { AGENT_TYPES } from '../../shared/discovery'
 import { createDetectionContext } from './adapters'
@@ -15,9 +16,9 @@ import type {
   DetectionContext,
   DiscoveryRepository,
   DiscoveryStateData,
-  RawEvidenceStore,
   ArtifactCandidate
 } from './model'
+import type { SourceEvidenceReader } from './source-evidence-reader'
 
 type SnapshotListener = (snapshot: DiscoverySnapshot) => void
 
@@ -29,6 +30,19 @@ interface ActiveOperation {
 
 interface DiscoveryServiceOptions {
   recoverInterruptedRuns?: boolean
+}
+
+export interface ReadAvailableSessionInput {
+  artifactId: string
+  expectedRevision: string
+}
+
+export interface AvailableSessionEvidence {
+  artifactId: string
+  revision: string
+  contentHash: string
+  sizeBytes: number
+  content: string
 }
 
 function now(): string {
@@ -67,7 +81,7 @@ export class DiscoveryService {
 
   constructor(
     private readonly repository: DiscoveryRepository,
-    private readonly rawEvidenceStore: RawEvidenceStore,
+    private readonly sourceEvidenceReader: SourceEvidenceReader,
     adapters: AgentHistoryAdapter[],
     detectionContext = createDetectionContext(homedir()),
     private readonly options: DiscoveryServiceOptions = {}
@@ -93,17 +107,11 @@ export class DiscoveryService {
         sessionCount: 0,
         instructionFileCount: 0,
         totalBytes: 0,
-        invalidFileCount: 0,
-        syncedBytes: 0,
-        syncedSessionCount: 0,
-        syncedInstructionFileCount: 0
+        invalidFileCount: 0
       })
     }
 
-    for (const source of this.state.sources) {
-      source.instructionFileCount ??= 0
-      source.syncedInstructionFileCount ??= 0
-    }
+    for (const source of this.state.sources) source.instructionFileCount ??= 0
 
     if (this.options.recoverInterruptedRuns !== false) {
       for (const run of this.state.runs) {
@@ -111,9 +119,6 @@ export class DiscoveryService {
         run.state = 'interrupted'
         run.finishedAt = stamp
         run.errorMessage = '应用在任务完成前退出'
-      }
-      for (const artifact of this.state.artifacts) {
-        if (artifact.syncState === 'syncing') artifact.syncState = 'pending'
       }
       for (const source of this.state.sources) {
         if (source.scanState === 'scanning') source.scanState = 'idle'
@@ -134,6 +139,71 @@ export class DiscoveryService {
         .sort((left, right) => (right.startedAt || '').localeCompare(left.startedAt || ''))
         .slice(0, 30)
     })
+  }
+
+  listAvailableSessions(): AvailableSessionSummary[] {
+    return this.state.artifacts
+      .filter((artifact) => artifact.kind === 'conversation')
+      .flatMap<AvailableSessionSummary>((artifact) => {
+        const source = this.state.sources.find((candidate) => candidate.id === artifact.sourceId)
+        if (!source || source.discoveryState !== 'found') return []
+        return [{
+          artifactId: artifact.id,
+          sourceId: source.id,
+          agentType: source.agentType,
+          sourceDisplayName: source.displayName,
+          externalId: artifact.externalId,
+          title: artifact.title,
+          projectPath: artifact.projectPath,
+          startedAt: artifact.startedAt,
+          updatedAt: artifact.updatedAt,
+          sizeBytes: artifact.sizeBytes,
+          revision: artifact.fingerprint
+        }]
+      })
+      .sort((left, right) => {
+        const leftDate = left.updatedAt || left.startedAt || ''
+        const rightDate = right.updatedAt || right.startedAt || ''
+        return rightDate.localeCompare(leftDate) || left.artifactId.localeCompare(right.artifactId)
+      })
+      .map((session) => clone(session))
+  }
+
+  async readAvailableSession(
+    input: ReadAvailableSessionInput,
+    maxBytes: number
+  ): Promise<AvailableSessionEvidence> {
+    if (typeof input.artifactId !== 'string' || input.artifactId.length === 0 || input.artifactId.length > 256) {
+      throw new Error('Invalid Session artifact ID')
+    }
+    if (!/^[a-f0-9]{64}$/i.test(input.expectedRevision)) {
+      throw new Error('Invalid Session revision')
+    }
+    const artifact = this.state.artifacts.find((candidate) => candidate.id === input.artifactId)
+    if (!artifact || artifact.kind !== 'conversation') {
+      throw new Error('The source Session is no longer available')
+    }
+    if (artifact.fingerprint !== input.expectedRevision) {
+      throw new Error('The source Session revision has changed')
+    }
+    const source = this.state.sources.find((candidate) => candidate.id === artifact.sourceId)
+    if (!source) throw new Error('The source Session is no longer available')
+    const adapter = this.requireAdapter(source.agentType)
+    const evidence = await this.sourceEvidenceReader.read({
+      artifactId: artifact.id,
+      absolutePath: adapter.resolveArtifactPath(source.rootPath, artifact),
+      expectedSizeBytes: artifact.sizeBytes,
+      expectedModifiedAt: artifact.modifiedAt,
+      maxBytes
+    })
+    const content = new TextDecoder('utf-8', { fatal: true }).decode(evidence.content)
+    return {
+      artifactId: artifact.id,
+      revision: artifact.fingerprint,
+      contentHash: evidence.contentHash,
+      sizeBytes: evidence.sizeBytes,
+      content
+    }
   }
 
   subscribe(listener: SnapshotListener): () => void {
@@ -182,13 +252,9 @@ export class DiscoveryService {
     source.instructionFileCount = 0
     source.totalBytes = 0
     source.invalidFileCount = 0
-    source.syncedBytes = 0
-    source.syncedSessionCount = 0
-    source.syncedInstructionFileCount = 0
     source.oldestSessionAt = undefined
     source.latestSessionAt = undefined
     source.lastScannedAt = undefined
-    source.lastSyncedAt = undefined
     this.state.artifacts = this.state.artifacts.filter((artifact) => artifact.sourceId !== sourceId)
 
     const detection = await adapter.detect(this.detectionContext, rootPath)
@@ -210,10 +276,9 @@ export class DiscoveryService {
     const source = this.requireSource(sourceId)
     if (source.discoveryState !== 'found' || this.activeOperations.has(sourceId)) return this.snapshot()
 
-    const run: SyncRun = {
+    const run: ScanRun = {
       id: randomUUID(),
       sourceId,
-      kind: 'scan',
       state: 'running',
       totalFiles: 0,
       processedFiles: 0,
@@ -229,35 +294,6 @@ export class DiscoveryService {
     this.activeOperations.set(sourceId, operation)
     await this.persistAndEmit()
     operation.task = this.performScan(source, run, operation.controller.signal)
-    return this.snapshot()
-  }
-
-  async importSource(sourceId: string): Promise<DiscoverySnapshot> {
-    const source = this.requireSource(sourceId)
-    if (source.scanState !== 'ready' || this.activeOperations.has(sourceId)) return this.snapshot()
-    const artifacts = this.state.artifacts.filter(
-      (artifact) =>
-        artifact.sourceId === sourceId &&
-        artifact.syncState !== 'missing' &&
-        artifact.syncedFingerprint !== artifact.fingerprint
-    )
-    const run: SyncRun = {
-      id: randomUUID(),
-      sourceId,
-      kind: 'import',
-      state: 'running',
-      totalFiles: artifacts.length,
-      processedFiles: 0,
-      totalBytes: artifacts.reduce((total, artifact) => total + artifact.sizeBytes, 0),
-      processedBytes: 0,
-      invalidFiles: 0,
-      startedAt: now()
-    }
-    this.addRun(run)
-    const operation: ActiveOperation = { runId: run.id, controller: new AbortController() }
-    this.activeOperations.set(sourceId, operation)
-    await this.persistAndEmit()
-    operation.task = this.performImport(source, run, artifacts, operation.controller.signal)
     return this.snapshot()
   }
 
@@ -280,7 +316,7 @@ export class DiscoveryService {
     await Promise.all(tasks)
   }
 
-  private async performScan(source: AgentSource, run: SyncRun, signal: AbortSignal): Promise<void> {
+  private async performScan(source: AgentSource, run: ScanRun, signal: AbortSignal): Promise<void> {
     const adapter = this.requireAdapter(source.agentType)
     const observed = new Set<string>()
     let oldest: string | undefined
@@ -302,8 +338,6 @@ export class DiscoveryService {
           observed.add(id)
           const nextFingerprint = fingerprint(source.id, candidate)
           const existing = this.state.artifacts.find((artifact) => artifact.id === id)
-          const nextState =
-            existing?.syncedFingerprint === nextFingerprint ? ('synced' as const) : ('pending' as const)
           const artifact: HistoryArtifact = {
             id,
             sourceId: source.id,
@@ -318,12 +352,7 @@ export class DiscoveryService {
             updatedAt: candidate.updatedAt,
             sizeBytes: candidate.sizeBytes,
             modifiedAt: candidate.modifiedAt,
-            fingerprint: nextFingerprint,
-            syncState: nextState,
-            rawEvidenceId: nextState === 'synced' ? existing?.rawEvidenceId : undefined,
-            rawContentHash: nextState === 'synced' ? existing?.rawContentHash : undefined,
-            syncedFingerprint: existing?.syncedFingerprint,
-            errorMessage: undefined
+            fingerprint: nextFingerprint
           }
           if (existing) Object.assign(existing, artifact)
           else this.state.artifacts.push(artifact)
@@ -337,9 +366,9 @@ export class DiscoveryService {
         if (run.processedFiles % 25 === 0) this.emit()
       }
 
-      for (const artifact of this.state.artifacts) {
-        if (artifact.sourceId === source.id && !observed.has(artifact.id)) artifact.syncState = 'missing'
-      }
+      this.state.artifacts = this.state.artifacts.filter(
+        (artifact) => artifact.sourceId !== source.id || observed.has(artifact.id)
+      )
       const currentArtifacts = this.currentArtifacts(source.id)
       source.fileCount = run.totalFiles
       source.sessionCount = currentArtifacts.filter((artifact) => artifact.kind === 'conversation').length
@@ -353,7 +382,6 @@ export class DiscoveryService {
       source.lastScannedAt = now()
       source.scanState = 'ready'
       source.errorMessage = undefined
-      this.recalculateSync(source)
       run.state = 'completed'
       run.finishedAt = now()
     } catch (error) {
@@ -371,92 +399,11 @@ export class DiscoveryService {
     }
   }
 
-  private async performImport(
-    source: AgentSource,
-    run: SyncRun,
-    artifacts: HistoryArtifact[],
-    signal: AbortSignal
-  ): Promise<void> {
-    const adapter = this.requireAdapter(source.agentType)
-    let failures = 0
-    let activeArtifact: HistoryArtifact | undefined
-
-    try {
-      for (const artifact of artifacts) {
-        signal.throwIfAborted()
-        activeArtifact = artifact
-        artifact.syncState = 'syncing'
-        this.emit()
-        let artifactProgress = 0
-        try {
-          const receipt = await this.rawEvidenceStore.importFile({
-            sourceId: source.id,
-            artifactId: artifact.id,
-            artifactKind: artifact.kind,
-            absolutePath: adapter.resolveArtifactPath(source.rootPath, artifact),
-            fingerprint: artifact.fingerprint,
-            signal,
-            onProgress: (bytes) => {
-              const acceptedBytes = Math.max(0, Math.min(bytes, artifact.sizeBytes - artifactProgress))
-              artifactProgress += acceptedBytes
-              run.processedBytes += acceptedBytes
-              this.emit()
-            }
-          })
-          artifact.rawEvidenceId = receipt.id
-          artifact.rawContentHash = receipt.contentHash
-          artifact.syncedFingerprint = artifact.fingerprint
-          artifact.syncState = 'synced'
-          artifact.errorMessage = undefined
-        } catch (error) {
-          if (signal.aborted || isAbortError(error)) throw error
-          failures += 1
-          artifact.syncState = 'failed'
-          artifact.errorMessage = errorMessage(error)
-        }
-        run.processedBytes += Math.max(0, artifact.sizeBytes - artifactProgress)
-        activeArtifact = undefined
-        run.processedFiles += 1
-        this.recalculateSync(source)
-        await this.persistAndEmit()
-      }
-
-      run.state = failures > 0 ? 'failed' : 'completed'
-      run.errorMessage = failures > 0 ? `${failures} 个文件导入失败` : undefined
-      run.finishedAt = now()
-      source.lastSyncedAt = now()
-    } catch (error) {
-      const cancelled = signal.aborted || isAbortError(error)
-      if (activeArtifact?.syncState === 'syncing') activeArtifact.syncState = 'pending'
-      run.state = cancelled ? 'cancelled' : 'failed'
-      run.finishedAt = now()
-      run.errorMessage = cancelled ? undefined : errorMessage(error)
-    } finally {
-      this.recalculateSync(source)
-      this.activeOperations.delete(source.id)
-      await this.persistAndEmit()
-    }
-  }
-
   private currentArtifacts(sourceId: string): HistoryArtifact[] {
-    return this.state.artifacts.filter(
-      (artifact) => artifact.sourceId === sourceId && artifact.syncState !== 'missing'
-    )
+    return this.state.artifacts.filter((artifact) => artifact.sourceId === sourceId)
   }
 
-  private recalculateSync(source: AgentSource): void {
-    const artifacts = this.currentArtifacts(source.id)
-    const synced = artifacts.filter(
-      (artifact) => artifact.syncState === 'synced' && artifact.syncedFingerprint === artifact.fingerprint
-    )
-    source.syncedSessionCount = synced.filter((artifact) => artifact.kind === 'conversation').length
-    source.syncedInstructionFileCount = synced.filter(
-      (artifact) => artifact.kind === 'human_instruction'
-    ).length
-    source.syncedBytes = synced.reduce((total, artifact) => total + artifact.sizeBytes, 0)
-  }
-
-  private addRun(run: SyncRun): void {
+  private addRun(run: ScanRun): void {
     this.state.runs.unshift(run)
     if (this.state.runs.length > 60) this.state.runs.length = 60
   }

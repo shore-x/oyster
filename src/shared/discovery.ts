@@ -5,9 +5,7 @@ export type ArtifactKind = 'conversation' | 'human_instruction'
 export type InstructionScope = 'user' | 'project' | 'managed'
 export type DiscoveryState = 'not_found' | 'found' | 'needs_permission' | 'error'
 export type ScanState = 'idle' | 'scanning' | 'ready' | 'error'
-export type ArtifactSyncState = 'pending' | 'syncing' | 'synced' | 'failed' | 'missing'
-export type SyncRunState = 'queued' | 'running' | 'completed' | 'cancelled' | 'failed' | 'interrupted'
-export type SyncRunKind = 'scan' | 'import'
+export type ScanRunState = 'queued' | 'running' | 'completed' | 'cancelled' | 'failed' | 'interrupted'
 
 export interface AgentSource {
   id: string
@@ -22,14 +20,10 @@ export interface AgentSource {
   instructionFileCount: number
   totalBytes: number
   invalidFileCount: number
-  syncedBytes: number
-  syncedSessionCount: number
-  syncedInstructionFileCount: number
   oldestSessionAt?: string
   latestSessionAt?: string
   lastDetectedAt?: string
   lastScannedAt?: string
-  lastSyncedAt?: string
   errorMessage?: string
 }
 export interface HistoryArtifact {
@@ -47,18 +41,12 @@ export interface HistoryArtifact {
   sizeBytes: number
   modifiedAt: string
   fingerprint: string
-  syncState: ArtifactSyncState
-  rawEvidenceId?: string
-  rawContentHash?: string
-  syncedFingerprint?: string
-  errorMessage?: string
 }
 
-export interface SyncRun {
+export interface ScanRun {
   id: string
   sourceId: string
-  kind: SyncRunKind
-  state: SyncRunState
+  state: ScanRunState
   totalFiles: number
   processedFiles: number
   totalBytes: number
@@ -71,16 +59,30 @@ export interface SyncRun {
 
 export interface DiscoverySnapshot {
   sources: AgentSource[]
-  runs: SyncRun[]
+  runs: ScanRun[]
+}
+
+/** A path-free reference to one discovered conversation revision. */
+export interface AvailableSessionSummary {
+  artifactId: string
+  sourceId: string
+  agentType: AgentType
+  sourceDisplayName: string
+  externalId: string
+  title?: string
+  projectPath?: string
+  startedAt?: string
+  updatedAt?: string
+  sizeBytes: number
+  revision: string
 }
 
 export interface DiscoveryApi {
   getSnapshot(): Promise<DiscoverySnapshot>
+  listAvailableSessions(): Promise<AvailableSessionSummary[]>
   detectAgents(): Promise<DiscoverySnapshot>
   scanSource(sourceId: string): Promise<DiscoverySnapshot>
-  importSource(sourceId: string): Promise<DiscoverySnapshot>
   cancelRun(runId: string): Promise<DiscoverySnapshot>
   chooseSourceRoot(sourceId: string): Promise<DiscoverySnapshot>
-  openRawEvidenceDirectory(): Promise<void>
   subscribe(listener: (snapshot: DiscoverySnapshot) => void): () => void
 }

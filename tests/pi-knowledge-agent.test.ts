@@ -1,0 +1,504 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  createAssistantMessageEventStream,
+  createModels,
+  fauxAssistantMessage,
+  fauxProvider,
+  fauxToolCall,
+  type Api,
+  type AssistantMessage,
+  type Context,
+  type FauxResponseStep,
+  type Model,
+  type Usage
+} from '@earendil-works/pi-ai'
+import type { StreamFn } from '@earendil-works/pi-agent-core'
+import { ModelConnectionFailureError } from '../src/main/ai-backends/model'
+import type { ModelRuntime } from '../src/main/ai-backends/model'
+import type {
+  KnowledgeAgentRunInput,
+  KnowledgeReader,
+  KnowledgeStatementRecord
+} from '../src/main/knowledge-processing/model'
+import { PiKnowledgeMaintenanceAgent } from '../src/main/knowledge-processing/pi-knowledge-agent'
+
+const TOOL_NAMES = [
+  'search_knowledge',
+  'read_knowledge_statement',
+  'read_evidence',
+  'submit_knowledge_contribution'
+]
+
+class MemoryKnowledgeReader implements KnowledgeReader {
+  readonly searchCalls: Array<{ query: string; limit: number }> = []
+  readonly readCalls: string[] = []
+
+  constructor(private readonly records: KnowledgeStatementRecord[] = []) {}
+
+  async search(query: string, limit: number, signal?: AbortSignal): Promise<KnowledgeStatementRecord[]> {
+    signal?.throwIfAborted()
+    this.searchCalls.push({ query, limit })
+    return this.records.slice(0, limit)
+  }
+
+  async read(statementId: string, signal?: AbortSignal): Promise<KnowledgeStatementRecord | undefined> {
+    signal?.throwIfAborted()
+    this.readCalls.push(statementId)
+    return this.records.find((record) => record.id === statementId)
+  }
+}
+
+function runInput(overrides: Partial<KnowledgeAgentRunInput> = {}): KnowledgeAgentRunInput {
+  return {
+    runtime: {
+      model: { id: 'unconfigured-test-model' } as Model<Api>,
+      streamFn: (() => {
+        throw new Error('test must supply a Model Runtime')
+      }) as StreamFn
+    },
+    systemPrompt: 'Maintain knowledge using only authorized Oyster tools.',
+    evidenceMap: 'Preference candidate at L000001-L000002.',
+    observationLines: ['RAW_SECRET prefers concise output', 'The user rejected verbose output'],
+    sourceRef: 'observation:test:1',
+    contributionRunRef: 'test-run:1',
+    attention: 'Track explicit preferences.',
+    signal: new AbortController().signal,
+    ...overrides
+  }
+}
+
+function contributionSubmission(content: string) {
+  return {
+    statements: [{
+      localRef: 'candidate-1',
+      title: 'Candidate knowledge',
+      content,
+      sources: [{
+        sourceRef: 'observation:test:1',
+        selector: 'L000001-L000001'
+      }]
+    }]
+  }
+}
+
+function fauxRuntime(responses: FauxResponseStep[], reasoning = false): {
+  runtime: ModelRuntime
+  callCount(): number
+  reasoningCalls: Array<string | undefined>
+} {
+  const faux = fauxProvider()
+  faux.setResponses(responses)
+  const models = createModels()
+  models.setProvider(faux.provider)
+  const reasoningCalls: Array<string | undefined> = []
+  return {
+    runtime: {
+      model: { ...faux.getModel(), reasoning },
+      streamFn: (model, context, options) => {
+        reasoningCalls.push(options?.reasoning)
+        return models.streamSimple(model, context, options)
+      }
+    },
+    callCount: () => faux.state.callCount,
+    reasoningCalls
+  }
+}
+
+function lastToolResult(context: Context) {
+  const message = [...context.messages].reverse().find((candidate) => candidate.role === 'toolResult')
+  if (!message || message.role !== 'toolResult') throw new Error('Expected a tool result')
+  return message
+}
+
+function toolResults(context: Context) {
+  return context.messages.flatMap((message) => message.role === 'toolResult' ? [message] : [])
+}
+
+function textContent(message: ReturnType<typeof lastToolResult>): string {
+  return message.content.flatMap((content) => content.type === 'text' ? [content.text] : []).join('\n')
+}
+
+function emptyUsage(): Usage {
+  return {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+  }
+}
+
+function waitingStreamFn(): StreamFn {
+  return (model, _context, options) => {
+    const stream = createAssistantMessageEventStream()
+    const abort = (): void => {
+      const output: AssistantMessage = {
+        role: 'assistant',
+        content: [],
+        api: model.api,
+        provider: model.provider,
+        model: model.id,
+        usage: emptyUsage(),
+        stopReason: 'aborted',
+        errorMessage: 'aborted',
+        timestamp: Date.now()
+      }
+      stream.push({ type: 'error', reason: 'aborted', error: output })
+      stream.end(output)
+    }
+    if (options?.signal?.aborted) abort()
+    else options?.signal?.addEventListener('abort', abort, { once: true })
+    return stream
+  }
+}
+
+function waitingRuntime(model: Model<Api>): ModelRuntime {
+  return { model, streamFn: waitingStreamFn() }
+}
+
+afterEach(() => {
+  vi.useRealTimers()
+})
+
+describe('PiKnowledgeMaintenanceAgent', () => {
+  it('forwards the configured reasoning effort through the Pi Agent loop only for a reasoning model', async () => {
+    const response = fauxAssistantMessage(fauxToolCall(
+      'submit_knowledge_contribution',
+      contributionSubmission('Reasoned candidate')
+    ), { stopReason: 'toolUse' })
+    const supported = fauxRuntime([response], true)
+    const unsupported = fauxRuntime([response], false)
+
+    await new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
+      runtime: supported.runtime,
+      reasoningEffort: 'high'
+    }))
+    await new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
+      runtime: unsupported.runtime,
+      reasoningEffort: 'high'
+    }))
+
+    expect(supported.reasoningCalls).toEqual(['high'])
+    expect(unsupported.reasoningCalls).toEqual([undefined])
+  })
+
+  it('uses a real four-turn Pi tool loop without putting raw Observation in the initial prompt', async () => {
+    const hugeContent = `Known preference. ${'x'.repeat(80_000)}`
+    const reader = new MemoryKnowledgeReader([{
+      id: 'statement:1',
+      title: 'Output preference',
+      content: hugeContent
+    }])
+    const runtime = fauxRuntime([
+      (context) => {
+        expect(context.systemPrompt).toBe('Maintain knowledge using only authorized Oyster tools.')
+        expect(context.tools?.map((tool) => tool.name)).toEqual(TOOL_NAMES)
+        expect(JSON.stringify(context.messages)).toContain('Preference candidate')
+        expect(JSON.stringify(context.messages)).not.toContain('RAW_SECRET')
+        return fauxAssistantMessage(
+          fauxToolCall('search_knowledge', { query: 'output preference', limit: 5 }),
+          { stopReason: 'toolUse' }
+        )
+      },
+      (context) => {
+        const result = textContent(lastToolResult(context))
+        expect(result.length).toBeLessThanOrEqual(16 * 1_024)
+        expect(result).toContain('statement:1')
+        return fauxAssistantMessage(
+          fauxToolCall('read_knowledge_statement', { statementId: 'statement:1' }),
+          { stopReason: 'toolUse' }
+        )
+      },
+      (context) => {
+        const result = textContent(lastToolResult(context))
+        expect(result.length).toBeLessThanOrEqual(32 * 1_024)
+        expect(result).toContain('内容因工具输出上限而截断')
+        return fauxAssistantMessage(
+          fauxToolCall('read_evidence', {
+            sourceRef: 'observation:test:1',
+            selector: 'L000001-L000002'
+          }),
+          { stopReason: 'toolUse' }
+        )
+      },
+      (context) => {
+        const result = textContent(lastToolResult(context))
+        expect(result).toContain('L000001 RAW_SECRET prefers concise output')
+        expect(result).toContain('L000002 The user rejected verbose output')
+        return fauxAssistantMessage(
+          fauxToolCall(
+            'submit_knowledge_contribution',
+            contributionSubmission('# Candidate\n\nThe user prefers concise output.')
+          ),
+          { stopReason: 'toolUse' }
+        )
+      }
+    ])
+    const agent = new PiKnowledgeMaintenanceAgent(reader)
+
+    const result = await agent.run(runInput({ runtime: runtime.runtime }))
+
+    expect(result).toEqual({
+      contribution: {
+        runRef: 'test-run:1',
+        ...contributionSubmission('# Candidate\n\nThe user prefers concise output.')
+      },
+      modelCallCount: 4,
+      toolCalls: TOOL_NAMES
+    })
+    expect(reader.searchCalls).toEqual([{ query: 'output preference', limit: 5 }])
+    expect(reader.readCalls).toEqual(['statement:1'])
+  })
+
+  it('allows only the exact workspace sourceRef and six-digit selectors of at most 200 lines', async () => {
+    const observationLines = Array.from({ length: 201 }, (_, index) => `secret-line-${index + 1}`)
+    const runtime = fauxRuntime([
+      fauxAssistantMessage(fauxToolCall('read_evidence', {
+        sourceRef: 'observation:other',
+        selector: 'L000001-L000001'
+      }), { stopReason: 'toolUse' }),
+      (context) => {
+        const result = lastToolResult(context)
+        expect(result.isError).toBe(true)
+        expect(textContent(result)).not.toContain('secret-line-1')
+        return fauxAssistantMessage(fauxToolCall('read_evidence', {
+          sourceRef: 'observation:test:1',
+          selector: 'L000001-L000201'
+        }), { stopReason: 'toolUse' })
+      },
+      (context) => {
+        const result = lastToolResult(context)
+        expect(result.isError).toBe(true)
+        expect(textContent(result)).toContain('最多读取 200 行')
+        return fauxAssistantMessage(fauxToolCall('read_evidence', {
+          sourceRef: 'observation:test:1',
+          selector: 'L000201-L000201'
+        }), { stopReason: 'toolUse' })
+      },
+      (context) => {
+        const result = lastToolResult(context)
+        expect(result.isError).toBe(false)
+        expect(textContent(result)).toBe('L000201 secret-line-201')
+        return fauxAssistantMessage(fauxToolCall(
+          'submit_knowledge_contribution',
+          contributionSubmission('No durable claim; evidence was only inspected.')
+        ), { stopReason: 'toolUse' })
+      }
+    ])
+    const agent = new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader())
+
+    await expect(agent.run(runInput({ runtime: runtime.runtime, observationLines }))).resolves.toMatchObject({
+      contribution: { statements: [{ content: 'No durable claim; evidence was only inspected.' }] },
+      modelCallCount: 4
+    })
+  })
+
+  it('returns recoverable tool errors for repeated searches, statements, and overlapping evidence', async () => {
+    const reader = new MemoryKnowledgeReader([{
+      id: 'statement:1',
+      title: 'Output preference',
+      content: 'The user prefers concise output.'
+    }])
+    const runtime = fauxRuntime([
+      fauxAssistantMessage([
+        fauxToolCall('search_knowledge', { query: '  Output   preference  ' }, { id: 'search-first' }),
+        fauxToolCall('read_knowledge_statement', { statementId: 'statement:1' }, { id: 'statement-first' }),
+        fauxToolCall('read_evidence', {
+          sourceRef: 'observation:test:1',
+          selector: 'L000001-L000002'
+        }, { id: 'evidence-first' })
+      ], { stopReason: 'toolUse' }),
+      fauxAssistantMessage([
+        fauxToolCall('search_knowledge', { query: 'output preference' }, { id: 'search-repeat' }),
+        fauxToolCall('read_knowledge_statement', { statementId: 'statement:1' }, { id: 'statement-repeat' }),
+        fauxToolCall('read_evidence', {
+          sourceRef: 'observation:test:1',
+          selector: 'L000002-L000002'
+        }, { id: 'evidence-overlap' })
+      ], { stopReason: 'toolUse' }),
+      (context) => {
+        const repeated = toolResults(context).slice(-3)
+        expect(repeated).toHaveLength(3)
+        expect(repeated.every((result) => result.isError)).toBe(true)
+        expect(textContent(repeated[0])).toContain('重复搜索已拒绝')
+        expect(textContent(repeated[1])).toContain('已读取')
+        expect(textContent(repeated[2])).toContain('重叠')
+        return fauxAssistantMessage(fauxToolCall(
+          'submit_knowledge_contribution',
+          contributionSubmission('Recovered from duplicate reads and submitted.')
+        ), { stopReason: 'toolUse' })
+      }
+    ])
+    const agent = new PiKnowledgeMaintenanceAgent(reader)
+
+    await expect(agent.run(runInput({ runtime: runtime.runtime }))).resolves.toMatchObject({
+      contribution: { statements: [{ content: 'Recovered from duplicate reads and submitted.' }] },
+      modelCallCount: 3
+    })
+    expect(reader.searchCalls).toEqual([{ query: 'Output   preference', limit: 8 }])
+    expect(reader.readCalls).toEqual(['statement:1'])
+  })
+
+  it('enforces a cumulative evidence line budget while allowing the Agent to submit afterwards', async () => {
+    const observationLines = Array.from({ length: 401 }, (_, index) => `line-${index + 1}`)
+    const runtime = fauxRuntime([
+      fauxAssistantMessage(fauxToolCall('read_evidence', {
+        sourceRef: 'observation:test:1',
+        selector: 'L000001-L000200'
+      }), { stopReason: 'toolUse' }),
+      fauxAssistantMessage(fauxToolCall('read_evidence', {
+        sourceRef: 'observation:test:1',
+        selector: 'L000201-L000400'
+      }), { stopReason: 'toolUse' }),
+      fauxAssistantMessage(fauxToolCall('read_evidence', {
+        sourceRef: 'observation:test:1',
+        selector: 'L000401-L000401'
+      }), { stopReason: 'toolUse' }),
+      (context) => {
+        const result = lastToolResult(context)
+        expect(result.isError).toBe(true)
+        expect(textContent(result)).toContain('累计最多读取 400 行')
+        return fauxAssistantMessage(fauxToolCall(
+          'submit_knowledge_contribution',
+          contributionSubmission('Submitted within the cumulative evidence budget.')
+        ), { stopReason: 'toolUse' })
+      }
+    ])
+    const agent = new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader())
+
+    await expect(agent.run(runInput({ runtime: runtime.runtime, observationLines }))).resolves.toMatchObject({
+      contribution: { statements: [{ content: 'Submitted within the cumulative evidence budget.' }] },
+      modelCallCount: 4
+    })
+  })
+
+  it('enforces a cumulative tool-output budget before the next model context grows too large', async () => {
+    const observationLines = Array.from({ length: 350 }, () => 'x'.repeat(300))
+    const runtime = fauxRuntime([
+      fauxAssistantMessage(fauxToolCall('read_evidence', {
+        sourceRef: 'observation:test:1',
+        selector: 'L000001-L000150'
+      }), { stopReason: 'toolUse' }),
+      fauxAssistantMessage(fauxToolCall('read_evidence', {
+        sourceRef: 'observation:test:1',
+        selector: 'L000151-L000300'
+      }), { stopReason: 'toolUse' }),
+      fauxAssistantMessage(fauxToolCall('read_evidence', {
+        sourceRef: 'observation:test:1',
+        selector: 'L000301-L000350'
+      }), { stopReason: 'toolUse' }),
+      (context) => {
+        const result = lastToolResult(context)
+        expect(result.isError).toBe(true)
+        expect(textContent(result)).toContain('工具输出累计最多 98304 个字符')
+        return fauxAssistantMessage(fauxToolCall(
+          'submit_knowledge_contribution',
+          contributionSubmission('Submitted within the cumulative output budget.')
+        ), { stopReason: 'toolUse' })
+      }
+    ])
+    const agent = new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader())
+
+    await expect(agent.run(runInput({ runtime: runtime.runtime, observationLines }))).resolves.toMatchObject({
+      contribution: { statements: [{ content: 'Submitted within the cumulative output budget.' }] },
+      modelCallCount: 4
+    })
+  })
+
+  it('fails before making a fifth model call', async () => {
+    const responses = Array.from({ length: 4 }, () => fauxAssistantMessage(
+      fauxToolCall('search_knowledge', { query: 'again' }),
+      { stopReason: 'toolUse' }
+    ))
+    const runtime = fauxRuntime(responses)
+    const agent = new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader())
+
+    await expect(agent.run(runInput({ runtime: runtime.runtime }))).rejects.toThrow('最多允许 4 次模型调用')
+    expect(runtime.callCount()).toBe(4)
+  })
+
+  it('executes at most twelve requested tools', async () => {
+    const reader = new MemoryKnowledgeReader()
+    const calls = Array.from({ length: 13 }, (_, index) => fauxToolCall(
+      'search_knowledge',
+      { query: `query-${index}` },
+      { id: `call-${index}` }
+    ))
+    const runtime = fauxRuntime([
+      fauxAssistantMessage(calls, { stopReason: 'toolUse' })
+    ])
+    const agent = new PiKnowledgeMaintenanceAgent(reader)
+
+    await expect(agent.run(runInput({ runtime: runtime.runtime }))).rejects.toThrow('最多允许 12 次工具调用')
+    expect(reader.searchCalls).toHaveLength(12)
+  })
+
+  it.each([
+    {
+      name: 'a second submission',
+      calls: [
+        fauxToolCall('submit_knowledge_contribution', contributionSubmission('first'), { id: 'submit-1' }),
+        fauxToolCall('submit_knowledge_contribution', contributionSubmission('second'), { id: 'submit-2' })
+      ],
+      error: '只能提交一次'
+    },
+    {
+      name: 'a tool after submission',
+      calls: [
+        fauxToolCall('submit_knowledge_contribution', contributionSubmission('first'), { id: 'submit' }),
+        fauxToolCall('read_evidence', {
+          sourceRef: 'observation:test:1',
+          selector: 'L000001-L000001'
+        }, { id: 'read-after-submit' })
+      ],
+      error: '提交 Knowledge Contribution 后不能继续调用工具'
+    }
+  ])('rejects $name', async ({ calls, error }) => {
+    const runtime = fauxRuntime([fauxAssistantMessage(calls, { stopReason: 'toolUse' })])
+    const agent = new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader())
+
+    await expect(agent.run(runInput({ runtime: runtime.runtime }))).rejects.toThrow(error)
+  })
+
+  it('fails when the model stops without submitting or the model runtime reports an error', async () => {
+    const noSubmit = fauxRuntime([fauxAssistantMessage('I am done without submitting.')])
+    await expect(new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
+      runtime: noSubmit.runtime
+    }))).rejects.toThrow('未提交 Knowledge Contribution')
+
+    const modelFailure = fauxRuntime([
+      fauxAssistantMessage('', { stopReason: 'error', errorMessage: 'provider down' })
+    ])
+    const providerFailure = new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
+      runtime: modelFailure.runtime
+    }))
+    await expect(providerFailure).rejects.toBeInstanceOf(ModelConnectionFailureError)
+    await expect(providerFailure).rejects.toThrow('provider down')
+  })
+
+  it('propagates an external abort to the active Pi run', async () => {
+    const faux = fauxProvider()
+    const controller = new AbortController()
+    const agent = new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader())
+    const run = agent.run(runInput({
+      runtime: waitingRuntime(faux.getModel()),
+      signal: controller.signal
+    }))
+    controller.abort(new Error('user cancelled'))
+
+    await expect(run).rejects.toThrow('user cancelled')
+  })
+
+  it('aborts an active run after five minutes', async () => {
+    vi.useFakeTimers()
+    const faux = fauxProvider()
+    const agent = new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader())
+    const assertion = expect(agent.run(runInput({
+      runtime: waitingRuntime(faux.getModel())
+    }))).rejects.toThrow('运行超时（5 分钟）')
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000)
+    await assertion
+  })
+})

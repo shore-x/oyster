@@ -1,11 +1,12 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { ClaudeHistoryAdapter } from '../src/main/discovery/adapters'
 import { DiscoveryService } from '../src/main/discovery/discovery-service'
-import { MemoryRawEvidenceStore } from '../src/main/discovery/raw-evidence-store'
 import { InMemoryDiscoveryRepository } from '../src/main/discovery/repository'
+import { FileSourceEvidenceReader } from '../src/main/discovery/source-evidence-reader'
 
 const temporaryDirectories: string[] = []
 
@@ -14,7 +15,7 @@ afterEach(async () => {
 })
 
 describe('DiscoveryService', () => {
-  it('detects, scans, and imports history without duplicating unchanged evidence', async () => {
+  it('lists scanned Sessions and reads only the selected source file without an import step', async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), 'oyster-service-'))
     temporaryDirectories.push(homeDirectory)
     const historyRoot = join(homeDirectory, '.claude', 'projects', 'demo')
@@ -35,10 +36,11 @@ describe('DiscoveryService', () => {
     )
     await writeFile(join(historyRoot, 'unknown.jsonl'), '{"type":"other"}\n')
 
-    const evidenceStore = new MemoryRawEvidenceStore()
+    const evidenceReader = new FileSourceEvidenceReader()
+    const readEvidence = vi.spyOn(evidenceReader, 'read')
     const service = new DiscoveryService(
       new InMemoryDiscoveryRepository(),
-      evidenceStore,
+      evidenceReader,
       [new ClaudeHistoryAdapter()],
       { homeDirectory, environment: {}, pathEntries: [] }
     )
@@ -53,26 +55,93 @@ describe('DiscoveryService', () => {
       fileCount: 5,
       sessionCount: 2,
       instructionFileCount: 2,
-      invalidFileCount: 1,
-      syncedSessionCount: 0,
-      syncedInstructionFileCount: 0
+      invalidFileCount: 1
     })
 
-    await service.importSource('source:claude')
-    await service.waitForIdle('source:claude')
-    snapshot = service.snapshot()
-    expect(snapshot.sources[0].syncedSessionCount).toBe(2)
-    expect(snapshot.sources[0].syncedInstructionFileCount).toBe(2)
-    expect(snapshot.sources[0].syncedBytes).toBe(snapshot.sources[0].totalBytes)
-    expect(evidenceStore.records.size).toBe(4)
-    expect([...evidenceStore.records.values()].map((value) => value.toString('utf8'))).not.toContain(
-      '# Agent generated memory\n'
-    )
+    const availableSessions = service.listAvailableSessions()
+    expect(readEvidence).not.toHaveBeenCalled()
+    expect(availableSessions).toHaveLength(2)
+    expect(availableSessions[0]).toMatchObject({
+      sourceId: 'source:claude',
+      agentType: 'claude',
+      sourceDisplayName: 'Claude Code',
+      externalId: 'two'
+    })
+    expect(availableSessions[0].revision).toMatch(/^[a-f0-9]{64}$/)
+    expect(availableSessions[0]).not.toHaveProperty('relativePath')
+    expect(availableSessions[0]).not.toHaveProperty('sourcePath')
+    expect(availableSessions[0]).not.toHaveProperty('contentHash')
 
-    await service.importSource('source:claude')
-    await service.waitForIdle('source:claude')
-    expect(evidenceStore.records.size).toBe(4)
-    expect(service.snapshot().runs[0]).toMatchObject({ kind: 'import', totalFiles: 0, state: 'completed' })
+    const selected = availableSessions.find((session) => session.externalId === 'one')!
+    const sourceContent = await readFile(join(historyRoot, 'one.jsonl'))
+    const evidence = await service.readAvailableSession({
+      artifactId: selected.artifactId,
+      expectedRevision: selected.revision
+    }, selected.sizeBytes)
+    expect(readEvidence).toHaveBeenCalledOnce()
+    expect(evidence).toMatchObject({
+      artifactId: selected.artifactId,
+      revision: selected.revision,
+      contentHash: createHash('sha256').update(sourceContent).digest('hex'),
+      sizeBytes: selected.sizeBytes
+    })
+    expect(evidence.content).toContain('"sessionId":"one"')
+    await expect(service.readAvailableSession({
+      artifactId: selected.artifactId,
+      expectedRevision: '0'.repeat(64)
+    }, selected.sizeBytes)).rejects.toThrow('revision has changed')
+    expect(readEvidence).toHaveBeenCalledOnce()
+    await expect(service.readAvailableSession({
+      artifactId: selected.artifactId,
+      expectedRevision: selected.revision
+    }, selected.sizeBytes - 1)).rejects.toThrow('read limit')
+    expect(service.snapshot().runs[0]).not.toHaveProperty('kind')
+  })
+
+  it('rejects a changed or deleted source revision and removes it after a rescan', async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), 'oyster-session-access-'))
+    temporaryDirectories.push(homeDirectory)
+    const historyRoot = join(homeDirectory, '.claude', 'projects', 'demo')
+    const sessionPath = join(historyRoot, 'one.jsonl')
+    await mkdir(historyRoot, { recursive: true })
+    await writeFile(sessionPath, '{"sessionId":"one","timestamp":"2026-07-01T00:00:00.000Z"}\n')
+
+    const service = new DiscoveryService(
+      new InMemoryDiscoveryRepository(),
+      new FileSourceEvidenceReader(),
+      [new ClaudeHistoryAdapter()],
+      { homeDirectory, environment: {}, pathEntries: [] }
+    )
+    await service.initialize()
+    await service.detectAgents()
+    await service.waitForIdle()
+
+    const selected = service.listAvailableSessions()[0]
+    expect(selected).toBeDefined()
+    await writeFile(sessionPath, '{"sessionId":"one","timestamp":"2026-07-01T00:00:00.000Z","changed":true}\n')
+    await expect(service.readAvailableSession({
+      artifactId: selected.artifactId,
+      expectedRevision: selected.revision
+    }, 1_024)).rejects.toThrow('revision has changed')
+
+    await service.scanSource('source:claude')
+    await service.waitForIdle()
+    const changed = service.listAvailableSessions()[0]
+    expect(changed.artifactId).toBe(selected.artifactId)
+    expect(changed.revision).not.toBe(selected.revision)
+    await expect(service.readAvailableSession({
+      artifactId: selected.artifactId,
+      expectedRevision: selected.revision
+    }, 1_024)).rejects.toThrow('revision has changed')
+
+    await rm(sessionPath)
+    await expect(service.readAvailableSession({
+      artifactId: changed.artifactId,
+      expectedRevision: changed.revision
+    }, 1_024)).rejects.toThrow('no longer available')
+    await service.scanSource('source:claude')
+    await service.waitForIdle()
+    expect(service.listAvailableSessions()).toEqual([])
   })
 
   it('resets indexed sessions when the user selects a different root', async () => {
@@ -86,7 +155,7 @@ describe('DiscoveryService', () => {
 
     const service = new DiscoveryService(
       new InMemoryDiscoveryRepository(),
-      new MemoryRawEvidenceStore(),
+      new FileSourceEvidenceReader(),
       [new ClaudeHistoryAdapter()],
       { homeDirectory, environment: {}, pathEntries: [] }
     )

@@ -1,272 +1,318 @@
-# 知识模型与协作式投影
+# 知识加工与协作式投影
 
-> 状态：早期设计原则，供后续数据模型与评测设计使用
+> 状态：当前设计原则
 >
-> 日期：2026-07-23
+> 日期：2026-07-26
 >
-> 范围：只讨论知识的纵向层次、层间关系、中间知识层的维护原则与用户视图；不选择数据库、索引、Embedding、具体字段或固定本体。
+> 范围：定义观察、知识、投影、Attention、Observation Preprocessing 和 Agent 维护之间的责任边界；确定各层的权威载体、最小持久格式与依赖原则，但不把具体数据库产品、字段物理类型、索引实现、固定本体或某个 Agent Runtime 固化为长期架构要求。当前验证实现的具体选择另见《知识加工验证 MVP》。
 
-本文将三类内容明确分开：带链接的项目描述属于**外部证据**；由多个项目归纳出的共同点和差异属于**分析推断**；Borrow / Adapt / Reject 与最小不变量属于对 Oyster 的**设计建议**。项目方自报的效果或定位不被当作独立验证结果。
+## 1. 结论
 
-## 1. 结论摘要
+Oyster 保留三个认识论层次：
 
-Oyster 的知识库可以抽象为三个认识论层次，而不是三套固定的数据类型：
+1. **观察层（发生了什么）**：标识来源事实，并保存从中确定性得到的活动结构；
+2. **知识层（目前可以怎样理解）**：保存从观察或已有知识形成的、可引用且可修订的理解；
+3. **投影层（在当前意图下如何表达）**：保存用户与 Agent 共同维护的持久文档，并按需生成临时消费视图。
 
-1. **观察层（发生了什么）**：保存来源事实及其可确定的活动结构。Raw Evidence 和由确定性解析得到的 Canonical Activity 都属于这一层。
-2. **知识层（目前可以怎样理解）**：保存从观察或已有知识推导出的、可修订且有出处的理解。不同知识之间可以形成复杂网络，但不预设一套完备的实体和语义关系分类。
-3. **投影层（在当前意图下什么重要）**：包括由知识和用户 Attention 初始化、再由用户与 Agent 共同维护的持久 Markdown 文档，也包括按需生成的临时消费视图。
+三层需要保持不同的数据所有权，但知识加工与投影生成不能完全独立。用户的 **Attention** 同时影响：
 
-这三层的控制权形成一个梯度：越靠近底层，流程越固定、来源约束越强；越靠近上层，越受用户意图、关注范围、表达粒度和任务目标控制。
+- 哪些观察值得预处理；
+- Knowledge Maintenance Agent 应探索、复用和维护哪些理解；
+- Projection Agent 应选择什么内容、粒度和表达方式。
 
-中间层不应在 MVP 阶段被实现为一个预先设计好的“万能知识图谱”。系统只需要理解少量结构性关系：知识依据什么、如何延续或修订、如何参与投影。`冲突`、`因果`、`相似`、`支持`、`概括`等语义关系本身也可能是需要证据和修订的知识，不应默认成为不可质疑的系统边。
+因此，知识层与投影层采用以下原则：
 
-投影文档不是可以随时从下层覆盖式重建的纯派生物。首次文档可以由知识和 Attention 生成，但一旦用户或 Agent 参与编辑，当前文档及其历史就成为后续更新的必要输入。新事实到来时，系统应在当前版本上继续演化，而不是丢弃已有编辑后重新编译全文。
+> **状态分离，策略耦合。**
 
-## 2. 三层不是三种内容分类
+Knowledge Statement 以数据库中的自由文本记录作为权威内容，持久投影以本地 Markdown 文档作为权威内容。Projection Agent 通过语义探索选择知识，Oyster Core 则在投影修订上保留已经确认的 Statement 依赖。
 
-### 2.1 观察层：发生了什么
+Observation Preprocessor、Knowledge Maintenance Agent 和 Projection Agent 不是互相竞争的整套架构，而是承担不同责任的处理器。越靠近观察层，流程越固定、来源约束越强；越靠近知识维护和投影，越需要 Agent 根据 Attention 探索现有状态并进行多步判断。
+
+## 2. 三个认识论层次
+
+### 2.1 观察层
 
 观察层包括两个现有子层：
 
-- **Raw Evidence**：上游 transcript、人类指令、工具结果及来源元数据的保真副本；
-- **Canonical Activity**：从原始格式确定性映射出的 Session、Message、Tool Call/Result、Artifact 和事件顺序等公共活动语义。
+- **Raw Evidence**：具有明确来源身份和版本身份、可由 Source Adapter 从原始位置按需读取的上游 transcript、人类指令和工具结果；
+- **Canonical Activity**：从原始格式确定性映射出的 Session、Message、Tool Call/Result、Artifact、分支和事件顺序。
 
-Canonical Activity 是为了跨 Harness 使用而生成的可重建观察，不是 LLM 对内容的解释。比如“assistant 输出了 X”是观察事实，但 X 本身不因此成为关于世界的真相；“工具返回失败”是观察事实，但失败原因仍可能只是后续推断。
+Canonical Activity 是可重建的公共活动语义，不是 LLM 对内容的解释。“assistant 输出了 X”是观察事实，但 X 不因此成为关于世界的真相；系统也不能把模型推断出的因果、冲突或重要性写回观察层。
 
-观察层可以保留来源原生的顺序、调用—结果、父子分支和会话归属关系。系统不得在这里补造来源没有表达的因果关系。
+对于本地外部 Agent 历史，Oyster 只持久化来源身份、内部 locator 和版本指纹，不复制原始正文。来源版本在被使用时确定；正式加工与测试均由同一个 Source Adapter 原地读取。上游记录可能变化、移动、消失或变得无权访问，因此 Raw Evidence 的身份可以长期保留，而正文的可用性不作永久保证。来源失效后，已有知识仍保留当时的出处身份；再次展开失败必须明确暴露，不能用相似记录静默替换。这里不要求额外持久化一份记录级“可用状态”。
 
-### 2.2 知识层：目前可以怎样理解
+### 2.2 知识层
 
-知识层包含规则、LLM 或用户从观察中形成的理解，也可以包含从已有知识继续抽象出的上层理解。一条知识可以依赖多条观察，一条观察也可以支持多个不同理解，因此它天然是多对多网络，而不是树。
+知识层包含规则、Pipeline、Agent 或用户从观察及已有知识形成的理解。一条 Knowledge Statement 可以依赖多条观察或已有 Knowledge Statement，同一组证据也可以支持多个并存的理解。
 
-`Decision / Problem / Attempt / Outcome / Preference` 可以成为某个早期加工管线或 Attention 的有用视角，但不应成为 Oyster 核心本体。核心模型允许这些视角演化、并存或被完全不同的视角替代。
+知识层的基本语义单位称为 **Knowledge Statement**：一份可以被独立引用、核查、修订并关联出处的自足理解。它不等同于已经证实的事实，也不预设三元组、节点类型或固定领域 Schema。
+
+Knowledge Statement 的权威内容以普通数据库中的自由文本记录保存。每条记录本身就是一个不可变的确定版本：提交后的标题和正文不原地修改，任何变化都创建新的 Knowledge Statement，并通过 `revises` 指向旧 Statement。数据库因此不需要额外的 Statement Revision 模型。它只需管理稳定身份、少量生命周期信息和必要的系统结构关系，不要求 Statement 采用固定领域 Schema，也不要求知识层首先成为图数据库。全文、向量及用于检索的语义关联或图索引可以派生重建；出处、派生和修订等影响完整性的关系仍由 Oyster Core 明确维护。
+
+**Knowledge Contribution** 是处理器提交的一次知识变更提案。一次 Contribution 可以通过创建新的 Knowledge Statement 及其结构关系，表达补充、限定、修订或关联；它不是知识层最终保存的语义单位。`Node` 只在具体图实现或视图确有需要时使用，不作为当前核心概念。
 
 知识层允许：
 
-- 同一组证据产生多个解释；
-- 新理解补充、限定或修订旧理解，而不静默抹去历史；
-- 某段关系在证据不足时保持为候选理解；
-- 用户明确输入与模型推断具有不同权威性，但都保留来源；
-- 更抽象的知识复用较低层知识，而不必每次直接回到所有原始消息重新生成。
+- 新的 Knowledge Statement 补充、限定或修订旧理解，而不静默覆盖历史；
+- 多个 Attention 或处理器产生重叠、互补甚至冲突的知识；
+- 更高层知识复用较低层知识，而不必每次重新读取全部原始消息；
+- Decision、Problem、Attempt、Outcome、Preference 等视角由处理策略定义，而不是固化为全局本体。
 
-### 2.3 投影层：协作中什么重要
+无论 Knowledge Statement 由 Knowledge Maintenance Agent、经授权的 Pipeline 还是用户发起，都进入同一个知识层并服从相同的出处、权限、修订和删除规则。
 
-投影是知识在用户 Attention 下形成的可消费表达。Attention 不是一个主题标签，而是用户对选择范围、问题方向、抽象程度、更新策略和表达形式的组合意图。
+“使用同一个模型”不等于擦除差异。系统仍需知道某个知识由哪个处理器、在什么 Attention 下、依据哪些输入形成，以便解释重叠、重新加工和级联删除。
 
-投影层需要区分两种生命周期：
+### 2.3 投影层
 
-- **持久协作文档**：Markdown Wiki、项目概览、决策脉络、失败经验等。它们是用户和 Agent 围绕知识协作的界面，有独立修订历史；
-- **临时消费视图**：为一次查询或运行构建的 Context Packet 等。它们可以按需生成，不因此获得协作文档的持久状态。
+投影是知识在当前 Attention 下形成的可消费表达：
 
-本节后续所说的“投影文档”专指前者。它不是新的世界事实来源，也不是唯一的规范性 Wiki。同一知识集合可以同时存在多个有效投影文档。
+- **持久协作文档**：Markdown Wiki、项目概览、决策脉络、失败经验等；
+- **临时消费视图**：为一次查询或 Agent 运行生成的 Context Packet。
 
-首次创建可以抽象为：
+持久投影拥有独立修订历史。当前和历史正文由文档侧的版本机制保存，知识数据库只记录修订身份、来源和依赖。首次文档可以由知识和 Attention 初始化；后续更新必须读取当前文档，保留仍然有效的用户和 Agent 编辑，而不是从最新知识全量重建并覆盖。
+
+持久投影以本地 Markdown 文件为主要载体。正文可以在确有读者价值时显式提及 Knowledge Statement 的标题，但不要求把所有系统依赖暴露给读者，标题也不承担稳定身份职责。
+
+投影不是新的世界事实来源。当前 Markdown 内容不能因为被模型生成或用户编辑，就自动成为知识层真相。
+
+### 2.4 最小持久格式
+
+知识层只保留三类权威记录：
+
+| 记录 | 最小字段 | 作用 |
+| --- | --- | --- |
+| Knowledge Statement | `id`、`title`、`content`、`origin_ref`、`created_at` | 保存一个不可变的自由文本理解；`origin_ref` 指向创建它的 Knowledge Contribution |
+| Statement Relation | `source_statement_id`、`relation`、`target_statement_id` | 保存 Statement 之间必要的结构关系；初期只使用 `derived_from` 和 `revises` |
+| Statement Source | `statement_id`、`source_ref`、`selector` | 指向特定版本的观察来源及其中可选的局部范围 |
+
+`title` 是可读标签而不是唯一身份，`content` 是 Markdown 兼容的自由文本。权威关系不嵌入正文；`derived_from` 表示当前 Statement 基于另一条 Statement 形成，`revises` 固定采用“新 Statement 指向旧 Statement”的方向。一条旧知识被拆分为多条，或多条旧知识被合并为一条，都通过多条 `revises` 关系表达。
+
+投影正文继续只保存在 Markdown 文件中，数据库不复制文档内容。Core 只保留三类元信息：
+
+| 记录 | 最小字段 | 作用 |
+| --- | --- | --- |
+| Projection Document | `id`、`path` | 将稳定文档身份与可变文件位置分离 |
+| Projection Revision | `id`、`projection_id`、`content_ref`、`origin_ref`、`created_at` | 指向一份由文档版本机制保存的确定 Markdown 修订，并记录其产生来源 |
+| Projection Dependency | `projection_revision_id`、`statement_id` | 记录该文档修订实际依赖的完整 Knowledge Statement |
+
+Statement 到投影的反向影响关系、全文、Embedding、关键词和相似关系都由以上权威记录派生，不进入最小持久格式。第一阶段也不增加知识类型、标签、置信度、重要度、状态或独立版本字段。
+
+## 3. Attention 是共享的处理策略
+
+Attention 不是简单的主题标签。它表达用户当前希望系统关注的范围、问题方向、抽象程度、保留偏好和表达目标。
+
+任何默认处理都隐含选择标准，因此不存在完全中立的“默认知识提取”。Oyster 应把默认行为视为一套可替换的默认 Attention/策略，而不是客观、完备的知识编译器。
+
+Attention 可以同时指导默认和自定义处理器，但不应：
+
+- 把知识层按每个 Attention 分裂成彼此隔离的私有知识库；
+- 把某个投影的目录或文档结构固化为知识本体；
+- 反向修改 Raw Evidence 或 Canonical Activity；
+- 让某个处理器产生的内容天然拥有更高权威性。
+
+同一共享知识层可以服务多个 Attention 和多个投影。Attention 改变时，系统可以复用已有知识、形成新的理解，或创建并列投影，不需要复制整套底层状态。
+
+## 4. Observation Preprocessing 与 Agent 的边界
+
+### 4.1 Observation Preprocessing
+
+**Observation Preprocessing** 是将一批观察转化为后续知识维护工作材料的过程；承担该职责的模块称为 **Observation Preprocessor**。它负责降低后续 Agent 的噪声和成本。适合在这一过程完成的工作包括：
+
+- 格式解析、规范化、排序、分段和范围裁剪；
+- Secret/PII 检测与 Redaction；
+- 全文索引、Embedding 和其他可重建检索信号；
+- 对局部历史进行有界摘要、要点提取、主题或实体候选生成；
+- 保存版本、输入依赖、失败状态和可重跑结果。
+
+这里的目标不是用一份摘要替代原始观察，也不是承诺 LLM 可以进行语义上的“无损压缩”。只要表示明显变短，它就必然包含选择和解释。Oyster 保证的是系统级可追溯：预处理结果声明覆盖范围和确定来源；只要该外部来源版本仍可访问，后续 Agent 就可以按需展开到最小必要的原始消息或工具结果。来源不可用时，系统保留这一事实和出处身份，而不是假装仍能回源。
+
+Observation Preprocessor 默认产出 **Evidence Map**：一种有界、可丢弃、可重算的多分辨率 Working Artifact。它在概念上同时提供：
+
+- **导航性概览**：帮助 Agent 快速理解这批观察大致发生了什么、哪些区域值得继续阅读；
+- **候选证据单元**：把可能具有独立意义的决定、约束、尝试、结果、偏好或未决问题提出来，但不自动宣布为知识；
+- **来源与覆盖地图**：说明候选来自哪些观察、哪些内容被跳过或仍不确定，以及如何回到原始上下文核查。
+
+Evidence Map 是“可丢弃的压缩地图”的正式名称。它描述一种工作职责，不构成第四个认识论层，也不要求固化为特定数据库类型；在系统模型中它仍属于 Working Artifact。默认加工路径可以概括为：
 
 ```text
-P₀ = initialize(K₀, A₀)
+Observation -> Observation Preprocessing -> Evidence Map (Working Artifact)
+            -> Knowledge Maintenance Agent -> Knowledge Contribution -> Knowledge Statement
 ```
 
-后续更新则必须抽象为：
+固定的是处理边界、输入输出责任和有界生命周期，而不是一套固定知识本体。Attention 可以改变本次预处理的关注重点和压缩密度，但不能让未被选中的来源身份或已有依赖从系统中静默消失；外部原文是否继续可用由上游生命周期决定。
 
-```text
-Pₙ₊₁ = evolve(Pₙ, ΔK, Aₙ)
-```
+责任边界不取决于是否调用 LLM，而取决于输出的权威性和生命周期：
 
-其中 `Pₙ` 已经包含用户直接编辑和受用户委托的 Agent 编辑。系统不能假设 `Pₙ` 仍等于某次纯生成结果，也不能只用最新知识 `K` 和 Attention `A` 重建并覆盖它。
+- 只供下一步使用、可随时重算且不直接对外提供的结果，是 **Working Artifact**；
+- 一旦摘要或要点需要成为可持久检索、引用或进一步推理的知识，它就必须通过 Knowledge Contribution 提交为 Knowledge Statement，并保留出处。
 
-- **Attention 基本不变、知识增加**：以当前文档为基础形成新修订，保留已有编辑；
-- **用户或 Agent 主动编辑**：编辑直接改变当前投影，成为下一次更新的起点；
-- **Attention 明显改变**：可以从当前文档演化，也可以生成并列投影；是否分叉属于后续产品决策。
+默认 Observation Preprocessor 只产生 Working Artifact。它可以在 Artifact 中提出局部候选，但不直接提交长期知识。未来如果允许某类固定 Pipeline 直接产生基础 Knowledge Contribution，该 Pipeline 就是一个正式的知识生产者，必须遵循与 Agent 相同的出处、Scope、修订、审计和删除契约。
 
-“用户执行了某次编辑”或“用户要求 Agent 这样编辑”本身可以在未来作为观察进入管线，但它不自动证明被写入的内容是真实知识，也不自动说明该修改应影响其他投影。如何解释编辑意图、决定其影响范围并重新进入知识加工，是后续产品问题，当前模型只要求完整保留当前文档及其修订历史。
+### 4.2 Knowledge Maintenance Agent
 
-## 3. 抽象关系模型
+**Knowledge Maintenance Agent** 负责需要多步探索的知识维护：
+
+- 以新的 Evidence Map、Attention 和相关已有 Knowledge Statement 作为默认起点；
+- 多次搜索、读取和比较现有知识；
+- 当 Artifact 不完整、存在冲突或将导致知识修订时，回到最小原始证据核查；
+- 识别可以直接复用的知识，以及需要补充、限定、修订或并列保留的理解；
+- 形成新的 Knowledge Contribution，其中可以包含对一条或多条 Knowledge Statement 的维护建议。
+
+Agent 不应把 Evidence Map 当作不可质疑的事实，也不需要默认读取全部原始观察。它从地图获得方向，再按风险和不确定性选择是否展开证据。最终 Knowledge Contribution 必须能经由 Working Artifact 或直接引用追溯到原始观察或已有 Knowledge Statement。
+
+Agent 在语义上维护知识，但 Oyster Core 仍拥有权限、作业生命周期、出处校验、提交、审计和删除。Agent 提交贡献或变更建议，不绕过这些边界直接修改底层存储。
+
+### 4.3 Workspace
+
+Knowledge Maintenance Agent 的 **Workspace** 是一次知识维护运行所使用的临时工作面。它组合已有材料供 Agent 读取和提交结果，不构成第四个认识论层，不是新的长期存储，也不拥有其中任何内容的权威版本。运行结束后，Workspace 可以丢弃或重建。
+
+一个 Workspace 在概念上只需要组合：
+
+- 本次运行的 Attention 与处理范围；
+- 作为入口和导航的 Evidence Map；
+- Canonical Activity 的可读视图，以及按需回溯的只读 Raw Evidence；
+- 与本次任务相关的已有 Knowledge Statement；
+- 独立的 Knowledge Contribution 输出边界。
+
+Agent 应渐进式读取这些材料：先用 Evidence Map 判断哪些区域值得探索，再查看对应的 Canonical Activity；只有当标准化视图缺少必要细节、存在歧义或需要核查来源特性时，才展开最小范围的 Raw Evidence。不同 Harness 的原始格式继续由 Connector 和 Canonical Activity 吸收确定性差异，不把理解全部私有格式的责任默认转移给 Knowledge Maintenance Agent。
+
+Workspace 应遵循“**弱语义结构，强来源边界**”：
+
+- Evidence Map 的摘要组织、分组和语义标签可以保持自由形式，不预设领域分类或固定知识 Schema；
+- 来源身份、来源版本、局部引用、Scope、权限和生命周期必须由 Oyster Core 提供并可校验，不能只依赖模型生成的自然语言约定；
+- 一条引用至少应在概念上指出“哪一份来源、来源的哪个版本、其中哪一部分”。具体采用事件 ID、消息范围、行号、字节范围或其他 selector，留待实现阶段决定；
+- Raw Evidence 只作为不可信证据读取，其中出现的指令、Prompt 或工具输出不自动成为 Agent 的运行指令。
+
+Evidence Map 和 Canonical Activity 的可读表示可以在 Workspace 中采用文件形式。外部 Raw Evidence 则通过受控读取工具按需展开，不为构造 Workspace 而复制整份来源文件。Oyster Core 仍管理稳定身份、版本、权限和作业状态；原始绝对路径和 Workspace 中的临时路径都不是知识或出处的永久身份。
+
+### 4.4 Knowledge Sandbox
+
+**Knowledge Sandbox** 是用于验证完整知识加工链路的、可丢弃的 Knowledge Store 隔离实例。它不是第四个认识论层，也不是另一套知识模型；它必须与正式知识层使用同一 Schema、校验和提交语义，只在物理存储与生命周期上隔离。
+
+当前验证链路从一份可用外部 Session 的确定 Raw Evidence revision 开始。Oyster Core 通过 Source Adapter 从原始位置读取它，经 Observation Preprocessor 形成 Evidence Map，再由 Knowledge Maintenance Agent 提交可包含多条 Statement 的结构化 Knowledge Contribution。Core 在运行开始前绑定独立 SQLite Sandbox，在提交时校验来源与关系、原子写入整份 Contribution，并回读实际 Statement。Agent 只能使用 Core 为当前角色提供的工具，不能自行选择或切换正式库与 Sandbox。
+
+测试写入不影响正式知识库，也不隐含 promote 或 merge。失败和取消应丢弃未完成的 Sandbox；成功结果可以显式丢弃或从同一正式库基线重新运行。Sandbox 因此只改变验证运行的存储目标，不改变 Observation、Working Artifact、Knowledge Statement 和 Projection 的边界。
+
+### 4.5 默认与自定义处理器
+
+Oyster 可以提供默认 Observation Preprocessor 和默认 Knowledge Maintenance Agent；用户也可以针对不同 Attention 增加自定义 Pipeline 或 Agent。
+
+当前验证实现用一次直接 Model 调用承担 Observation Preprocessing，并用 Pi Agent Core 承担 Knowledge Maintenance Agent 的多轮工具循环；默认完整链路在 Knowledge Sandbox 中提交和回读结果，同时保留不提交结果的阶段调试。这是对上述职责边界的首个可替换实现，不意味着知识模型依赖 Pi，也不把预处理器升级为 Agent。
+
+只要某个处理器要产生或维护 Knowledge Statement，它就必须使用统一的 Knowledge Contribution 契约。核心不需要为“默认知识”“Agent 知识”或某个自定义视角建立不同的知识类型。
+
+处理器产生相似内容时，不要求立即合并为唯一陈述。它们可以：
+
+- 复用同一个已有知识；
+- 分别引用同一组证据；
+- 形成补充、限定、修订或候选等价关系；
+- 在证据不足时保持并存。
+
+系统结构只需表达出处、派生、延续和修订等稳定关系。因果、冲突、相似、支持、概括等关系若需要解释世界，应当继续作为可引用、可反驳的知识，而不是不可质疑的系统边。
+
+## 5. 知识与投影的受控反馈
+
+### 5.1 工具是 Agent 的能力边界
+
+观察、知识和投影的层次区分，不要求在每两层之间再引入一套独立的接口层。Oyster Core 可以统一提供底层的存储、检索、出处和提交能力，再根据 Agent 当前承担的角色，向它开放不同的工具集合。工具集合决定 Agent 能看到什么、能够向哪一层提交结果；边界属于一次运行所承担的角色，而不绑定某个模型或常驻进程。
+
+工具应屏蔽物理表结构、索引实现、文件布局和内部关系编码，但不屏蔽完成任务所需的语义结果。Projection Agent 需要发现相关知识、读取某个不可变 Statement 的确切内容，并按需展开可能影响理解的相关知识、后续变化和来源；它不需要通过通用图查询理解 `revises` 等关系在数据库中的存储方式。Knowledge Maintenance Agent 在这些知识读取能力之外，还可以渐进式搜索观察、读取 Canonical Activity，并在必要时展开最小范围的 Raw Evidence。观察层不需要为此增加一个维护 Agent。
+
+第一阶段的角色能力边界保持如下：
+
+| 能力 | Projection Agent | Knowledge Maintenance Agent |
+| --- | --- | --- |
+| 语义发现、精确读取和上下文展开 Knowledge Statement | 可以 | 可以 |
+| 按需读取获得授权的观察细节 | 默认不开放 | 可以 |
+| 提交 Knowledge Need | 可以 | 不需要 |
+| 提交 Knowledge Contribution | 不可以 | 可以 |
+| 生成 Projection Revision | 可以 | 不可以 |
+| 直接修改底层存储 | 不可以 | 不可以 |
+
+Projection Agent 发现知识缺失、冲突或疑似错误时，默认提交 Knowledge Need，由 Knowledge Maintenance Agent 核查知识和观察后形成 Knowledge Contribution。两种角色可以由同一个 Agent Runtime 在不同阶段承担，但切换角色时仍使用各自的工具和提交边界；共用模型不意味着合并权限。
+
+### 5.2 协作与反馈
 
 ```mermaid
-flowchart BT
-  E1["Raw Evidence"] --> A["Canonical Activity"]
-  A -->|"grounding / derivation"| K1["Knowledge"]
-  E1 -->|"direct grounding when needed"| K1
-  K1 -->|"synthesis"| K2["More abstract knowledge"]
-  K1 -->|"continuation / revision"| K3["Later understanding"]
-  K2 --> I["Initialize with Attention"]
-  I --> P0["Initial projection"]
-  P0 --> Pn["Current collaborative document"]
-  U["User / delegated Agent edits"] --> Pn
-  K3 --> X["State-aware update"]
-  Pn --> X
-  AT["Current Attention"] --> X
-  X --> Pnext["Next document revision"]
+flowchart LR
+  O["Observation"] --> PP["Observation Preprocessors"]
+  PP --> E["Evidence Maps"]
+  AT["Attention"] --> PP
+  E --> W["Workspace"]
+  O -. "Canonical / raw source access" .-> W
+  K["Shared Knowledge Statements"] --> W
+  AT --> W
+  W --> KA["Knowledge Maintenance Agents"]
+  KA -->|"Knowledge Contributions"| K
+  K --> PA["Projection Agent"]
+  AT --> PA
+  P["Current Projection"] --> PA
+  PA --> PN["Next Projection Revision"]
+  PN -. "Statement input dependencies" .-> K
+  PA -. "Knowledge Need" .-> KA
+  U["User / delegated Agent edits"] --> P
 ```
 
-需要区分三类性质不同的关系：
+知识与投影通过三种方式耦合：
 
-### 3.1 来源原生关系
+1. **共享 Attention**：同一个用户目标影响知识维护和最终表达；
+2. **修订输入依赖**：投影修订保存已经确认的 Knowledge Statement 依赖，以便在知识变化时定位需要复核的投影；
+3. **Knowledge Need**：Projection Agent 发现现有知识不足时，可以请求 Knowledge Maintenance Agent 针对某个问题继续探索。
 
-消息顺序、工具调用与结果、分支父子关系、所属会话等，来自观察层。它们表达来源记录的拓扑，不表达系统的语义判断。
+Projection Agent 通过标题、关键词和语义搜索发现候选 Knowledge Statement，再判断哪些内容实际支撑本次文档修订。Prompt 和代码匹配可以辅助这一过程，但不能独自宣布引用成立。Agent 不需要在 Markdown 中写入内部 ID；Oyster Core 将 Agent 确认的目标解析为不可变 Statement 的稳定身份，并保存到对应投影修订的元信息中。
 
-### 3.2 系统结构关系
+第一阶段采用文档级依赖：以整个投影文档修订为主体，关联一条或多条完整的 Knowledge Statement；暂不建立段落、句子或 Statement 内部片段之间的精细映射。Statement 到受影响投影的反向关系可以从这些依赖派生。
 
-系统必须能够回答：
+读者可见引用与系统依赖彼此独立。Agent 只在认为引用本身对读者有价值时，在正文中使用标题等语义化表达；系统依赖无论是否显示，都以投影修订元信息为准。知识发生修订、拆分、合并或删除时，依赖关系用于确定受影响范围，标题和语义匹配用于帮助 Agent 重新判断，不自动把旧依赖替换为最相似的新知识。
 
-- 一个知识依据哪些观察或已有知识；
-- 一个新理解如何延续、限定或修订旧理解；
-- 一个投影最初使用了哪些知识和 Attention；
-- 一个投影修订继承了哪个当前文档版本，并引入了哪些新知识或编辑。
+它们不通过“把当前投影当作知识”耦合。否则会形成模型生成投影、投影回流为知识、模型再次引用自身输出的无来源循环。
 
-这些关系支撑出处、增量更新、修订和删除，是比领域本体更稳定的结构性不变量。知识层及系统生成的投影贡献可以重算，但已经被用户或 Agent 编辑过的完整文档不能被假定为可从下层重新生成。
+用户编辑投影可能意味着三种不同事情：
 
-### 3.3 语义主张与弱关联
+- 修改当前文档的表达；
+- 改变 Attention；
+- 明确纠正或补充知识。
 
-“A 导致 B”“两种方案冲突”“C 是 D 的抽象”“E 与 F 相似”并不都具有同样的确定性：
+编辑行为可以作为新的观察或反馈进入加工流程，但系统必须先解释其意图，不能自动影响其他知识和投影。
 
-- 若关系需要解释世界，应把它视为一条可引用、可反驳、可修订的知识主张；
-- 若关系只是帮助召回，可以保留为可重建的弱关联，不把它呈现为事实；
-- 只有来源明确提供的关系，才可直接作为观察保存。
+## 6. 最小所有权边界
 
-因此，图是知识可能采用的一种视图，不是领域真相本身。MVP 不需要先确定所有节点和边的类型。
+| 所有者 | 负责 | 不负责 |
+| --- | --- | --- |
+| Source Adapter / Observation Pipeline | 发现、定位、版本校验、按需读取、Raw Evidence、Canonical Activity | 复制外部历史、LLM 解释、最终知识、投影编辑 |
+| Observation Preprocessor | 有界转换、Evidence Map，以及其中不具权威性的局部候选 | 直接提交长期知识、全局知识维护、静默覆盖旧知识 |
+| Knowledge Maintenance Agent | 通过工具渐进探索知识与观察，并提出 Knowledge Contribution | 直接修改知识存储或绕过 Scope、出处和删除规则提交 |
+| Oyster Core | 按角色提供能力、校验并持久化贡献、维护出处、修订历史、稳定依赖和级联删除 | 预设所有领域语义和文档结构 |
+| Projection Agent | 通过只读知识工具选择依据，生成投影修订和依赖，并在必要时提出 Knowledge Need | 直接修改知识、默认读取原始观察，或用正文标题代替系统依赖 |
 
-## 4. 前沿与成熟开源路线
+## 7. 当前最小不变量
 
-以下比较关注项目公开设计中“知识是什么、关系有什么地位、变化如何维护”，不比较数据库、部署方式或 benchmark 排名。项目自身发布的效果数字只视为项目方证据，不作为 Oyster 的效果证明。
+1. 观察、知识和投影始终可以清楚区分；
+2. Working Artifact 只是运行中间物，不伪装成观察或无需出处的知识；
+3. 每个 Knowledge Statement 都能追溯到观察或已有 Knowledge Statement，并保留处理器与 Attention 信息；
+4. 默认和自定义处理器产生的知识服从同一治理契约；
+5. Knowledge Statement 提交后不可原地修改；任何变化都创建新 Statement 并显式关联旧版本，多个解释和 Attention 可以并存；
+6. 共享知识可以被多个处理器和投影复用，不按投影复制真相；
+7. Attention 影响知识选择和投影表达，但不改写观察；
+8. Knowledge Maintenance Agent 可以按需到达全部获得授权的观察细节，但不默认把全部原始观察载入上下文；
+9. 外部 Raw Evidence 不复制到 Oyster；来源失效后保留出处身份，并明确暴露再次展开失败；
+10. Agent 对各层的可见性和提交权限由当前角色的工具集合决定，共用底层实现或模型不合并角色权限；
+11. Agent 的最终提交仍由 Oyster Core 校验并写入权威载体；
+12. 持久投影更新始终以当前文档为输入；
+13. 投影修订保留已经确认的完整 Knowledge Statement 依赖，正文中的可读引用不取代该依赖；
+14. 投影不会自动回流为知识，用户删除权始终高于追加式加工。
 
-### 4.1 Wikidata / Wikibase：受治理的陈述网络
+## 8. 暂不决定
 
-[Wikibase 数据模型](https://www.mediawiki.org/wiki/Wikibase/DataModel)把知识的基本单位设计为关于实体的 statement，而不是简单覆盖属性。陈述可带 qualifier、reference 和粗粒度 rank；同一属性可以存在多个值，甚至保留已知错误但有历史意义的 deprecated statement。[Wikidata 的 qualifier 指南](https://www.wikidata.org/wiki/Help%3AQualifiers)也明确允许矛盾观点并存，再用范围、时间、来源与共识表达差异。
+当前刻意不决定：
 
-设计原则：**先把陈述及其适用范围、出处和治理状态变成一等对象，再谈“当前最佳答案”。** 它擅长可审计的公共事实治理，但依赖稳定身份、属性体系和社区规范；对 Oyster 的早期开放式 Agent 活动而言，完整照搬会过重。
+- 最小字段的物理类型、约束、索引和 Contribution / 审计记录的具体结构；
+- Workspace 的长期目录布局和跨来源局部引用 selector；当前完整链路与阶段调试暂用行号范围；
+- 各项能力的长期工具形态、参数、运行步数和调度方式；当前验证实现只提供最小受控工具集；
+- 读者可见引用的 Markdown 语法；
+- 默认 Attention 的完整内容；
+- 自定义处理器的安装和权限协议；
+- 知识合并、身份解析和语义关系词表；
+- 全文、向量和图索引的具体实现，以及投影模板。
 
-### 4.2 Graphiti：带时间和出处的演化事实图
-
-[Graphiti](https://github.com/getzep/graphiti)将原始 episode 保留为来源，把实体与事实关系作为派生层；事实拥有有效时间，在信息变化时失效而不是被删除，并允许规定式或学习式 ontology。
-
-设计原则：**变化不是对当前状态的覆盖，而是有来源的时间化事实演进。** 这很适合动态世界和历史查询；代价是“什么算同一实体”“新信息何时使旧事实失效”会成为系统的核心判断，而且把大量理解压成实体—关系—实体仍会损失开放式叙述。
-
-### 4.3 KAG / OpenSPG：Schema 与逻辑约束优先
-
-[KAG](https://github.com/OpenSPG/KAG)认为纯向量相似和开放式信息抽取不足以支持专业领域中的数值、时间、规则和多跳推理，因此采用 schema-constrained construction、知识对齐与逻辑形式引导的检索推理；其[论文](https://arxiv.org/abs/2409.13731)强调知识图与原始 chunk 的双向索引。
-
-设计原则：**当领域语义和推理规则足够稳定时，用显式 Schema 降低歧义和噪声。** 它适合专业知识服务，却把大量设计权前置给领域建模者。Oyster 目前没有稳定查询集和领域边界，不应过早采用这一路线作为通用内核。
-
-### 4.4 Mem0：面向召回的紧凑事实记忆
-
-[Mem0 2026 状态报告](https://mem0.ai/blog/state-of-ai-agent-memory-2026)描述的当前路线采用单次、追加式事实提取，并把语义、关键词和实体信号融合用于检索；新版用实体链接替代了可遍历的外部图接口。它还用 user、agent、session/run、app/org 等 scope 控制记忆归属。
-
-设计原则：**只保留足以改善未来召回的紧凑事实和身份范围，不为“拥有知识图”承担额外复杂度。** 这说明关系不一定需要成为可查询图；但若只保存提取后的记忆，难以满足 Oyster 对原始证据、解释链和多种投影的要求。
-
-### 4.5 A-MEM：由 Agent 演化的联想笔记网络
-
-[A-MEM](https://github.com/agiresearch/A-mem)借鉴 Zettelkasten：新记忆被写成带上下文、关键词和标签的笔记，系统寻找历史关联、建立链接，并可能更新既有记忆的上下文表示。
-
-设计原则：**关系可以从使用和相似性中逐步涌现，不必先有全局 ontology。** 它为开放式个人知识提供了灵活性；但自动生成链接以及回写旧笔记会降低审计性，弱关联也容易被误读为事实关系。
-
-### 4.6 Hindsight：观察、经验与反思分离
-
-[Hindsight](https://github.com/vectorize-io/hindsight)把记忆分为 world facts、experiences 和由 reflect 形成的 mental models，并把 retain、recall、reflect 分为不同动作。反思可以从已有记忆形成新连接和洞见，而不是把所有输入直接放在同一平面。
-
-设计原则：**原始记忆与反思性理解应有不同地位，抽象知识需要显式形成过程。** 这与 Oyster 的观察—知识分层接近；但 world/experience/mental model 是一套较强的认知先验，应作为启发而不是核心分类。
-
-### 4.7 GraphRAG：为全局理解预计算层级摘要
-
-[Microsoft GraphRAG](https://microsoft.github.io/graphrag/index/methods/)从文本单元提取实体、关系和可选 claims，再形成社区及多粒度报告；其[论文](https://arxiv.org/abs/2404.16130)把这一层级索引用于回答传统局部 RAG 难以处理的全局问题。
-
-设计原则：**中间关系网络的一个重要价值，是支撑更高层的全局综合，而不只是逐块召回。** 但社区报告是面向一类查询预先生成的有损摘要，且更适合相对静态语料。对持续到来的 Agent 活动，它更适合作为可重算的生成基线或索引，而不是唯一知识真相或对协作文档的覆盖源。
-
-### 4.8 Living Wiki / OpenWiki：用户目标驱动的可读投影
-
-[OpenWiki Brains](https://www.langchain.com/blog/introducing-openwiki-brains-general-purpose-wiki-memory-for-agents)允许用户通过提示定义系统应关注的内容，再把多来源信息维护成 Markdown Wiki；[OpenWiki 的 OKF 支持](https://www.langchain.com/blog/openwiki-0-2-adds-okf-support)增加最小元数据、目录索引和变更日志。
-
-[The Living Wiki](https://openreview.net/attachment?id=e64EcfHp8L&name=pdf)进一步把 immutable sources、agent-owned wiki 和 human-configured schema 分开。其实验同时给出一个重要反例：Wiki 能提高部分来源命中与实体聚合，但综合答案未必优于 RAG，持续重写还会产生断链。这说明**可读 Wiki 是有价值的高层界面，却不能替代证据和中间知识；自动维护也不能假定重写永远优于保留现状。**
-
-## 5. 共同取舍
-
-这些路线虽然目标不同，仍出现了几个共同方向：
-
-1. **来源与理解逐渐分离。** Graphiti 保留 episode，KAG/GraphRAG 连接原文块，Wikibase 为陈述保存 reference，Living Wiki 保留 immutable sources。只保存摘要会失去重建和纠错能力。
-2. **单一“当前真相”不足以表达变化。** Wikibase 允许多陈述和 rank，Graphiti 使旧事实失效但保留历史，反思式系统把新理解作为演化结果。
-3. **身份、时间、范围与出处比丰富类型更基础。** 即使 Mem0 放弃可查询图，也保留实体链接和多级 scope；动态图系统则把时间和来源放进核心。
-4. **关系服务于不同目的。** 有些关系是待治理的事实，有些是推理约束，有些只是检索信号，有些用于形成层级摘要。把它们统一解释成“已知事实边”会产生错误确定性。
-5. **高层表达必然有损且与目标相关。** GraphRAG 社区报告、Hindsight mental model 和 Wiki 页面都在压缩底层信息；一旦用户参与编辑，高层表达还会包含下层知识无法完全重建的用户判断。
-6. **维护是持续过程，不是一次抽取。** 代表性路线分别选择追加、失效、反思、重连、重写或重建；差别在于谁有权改变旧知识，以及是否保留变化链。
-
-没有一个项目同时解决异构原始证据保真、开放式关系、时间演化、用户 Attention 投影和跨 Harness 供给。Oyster 不应通过组合所有功能来弥补这一点，而应只保留与自身定位一致的不变量。
-
-## 6. 关键设计差异
-
-| 路线 | 知识基本单位 | 关系的地位 | 变化策略 | 主要权威来源 | 核心取舍 |
-| --- | --- | --- | --- | --- | --- |
-| Wikibase | 带范围与引用的陈述 | 受 Schema 治理的主张 | 多值并存、rank、deprecated | 社区与引用 | 审计性强，建模与治理成本高 |
-| Graphiti | 有时间窗口的事实关系 | 世界状态主张 | 增量加入、旧事实失效但保留 | episode + 提取逻辑 | 动态性强，实体解析和失效判断重 |
-| KAG | Schema 对齐的领域知识 | 推理约束与事实 | 受领域模型约束地更新 | 专家 Schema + 来源 | 精确推理优先，开放性较低 |
-| Mem0 | 可召回的紧凑事实 | 实体/关联主要是排序信号 | 追加式积累 | 提取策略 + scope | 简洁高效，解释链较弱 |
-| A-MEM | 上下文化笔记 | 涌现的联想链接 | 新增时重连并演化旧表示 | Agent 判断 | 灵活，关系可靠性与可审计性较弱 |
-| Hindsight | 事实、经验、mental model | 反思形成的理解连接 | retain 与 reflect 分开 | Agent 反思 | 抽象过程清晰，认知分类先验较强 |
-| GraphRAG | 实体关系与社区报告 | 综合与导航索引 | 重新索引/重建摘要 | 语料 + 提取/聚类 | 全局理解强，投影有损且偏批处理 |
-| Living/OpenWiki | 页面与链接 | 可读导航、综合与协作界面 | Agent 持续 gardening | 用户 schema/attention + Agent | 使用直接，断链和覆盖人工编辑风险高 |
-
-最根本的差异不是“用图还是向量”，而是：
-
-- 系统把关系当作事实、解释还是召回线索；
-- 新知识到来时，是覆盖旧状态、使其失效、并列保存，还是重新综合；
-- Schema 由系统预设、领域专家规定、Agent 学习，还是用户在投影时表达；
-- 高层摘要是知识真相、可覆盖式重算的视图，还是有自身历史的协作文档。
-
-## 7. 对 Oyster 的取舍
-
-### Borrow
-
-- 借鉴 Wikibase：陈述可以并存，出处、适用范围和修订地位比强行选出唯一真相更重要；
-- 借鉴 Graphiti：原始 episode 与派生事实分离，变化保留历史而不是删除旧理解；
-- 借鉴 A-MEM：开放领域的关联可以逐步涌现，无需先建设完整本体；
-- 借鉴 Hindsight：观察与反思性理解必须分层，知识之间可以继续形成更高层知识；
-- 借鉴 GraphRAG：层级综合很有价值，但只将自动生成部分视为可重算结果；
-- 借鉴 Agent Wiki：用户 Attention 应成为创建和更新可读视图的显式输入，Markdown 是适合用户与 Agent 共同维护的界面。
-
-### Adapt
-
-- 将 `derived-from`、`continuation/revision` 等保留为系统结构，而把因果、冲突、相似、概括等放入可修订知识或弱索引；
-- Raw Evidence 与 Canonical Activity 共同构成观察层，延续现有导入架构，不额外制造一套新的底层真相；
-- 允许管线使用 Decision、Problem、Attempt、Outcome 等提取视角，但把它们配置成可替换 Attention/策略，而不是全局类型；
-- 正常演进以追加新知识和新投影修订为主；用户删除仍按既有策略级联清除；
-- 投影记录初始 Attention、知识依赖和文档修订历史；后续更新必须读取当前文档，并可并列维护其他关注方向的文档。
-
-### Reject for now
-
-- 在真实查询和语料验证前建立全局本体、复杂关系类型或图数据库依赖；
-- 把 LLM 抽取的实体关系直接宣布为事实；
-- 只维护一个“最新正确”的 Wiki 页面并静默覆盖历史；
-- 从最新知识全量重建投影并覆盖用户或 Agent 已经编辑的当前文档；
-- 让投影自动回流为知识，形成无来源的自我引用；
-- 把相似度、共现或社区归属伪装成语义关系；
-- 将某套认知分类或文档目录结构固化为所有用户、项目和 Agent 的共同模型。
-
-## 8. 当前最小不变量
-
-在还不设计具体字段和技术路线时，Oyster 只需承诺：
-
-1. 观察、知识和投影可以被清楚区分；
-2. 每个知识都能追溯到观察或已有知识，派生链可以跨多层；
-3. 新理解默认不静默覆写旧理解，并可表达延续或修订；
-4. 多个解释和多个 Attention 投影可以同时存在；
-5. 语义关系必须保留其认识论地位：来源事实、可修订主张或弱关联；
-6. 持久投影文档是可编辑、持久化的协作状态；每次自动或 Agent 更新都以当前文档为输入；
-7. 系统生成的贡献可以重算，但重算不得覆盖无法由下层重建的用户或 Agent 编辑；
-8. 投影文档不是世界事实；编辑行为未来可以作为观察回流，但其语义和影响范围必须另行解释；
-9. Attention 影响知识的选择和表达，不反向改写底层知识；
-10. 正常加工遵循追加修订原则，但用户删除权始终优先。
-
-## 9. 尚未决定与验证方式
-
-当前刻意不决定：知识对象的具体字段、实体标签、语义关系词表、图存储、向量索引、合并算法和投影模板。
-
-下一阶段应先用真实脱敏会话与真实查询验证：
-
-- 用户是更常复用上层抽象，还是回查底层事实与执行细节；
-- 哪些语义关系会稳定地改善理解，而不仅是让图看起来更丰富；
-- “关系作为知识对象”与“关系作为固定边”在引用、修订和查询上的实际成本；
-- 同一证据生成多个理解时，用户如何比较、确认或忽略它们；
-- 如何在当前协作文档上吸收新知识，同时稳定保留用户和 Agent 已有编辑；
-- 如何把直接编辑或编辑指令作为观察重新进入管线，并区分知识修正、Attention 变化和仅影响当前文档的选择；
-- 哪些知识加工可以全自动，哪些只应作为候选，哪些需要用户主动触发。
-
-在这些问题得到证据前，保持模型简单不是暂时妥协，而是防止错误先验进入长期数据的核心设计原则。
+这些细节应在真实脱敏会话上验证 Observation Preprocessing 能减少多少噪声、Knowledge Maintenance Agent 需要怎样的探索深度、不同 Attention 会产生多少重叠知识之后再确定。

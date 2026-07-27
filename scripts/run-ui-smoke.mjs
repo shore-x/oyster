@@ -33,10 +33,143 @@ if (semantics.buttonCount !== semantics.sharedButtonCount) throw new Error('A bu
 if (semantics.buttonIconCount < semantics.sharedButtonCount) throw new Error('A shared button icon was not rendered')
 if (semantics.overflowX) throw new Error('Page has unexpected horizontal overflow')
 if (!semantics.primaryActions.includes('探测本机 Agent')) throw new Error('Discovery action is missing')
-if (!semantics.primaryActions.includes('打开导入目录')) throw new Error('Raw Evidence directory action is missing')
-if (!semantics.bodyText.includes('正在导入原始记录')) throw new Error('Import progress state is missing')
+if (!semantics.bodyText.includes('内容将在使用时从原始位置读取')) throw new Error('On-demand source reading is not explained')
+for (const removedCopy of ['打开导入目录', '正在导入原始记录', '已全部导入']) {
+  if (semantics.bodyText.includes(removedCopy)) throw new Error(`Removed import copy is still rendered: ${removedCopy}`)
+}
 for (const removedCopy of ['KNOWLEDGE SOURCES', '数据仅保存在本机', 'LOCAL KNOWLEDGE HUB']) {
   if (semantics.bodyText.includes(removedCopy)) throw new Error(`Redundant copy is still rendered: ${removedCopy}`)
 }
+
+if (semantics.ai.agent.title !== 'AI 后端') throw new Error('AI backend page was not rendered')
+if (semantics.ai.agent.backendKind !== 'coding_plan') throw new Error('Coding Plan is not the default backend')
+if (semantics.ai.agent.provider !== 'openai_codex') throw new Error('OpenAI Codex is not selected for the Coding Plan backend')
+if (semantics.ai.agent.codexCards !== 1) throw new Error('Codex runtime card is missing')
+if (semantics.ai.agent.codingPlanModel !== 'fixture-codex-small') throw new Error('Coding Plan test model is not explicit')
+if (semantics.ai.agent.codingPlanReasoning !== '') throw new Error('Coding Plan fixture should use the model-default reasoning effort')
+if (!semantics.ai.agent.codingPlanConfiguration?.includes('Fixture Codex Small')) throw new Error('Coding Plan test configuration is not visible')
+if (!semantics.ai.agent.bodyText.includes('Coding Plan')) throw new Error('Coding Plan choice is missing')
+if (semantics.ai.agent.overflowX) throw new Error('AI backend page has unexpected horizontal overflow')
+if (semantics.ai.model.backendKind !== 'api') throw new Error('API backend choice did not update the form')
+if (semantics.ai.model.provider !== 'openai') throw new Error('OpenAI is not the default Model provider')
+if (semantics.ai.model.passwordFields !== 1) throw new Error('API Key password field is missing')
+if (semantics.ai.model.passwordValues.some(Boolean)) throw new Error('The fixture exposed a stored API Key to the renderer')
+if (semantics.ai.model.configuredModel !== 'fixture-model') throw new Error('API Connection test model is not explicit')
+if (semantics.ai.model.configuredReasoning !== '') throw new Error('API fixture should use the model-default reasoning effort')
+if (!semantics.ai.model.configuredSummary?.includes('Fixture Model')) throw new Error('API Connection test configuration is not visible')
+if (!semantics.ai.model.bodyText.includes('OpenAI-compatible')) throw new Error('Custom compatible provider choice is missing')
+
+const processing = semantics.processing
+if (processing.title !== '知识加工') throw new Error('Knowledge processing page was not rendered')
+if (processing.fullChain.fullChainSelected !== 'true' || !processing.fullChain.workspaceExists) {
+  throw new Error('Full-chain Sandbox workspace is not the default knowledge processing view')
+}
+if (processing.fullChain.sessionOptionCount !== 2) {
+  throw new Error(`Expected one available fixture Session, got ${processing.fullChain.sessionOptionCount - 1}`)
+}
+if (!processing.fullChain.fullChainButtonExists || processing.fullChain.fullChainButtonDisabled !== true) {
+  throw new Error('Full-chain action must wait for an explicit Session selection')
+}
+if (!processing.fullChain.initialDisabledReason?.includes('选择一个 Session')) {
+  throw new Error('Full-chain view does not explain why the action is initially disabled')
+}
+if (!processing.fullChain.selectedSession || processing.fullChain.fullChainButtonEnabledAfterSelection !== true) {
+  throw new Error('A complete stage configuration must become runnable after selecting a Session')
+}
+if (!processing.fullChain.readyReason?.includes('配置完整')) {
+  throw new Error('Full-chain view does not report that the selected configuration is runnable')
+}
+if (processing.fullChain.stageConfigurations.length !== 2) {
+  throw new Error('Full-chain view must show the exact configuration of both stages')
+}
+const fullChainConfiguration = processing.fullChain.stageConfigurations.join('\n')
+for (const requiredCopy of ['API', 'OpenAI-compatible', 'fixture-model', '模型默认', '可用']) {
+  if (!fullChainConfiguration.includes(requiredCopy)) {
+    throw new Error(`Full-chain stage configuration is missing: ${requiredCopy}`)
+  }
+}
+if (!processing.fullChain.bodyText.includes('Knowledge Sandbox')) {
+  throw new Error('Knowledge Sandbox boundary is not visible in the full-chain view')
+}
+if (!processing.fullChain.bodyText.includes('运行时从 Agent 的原始位置读取内容')) {
+  throw new Error('Full-chain view does not explain on-demand Session reading')
+}
+if (processing.fullChain.bodyText.includes('已导入 Session')) {
+  throw new Error('Full-chain view still exposes the removed import model')
+}
+if (processing.fullChain.overflowX) throw new Error('Full-chain view has unexpected horizontal overflow')
+if (processing.stageCount !== 2) throw new Error(`Expected 2 fixed processing stages, got ${processing.stageCount}`)
+if (processing.promptCount !== 2) throw new Error(`Expected 2 processing prompt editors, got ${processing.promptCount}`)
+if (processing.promptValues.some((prompt) => typeof prompt !== 'string' || !prompt.trim())) {
+  throw new Error('A processing default prompt is empty')
+}
+const [preprocessorPrompt, maintainerPrompt] = processing.promptValues
+for (const requiredCopy of ['Observation Preprocessor', 'Evidence Map', 'primary language of the original material']) {
+  if (!preprocessorPrompt.includes(requiredCopy)) {
+    throw new Error(`Observation Preprocessor prompt is missing its responsibility: ${requiredCopy}`)
+  }
+}
+for (const requiredCopy of ['Knowledge Maintenance Agent', 'Knowledge Statements are immutable', 'primary language of the original observation', 'submit_knowledge_contribution']) {
+  if (!maintainerPrompt.includes(requiredCopy)) {
+    throw new Error(`Knowledge Maintenance Agent prompt is missing its responsibility: ${requiredCopy}`)
+  }
+}
+if (processing.promptValues.some((prompt) => prompt.includes('Oyster'))) {
+  throw new Error('A default processing prompt assumes product-specific context')
+}
+if (processing.badgeValues.length !== 2 || processing.badgeValues.some((badge) => badge !== 'Default')) {
+  throw new Error('Both processing stages must show the Default prompt badge in fixture mode')
+}
+if (processing.connectionValues.length !== 2 || processing.connectionValues.some((value) => value !== 'model:fixture')) {
+  throw new Error('Both processing stages must select the fixture Model Connection')
+}
+if (processing.modelValues.length !== 2 || processing.modelValues.some((value) => value !== 'fixture-model')) {
+  throw new Error('Both processing stages must select an explicit fixture model')
+}
+if (processing.reasoningValues.length !== 2 || processing.reasoningValues.some((value) => value !== '')) {
+  throw new Error('Both processing stages must expose their effective model-default reasoning')
+}
+const stageConfiguration = processing.configurationText.join('\n')
+for (const requiredCopy of ['API', 'OpenAI-compatible', 'fixture-model', '模型默认', 'Direct Model', 'Pi Agent Core']) {
+  if (!stageConfiguration.includes(requiredCopy)) {
+    throw new Error(`Stage debugging configuration is missing: ${requiredCopy}`)
+  }
+}
+if (processing.preprocessorSessionSourceSelected !== 'true' || processing.manualObservationVisible) {
+  throw new Error('Stage debugging must default to an available Session instead of manual paste')
+}
+if (processing.preprocessorSessionOptionCount !== 2) {
+  throw new Error(`Expected one available fixture Session in stage debugging, got ${processing.preprocessorSessionOptionCount - 1}`)
+}
+if (!processing.bodyText.includes('运行时从 Agent 的原始位置读取')) {
+  throw new Error('Stage debugging does not explain on-demand Session reading')
+}
+if (processing.bodyText.includes('已导入 Session')) {
+  throw new Error('Stage debugging still exposes the removed import model')
+}
+if (!processing.preprocessorButtonExists || processing.preprocessorDisabled !== true) {
+  throw new Error('Preprocessor action must wait for an explicit Session selection')
+}
+if (!processing.maintainerButtonExists || processing.maintainerDisabled !== true) {
+  throw new Error('Knowledge maintenance action must remain disabled before preprocessing succeeds')
+}
+if (processing.resultCount !== 0) throw new Error('Knowledge processing produced a candidate without an explicit run')
+if (processing.overflowX) throw new Error('Knowledge processing page has unexpected horizontal overflow')
+if (processing.buttonCount !== processing.sharedButtonCount + processing.tabButtonCount + processing.sourceSwitchButtonCount) {
+  throw new Error('A knowledge processing action button bypasses the shared UI component')
+}
+if (processing.buttonIconCount !== processing.sharedButtonCount) {
+  throw new Error('A knowledge processing shared button icon was not rendered')
+}
+if (processing.promptRestore.customizedBeforeRestore !== 'Customized') {
+  throw new Error('An unsaved prompt draft was not shown as Customized')
+}
+if (!processing.promptRestore.matchesOriginal || processing.promptRestore.defaultAfterRestore !== 'Default') {
+  throw new Error('Restore default did not reset an unsaved prompt draft after a successful save')
+}
+const processingImage = await readFile(join(dirname(capturePath), 'knowledge-processing.png'))
+if (processingImage.length === 0) throw new Error('Knowledge processing screenshot is empty')
+const stageDebugImage = await readFile(join(dirname(capturePath), 'knowledge-processing-stage-debug.png'))
+if (stageDebugImage.length === 0) throw new Error('Knowledge processing stage-debug screenshot is empty')
 
 console.log(`UI smoke test passed: ${capturePath}`)

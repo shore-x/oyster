@@ -4,13 +4,13 @@ import type {
   ArtifactKind,
   HistoryArtifact,
   InstructionScope,
-  SyncRun
+  ScanRun
 } from '../../shared/discovery'
 
 export interface DiscoveryStateData {
   sources: AgentSource[]
   artifacts: HistoryArtifact[]
-  runs: SyncRun[]
+  runs: ScanRun[]
 }
 
 export interface DetectionContext {
@@ -57,24 +57,4 @@ export interface AgentHistoryAdapter {
 export interface DiscoveryRepository {
   load(): Promise<DiscoveryStateData>
   save(state: DiscoveryStateData): Promise<void>
-}
-
-export interface RawEvidenceInput {
-  sourceId: string
-  artifactId: string
-  artifactKind: ArtifactKind
-  absolutePath: string
-  fingerprint: string
-  signal: AbortSignal
-  onProgress(bytes: number): void
-}
-
-export interface RawEvidenceReceipt {
-  id: string
-  contentHash: string
-  sizeBytes: number
-}
-
-export interface RawEvidenceStore {
-  importFile(input: RawEvidenceInput): Promise<RawEvidenceReceipt>
 }

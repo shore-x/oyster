@@ -3,58 +3,110 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { discoveryChannels } from '../shared/channels'
-import { AGENT_TYPES, type DiscoverySnapshot } from '../shared/discovery'
+import type { DiscoverySnapshot } from '../shared/discovery'
+import { AiBackendService } from './ai-backends/ai-backend-service'
+import { CodexAgentAdapter } from './ai-backends/codex-adapter'
+import { KeychainCredentialStore } from './ai-backends/credential-store'
+import { createFixtureAiBackendService } from './ai-backends/fixture'
+import { registerAiBackendIpc } from './ai-backends/ipc'
+import { OpenAiCompatibleAdapter } from './ai-backends/openai-compatible-adapter'
+import { PiCodingPlanAdapter } from './ai-backends/pi-coding-plan-adapter'
+import { PiKeychainCredentialStore } from './ai-backends/pi-credential-store'
+import { JsonAiBackendRepository } from './ai-backends/repository'
 import { createDefaultAdapters, createDetectionContext } from './discovery/adapters'
 import { DiscoveryService } from './discovery/discovery-service'
 import { nearestExistingDirectory } from './discovery/path-utils'
 import {
-  ensureRawEvidenceDirectories,
-  FileRawEvidenceStore,
-  MemoryRawEvidenceStore
-} from './discovery/raw-evidence-store'
+  FileSourceEvidenceReader,
+  MemorySourceEvidenceReader
+} from './discovery/source-evidence-reader'
 import { InMemoryDiscoveryRepository, JsonDiscoveryRepository } from './discovery/repository'
-import { createFixtureState } from './fixture-state'
+import {
+  createFixtureState,
+  FIXTURE_SESSION_ARTIFACT_ID,
+  FIXTURE_SESSION_CONTENT
+} from './fixture-state'
+import {
+  createFixtureKnowledgeProcessingService,
+  FixtureKnowledgeAgentRuntime
+} from './knowledge-processing/fixture'
+import {
+  KnowledgeFullChainService
+} from './knowledge-processing/full-chain-service'
+import { registerKnowledgeProcessingIpc } from './knowledge-processing/ipc'
+import { SessionPreprocessor } from './knowledge-processing/session-preprocessor'
+import { KnowledgeProcessingService } from './knowledge-processing/knowledge-processing-service'
+import { PiKnowledgeMaintenanceAgent } from './knowledge-processing/pi-knowledge-agent'
+import { JsonKnowledgeProcessingRepository } from './knowledge-processing/repository'
+import { SqliteKnowledgeStoreManager } from './knowledge-store/knowledge-store-manager'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 let mainWindow: BrowserWindow | undefined
-
-function rawEvidenceRootPath(): string {
-  return join(app.getPath('userData'), 'raw-evidence')
-}
+let aiBackendService: AiBackendService | undefined
+let knowledgeProcessingService: KnowledgeProcessingService | undefined
+let knowledgeFullChainService: KnowledgeFullChainService | undefined
+let knowledgeStoreManager: SqliteKnowledgeStoreManager | undefined
 
 function fixtureMode(): boolean {
   return process.env.OYSTER_FIXTURE_MODE === '1'
 }
 
+if (fixtureMode()) app.disableHardwareAcceleration()
+
 function createService(): DiscoveryService {
   const useFixtures = fixtureMode()
+  const fixtureState = useFixtures ? createFixtureState() : undefined
   const repository = useFixtures
-    ? new InMemoryDiscoveryRepository(createFixtureState())
+    ? new InMemoryDiscoveryRepository(fixtureState!)
     : new JsonDiscoveryRepository(join(app.getPath('userData'), 'discovery-state.json'))
-  const evidenceStore = useFixtures
-    ? new MemoryRawEvidenceStore()
-    : new FileRawEvidenceStore(rawEvidenceRootPath())
+  const evidenceReader = useFixtures
+    ? new MemorySourceEvidenceReader([{
+        artifactId: FIXTURE_SESSION_ARTIFACT_ID,
+        content: FIXTURE_SESSION_CONTENT
+      }])
+    : new FileSourceEvidenceReader()
   return new DiscoveryService(
     repository,
-    evidenceStore,
+    evidenceReader,
     createDefaultAdapters(),
     createDetectionContext(app.getPath('home')),
     { recoverInterruptedRuns: !useFixtures }
   )
 }
 
+function createBackendService(): AiBackendService {
+  if (fixtureMode()) return createFixtureAiBackendService()
+  const credentials = new KeychainCredentialStore()
+  return new AiBackendService(
+    new JsonAiBackendRepository(join(app.getPath('userData'), 'ai-connections.json')),
+    credentials,
+    new CodexAgentAdapter(app.getPath('home')),
+    new OpenAiCompatibleAdapter(),
+    new PiCodingPlanAdapter({
+      credentials: new PiKeychainCredentialStore(credentials),
+      openExternal: async (url) => { await shell.openExternal(url) }
+    })
+  )
+}
+
+function createKnowledgeProcessingService(
+  aiBackend: AiBackendService,
+  stores: SqliteKnowledgeStoreManager
+): KnowledgeProcessingService {
+  if (fixtureMode()) return createFixtureKnowledgeProcessingService(aiBackend)
+  return new KnowledgeProcessingService(
+    new JsonKnowledgeProcessingRepository(join(app.getPath('userData'), 'knowledge-processing.json')),
+    aiBackend,
+    new PiKnowledgeMaintenanceAgent(stores.production)
+  )
+}
+
 function registerIpc(service: DiscoveryService): void {
   ipcMain.handle(discoveryChannels.getSnapshot, () => service.snapshot())
+  ipcMain.handle(discoveryChannels.listAvailableSessions, () => service.listAvailableSessions())
   ipcMain.handle(discoveryChannels.detectAgents, () => service.detectAgents())
   ipcMain.handle(discoveryChannels.scanSource, (_event, sourceId: string) => service.scanSource(sourceId))
-  ipcMain.handle(discoveryChannels.importSource, (_event, sourceId: string) => service.importSource(sourceId))
   ipcMain.handle(discoveryChannels.cancelRun, (_event, runId: string) => service.cancelRun(runId))
-  ipcMain.handle(discoveryChannels.openRawEvidenceDirectory, async () => {
-    const rootPath = rawEvidenceRootPath()
-    await ensureRawEvidenceDirectories(rootPath, AGENT_TYPES.map((agentType) => `source:${agentType}`))
-    const error = await shell.openPath(rootPath)
-    if (error) throw new Error(`无法打开导入目录：${error}`)
-  })
   ipcMain.handle(discoveryChannels.chooseSourceRoot, async (_event, sourceId: string) => {
     const owner = BrowserWindow.getFocusedWindow() || mainWindow
     const source = service.snapshot().sources.find((candidate) => candidate.id === sourceId)
@@ -100,7 +152,140 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       bodyText: document.body.innerText
     }
   })()`)
-  await writeFile(`${capturePath}.json`, `${JSON.stringify(semantics, null, 2)}\n`, 'utf8')
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-ai-backends"]').click()`)
+  await new Promise((resolve) => setTimeout(resolve, 120))
+  const aiImage = await window.webContents.capturePage()
+  await writeFile(join(dirname(capturePath), 'ai-backends.png'), aiImage.toPNG())
+  const aiSemantics = await window.webContents.executeJavaScript(`(() => {
+    const agent = {
+      title: document.querySelector('h1')?.textContent,
+      backendKind: document.querySelector('[data-testid="backend-kind-select"]')?.value,
+      provider: document.querySelector('[data-testid="provider-select"]')?.value,
+      codexCards: document.querySelectorAll('[data-testid="codex-runtime-card"]').length,
+      modelCards: document.querySelectorAll('[data-testid="model-connection-card"]').length,
+      codingPlanModel: document.querySelector('[data-testid="coding-plan-model-select"]')?.value,
+      codingPlanReasoning: document.querySelector('[data-testid="coding-plan-reasoning-select"]')?.value,
+      codingPlanConfiguration: document.querySelector('[data-testid="coding-plan-test-configuration"]')?.textContent,
+      bodyText: document.body.innerText,
+      overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
+    }
+    const backend = document.querySelector('[data-testid="backend-kind-select"]')
+    backend.value = 'api'
+    backend.dispatchEvent(new Event('change', { bubbles: true }))
+    return new Promise((resolve) => requestAnimationFrame(() => resolve({
+      agent,
+      model: {
+        backendKind: document.querySelector('[data-testid="backend-kind-select"]')?.value,
+        provider: document.querySelector('[data-testid="provider-select"]')?.value,
+        passwordFields: document.querySelectorAll('input[type="password"]').length,
+        passwordValues: Array.from(document.querySelectorAll('input[type="password"]')).map((input) => input.value),
+        configuredModel: document.querySelector('[data-testid="api-connection-model-select"]')?.value,
+        configuredReasoning: document.querySelector('[data-testid="api-connection-reasoning-select"]')?.value,
+        configuredSummary: document.querySelector('[data-testid="api-connection-test-configuration"]')?.textContent,
+        bodyText: document.body.innerText
+      }
+    })))
+  })()`)
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-knowledge-processing"]').click()`)
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  const processingImage = await window.webContents.capturePage()
+  await writeFile(join(dirname(capturePath), 'knowledge-processing.png'), processingImage.toPNG())
+  const fullChainSemantics = await window.webContents.executeJavaScript(`(() => {
+    const select = document.querySelector('[data-testid="full-chain-session-select"]')
+    const initialButton = document.querySelector('[data-testid="run-full-chain"]')
+    const result = {
+      fullChainSelected: document.querySelector('[data-testid="processing-view-full-chain"]')?.getAttribute('aria-selected'),
+      workspaceExists: Boolean(document.querySelector('[data-testid="full-chain-workspace"]')),
+      sessionOptionCount: select?.options.length,
+      fullChainButtonExists: Boolean(initialButton),
+      fullChainButtonDisabled: initialButton?.disabled,
+      initialDisabledReason: document.querySelector('[data-testid="full-chain-disabled-reason"]')?.textContent?.trim(),
+      stageConfigurations: Array.from(document.querySelectorAll('[data-testid^="full-chain-config-"]')).map((node) => node.textContent?.trim()),
+      bodyText: document.body.innerText,
+      overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
+    }
+    if (select?.options[1]) {
+      select.value = select.options[1].value
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+    return new Promise((resolve) => requestAnimationFrame(() => resolve({
+      ...result,
+      selectedSession: select?.value,
+      fullChainButtonEnabledAfterSelection: document.querySelector('[data-testid="run-full-chain"]')?.disabled === false,
+      readyReason: document.querySelector('[data-testid="full-chain-disabled-reason"]')?.textContent?.trim()
+    })))
+  })()`)
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="processing-view-stage-debug"]').click()`)
+  await new Promise((resolve) => setTimeout(resolve, 120))
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="processing-preprocessor-session"]')?.scrollIntoView({ block: 'center' })`)
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  const stageDebugImage = await window.webContents.capturePage()
+  await writeFile(join(dirname(capturePath), 'knowledge-processing-stage-debug.png'), stageDebugImage.toPNG())
+  const processingSemantics = await window.webContents.executeJavaScript(`(() => {
+    const prompts = Array.from(document.querySelectorAll('[data-testid^="processing-instructions-"]'))
+    const badges = Array.from(document.querySelectorAll('[data-testid^="processing-prompt-badge-"]'))
+    const connections = Array.from(document.querySelectorAll('[data-testid^="processing-connection-"]'))
+    const models = Array.from(document.querySelectorAll('[data-testid^="processing-model-"]'))
+    const reasoning = Array.from(document.querySelectorAll('[data-testid^="processing-reasoning-"]'))
+    const buttons = Array.from(document.querySelectorAll('button'))
+    return {
+      title: document.querySelector('h1')?.textContent,
+      stageCount: document.querySelectorAll('[data-testid="processing-stage-observation_preprocessor"], [data-testid="processing-stage-knowledge_maintenance_agent"]').length,
+      promptCount: prompts.length,
+      promptValues: prompts.map((prompt) => prompt.value),
+      badgeValues: badges.map((badge) => badge.textContent?.trim()),
+      connectionValues: connections.map((connection) => connection.value),
+      modelValues: models.map((model) => model.value),
+      reasoningValues: reasoning.map((effort) => effort.value),
+      configurationText: Array.from(document.querySelectorAll('[data-testid^="processing-config-"]')).map((node) => node.textContent?.trim()),
+      preprocessorSessionSourceSelected: document.querySelector('[data-testid="preprocessor-source-session"]')?.getAttribute('aria-pressed'),
+      preprocessorSessionOptionCount: document.querySelector('[data-testid="processing-preprocessor-session"]')?.options.length,
+      manualObservationVisible: Boolean(document.querySelector('[data-testid="processing-observation-input"]')),
+      preprocessorButtonExists: Boolean(document.querySelector('[data-testid="run-preprocessor"]')),
+      preprocessorDisabled: document.querySelector('[data-testid="run-preprocessor"]')?.disabled,
+      maintainerButtonExists: Boolean(document.querySelector('[data-testid="run-maintainer"]')),
+      maintainerDisabled: document.querySelector('[data-testid="run-maintainer"]')?.disabled,
+      resultCount: document.querySelectorAll('[data-testid^="processing-result-"]').length,
+      buttonCount: buttons.length,
+      sharedButtonCount: document.querySelectorAll('.ui-button').length,
+      tabButtonCount: document.querySelectorAll('button[role="tab"]').length,
+      sourceSwitchButtonCount: document.querySelectorAll('.processing-input-source button').length,
+      buttonIconCount: buttons.filter((button) => button.querySelector('.ui-button__icon .ui-icon')?.childElementCount > 0).length,
+      overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      bodyText: document.body.innerText
+    }
+  })()`)
+  const promptRestoreSemantics = await window.webContents.executeJavaScript(`(() => {
+    const editor = document.querySelector('[data-testid="processing-instructions-observation_preprocessor"]')
+    const badge = document.querySelector('[data-testid="processing-prompt-badge-observation_preprocessor"]')
+    const restore = document.querySelector('[data-testid="restore-processing-instructions-observation_preprocessor"]')
+    const original = editor.value
+    editor.value = original + '\\n未保存的测试草稿'
+    editor.dispatchEvent(new Event('input', { bubbles: true }))
+    return new Promise((resolve) => requestAnimationFrame(() => {
+      const customizedBeforeRestore = badge.textContent?.trim()
+      restore.click()
+      setTimeout(() => resolve({
+        customizedBeforeRestore,
+        restoredValue: editor.value,
+        defaultAfterRestore: badge.textContent?.trim(),
+        matchesOriginal: editor.value === original
+      }), 120)
+    }))
+  })()`)
+  await writeFile(
+    `${capturePath}.json`,
+    `${JSON.stringify({
+      ...semantics,
+      ai: aiSemantics,
+      processing: {
+        fullChain: fullChainSemantics,
+        ...processingSemantics,
+        promptRestore: promptRestoreSemantics
+      }
+    }, null, 2)}\n`,
+    'utf8'
+  )
   app.quit()
 }
 
@@ -123,6 +308,7 @@ async function createMainWindow(): Promise<void> {
   })
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  mainWindow.webContents.on('will-navigate', (event) => event.preventDefault())
   mainWindow.once('ready-to-show', () => mainWindow?.show())
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -132,24 +318,56 @@ async function createMainWindow(): Promise<void> {
   }
 
   const capturePath = process.env.OYSTER_UI_CAPTURE_PATH
-  if (capturePath) await captureFixture(mainWindow, capturePath)
+  if (capturePath) {
+    // A hidden macOS window can leave Electron's capturePage promise pending forever.
+    mainWindow.show()
+    await captureFixture(mainWindow, capturePath)
+  }
 }
 
 app.whenReady().then(async () => {
-  if (!fixtureMode()) {
-    await ensureRawEvidenceDirectories(
-      rawEvidenceRootPath(),
-      AGENT_TYPES.map((agentType) => `source:${agentType}`)
-    )
-  }
   const service = createService()
-  await service.initialize()
+  aiBackendService = createBackendService()
+  knowledgeStoreManager = await SqliteKnowledgeStoreManager.open(
+    join(app.getPath('userData'), 'knowledge-store')
+  )
+  for (const sandbox of await knowledgeStoreManager.listSandboxes()) {
+    await knowledgeStoreManager.discardSandbox(sandbox.id)
+  }
+  knowledgeProcessingService = createKnowledgeProcessingService(aiBackendService, knowledgeStoreManager)
+  knowledgeFullChainService = new KnowledgeFullChainService(
+    service,
+    knowledgeProcessingService,
+    knowledgeStoreManager,
+    (reader) => fixtureMode()
+      ? new FixtureKnowledgeAgentRuntime()
+      : new PiKnowledgeMaintenanceAgent(reader)
+  )
+  await Promise.all([
+    service.initialize(),
+    aiBackendService.initialize(),
+    knowledgeProcessingService.initialize()
+  ])
   registerIpc(service)
+  registerAiBackendIpc(aiBackendService, () => mainWindow)
+  registerKnowledgeProcessingIpc(
+    knowledgeProcessingService,
+    new SessionPreprocessor(service, knowledgeProcessingService),
+    knowledgeFullChainService,
+    () => mainWindow
+  )
   await createMainWindow()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) void createMainWindow()
   })
+})
+
+app.on('before-quit', () => {
+  knowledgeFullChainService?.dispose()
+  knowledgeProcessingService?.dispose()
+  knowledgeStoreManager?.close()
+  aiBackendService?.dispose()
 })
 
 app.on('window-all-closed', () => {
