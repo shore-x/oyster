@@ -52,6 +52,16 @@ export function connectionStatusLabel(status: AiConnectionStatus): string {
   return CONNECTION_STATUS_LABELS[status]
 }
 
+export function connectionCanAttemptRun(
+  connection: ProcessingConnectionView | undefined
+): boolean {
+  if (!connection) return false
+  // Health is advisory: an unchecked or previously failed connection may be retried by a real run.
+  return connection.status === 'unverified'
+    || connection.status === 'ready'
+    || connection.status === 'unavailable'
+}
+
 export function runtimeLabel(runtime: ProcessingRuntime): string {
   return runtime === 'direct_model_call' ? 'Direct Model' : 'Pi Agent Core'
 }

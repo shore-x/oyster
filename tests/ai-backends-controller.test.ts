@@ -7,6 +7,8 @@ import type {
 } from '../src/shared/ai-backends'
 import { createAiBackendsController } from '../src/renderer/src/ai-backends-controller'
 
+vi.mock('solid-js', async () => vi.importActual('solid-js/dist/solid.js'))
+
 const SNAPSHOT: AiBackendSnapshot = { options: [], connections: [] }
 
 function installApi(
@@ -31,6 +33,64 @@ function installApi(
 afterEach(() => vi.unstubAllGlobals())
 
 describe('AI backends controller', () => {
+  it('loads the current snapshot without refreshing and preserves a newer subscription update', async () => {
+    const initialSnapshot: AiBackendSnapshot = {
+      options: [],
+      connections: [{
+        id: 'runtime:codex',
+        adapterId: 'codex',
+        backendKind: 'coding_plan',
+        providerId: 'openai_codex',
+        displayName: 'OpenAI Codex Coding Plan',
+        credentialMode: 'oyster_keychain',
+        status: 'unverified',
+        models: []
+      }]
+    }
+    const subscribedSnapshot: AiBackendSnapshot = {
+      options: [],
+      connections: [{
+        ...initialSnapshot.connections[0],
+        status: 'ready'
+      }]
+    }
+    let resolveInitialSnapshot!: (snapshot: AiBackendSnapshot) => void
+    let publishSnapshot!: (snapshot: AiBackendSnapshot) => void
+    const getSnapshot = vi.fn<AiBackendApi['getSnapshot']>(() => new Promise((resolve) => {
+      resolveInitialSnapshot = resolve
+    }))
+    const refresh = vi.fn<AiBackendApi['refresh']>(async () => initialSnapshot)
+    const unsubscribe = vi.fn()
+    installApi(async () => ({
+      connectionId: 'runtime:codex',
+      output: 'ok',
+      durationMs: 10
+    }), {
+      getSnapshot,
+      refresh,
+      subscribe: (listener) => {
+        publishSnapshot = listener
+        return unsubscribe
+      }
+    })
+
+    await createRoot(async (dispose) => {
+      try {
+        const controller = createAiBackendsController()
+        await vi.waitFor(() => expect(getSnapshot).toHaveBeenCalledOnce())
+
+        publishSnapshot(subscribedSnapshot)
+        resolveInitialSnapshot(initialSnapshot)
+
+        await vi.waitFor(() => expect(controller.snapshot()).toEqual(subscribedSnapshot))
+        expect(refresh).not.toHaveBeenCalled()
+      } finally {
+        dispose()
+      }
+    })
+    expect(unsubscribe).toHaveBeenCalledOnce()
+  })
+
   it('uses the selected Coding Plan login method and forwards cancellation', async () => {
     const connect = vi.fn<AiBackendApi['connect']>(async () => SNAPSHOT)
     const cancelConnect = vi.fn<AiBackendApi['cancelConnect']>(async () => undefined)

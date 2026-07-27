@@ -156,40 +156,6 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       bodyText: document.body.innerText
     }
   })()`)
-  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-ai-backends"]').click()`)
-  await new Promise((resolve) => setTimeout(resolve, 120))
-  const aiImage = await window.webContents.capturePage()
-  await writeFile(join(dirname(capturePath), 'ai-backends.png'), aiImage.toPNG())
-  const aiSemantics = await window.webContents.executeJavaScript(`(() => {
-    const agent = {
-      title: document.querySelector('h1')?.textContent,
-      backendKind: document.querySelector('[data-testid="backend-kind-select"]')?.value,
-      provider: document.querySelector('[data-testid="provider-select"]')?.value,
-      codexCards: document.querySelectorAll('[data-testid="codex-runtime-card"]').length,
-      modelCards: document.querySelectorAll('[data-testid="model-connection-card"]').length,
-      codingPlanModel: document.querySelector('[data-testid="coding-plan-model-select"]')?.value,
-      codingPlanReasoning: document.querySelector('[data-testid="coding-plan-reasoning-select"]')?.value,
-      codingPlanConfiguration: document.querySelector('[data-testid="coding-plan-test-configuration"]')?.textContent,
-      bodyText: document.body.innerText,
-      overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
-    }
-    const backend = document.querySelector('[data-testid="backend-kind-select"]')
-    backend.value = 'api'
-    backend.dispatchEvent(new Event('change', { bubbles: true }))
-    return new Promise((resolve) => requestAnimationFrame(() => resolve({
-      agent,
-      model: {
-        backendKind: document.querySelector('[data-testid="backend-kind-select"]')?.value,
-        provider: document.querySelector('[data-testid="provider-select"]')?.value,
-        passwordFields: document.querySelectorAll('input[type="password"]').length,
-        passwordValues: Array.from(document.querySelectorAll('input[type="password"]')).map((input) => input.value),
-        configuredModel: document.querySelector('[data-testid="api-connection-model-select"]')?.value,
-        configuredReasoning: document.querySelector('[data-testid="api-connection-reasoning-select"]')?.value,
-        configuredSummary: document.querySelector('[data-testid="api-connection-test-configuration"]')?.textContent,
-        bodyText: document.body.innerText
-      }
-    })))
-  })()`)
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-knowledge-processing"]').click()`)
   await new Promise((resolve) => setTimeout(resolve, 200))
   const processingImage = await window.webContents.capturePage()
@@ -319,6 +285,40 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     join(dirname(capturePath), 'knowledge-processing-trace-maintenance.png'),
     maintenanceTraceImage.toPNG()
   )
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-ai-backends"]').click()`)
+  await new Promise((resolve) => setTimeout(resolve, 120))
+  const aiImage = await window.webContents.capturePage()
+  await writeFile(join(dirname(capturePath), 'ai-backends.png'), aiImage.toPNG())
+  const aiSemantics = await window.webContents.executeJavaScript(`(() => {
+    const agent = {
+      title: document.querySelector('h1')?.textContent,
+      backendKind: document.querySelector('[data-testid="backend-kind-select"]')?.value,
+      provider: document.querySelector('[data-testid="provider-select"]')?.value,
+      codexCards: document.querySelectorAll('[data-testid="codex-runtime-card"]').length,
+      modelCards: document.querySelectorAll('[data-testid="model-connection-card"]').length,
+      codingPlanModel: document.querySelector('[data-testid="coding-plan-model-select"]')?.value,
+      codingPlanReasoning: document.querySelector('[data-testid="coding-plan-reasoning-select"]')?.value,
+      codingPlanConfiguration: document.querySelector('[data-testid="coding-plan-test-configuration"]')?.textContent,
+      bodyText: document.body.innerText,
+      overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
+    }
+    const backend = document.querySelector('[data-testid="backend-kind-select"]')
+    backend.value = 'api'
+    backend.dispatchEvent(new Event('change', { bubbles: true }))
+    return new Promise((resolve) => requestAnimationFrame(() => resolve({
+      agent,
+      model: {
+        backendKind: document.querySelector('[data-testid="backend-kind-select"]')?.value,
+        provider: document.querySelector('[data-testid="provider-select"]')?.value,
+        passwordFields: document.querySelectorAll('input[type="password"]').length,
+        passwordValues: Array.from(document.querySelectorAll('input[type="password"]')).map((input) => input.value),
+        configuredModel: document.querySelector('[data-testid="api-connection-model-select"]')?.value,
+        configuredReasoning: document.querySelector('[data-testid="api-connection-reasoning-select"]')?.value,
+        configuredSummary: document.querySelector('[data-testid="api-connection-test-configuration"]')?.textContent,
+        bodyText: document.body.innerText
+      }
+    })))
+  })()`)
   await writeFile(
     `${capturePath}.json`,
     `${JSON.stringify({

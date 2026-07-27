@@ -270,6 +270,9 @@ export class AiBackendService {
       ...this.codingPlanConnection,
       models: this.codingPlanAdapter.listModels()
     }
+    // Coding Plan authentication is application state, not a side effect of visiting its UI.
+    // API model discovery remains explicit so unreachable custom endpoints do not delay startup.
+    await this.refreshCodingPlan()
   }
 
   snapshot(): AiBackendSnapshot {

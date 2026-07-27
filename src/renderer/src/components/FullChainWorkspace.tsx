@@ -8,6 +8,7 @@ import type {
 } from '../../../shared/knowledge-processing'
 import {
   backendLabel,
+  connectionCanAttemptRun,
   connectionStatusLabel,
   providerLabel,
   reasoningLabel,
@@ -136,7 +137,7 @@ function stageConfiguration(
     runnable: Boolean(
       connection
       && model
-      && (connection.backendKind === 'api' || connection.status === 'ready')
+      && connectionCanAttemptRun(connection)
     )
   }
 }
@@ -183,10 +184,10 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
     if (props.selectedSessionInspectionError) return '所选 Session 无法读取，请重新扫描或选择其他 Session。'
     if (!props.preprocessor?.connectionId) return '请先为 Observation Preprocessor 选择 Connection。'
     if (!props.preprocessor?.modelId) return '请先为 Observation Preprocessor 选择 Model。'
-    if (!preprocessorConfig().runnable) return 'Observation Preprocessor 的 Coding Plan Connection 当前不可用。'
+    if (!preprocessorConfig().runnable) return 'Observation Preprocessor 的 Connection 需要先完成认证或配置。'
     if (!props.maintainer?.connectionId) return '请先为 Knowledge Maintenance Agent 选择 Connection。'
     if (!props.maintainer?.modelId) return '请先为 Knowledge Maintenance Agent 选择 Model。'
-    if (!maintainerConfig().runnable) return 'Knowledge Maintenance Agent 的 Coding Plan Connection 当前不可用。'
+    if (!maintainerConfig().runnable) return 'Knowledge Maintenance Agent 的 Connection 需要先完成认证或配置。'
     return undefined
   })
   const canRun = createMemo(() => !disabledReason())

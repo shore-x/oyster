@@ -61,7 +61,7 @@ if (semantics.ai.model.passwordFields !== 1) throw new Error('API Key password f
 if (semantics.ai.model.passwordValues.some(Boolean)) throw new Error('The fixture exposed a stored API Key to the renderer')
 if (semantics.ai.model.configuredModel !== 'fixture-model') throw new Error('API Connection test model is not explicit')
 if (semantics.ai.model.configuredReasoning !== '') throw new Error('API fixture should use the model-default reasoning effort')
-if (!semantics.ai.model.configuredSummary?.includes('Fixture Model')) throw new Error('API Connection test configuration is not visible')
+if (!semantics.ai.model.configuredSummary?.includes('fixture-model')) throw new Error('API Connection test configuration is not visible')
 if (!semantics.ai.model.bodyText.includes('OpenAI-compatible')) throw new Error('Custom compatible provider choice is missing')
 
 const processing = semantics.processing
@@ -101,7 +101,7 @@ if (processing.fullChain.stageConfigurations.length !== 2) {
   throw new Error('Full-chain view must show the exact configuration of both stages')
 }
 const fullChainConfiguration = processing.fullChain.stageConfigurations.join('\n')
-for (const requiredCopy of ['API', 'OpenAI-compatible', 'fixture-model', '模型默认', '可用']) {
+for (const requiredCopy of ['API', 'OpenAI-compatible', 'fixture-model', '模型默认', '未测试']) {
   if (!fullChainConfiguration.includes(requiredCopy)) {
     throw new Error(`Full-chain stage configuration is missing: ${requiredCopy}`)
   }

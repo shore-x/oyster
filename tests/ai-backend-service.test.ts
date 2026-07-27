@@ -203,6 +203,35 @@ async function saveApiConnection(
 }
 
 describe('AiBackendService', () => {
+  it('checks Coding Plan readiness during initialization without probing API model endpoints', async () => {
+    const repository = new InMemoryAiBackendRepository({
+      connections: [{
+        id: 'model:stored',
+        adapterId: 'openai-compatible',
+        providerId: 'openai_compatible',
+        protocol: 'openai_responses',
+        baseUrl: 'http://localhost:11434/v1',
+        model: 'stored-model'
+      }]
+    })
+    const { service, model } = createService(repository)
+
+    await service.initialize()
+
+    expect(service.snapshot().connections.find(
+      (connection) => connection.id === 'runtime:codex'
+    )).toMatchObject({
+      status: 'ready',
+      executablePath: '/usr/local/bin/codex',
+      accountLabel: 'user@example.com',
+      planType: 'pro'
+    })
+    expect(service.snapshot().connections.find(
+      (connection) => connection.id === 'model:stored'
+    )).toMatchObject({ status: 'unverified' })
+    expect(model.listCalls).toEqual([])
+  })
+
   it('discovers models without persisting the temporary key and uses the fixed OpenAI endpoint', async () => {
     const { service, repository, model } = createService()
     await service.initialize()

@@ -13,6 +13,7 @@ import { createKnowledgeProcessingController } from '../knowledge-processing-con
 import {
   REASONING_LABELS,
   backendLabel,
+  connectionCanAttemptRun,
   connectionStatusLabel,
   providerLabel,
   reasoningLabel,
@@ -423,7 +424,7 @@ export function KnowledgeProcessingPage() {
     return Boolean(
       connection
       && stageModel(stage)
-      && (connection.backendKind === 'api' || connection.status === 'ready')
+      && connectionCanAttemptRun(connection)
     )
   }
   const preprocessorPromptDirty = createMemo(() => {
@@ -485,8 +486,8 @@ export function KnowledgeProcessingPage() {
     const connection = selectedConnection(stage)
     if (!connection) return '当前 Connection 不可用，或尚未发现可用模型。'
     if (!stage.modelId || !stageModel(stage)) return '请先选择 Observation Preprocessor 使用的 Model。'
-    if (connection.backendKind === 'coding_plan' && connection.status !== 'ready') {
-      return `当前 Coding Plan Connection 状态为“${connectionStatusLabel(connection.status)}”，暂不可运行。`
+    if (!connectionCanAttemptRun(connection)) {
+      return `当前 Connection 状态为“${connectionStatusLabel(connection.status)}”，需要先完成认证或配置。`
     }
     if (preprocessorPromptDirty()) return '处理指令有未保存修改，请先保存。'
     if (preprocessorInputSource() === 'manual') {

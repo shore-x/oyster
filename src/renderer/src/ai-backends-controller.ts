@@ -44,8 +44,16 @@ export function createAiBackendsController() {
   }
 
   onMount(() => {
-    const unsubscribe = window.oyster.aiBackends.subscribe(setSnapshot)
-    void update('refresh', () => window.oyster.aiBackends.refresh())
+    let receivedSubscriptionSnapshot = false
+    const unsubscribe = window.oyster.aiBackends.subscribe((nextSnapshot) => {
+      receivedSubscriptionSnapshot = true
+      setSnapshot(nextSnapshot)
+    })
+    void window.oyster.aiBackends.getSnapshot()
+      .then((initialSnapshot) => {
+        if (!receivedSubscriptionSnapshot) setSnapshot(initialSnapshot)
+      })
+      .catch((cause) => setError(errorText(cause)))
     onCleanup(unsubscribe)
   })
 
