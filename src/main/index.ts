@@ -104,6 +104,10 @@ function createKnowledgeProcessingService(
 function registerIpc(service: DiscoveryService): void {
   ipcMain.handle(discoveryChannels.getSnapshot, () => service.snapshot())
   ipcMain.handle(discoveryChannels.listAvailableSessions, () => service.listAvailableSessions())
+  ipcMain.handle(
+    discoveryChannels.inspectAvailableSession,
+    (_event, input) => service.inspectAvailableSession(input)
+  )
   ipcMain.handle(discoveryChannels.detectAgents, () => service.detectAgents())
   ipcMain.handle(discoveryChannels.scanSource, (_event, sourceId: string) => service.scanSource(sourceId))
   ipcMain.handle(discoveryChannels.cancelRun, (_event, runId: string) => service.cancelRun(runId))
@@ -211,6 +215,12 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     return new Promise((resolve) => requestAnimationFrame(() => resolve({
       ...result,
       selectedSession: select?.value,
+      selectedSessionDetails: {
+        title: document.querySelector('[data-testid="full-chain-session-meta-title"]')?.textContent?.trim(),
+        timeRange: document.querySelector('[data-testid="full-chain-session-meta-time-range"]')?.textContent?.trim(),
+        messageCount: document.querySelector('[data-testid="full-chain-session-meta-message-count"]')?.textContent?.trim(),
+        project: document.querySelector('[data-testid="full-chain-session-meta-project"]')?.textContent?.trim()
+      },
       fullChainButtonEnabledAfterSelection: document.querySelector('[data-testid="run-full-chain"]')?.disabled === false,
       readyReason: document.querySelector('[data-testid="full-chain-disabled-reason"]')?.textContent?.trim()
     })))
@@ -240,6 +250,8 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       configurationText: Array.from(document.querySelectorAll('[data-testid^="processing-config-"]')).map((node) => node.textContent?.trim()),
       preprocessorSessionSourceSelected: document.querySelector('[data-testid="preprocessor-source-session"]')?.getAttribute('aria-pressed'),
       preprocessorSessionOptionCount: document.querySelector('[data-testid="processing-preprocessor-session"]')?.options.length,
+      preprocessorSessionValue: document.querySelector('[data-testid="processing-preprocessor-session"]')?.value,
+      preprocessorReadyReason: document.querySelector('[data-testid="preprocessor-disabled-reason"]')?.textContent?.trim(),
       manualObservationVisible: Boolean(document.querySelector('[data-testid="processing-observation-input"]')),
       preprocessorButtonExists: Boolean(document.querySelector('[data-testid="run-preprocessor"]')),
       preprocessorDisabled: document.querySelector('[data-testid="run-preprocessor"]')?.disabled,

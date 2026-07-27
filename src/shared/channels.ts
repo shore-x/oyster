@@ -2,6 +2,7 @@ export const discoveryChannels = {
   snapshot: 'discovery:snapshot',
   getSnapshot: 'discovery:get-snapshot',
   listAvailableSessions: 'discovery:list-available-sessions',
+  inspectAvailableSession: 'discovery:inspect-available-session',
   detectAgents: 'discovery:detect-agents',
   scanSource: 'discovery:scan-source',
   cancelRun: 'discovery:cancel-run',

@@ -81,6 +81,19 @@ if (!processing.fullChain.initialDisabledReason?.includes('选择一个 Session'
 if (!processing.fullChain.selectedSession || processing.fullChain.fullChainButtonEnabledAfterSelection !== true) {
   throw new Error('A complete stage configuration must become runnable after selecting a Session')
 }
+const selectedSessionDetails = processing.fullChain.selectedSessionDetails
+if (selectedSessionDetails?.title !== '知识加工 Sandbox 设计讨论') {
+  throw new Error('The selected Session title is not visible in the full-chain details')
+}
+if (!selectedSessionDetails?.timeRange?.includes('→')) {
+  throw new Error('The selected Session time range is not visible in the full-chain details')
+}
+if (selectedSessionDetails?.messageCount !== '3 条') {
+  throw new Error(`Expected 3 fixture messages, got ${selectedSessionDetails?.messageCount || 'no value'}`)
+}
+if (selectedSessionDetails?.project !== '/Users/demo/projects/oyster') {
+  throw new Error('The selected Session project is not visible in the full-chain details')
+}
 if (!processing.fullChain.readyReason?.includes('配置完整')) {
   throw new Error('Full-chain view does not report that the selected configuration is runnable')
 }
@@ -146,14 +159,17 @@ if (processing.preprocessorSessionSourceSelected !== 'true' || processing.manual
 if (processing.preprocessorSessionOptionCount !== 2) {
   throw new Error(`Expected one available fixture Session in stage debugging, got ${processing.preprocessorSessionOptionCount - 1}`)
 }
-if (!processing.bodyText.includes('运行时从 Agent 的原始位置读取')) {
-  throw new Error('Stage debugging does not explain on-demand Session reading')
-}
 if (processing.bodyText.includes('已导入 Session')) {
   throw new Error('Stage debugging still exposes the removed import model')
 }
-if (!processing.preprocessorButtonExists || processing.preprocessorDisabled !== true) {
-  throw new Error('Preprocessor action must wait for an explicit Session selection')
+if (processing.preprocessorSessionValue !== processing.fullChain.selectedSession) {
+  throw new Error('Stage debugging did not preserve the Session selected in the full-chain view')
+}
+if (!processing.preprocessorButtonExists || processing.preprocessorDisabled !== false) {
+  throw new Error('Preprocessor action must be runnable with the preserved Session and ready configuration')
+}
+if (!processing.preprocessorReadyReason?.includes('可以运行预处理')) {
+  throw new Error('Stage debugging does not report that preprocessing is ready to run')
 }
 if (!processing.maintainerButtonExists || processing.maintainerDisabled !== true) {
   throw new Error('Knowledge maintenance action must remain disabled before preprocessing succeeds')

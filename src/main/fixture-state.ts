@@ -72,7 +72,9 @@ export function createFixtureState(): DiscoveryStateData {
       title: '知识加工 Sandbox 设计讨论',
       projectPath: '/Users/demo/projects/oyster',
       startedAt: '2026-07-21T13:10:00.000Z',
+      endedAt: '2026-07-21T13:42:00.000Z',
       updatedAt: '2026-07-21T13:42:00.000Z',
+      messageCount: 3,
       sizeBytes: Buffer.byteLength(FIXTURE_SESSION_CONTENT),
       modifiedAt: '2026-07-21T13:42:00.000Z',
       fingerprint: 'a'.repeat(64)

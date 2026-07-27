@@ -7,6 +7,7 @@ import type {
   AvailableSessionSummary,
   DiscoverySnapshot,
   HistoryArtifact,
+  InspectAvailableSessionInput,
   ScanRun
 } from '../../shared/discovery'
 import { AGENT_TYPES } from '../../shared/discovery'
@@ -19,6 +20,7 @@ import type {
   ArtifactCandidate
 } from './model'
 import type { SourceEvidenceReader } from './source-evidence-reader'
+import { SessionInspector } from './session-inspection'
 
 type SnapshotListener = (snapshot: DiscoverySnapshot) => void
 
@@ -70,6 +72,36 @@ function errorMessage(error: unknown): string {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && (error.name === 'AbortError' || error.message.includes('aborted'))
+}
+
+function sessionSummary(
+  artifact: HistoryArtifact,
+  source: AgentSource
+): AvailableSessionSummary {
+  return {
+    artifactId: artifact.id,
+    sourceId: source.id,
+    agentType: source.agentType,
+    sourceDisplayName: source.displayName,
+    externalId: artifact.externalId,
+    title: artifact.title,
+    projectPath: artifact.projectPath,
+    startedAt: artifact.startedAt,
+    endedAt: artifact.endedAt,
+    updatedAt: artifact.updatedAt,
+    messageCount: artifact.messageCount,
+    sizeBytes: artifact.sizeBytes,
+    revision: artifact.fingerprint
+  }
+}
+
+function assertSessionReference(input: InspectAvailableSessionInput): void {
+  if (typeof input.artifactId !== 'string' || input.artifactId.length === 0 || input.artifactId.length > 256) {
+    throw new Error('Invalid Session artifact ID')
+  }
+  if (!/^[a-f0-9]{64}$/i.test(input.expectedRevision)) {
+    throw new Error('Invalid Session revision')
+  }
 }
 
 export class DiscoveryService {
@@ -147,38 +179,61 @@ export class DiscoveryService {
       .flatMap<AvailableSessionSummary>((artifact) => {
         const source = this.state.sources.find((candidate) => candidate.id === artifact.sourceId)
         if (!source || source.discoveryState !== 'found') return []
-        return [{
-          artifactId: artifact.id,
-          sourceId: source.id,
-          agentType: source.agentType,
-          sourceDisplayName: source.displayName,
-          externalId: artifact.externalId,
-          title: artifact.title,
-          projectPath: artifact.projectPath,
-          startedAt: artifact.startedAt,
-          updatedAt: artifact.updatedAt,
-          sizeBytes: artifact.sizeBytes,
-          revision: artifact.fingerprint
-        }]
+        return [sessionSummary(artifact, source)]
       })
       .sort((left, right) => {
-        const leftDate = left.updatedAt || left.startedAt || ''
-        const rightDate = right.updatedAt || right.startedAt || ''
+        const leftDate = left.endedAt || left.updatedAt || left.startedAt || ''
+        const rightDate = right.endedAt || right.updatedAt || right.startedAt || ''
         return rightDate.localeCompare(leftDate) || left.artifactId.localeCompare(right.artifactId)
       })
       .map((session) => clone(session))
+  }
+
+  async inspectAvailableSession(
+    input: InspectAvailableSessionInput
+  ): Promise<AvailableSessionSummary> {
+    assertSessionReference(input)
+    const artifact = this.state.artifacts.find((candidate) => candidate.id === input.artifactId)
+    if (!artifact || artifact.kind !== 'conversation') {
+      throw new Error('The source Session is no longer available')
+    }
+    if (artifact.fingerprint !== input.expectedRevision) {
+      throw new Error('The source Session revision has changed')
+    }
+    const source = this.state.sources.find((candidate) => candidate.id === artifact.sourceId)
+    if (!source || source.discoveryState !== 'found') {
+      throw new Error('The source Session is no longer available')
+    }
+    if (artifact.messageCount !== undefined) {
+      return clone(sessionSummary(artifact, source))
+    }
+
+    const adapter = this.requireAdapter(source.agentType)
+    const inspector = new SessionInspector(source.agentType)
+    await this.sourceEvidenceReader.scanLines({
+      artifactId: artifact.id,
+      absolutePath: adapter.resolveArtifactPath(source.rootPath, artifact),
+      expectedSizeBytes: artifact.sizeBytes,
+      expectedModifiedAt: artifact.modifiedAt
+    }, (line) => inspector.visitLine(line))
+
+    const current = this.state.artifacts.find((candidate) => candidate.id === input.artifactId)
+    if (!current || current.fingerprint !== input.expectedRevision) {
+      throw new Error('The source Session revision changed while it was being inspected')
+    }
+    const inspection = inspector.result()
+    current.messageCount = inspection.messageCount
+    current.startedAt ??= inspection.startedAt
+    current.endedAt = inspection.endedAt
+    await this.persist()
+    return clone(sessionSummary(current, source))
   }
 
   async readAvailableSession(
     input: ReadAvailableSessionInput,
     maxBytes: number
   ): Promise<AvailableSessionEvidence> {
-    if (typeof input.artifactId !== 'string' || input.artifactId.length === 0 || input.artifactId.length > 256) {
-      throw new Error('Invalid Session artifact ID')
-    }
-    if (!/^[a-f0-9]{64}$/i.test(input.expectedRevision)) {
-      throw new Error('Invalid Session revision')
-    }
+    assertSessionReference(input)
     const artifact = this.state.artifacts.find((candidate) => candidate.id === input.artifactId)
     if (!artifact || artifact.kind !== 'conversation') {
       throw new Error('The source Session is no longer available')
@@ -349,7 +404,11 @@ export class DiscoveryService {
             projectPath: candidate.projectPath,
             instructionScope: candidate.instructionScope,
             startedAt: candidate.startedAt,
+            endedAt: candidate.endedAt
+              ?? (existing?.fingerprint === nextFingerprint ? existing.endedAt : undefined),
             updatedAt: candidate.updatedAt,
+            messageCount: candidate.messageCount
+              ?? (existing?.fingerprint === nextFingerprint ? existing.messageCount : undefined),
             sizeBytes: candidate.sizeBytes,
             modifiedAt: candidate.modifiedAt,
             fingerprint: nextFingerprint

@@ -8,7 +8,6 @@ import type {
   ProcessingStageView
 } from '../../../shared/knowledge-processing'
 import type { ReasoningEffort } from '../../../shared/ai-backends'
-import type { AvailableSessionSummary } from '../../../shared/discovery'
 import type { KnowledgeContributionDraft } from '../../../shared/knowledge'
 import { createKnowledgeProcessingController } from '../knowledge-processing-controller'
 import {
@@ -23,6 +22,7 @@ import {
 import { Button, Icon } from '../ui'
 import { FullChainWorkspace, type FullChainResultView } from './FullChainWorkspace'
 import { ProcessingDebugTracePanel } from './ProcessingDebugTracePanel'
+import { SessionMetadata, sessionOptionLabel } from './SessionMetadata'
 
 function formatDuration(durationMs: number): string {
   if (durationMs < 1_000) return `${durationMs} ms`
@@ -32,11 +32,6 @@ function formatDuration(durationMs: number): string {
 function formatTime(value: string): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN')
-}
-
-function availableSessionLabel(session: AvailableSessionSummary): string {
-  const identity = session.title?.trim() || session.externalId
-  return `${identity} · ${session.sourceDisplayName}`
 }
 
 function contributionText(contribution: KnowledgeContributionDraft): string {
@@ -405,10 +400,9 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
 export function KnowledgeProcessingPage() {
   const controller = createKnowledgeProcessingController()
   const [view, setView] = createSignal<'full_chain' | 'stage_debug'>('full_chain')
-  const [fullChainSessionId, setFullChainSessionId] = createSignal<string>()
+  const [selectedSessionId, setSelectedSessionId] = createSignal<string>()
   const [fullChainAttention, setFullChainAttention] = createSignal('')
   const [preprocessorInputSource, setPreprocessorInputSource] = createSignal<'session' | 'manual'>('session')
-  const [preprocessorSessionId, setPreprocessorSessionId] = createSignal<string>()
   const [observation, setObservation] = createSignal('')
   const [attention, setAttention] = createSignal('')
   const [preprocessorPrompt, setPreprocessorPrompt] = createSignal('')
@@ -474,17 +468,39 @@ export function KnowledgeProcessingPage() {
       ? result
       : undefined
   })
-  const selectedPreprocessorSession = createMemo(() => controller.availableSessions().find(
-    (session) => session.artifactId === preprocessorSessionId()
+  const selectedSession = createMemo(() => controller.availableSessions().find(
+    (session) => session.artifactId === selectedSessionId()
   ))
-  const preprocessorInputReady = createMemo(() => preprocessorInputSource() === 'session'
-    ? Boolean(selectedPreprocessorSession())
-    : Boolean(observation().trim()))
   const anyStageRunning = createMemo(
     () => controller.isFullChainRunning()
       || controller.isRunning('observation_preprocessor')
       || controller.isRunning('knowledge_maintenance_agent')
   )
+  const preprocessorDisabledReason = createMemo(() => {
+    const stage = preprocessor()
+    if (!stage) return '正在读取 Observation Preprocessor 配置…'
+    if (anyStageRunning()) return '已有知识加工任务正在运行。'
+    if (controller.isSaving(stage.id)) return '正在保存 Observation Preprocessor 配置…'
+    if (!stage.connectionId) return '请先选择 Observation Preprocessor 的 Connection。'
+    const connection = selectedConnection(stage)
+    if (!connection) return '当前 Connection 不可用，或尚未发现可用模型。'
+    if (!stage.modelId || !stageModel(stage)) return '请先选择 Observation Preprocessor 使用的 Model。'
+    if (connection.backendKind === 'coding_plan' && connection.status !== 'ready') {
+      return `当前 Coding Plan Connection 状态为“${connectionStatusLabel(connection.status)}”，暂不可运行。`
+    }
+    if (preprocessorPromptDirty()) return '处理指令有未保存修改，请先保存。'
+    if (preprocessorInputSource() === 'manual') {
+      return observation().trim() ? undefined : '请输入用于调试的 Observation。'
+    }
+    if (controller.sessionsLoading()) return '正在读取可用 Session…'
+    if (!controller.availableSessions().length) return '暂无可用 Session，请先在“数据来源”中完成扫描。'
+    const session = selectedSession()
+    if (!session) return '请先选择一个 Session。'
+    if (controller.sessionInspectionError(session.artifactId)) {
+      return '所选 Session 无法读取，请重新扫描或选择其他 Session。'
+    }
+    return undefined
+  })
 
   let previousPreprocessorInstructions: string | undefined
   let previousMaintenanceInstructions: string | undefined
@@ -594,9 +610,14 @@ export function KnowledgeProcessingPage() {
     controller.invalidateInputResults()
   }
 
-  function updatePreprocessorSession(value: string): void {
-    setPreprocessorSessionId(value || undefined)
+  function updateSelectedSession(value: string): void {
+    const artifactId = value || undefined
+    setSelectedSessionId(artifactId)
     controller.invalidateInputResults()
+    const session = controller.availableSessions().find(
+      (candidate) => candidate.artifactId === artifactId
+    )
+    if (session) void controller.inspectAvailableSession(session)
   }
 
   function updateAttention(value: string): void {
@@ -650,7 +671,13 @@ export function KnowledgeProcessingPage() {
         <FullChainWorkspace
           sessions={controller.availableSessions()}
           sessionsLoading={controller.sessionsLoading()}
-          selectedSessionId={fullChainSessionId()}
+          selectedSessionId={selectedSessionId()}
+          selectedSessionInspecting={controller.isInspectingSession(
+            selectedSession()?.artifactId || ''
+          )}
+          selectedSessionInspectionError={controller.sessionInspectionError(
+            selectedSession()?.artifactId || ''
+          )}
           attention={fullChainAttention()}
           preprocessor={preprocessor()}
           preprocessorConnection={selectedConnection(preprocessor())}
@@ -669,11 +696,11 @@ export function KnowledgeProcessingPage() {
             && controller.isDiscardingSandbox(fullChainResult()!.sandboxId)
           )}
           result={fullChainResult()}
-          onSelectSession={(id) => setFullChainSessionId(id || undefined)}
+          onSelectSession={updateSelectedSession}
           onAttentionInput={setFullChainAttention}
           onRun={() => {
             const session = controller.availableSessions().find(
-              (candidate) => candidate.artifactId === fullChainSessionId()
+              (candidate) => candidate.artifactId === selectedSessionId()
             )
             if (!session) return
             void controller.runFullChain({
@@ -779,9 +806,13 @@ export function KnowledgeProcessingPage() {
                     <span>可用 Session</span>
                     <select
                       data-testid="processing-preprocessor-session"
-                      value={preprocessorSessionId() || ''}
-                      disabled={anyStageRunning() || controller.sessionsLoading()}
-                      onChange={(event) => updatePreprocessorSession(event.currentTarget.value)}
+                      value={selectedSessionId() || ''}
+                      disabled={
+                        anyStageRunning()
+                        || controller.sessionsLoading()
+                        || controller.availableSessions().length === 0
+                      }
+                      onChange={(event) => updateSelectedSession(event.currentTarget.value)}
                     >
                       <option value="">
                         {controller.sessionsLoading()
@@ -791,12 +822,12 @@ export function KnowledgeProcessingPage() {
                             : '暂无可用 Session'}
                       </option>
                       <For each={controller.availableSessions()}>{(session) => (
-                        <option value={session.artifactId}>{availableSessionLabel(session)}</option>
+                        <option value={session.artifactId}>{sessionOptionLabel(session)}</option>
                       )}</For>
                     </select>
                   </label>
                   <Show
-                    when={selectedPreprocessorSession()}
+                    when={selectedSession()}
                     fallback={(
                       <p class="processing-input__hint">
                         {controller.availableSessions().length
@@ -806,11 +837,13 @@ export function KnowledgeProcessingPage() {
                     )}
                   >
                     {(session) => (
-                      <dl class="processing-session-summary">
-                        <div><dt>来源</dt><dd>{session().sourceDisplayName}</dd></div>
-                        <div><dt>Session</dt><dd title={session().externalId}>{session().externalId}</dd></div>
-                        <div><dt>扫描版本</dt><dd title={session().revision}>{session().revision.slice(0, 12)}</dd></div>
-                      </dl>
+                      <SessionMetadata
+                        session={session()}
+                        class="processing-session-summary"
+                        testId="preprocessor-session-meta"
+                        loading={controller.isInspectingSession(session().artifactId)}
+                        error={controller.sessionInspectionError(session().artifactId)}
+                      />
                     )}
                   </Show>
                 </Show>
@@ -824,9 +857,12 @@ export function KnowledgeProcessingPage() {
                     onInput={(event) => updateAttention(event.currentTarget.value)}
                   />
                 </label>
-                <Show when={preprocessorPromptDirty()}>
-                  <p class="processing-stage__action-note">请先保存处理指令，再运行预处理。</p>
-                </Show>
+                <p
+                  class={`processing-stage__run-status${preprocessorDisabledReason() ? ' processing-stage__run-status--blocked' : ''}`}
+                  data-testid="preprocessor-disabled-reason"
+                >
+                  {preprocessorDisabledReason() || '配置和输入已准备，可以运行预处理。'}
+                </p>
                 <div class="processing-stage__actions">
                   <Show
                     when={controller.isRunning(stage().id)}
@@ -835,15 +871,9 @@ export function KnowledgeProcessingPage() {
                         variant="primary"
                         icon="play"
                         data-testid="run-preprocessor"
-                        disabled={
-                          !stageConfigured(stage())
-                          || !preprocessorInputReady()
-                          || preprocessorPromptDirty()
-                          || controller.isSaving(stage().id)
-                          || anyStageRunning()
-                        }
+                        disabled={Boolean(preprocessorDisabledReason())}
                         onClick={() => {
-                          const session = selectedPreprocessorSession()
+                          const session = selectedSession()
                           if (preprocessorInputSource() === 'session') {
                             if (!session) return
                             void controller.runSessionPreprocessor({

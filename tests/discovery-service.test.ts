@@ -15,6 +15,93 @@ afterEach(async () => {
 })
 
 describe('DiscoveryService', () => {
+  it('inspects only the selected Session and caches its message metadata by revision', async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), 'oyster-session-inspection-'))
+    temporaryDirectories.push(homeDirectory)
+    const historyRoot = join(homeDirectory, '.claude', 'projects', 'demo')
+    await mkdir(historyRoot, { recursive: true })
+    await writeFile(join(historyRoot, 'one.jsonl'), [
+      JSON.stringify({
+        sessionId: 'one',
+        timestamp: '2026-07-01T00:00:00.000Z'
+      }),
+      JSON.stringify({
+        sessionId: 'one',
+        type: 'user',
+        timestamp: '2026-07-01T00:01:00.000Z',
+        message: { role: 'user', content: 'Question' }
+      }),
+      JSON.stringify({
+        sessionId: 'one',
+        type: 'assistant',
+        timestamp: '2026-07-01T00:02:00.000Z',
+        message: { role: 'assistant', content: 'Answer' }
+      })
+    ].join('\n') + '\n')
+
+    const repository = new InMemoryDiscoveryRepository()
+    const evidenceReader = new FileSourceEvidenceReader()
+    const scanLines = vi.spyOn(evidenceReader, 'scanLines')
+    const readEvidence = vi.spyOn(evidenceReader, 'read')
+    const context = { homeDirectory, environment: {}, pathEntries: [] }
+    const service = new DiscoveryService(
+      repository,
+      evidenceReader,
+      [new ClaudeHistoryAdapter()],
+      context
+    )
+    await service.initialize()
+    await service.detectAgents()
+    await service.waitForIdle()
+
+    const selected = service.listAvailableSessions()[0]
+    expect(selected).toMatchObject({
+      externalId: 'one',
+      startedAt: '2026-07-01T00:00:00.000Z'
+    })
+    expect(selected.messageCount).toBeUndefined()
+    expect(selected.endedAt).toBeUndefined()
+
+    const inspected = await service.inspectAvailableSession({
+      artifactId: selected.artifactId,
+      expectedRevision: selected.revision
+    })
+    expect(inspected).toMatchObject({
+      artifactId: selected.artifactId,
+      revision: selected.revision,
+      startedAt: '2026-07-01T00:00:00.000Z',
+      endedAt: '2026-07-01T00:02:00.000Z',
+      messageCount: 2
+    })
+    expect(scanLines).toHaveBeenCalledOnce()
+    expect(readEvidence).not.toHaveBeenCalled()
+    expect(service.listAvailableSessions()[0]).toMatchObject({
+      endedAt: '2026-07-01T00:02:00.000Z',
+      messageCount: 2
+    })
+
+    await expect(service.inspectAvailableSession({
+      artifactId: selected.artifactId,
+      expectedRevision: selected.revision
+    })).resolves.toMatchObject({ messageCount: 2 })
+
+    const restored = new DiscoveryService(
+      repository,
+      evidenceReader,
+      [new ClaudeHistoryAdapter()],
+      context
+    )
+    await restored.initialize()
+    await expect(restored.inspectAvailableSession({
+      artifactId: selected.artifactId,
+      expectedRevision: selected.revision
+    })).resolves.toMatchObject({
+      endedAt: '2026-07-01T00:02:00.000Z',
+      messageCount: 2
+    })
+    expect(scanLines).toHaveBeenCalledOnce()
+  })
+
   it('lists scanned Sessions and reads only the selected source file without an import step', async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), 'oyster-service-'))
     temporaryDirectories.push(homeDirectory)

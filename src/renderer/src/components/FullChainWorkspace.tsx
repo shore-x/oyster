@@ -16,6 +16,7 @@ import {
 } from '../processing-configuration'
 import { Button, Icon } from '../ui'
 import { ProcessingDebugTracePanel } from './ProcessingDebugTracePanel'
+import { SessionMetadata, sessionOptionLabel, sessionTitle } from './SessionMetadata'
 
 export type FullChainStepState = 'pending' | 'running' | 'completed' | 'failed'
 
@@ -72,6 +73,8 @@ export interface FullChainWorkspaceProps {
   sessions: AvailableSessionSummary[]
   sessionsLoading: boolean
   selectedSessionId?: string
+  selectedSessionInspecting: boolean
+  selectedSessionInspectionError?: string
   attention: string
   preprocessor?: ProcessingStageView
   preprocessorConnection?: ProcessingConnectionView
@@ -89,16 +92,6 @@ export interface FullChainWorkspaceProps {
   onRun(): void
   onCancel(): void
   onDiscardSandbox(): void
-}
-
-function sessionTitle(session: AvailableSessionSummary): string {
-  return session.title || session.externalId
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1_024) return `${bytes} B`
-  if (bytes < 1_024 * 1_024) return `${(bytes / 1_024).toFixed(1)} KB`
-  return `${(bytes / (1_024 * 1_024)).toFixed(1)} MB`
 }
 
 function formatTime(value?: string): string {
@@ -187,6 +180,7 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
   const disabledReason = createMemo(() => {
     if (props.locked) return '已有知识加工任务正在运行。'
     if (!selectedSession()) return '请先选择一个 Session。'
+    if (props.selectedSessionInspectionError) return '所选 Session 无法读取，请重新扫描或选择其他 Session。'
     if (!props.preprocessor?.connectionId) return '请先为 Observation Preprocessor 选择 Connection。'
     if (!props.preprocessor?.modelId) return '请先为 Observation Preprocessor 选择 Model。'
     if (!preprocessorConfig().runnable) return 'Observation Preprocessor 的 Coding Plan Connection 当前不可用。'
@@ -237,7 +231,7 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
               </option>
               <For each={props.sessions}>{(session) => (
                 <option value={session.artifactId}>
-                  {session.sourceDisplayName} · {sessionTitle(session)}
+                  {sessionOptionLabel(session)}
                 </option>
               )}</For>
             </select>
@@ -256,14 +250,13 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
             )}
           >
             {(session) => (
-              <dl class="full-chain-session-meta">
-                <div><dt>来源</dt><dd>{session().sourceDisplayName}</dd></div>
-                <div><dt>时间</dt><dd>{formatTime(session().startedAt || session().updatedAt)}</dd></div>
-                <div><dt>大小</dt><dd>{formatBytes(session().sizeBytes)}</dd></div>
-                <div><dt>项目</dt><dd title={session().projectPath}>{session().projectPath || '—'}</dd></div>
-                <div><dt>Session</dt><dd title={session().externalId}>{session().externalId}</dd></div>
-                <div><dt>扫描版本</dt><dd><code title={session().revision}>{session().revision.slice(0, 12)}</code></dd></div>
-              </dl>
+              <SessionMetadata
+                session={session()}
+                class="full-chain-session-meta"
+                testId="full-chain-session-meta"
+                loading={props.selectedSessionInspecting}
+                error={props.selectedSessionInspectionError}
+              />
             )}
           </Show>
 

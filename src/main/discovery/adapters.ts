@@ -27,6 +27,56 @@ function isoValue(...values: unknown[]): string | undefined {
   return Number.isNaN(date.valueOf()) ? undefined : date.toISOString()
 }
 
+function contentText(value: unknown): string | undefined {
+  if (typeof value === 'string') return value
+  if (!Array.isArray(value)) return undefined
+  const parts = value.flatMap((item) => {
+    const block = asRecord(item)
+    const text = stringValue(block?.text, block?.content)
+    return text ? [text] : []
+  })
+  return parts.length ? parts.join(' ') : undefined
+}
+
+function titlePreview(value: unknown): string | undefined {
+  const text = contentText(value)?.replace(/\s+/g, ' ').trim()
+  if (!text) return undefined
+  const characters = Array.from(text)
+  return characters.length > 80 ? `${characters.slice(0, 80).join('')}…` : text
+}
+
+function claudeUserTitle(records: Record<string, unknown>[]): string | undefined {
+  for (const record of records) {
+    if (record.type !== 'user') continue
+    const message = asRecord(record.message)
+    const title = titlePreview(message?.content ?? record.content ?? record.message)
+    if (title) return title
+  }
+  return undefined
+}
+
+function piUserTitle(records: Record<string, unknown>[]): string | undefined {
+  for (const record of records) {
+    if (record.type !== 'message') continue
+    const message = asRecord(record.message)
+    if (record.role !== 'user' && message?.role !== 'user') continue
+    const title = titlePreview(record.content ?? message?.content)
+    if (title) return title
+  }
+  return undefined
+}
+
+function codexUserTitle(records: Record<string, unknown>[]): string | undefined {
+  for (const record of records) {
+    if (record.type !== 'response_item') continue
+    const payload = asRecord(record.payload)
+    if (payload?.role !== 'user') continue
+    const title = titlePreview(payload.content)
+    if (title) return title
+  }
+  return undefined
+}
+
 async function readJsonLinesHead(filePath: string): Promise<Record<string, unknown>[]> {
   const handle = await open(filePath, 'r')
   try {
@@ -317,7 +367,12 @@ export class ClaudeHistoryAdapter implements AgentHistoryAdapter {
       yield {
         kind: 'artifact',
         candidate: candidateFromFile(rootPath, filePath, externalId, metadata, {
-          title: stringValue(header.slug, message?.content, basename(filePath, '.jsonl')),
+          title: stringValue(
+            header.slug,
+            titlePreview(message?.content),
+            claudeUserTitle(records),
+            basename(filePath, '.jsonl')
+          ),
           projectPath: stringValue(header.cwd, header.projectPath),
           startedAt: isoValue(header.timestamp),
           updatedAt: metadata.mtime.toISOString()
@@ -426,7 +481,7 @@ export class PiHistoryAdapter implements AgentHistoryAdapter {
       yield {
         kind: 'artifact',
         candidate: candidateFromFile(rootPath, filePath, externalId, metadata, {
-          title: stringValue(header.title, basename(filePath, '.jsonl')),
+          title: stringValue(header.title, piUserTitle(records), basename(filePath, '.jsonl')),
           projectPath: stringValue(header.cwd, header.projectPath),
           startedAt: isoValue(header.timestamp, header.createdAt),
           updatedAt: metadata.mtime.toISOString()
@@ -511,7 +566,11 @@ export class CodexHistoryAdapter implements AgentHistoryAdapter {
           yield {
             kind: 'artifact',
             candidate: candidateFromFile(rootPath, filePath, externalId, metadata, {
-              title: stringValue(payload.title, basename(filePath, '.jsonl')),
+              title: stringValue(
+                payload.title,
+                codexUserTitle(records),
+                basename(filePath, '.jsonl')
+              ),
               projectPath: stringValue(payload.cwd),
               startedAt: isoValue(payload.timestamp, header.timestamp),
               updatedAt: metadata.mtime.toISOString()

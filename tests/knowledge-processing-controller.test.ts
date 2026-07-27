@@ -280,4 +280,36 @@ describe('knowledge processing controller', () => {
       }
     })
   })
+
+  it('loads and caches details only for the selected Session revision', async () => {
+    const session = fullChainResult().session
+    const inspected = {
+      ...session,
+      endedAt: '2026-07-26T00:10:00.000Z',
+      messageCount: 12
+    }
+    installApi({}, [session])
+    const inspectAvailableSession = vi.fn(async () => inspected)
+    window.oyster.discovery.inspectAvailableSession = inspectAvailableSession
+
+    await createRoot(async (dispose) => {
+      try {
+        const controller = createKnowledgeProcessingController()
+        await controller.loadAvailableSessions()
+        await controller.inspectAvailableSession(session)
+        await controller.inspectAvailableSession(session)
+
+        expect(inspectAvailableSession).toHaveBeenCalledOnce()
+        expect(inspectAvailableSession).toHaveBeenCalledWith({
+          artifactId: session.artifactId,
+          expectedRevision: session.revision
+        })
+        expect(controller.availableSessions()[0]).toEqual(inspected)
+        expect(controller.isInspectingSession(session.artifactId)).toBe(false)
+        expect(controller.sessionInspectionError(session.artifactId)).toBeUndefined()
+      } finally {
+        dispose()
+      }
+    })
+  })
 })

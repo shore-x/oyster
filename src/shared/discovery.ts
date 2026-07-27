@@ -37,7 +37,9 @@ export interface HistoryArtifact {
   projectPath?: string
   instructionScope?: InstructionScope
   startedAt?: string
+  endedAt?: string
   updatedAt?: string
+  messageCount?: number
   sizeBytes: number
   modifiedAt: string
   fingerprint: string
@@ -72,14 +74,22 @@ export interface AvailableSessionSummary {
   title?: string
   projectPath?: string
   startedAt?: string
+  endedAt?: string
   updatedAt?: string
+  messageCount?: number
   sizeBytes: number
   revision: string
+}
+
+export interface InspectAvailableSessionInput {
+  artifactId: string
+  expectedRevision: string
 }
 
 export interface DiscoveryApi {
   getSnapshot(): Promise<DiscoverySnapshot>
   listAvailableSessions(): Promise<AvailableSessionSummary[]>
+  inspectAvailableSession(input: InspectAvailableSessionInput): Promise<AvailableSessionSummary>
   detectAgents(): Promise<DiscoverySnapshot>
   scanSource(sourceId: string): Promise<DiscoverySnapshot>
   cancelRun(runId: string): Promise<DiscoverySnapshot>

@@ -36,7 +36,9 @@ export interface ArtifactCandidate {
   projectPath?: string
   instructionScope?: InstructionScope
   startedAt?: string
+  endedAt?: string
   updatedAt?: string
+  messageCount?: number
   sizeBytes: number
   modifiedAt: string
 }
