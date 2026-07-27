@@ -2,6 +2,7 @@ import type { ModelGenerationRequest, ModelRuntime } from '../ai-backends/model'
 import type { AiBackendSnapshot } from '../../shared/ai-backends'
 import type { ReasoningEffort } from '../../shared/ai-backends'
 import type { KnowledgeContributionDraft } from '../../shared/knowledge'
+import type { ObservationCharacterWindow } from '../observation/model'
 import type {
   KnowledgeProcessingSnapshot,
   ProcessingStageId
@@ -57,6 +58,7 @@ export interface KnowledgeAgentRunInput {
   evidenceMap: string
   evidenceMapSections: EvidenceMapSection[]
   observationLines: string[]
+  observationFormatVersion: string
   sourceRef: string
   contributionRunRef: string
   attention?: string
@@ -86,6 +88,10 @@ export interface EvidenceMapSection {
   id: string
   selector: string
   content: string
+  /** Immediate child sections for progressive disclosure; descendants are never flattened. */
+  children?: string[]
+  /** Internal navigation for a fragment of one unusually long raw Observation line. */
+  characterWindow?: ObservationCharacterWindow
 }
 
 export interface KnowledgeAgentRunResult {
@@ -102,6 +108,7 @@ export interface PreprocessingWorkspace {
   runId: string
   sourceRef: string
   observationLines: string[]
+  observationFormatVersion: string
   evidenceMap: string
   evidenceMapSections: EvidenceMapSection[]
   attention?: string

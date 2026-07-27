@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { AddressInfo } from 'node:net'
 import { OpenAiCompatibleAdapter, normalizeModelBaseUrl } from '../src/main/ai-backends/openai-compatible-adapter'
-import type { StoredModelConnection } from '../src/main/ai-backends/model'
+import { ModelContextOverflowError, type StoredModelConnection } from '../src/main/ai-backends/model'
 
 const servers: Server[] = []
 
@@ -43,8 +43,19 @@ describe('OpenAiCompatibleAdapter', () => {
       response.end(JSON.stringify({
         object: 'list',
         data: [
-          { id: 'gpt-5-mini', object: 'model', name: 'GPT-5 mini' },
-          { id: 'gpt-4.1-mini', object: 'model' },
+          {
+            id: 'gpt-5-mini',
+            object: 'model',
+            name: 'GPT-5 mini',
+            context_window: 272_000,
+            max_output_tokens: 128_000
+          },
+          {
+            id: 'gpt-4.1-mini',
+            object: 'model',
+            context_length: -1,
+            max_completion_tokens: 'unknown'
+          },
           { id: 'gpt-5-mini', object: 'model' },
           { object: 'model' }
         ]
@@ -64,6 +75,12 @@ describe('OpenAiCompatibleAdapter', () => {
     expect(result.find((model) => model.id === 'gpt-5-mini')?.reasoningEfforts).toEqual([
       'minimal', 'low', 'medium', 'high'
     ])
+    expect(result.find((model) => model.id === 'gpt-5-mini')).toMatchObject({
+      contextWindowTokens: 272_000,
+      maxOutputTokens: 128_000
+    })
+    expect(result.find((model) => model.id === 'gpt-4.1-mini')).not.toHaveProperty('contextWindowTokens')
+    expect(result.find((model) => model.id === 'gpt-4.1-mini')).not.toHaveProperty('maxOutputTokens')
   })
 
   it('sends the key only to the configured endpoint and parses chat completion text', async () => {
@@ -217,6 +234,61 @@ describe('OpenAiCompatibleAdapter', () => {
     )).rejects.toThrow('max_output_tokens')
   })
 
+  it('classifies bounded provider context errors without treating other HTTP 400 failures as overflow', async () => {
+    const payloads = [
+      {
+        error: {
+          type: 'invalid_request_error',
+          code: 'context_length_exceeded',
+          message: 'Your input exceeds the context window of this model'
+        }
+      },
+      { error: { message: 'invalid request syntax' } }
+    ]
+    const adapter = new OpenAiCompatibleAdapter(async () => new Response(
+      JSON.stringify(payloads.shift()),
+      { status: 400, headers: { 'content-type': 'application/json' } }
+    ))
+
+    await expect(adapter.generate(
+      connection('http://localhost:11434/v1'),
+      undefined,
+      { prompt: 'oversized' }
+    )).rejects.toBeInstanceOf(ModelContextOverflowError)
+    await expect(adapter.generate(
+      connection('http://localhost:11434/v1'),
+      undefined,
+      { prompt: 'invalid' }
+    )).rejects.toThrow('HTTP 400')
+  })
+
+  it('classifies a Responses incomplete context reason separately from output exhaustion', async () => {
+    const payloads = [
+      { status: 'incomplete', incomplete_details: { reason: 'context_length_exceeded' } },
+      { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } }
+    ]
+    const adapter = new OpenAiCompatibleAdapter(async () => new Response(
+      JSON.stringify(payloads.shift()),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    ))
+    const responsesConnection = {
+      ...connection('http://localhost:11434/v1'),
+      protocol: 'openai_responses' as const
+    }
+
+    await expect(adapter.generate(responsesConnection, undefined, { prompt: 'oversized' }))
+      .rejects.toBeInstanceOf(ModelContextOverflowError)
+    let outputError: unknown
+    try {
+      await adapter.generate(responsesConnection, undefined, { prompt: 'valid input' })
+    } catch (error) {
+      outputError = error
+    }
+    expect(outputError).toBeInstanceOf(Error)
+    expect(outputError).not.toBeInstanceOf(ModelContextOverflowError)
+    expect((outputError as Error).message).toContain('max_output_tokens')
+  })
+
   it('accepts compatible endpoints that omit completion status metadata', async () => {
     const baseUrl = await listen((request, response) => {
       response.setHeader('content-type', 'application/json')
@@ -298,6 +370,18 @@ describe('OpenAiCompatibleAdapter', () => {
       connection(baseUrl),
       undefined,
       { prompt: 'test', maxResponseBytes: 1_024 }
+    )).rejects.toThrow('内容过大')
+  })
+
+  it('also bounds non-success response bodies used for context-error classification', async () => {
+    const adapter = new OpenAiCompatibleAdapter(async () => new Response(
+      JSON.stringify({ error: { message: 'x'.repeat(65 * 1_024) } }),
+      { status: 400, headers: { 'content-type': 'application/json' } }
+    ))
+    await expect(adapter.generate(
+      connection('http://localhost:11434/v1'),
+      undefined,
+      { prompt: 'test' }
     )).rejects.toThrow('内容过大')
   })
 })

@@ -5,6 +5,7 @@ import type {
   ModelGenerationRequest,
   ModelRuntime
 } from '../src/main/ai-backends/model'
+import { ModelContextOverflowError } from '../src/main/ai-backends/model'
 import {
   KnowledgeProcessingService,
   type KnowledgeProcessingServiceOptions
@@ -25,7 +26,8 @@ import { InMemoryKnowledgeProcessingRepository } from '../src/main/knowledge-pro
 function modelConnection(
   id: string,
   model = id,
-  reasoningEfforts: NonNullable<AiConnection['modelConfig']>['reasoningEfforts'] = []
+  reasoningEfforts: NonNullable<AiConnection['modelConfig']>['reasoningEfforts'] = [],
+  contextWindowTokens?: number
 ): AiConnection {
   return {
     id,
@@ -35,7 +37,12 @@ function modelConnection(
     displayName: `Model ${id}`,
     credentialMode: 'oyster_keychain',
     status: 'ready',
-    models: [{ id: model, displayName: model, reasoningEfforts: reasoningEfforts ?? [] }],
+    models: [{
+      id: model,
+      displayName: model,
+      reasoningEfforts: reasoningEfforts ?? [],
+      ...(contextWindowTokens ? { contextWindowTokens, maxOutputTokens: 4_096 } : {})
+    }],
     defaultModelId: model,
     modelConfig: {
       providerId: 'openai_compatible',
@@ -472,9 +479,9 @@ describe('KnowledgeProcessingService', () => {
     const { service, backend, agent } = createService({
       serviceOptions: {
         evidenceMapPlanner: {
-          segmentCharacters: 40,
-          adjacentContextCharacters: 18,
-          mergeCharacters: 1_000
+          segmentBytes: 40,
+          adjacentContextBytes: 18,
+          mergeBytes: 1_000
         }
       }
     })
@@ -506,8 +513,8 @@ describe('KnowledgeProcessingService', () => {
       execution: { modelCallCount: 3 }
     })
     expect(result.evidenceMap).toContain('ROOT NAVIGATION')
-    expect(result.evidenceMap).toContain('- M000001: L000001-L000002')
-    expect(result.evidenceMap).toContain('- M000002: L000003-L000004')
+    expect(result.evidenceMap).toContain('- Root map section: M000003')
+    expect(result.evidenceMap).toContain('- Immediate child sections: M000001, M000002')
     expect(backend.generationCalls).toHaveLength(3)
     const firstPrompt = backend.generationCalls[0].request.prompt
     const secondPrompt = backend.generationCalls[1].request.prompt
@@ -548,7 +555,13 @@ describe('KnowledgeProcessingService', () => {
     expect(agent.calls[0].evidenceMap).toBe(result.evidenceMap)
     expect(agent.calls[0].evidenceMapSections).toEqual([
       { id: 'M000001', selector: 'L000001-L000002', content: 'LEAF A' },
-      { id: 'M000002', selector: 'L000003-L000004', content: 'LEAF B' }
+      { id: 'M000002', selector: 'L000003-L000004', content: 'LEAF B' },
+      {
+        id: 'M000003',
+        selector: 'L000001-L000004',
+        content: 'ROOT NAVIGATION',
+        children: ['M000001', 'M000002']
+      }
     ])
   })
 
@@ -566,26 +579,76 @@ describe('KnowledgeProcessingService', () => {
     const result = await service.runObservationPreprocessor(
       { observation },
       undefined,
-      { allowSegmentedObservation: true, sourceRef: 'raw:test-large@sha256:revision' }
+      { sourceRef: 'raw:test-large@sha256:revision' }
     )
 
-    expect(result).toMatchObject({
-      segmentCount: 2,
-      execution: { modelCallCount: 3 }
-    })
-    expect(backend.generationCalls).toHaveLength(3)
-    expect(backend.generationCalls[0].request.prompt).toContain('L000001 | a')
-    expect(backend.generationCalls[1].request.prompt).toContain('L000002 | b')
+    expect(result.segmentCount).toBeGreaterThan(2)
+    expect(result.execution.modelCallCount).toBeGreaterThan(result.segmentCount)
+    expect(backend.generationCalls).toHaveLength(result.execution.modelCallCount)
+    expect(backend.generationCalls[0].request.prompt).toContain('L000001 C0:')
+    expect(backend.generationCalls.some((call) => call.request.prompt.includes('L000002 C0:'))).toBe(true)
     expect(result.evidenceMap).toContain('ROOT FOR LARGE SESSION')
+  })
+
+  it('bounds every complete preprocessing request by the selected model context window', async () => {
+    const connection = modelConnection('model:bounded', 'bounded', [], 32_768)
+    const { service, backend } = createService({ connections: [connection] })
+    await service.initialize()
+    await configure(service, 'observation_preprocessor', connection.id, 'short system', 'bounded')
+    backend.generationHandler = async (_connectionId, _modelId, request) => ({
+      text: request.prompt.includes('BEGIN_EVIDENCE_MAP_MATERIALS') ? 'ROOT' : 'LOCAL'
+    })
+
+    const result = await service.runObservationPreprocessor({
+      observation: `中文${'😀abc'.repeat(20_000)}`,
+      attention: 'preserve details'
+    })
+
+    const maximumInputBytes = 32_768 - 4_096 - 4_096
+    expect(result.segmentCount).toBeGreaterThan(1)
+    expect(backend.generationCalls.every((call) => (
+      Buffer.byteLength(call.request.systemPrompt ?? '', 'utf8')
+        + Buffer.byteLength(call.request.prompt, 'utf8')
+    ) <= maximumInputBytes)).toBe(true)
+    expect(backend.generationCalls.every((call) => (
+      typeof call.request.maxOutputTokens === 'number'
+      && call.request.maxOutputTokens > 0
+      && call.request.maxOutputTokens <= 4_096
+    ))).toBe(true)
+  })
+
+  it('automatically replans smaller segments after a provider reports context overflow', async () => {
+    const connection = modelConnection('model:adaptive', 'adaptive')
+    const { service, backend } = createService({ connections: [connection] })
+    await service.initialize()
+    await configure(service, 'observation_preprocessor', connection.id, null, 'adaptive')
+    let overflowed = false
+    backend.generationHandler = async (_connectionId, _modelId, request) => {
+      if (!overflowed) {
+        overflowed = true
+        throw new ModelContextOverflowError('provider context overflow')
+      }
+      return { text: request.prompt.includes('BEGIN_EVIDENCE_MAP_MATERIALS') ? 'ROOT' : 'LOCAL' }
+    }
+
+    const result = await service.runObservationPreprocessor({ observation: 'x'.repeat(30_000) })
+
+    expect(result.segmentCount).toBeGreaterThan(2)
+    expect(result.execution.modelCallCount).toBe(backend.generationCalls.length)
+    expect(result.debugTrace.preprocessing?.calls[0]).toMatchObject({
+      status: 'failed',
+      error: '观察预处理模型调用失败'
+    })
+    expect(result.debugTrace.status).toBe('completed')
   })
 
   it('publishes each preprocessing call and its output while the remaining calls are still running', async () => {
     const { service, backend } = createService({
       serviceOptions: {
         evidenceMapPlanner: {
-          segmentCharacters: 16,
-          adjacentContextCharacters: 16,
-          mergeCharacters: 1_000
+          segmentBytes: 16,
+          adjacentContextBytes: 16,
+          mergeBytes: 1_000
         }
       }
     })
@@ -646,9 +709,9 @@ describe('KnowledgeProcessingService', () => {
     const { service, backend } = createService({
       serviceOptions: {
         evidenceMapPlanner: {
-          segmentCharacters: 23,
-          adjacentContextCharacters: 11,
-          mergeCharacters: 170
+          segmentBytes: 23,
+          adjacentContextBytes: 11,
+          mergeBytes: 170
         }
       }
     })
@@ -658,7 +721,7 @@ describe('KnowledgeProcessingService', () => {
       if (!request.prompt.includes('BEGIN_EVIDENCE_MAP_MATERIALS')) {
         return { text: `LEAF ${backend.generationCalls.length}` }
       }
-      return { text: backend.generationCalls.length === 4 ? 'MERGED FIRST GROUP' : 'ROOT FINAL' }
+      return { text: backend.generationCalls.length === 4 ? 'MID' : 'ROOT' }
     }
 
     const result = await service.runObservationPreprocessor({ observation: 'a\nb\nc\nd\ne' })
@@ -667,62 +730,89 @@ describe('KnowledgeProcessingService', () => {
       segmentCount: 3,
       execution: { modelCallCount: 5 }
     })
-    expect(result.evidenceMap).toContain('ROOT FINAL')
-    expect(result.evidenceMap).toContain('- M000003: L000005-L000005')
+    expect(result.evidenceMap).toContain('ROOT')
+    expect(result.evidenceMap).toContain('- Root map section: M000005')
+    expect(result.evidenceMap).toContain('- Immediate child sections: M000004, M000003')
     expect(backend.generationCalls.filter(
       (call) => call.request.prompt.includes('BEGIN_EVIDENCE_MAP_MATERIALS')
     )).toHaveLength(2)
   })
 
-  it('rejects oversized observations before reserving a stage or calling a model', async () => {
+  it('automatically segments a manual Observation instead of imposing a total character limit', async () => {
     const { service, backend } = createService()
     await service.initialize()
     await configure(service, 'observation_preprocessor')
+    backend.generationHandler = async (_connectionId, _modelId, request) => ({
+      text: request.prompt.includes('BEGIN_EVIDENCE_MAP_MATERIALS') ? 'ROOT' : 'LOCAL'
+    })
 
-    await expect(service.runObservationPreprocessor({ observation: 'x'.repeat(120_001) }))
-      .rejects.toThrow('120000')
-    expect(backend.generationCalls).toHaveLength(0)
+    const result = await service.runObservationPreprocessor({ observation: 'x'.repeat(120_001) })
+
+    expect(result.segmentCount).toBeGreaterThan(1)
+    expect(backend.generationCalls).toHaveLength(result.execution.modelCallCount)
+    expect(backend.generationCalls[0].request.prompt).toContain('L000001 C0:')
     expect(service.snapshot().runningStageIds).toEqual([])
   })
 
-  it('rejects an indivisible oversized line without truncating or calling a model', async () => {
-    const { service, backend } = createService({
+  it('losslessly splits one oversized physical line before model calls', async () => {
+    const { service, backend, agent } = createService({
       serviceOptions: {
         evidenceMapPlanner: {
-          segmentCharacters: 15,
-          adjacentContextCharacters: 2,
-          mergeCharacters: 100
+          segmentBytes: 5_000,
+          adjacentContextBytes: 1_000,
+          mergeBytes: 10_000
         }
       }
     })
     await service.initialize()
     await configure(service, 'observation_preprocessor')
+    await configure(service, 'knowledge_maintenance_agent')
+    backend.generationHandler = async (_connectionId, _modelId, request) => ({
+      text: request.prompt.includes('BEGIN_EVIDENCE_MAP_MATERIALS') ? 'ROOT' : 'LOCAL'
+    })
 
-    await expect(service.runObservationPreprocessor({ observation: '123456' }))
-      .rejects.toThrow('L000001 加入全局行号后超过 15')
-    expect(backend.generationCalls).toHaveLength(0)
+    const observation = '1234567890'.repeat(1_200)
+    const result = await service.runObservationPreprocessor({ observation })
+
+    expect(result.segmentCount).toBeGreaterThan(1)
+    expect(backend.generationCalls.filter(
+      (call) => call.request.prompt.includes('BEGIN_AUTHORIZED_OBSERVATION')
+    ).every((call) => call.request.prompt.includes('L000001 C'))).toBe(true)
+    await service.runKnowledgeMaintenance({ preprocessingRunId: result.runId })
+    const windows = agent.calls[0].evidenceMapSections.flatMap(
+      (section) => section.characterWindow && !section.children ? [section.characterWindow] : []
+    )
+    expect(windows.length).toBe(result.segmentCount)
+    expect(windows[0].startCharacter).toBe(0)
+    expect(windows.at(-1)?.endCharacter).toBe(observation.length)
+    expect(windows.every((window, index) => (
+      index === 0 || window.startCharacter === windows[index - 1].endCharacter
+    ))).toBe(true)
     expect(service.snapshot().runningStageIds).toEqual([])
     expect(service.snapshot().preprocessingProgress).toBeUndefined()
   })
 
-  it('rejects a run that would require too many model calls before sending any material', async () => {
+  it('processes more than 32 segments without a run-level segment or call ceiling', async () => {
     const { service, backend } = createService({
       serviceOptions: {
         evidenceMapPlanner: {
-          segmentCharacters: 15,
-          adjacentContextCharacters: 2,
-          mergeCharacters: 100
+          segmentBytes: 15,
+          adjacentContextBytes: 2,
+          mergeBytes: 1_000
         }
       }
     })
     await service.initialize()
     await configure(service, 'observation_preprocessor')
+    backend.generationHandler = async () => ({ text: 'MAP' })
 
-    await expect(service.runObservationPreprocessor({
+    const result = await service.runObservationPreprocessor({
       observation: Array.from({ length: 33 }, () => '12345').join('\n')
-    })).rejects.toThrow('需要 33 个分段')
+    })
 
-    expect(backend.generationCalls).toHaveLength(0)
+    expect(result.segmentCount).toBe(33)
+    expect(result.execution.modelCallCount).toBeGreaterThan(33)
+    expect(backend.generationCalls).toHaveLength(result.execution.modelCallCount)
     expect(service.snapshot().runningStageIds).toEqual([])
     expect(service.snapshot().preprocessingProgress).toBeUndefined()
   })
@@ -731,9 +821,9 @@ describe('KnowledgeProcessingService', () => {
     const { service, backend, agent } = createService({
       serviceOptions: {
         evidenceMapPlanner: {
-          segmentCharacters: 16,
-          adjacentContextCharacters: 16,
-          mergeCharacters: 100
+          segmentBytes: 16,
+          adjacentContextBytes: 16,
+          mergeBytes: 1_000
         }
       }
     })
@@ -775,9 +865,9 @@ describe('KnowledgeProcessingService', () => {
     const { service, backend } = createService({
       serviceOptions: {
         evidenceMapPlanner: {
-          segmentCharacters: 16,
-          adjacentContextCharacters: 16,
-          mergeCharacters: 100
+          segmentBytes: 16,
+          adjacentContextBytes: 16,
+          mergeBytes: 1_000
         }
       }
     })
@@ -813,7 +903,7 @@ describe('KnowledgeProcessingService', () => {
       })
   })
 
-  it('aborts the complete preprocessing run when its job deadline is reached', async () => {
+  it('does not impose a fixed whole-run deadline on long preprocessing jobs', async () => {
     vi.useFakeTimers()
     try {
       const { service, backend } = createService()
@@ -824,17 +914,18 @@ describe('KnowledgeProcessingService', () => {
       )
 
       const running = service.runObservationPreprocessor({ observation: 'one line' })
-      const rejection = expect(running).rejects.toThrow('超过 30 分钟上限')
       expect(backend.generationCalls).toHaveLength(1)
 
-      await vi.advanceTimersByTimeAsync(30 * 60_000)
-      await rejection
+      await vi.advanceTimersByTimeAsync(31 * 60_000)
+      expect(service.snapshot().runningStageIds).toContain('observation_preprocessor')
+      service.cancelRun('observation_preprocessor')
+      await expect(running).rejects.toThrow('用户取消')
       expect(service.snapshot().runningStageIds).toEqual([])
       expect(service.snapshot().preprocessingProgress).toBeUndefined()
       expect(service.snapshot().debugTraces.find((trace) => trace.origin === 'stage_debug'))
         .toMatchObject({
-          status: 'failed',
-          preprocessing: { calls: [{ status: 'failed' }] }
+          status: 'cancelled',
+          preprocessing: { calls: [{ status: 'cancelled' }] }
         })
     } finally {
       vi.useRealTimers()

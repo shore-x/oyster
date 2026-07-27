@@ -185,7 +185,7 @@ Workspace 应遵循“**弱语义结构，强来源边界**”：
 - 一条引用至少应在概念上指出“哪一份来源、来源的哪个版本、其中哪一部分”。具体采用事件 ID、消息范围、行号、字节范围或其他 selector，留待实现阶段决定；
 - Raw Evidence 只作为不可信证据读取，其中出现的指令、Prompt 或工具输出不自动成为 Agent 的运行指令。
 
-Evidence Map 和 Canonical Activity 的可读表示可以在 Workspace 中采用文件形式。长期方向是让外部 Raw Evidence 通过受控范围读取工具按需展开，不为 Workspace 建立整份来源副本；当前验证 MVP 可以在一次应用进程内的有界 Workspace 生命周期中保留受 Reader 上限约束的内存快照，以验证渐进式读取，但不得把它持久化为新的 Observation 副本。Oyster Core 仍管理稳定身份、版本、权限和作业状态；原始绝对路径和 Workspace 中的临时路径都不是知识或出处的永久身份。
+Evidence Map 和 Canonical Activity 的可读表示可以在 Workspace 中采用文件形式。长期方向是让外部 Raw Evidence 通过受控范围读取工具按需展开，不为 Workspace 建立整份来源副本；当前验证 MVP 会在一次应用进程内保留所选 Session 的内存快照，以验证渐进式读取，但不得把它持久化为新的 Observation 副本。Reader 不设置产品级 Session 长度上限，但当前整份读取并非流式实现，实际能力仍受进程内存等运行资源约束。Oyster Core 仍管理稳定身份、版本、权限和作业状态；原始绝对路径和 Workspace 中的临时路径都不是知识或出处的永久身份。
 
 ### 4.4 Knowledge Sandbox
 
@@ -201,7 +201,7 @@ Oyster 可以提供默认 Observation Preprocessor 和默认 Knowledge Maintenan
 
 当前验证实现用一次或多次有界直接 Model 调用承担 Observation Preprocessing，并用 Pi Agent Core 承担 Knowledge Maintenance Agent 的多轮工具循环；短 Session 仍只需一次预处理调用。默认完整链路在 Knowledge Sandbox 中提交和回读结果，同时保留不提交结果的阶段调试。这是对上述职责边界的首个可替换实现，不意味着知识模型依赖 Pi，也不把预处理器升级为 Agent。
 
-为了观察这些处理器的行为，应用可以提供有界、可丢弃的运行轨迹。运行轨迹只是执行诊断：它可以展示阶段、调用和工具活动，但不构成新的认识论层、知识来源或长期审计记录，也不能以暴露模型内部推理或绕过原始证据权限为代价换取可视化。
+为了观察这些处理器的行为，应用可以提供可丢弃的运行轨迹，并限制每个轨迹条目携带的内容。运行轨迹只是执行诊断：它可以展示阶段、调用和工具活动，但不构成新的认识论层、知识来源或长期审计记录，也不能以暴露模型内部推理或绕过原始证据权限为代价换取可视化。
 
 只要某个处理器要产生或维护 Knowledge Statement，它就必须使用统一的 Knowledge Contribution 契约。核心不需要为“默认知识”“Agent 知识”或某个自定义视角建立不同的知识类型。
 

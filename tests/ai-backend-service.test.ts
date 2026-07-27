@@ -14,7 +14,10 @@ import {
   type CodingPlanBackend
 } from '../src/main/ai-backends/ai-backend-service'
 import { MemoryCredentialStore } from '../src/main/ai-backends/credential-store'
-import { ModelConnectionFailureError } from '../src/main/ai-backends/model'
+import {
+  ModelConnectionFailureError,
+  ModelContextOverflowError
+} from '../src/main/ai-backends/model'
 import type {
   AgentBackendAdapter,
   AiBackendRepository,
@@ -377,7 +380,9 @@ describe('AiBackendService', () => {
     model.discoveredModels = [{
       id: 'smaller-model',
       displayName: 'Smaller model',
-      reasoningEfforts: ['low']
+      reasoningEfforts: ['low'],
+      contextWindowTokens: 32_000,
+      maxOutputTokens: 50
     }]
     await service.refresh()
 
@@ -394,9 +399,22 @@ describe('AiBackendService', () => {
     await expect(service.withModelRuntime(
       connectionId,
       'smaller-model',
-      async (selectedRuntime) => selectedRuntime.model.id
-    )).resolves.toBe('smaller-model')
+      async (selectedRuntime) => ({
+        id: selectedRuntime.model.id,
+        contextWindow: selectedRuntime.model.contextWindow,
+        maxTokens: selectedRuntime.model.maxTokens
+      })
+    )).resolves.toEqual({
+      id: 'smaller-model',
+      contextWindow: 32_000,
+      maxTokens: 50
+    })
     expect(apiRuntimeCalls).toContainEqual({ modelId: 'smaller-model', apiKey: 'api-secret' })
+    expect(service.snapshot().connections.find((candidate) => candidate.id === connectionId)
+      ?.models.find((candidate) => candidate.id === 'smaller-model')).toMatchObject({
+        contextWindowTokens: 32_000,
+        maxOutputTokens: 50
+      })
   })
 
   it('rejects a model outside the selected connection before invoking any backend', async () => {
@@ -531,6 +549,21 @@ describe('AiBackendService', () => {
       prompt: 'cancelled generation',
       signal: controller.signal
     })).rejects.toThrow('用户取消')
+
+    expect(service.snapshot().connections.find((connection) => connection.id === connectionId)).toEqual(healthyState)
+  })
+
+  it('does not mark a connection unavailable for a request-local context overflow', async () => {
+    const { service, model } = createService()
+    await service.initialize()
+    const connectionId = await saveApiConnection(service, 'test-model')
+    await service.generateWithModel(connectionId, 'test-model', { prompt: 'probe' })
+    const healthyState = service.snapshot().connections.find((connection) => connection.id === connectionId)
+
+    model.failure = new ModelContextOverflowError()
+    await expect(service.generateWithModel(connectionId, 'test-model', {
+      prompt: 'oversized request'
+    })).rejects.toBeInstanceOf(ModelContextOverflowError)
 
     expect(service.snapshot().connections.find((connection) => connection.id === connectionId)).toEqual(healthyState)
   })

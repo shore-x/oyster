@@ -5,7 +5,6 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   FileSourceEvidenceReader,
-  MAX_SOURCE_EVIDENCE_READ_BYTES,
   MemorySourceEvidenceReader
 } from '../src/main/discovery/source-evidence-reader'
 
@@ -32,8 +31,7 @@ describe('FileSourceEvidenceReader', () => {
       artifactId: 'artifact-one',
       absolutePath: sourcePath,
       expectedSizeBytes: metadata.size,
-      expectedModifiedAt: metadata.mtime.toISOString(),
-      maxBytes: metadata.size
+      expectedModifiedAt: metadata.mtime.toISOString()
     })
 
     expect(evidence).toEqual({
@@ -44,7 +42,26 @@ describe('FileSourceEvidenceReader', () => {
     expect(await stat(sourcePath)).toMatchObject({ size: content.length })
   })
 
-  it('rejects changed, deleted, symbolic-link, oversized, and invalid-limit sources', async () => {
+  it('does not impose the former 16 MiB product limit', async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), 'oyster-source-large-evidence-'))
+    temporaryDirectories.push(temporaryDirectory)
+    const sourcePath = join(temporaryDirectory, 'large-session.jsonl')
+    const content = Buffer.alloc(16 * 1024 * 1024 + 1, 0x61)
+    await writeFile(sourcePath, content)
+    const metadata = await stat(sourcePath)
+
+    const evidence = await new FileSourceEvidenceReader().read({
+      artifactId: 'artifact-large',
+      absolutePath: sourcePath,
+      expectedSizeBytes: metadata.size,
+      expectedModifiedAt: metadata.mtime.toISOString()
+    })
+    expect(evidence.sizeBytes).toBe(content.length)
+    expect(evidence.contentHash).toBe(sha256(content))
+    expect(evidence.content.equals(content)).toBe(true)
+  })
+
+  it('rejects changed, deleted, symbolic-link, caller-bounded, and invalid-limit sources', async () => {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), 'oyster-source-revision-'))
     temporaryDirectories.push(temporaryDirectory)
     const sourcePath = join(temporaryDirectory, 'session.jsonl')
@@ -63,8 +80,8 @@ describe('FileSourceEvidenceReader', () => {
 
     await expect(reader.read({ ...input, maxBytes: metadata.size - 1 }))
       .rejects.toThrow('read limit')
-    await expect(reader.read({ ...input, maxBytes: MAX_SOURCE_EVIDENCE_READ_BYTES + 1 }))
-      .rejects.toThrow('read limit must be between')
+    await expect(reader.read({ ...input, maxBytes: Number.MAX_SAFE_INTEGER + 1 }))
+      .rejects.toThrow('positive safe integer')
 
     await writeFile(sourcePath, Buffer.from('{"sessionId":"two"}\n', 'utf8'))
     await utimes(sourcePath, metadata.atime, new Date(metadata.mtimeMs + 2_000))
@@ -85,15 +102,14 @@ describe('FileSourceEvidenceReader', () => {
 })
 
 describe('MemorySourceEvidenceReader', () => {
-  it('provides the same bounded read contract for deterministic fixtures', async () => {
+  it('provides the same optional caller-owned read bound for deterministic fixtures', async () => {
     const content = Buffer.from('{"sessionId":"fixture"}\n', 'utf8')
     const reader = new MemorySourceEvidenceReader([{ artifactId: 'artifact-fixture', content }])
     const input = {
       artifactId: 'artifact-fixture',
       absolutePath: '/not-used-by-memory-reader.jsonl',
       expectedSizeBytes: content.length,
-      expectedModifiedAt: '2026-07-26T00:00:00.000Z',
-      maxBytes: content.length
+      expectedModifiedAt: '2026-07-26T00:00:00.000Z'
     }
 
     await expect(reader.read(input)).resolves.toEqual({

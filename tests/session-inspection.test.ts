@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { SessionInspector } from '../src/main/discovery/session-inspection'
+import {
+  ClaudeHistoryAdapter,
+  CodexHistoryAdapter,
+  PiHistoryAdapter
+} from '../src/main/discovery/adapters'
 import type { AgentType } from '../src/shared/discovery'
 
 function inspect(agentType: AgentType, lines: Array<string | Record<string, unknown>>) {
-  const inspector = new SessionInspector(agentType)
+  const inspector = {
+    claude: new ClaudeHistoryAdapter(),
+    pi: new PiHistoryAdapter(),
+    codex: new CodexHistoryAdapter()
+  }[agentType].createSessionInspector()
   for (const line of lines) {
     inspector.visitLine(typeof line === 'string' ? line : JSON.stringify(line))
   }

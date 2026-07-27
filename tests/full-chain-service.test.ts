@@ -10,6 +10,7 @@ import type {
   ModelRuntime
 } from '../src/main/ai-backends/model'
 import type { DiscoveryService } from '../src/main/discovery/discovery-service'
+import { CodexHistoryAdapter } from '../src/main/discovery/adapters'
 import {
   KnowledgeFullChainService,
   type KnowledgeAgentFactory,
@@ -160,6 +161,7 @@ function fakeDiscovery(options: FakeDiscoveryOptions = {}): {
   ].join('\n')
   const revision = sha256(`revision\0${content}`)
   const contentHash = sha256(content)
+  const observationView = new CodexHistoryAdapter().createObservationView(content)
   const session: AvailableSessionSummary = {
     artifactId,
     sourceId: 'source:codex',
@@ -175,13 +177,13 @@ function fakeDiscovery(options: FakeDiscoveryOptions = {}): {
     listAvailableSessions: (): AvailableSessionSummary[] => [structuredClone(session)],
     readAvailableSession: async (
       input: { artifactId: string; expectedRevision: string },
-      maxBytes: number
+      maxBytes?: number
     ) => {
       if (input.artifactId !== artifactId) throw new Error('Unknown test artifact')
       if (input.expectedRevision !== revision) throw new Error('The Session revision has changed')
       const sizeBytes = Buffer.byteLength(content)
-      if (sizeBytes > maxBytes) throw new Error('Raw evidence exceeds maximum size')
-      return { artifactId, revision, contentHash, sizeBytes, content }
+      if (maxBytes !== undefined && sizeBytes > maxBytes) throw new Error('Raw evidence exceeds maximum size')
+      return { artifactId, revision, contentHash, sizeBytes, content, observationView }
     }
   } as unknown as DiscoveryService
   return { service, session, content }
@@ -368,9 +370,9 @@ describe('KnowledgeFullChainService', () => {
     })
     const harness = await createHarness(discovery, {
       evidenceMapPlanner: {
-        segmentCharacters: 40,
-        adjacentContextCharacters: 18,
-        mergeCharacters: 1_000
+        segmentBytes: 64,
+        adjacentContextBytes: 32,
+        mergeBytes: 1_000
       }
     })
     harness.backend.generationHandler = async (_connectionId, _modelId, request) => {
@@ -385,7 +387,13 @@ describe('KnowledgeFullChainService', () => {
       expect(input.evidenceMap).toContain('ROOT NAVIGATION')
       expect(input.evidenceMapSections).toEqual([
         { id: 'M000001', selector: 'L000001-L000002', content: 'LEAF A' },
-        { id: 'M000002', selector: 'L000003-L000004', content: 'LEAF B' }
+        { id: 'M000002', selector: 'L000003-L000004', content: 'LEAF B' },
+        {
+          id: 'M000003',
+          selector: 'L000001-L000004',
+          content: 'ROOT NAVIGATION',
+          children: ['M000001', 'M000002']
+        }
       ])
       return {
         contribution: {

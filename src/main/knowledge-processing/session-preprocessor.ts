@@ -24,13 +24,14 @@ export class SessionPreprocessor {
       throw new Error('Attention 格式无效')
     }
     const material = await loadSessionMaterial(this.discovery, input)
-    return this.processing.runObservationPreprocessor({
-      observation: material.evidence.content,
-      attention: input.attention
-    }, undefined, {
-      binding: structuredClone(binding),
-      sourceRef: material.sourceRef,
-      allowSegmentedObservation: true
-    })
+    return this.processing.runObservationPreprocessorView(
+      material.evidence.observationView,
+      input.attention,
+      undefined,
+      {
+        binding: structuredClone(binding),
+        sourceRef: material.sourceRef
+      }
+    )
   }
 }

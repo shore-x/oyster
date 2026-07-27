@@ -18,6 +18,7 @@ import {
   PiCodingPlanAdapter,
   type PiCodingPlanModels
 } from '../src/main/ai-backends/pi-coding-plan-adapter'
+import { ModelContextOverflowError } from '../src/main/ai-backends/model'
 import type { CodingPlanAuthentication } from '../src/shared/ai-backends'
 
 const MODEL: Model<Api> = {
@@ -149,7 +150,9 @@ describe('PiCodingPlanAdapter', () => {
     expect(adapter.listModels()).toEqual([{
       id: MODEL.id,
       displayName: MODEL.name,
-      reasoningEfforts: ['minimal', 'low', 'medium', 'high', 'xhigh']
+      reasoningEfforts: ['minimal', 'low', 'medium', 'high', 'xhigh'],
+      contextWindowTokens: 128_000,
+      maxOutputTokens: 32_768
     }])
   })
 
@@ -398,6 +401,34 @@ describe('PiCodingPlanAdapter', () => {
     })).rejects.toThrow('不支持思考强度')
     await expect(adapter.generate('missing-model', { prompt: 'observation' }))
       .rejects.toThrow('当前不可用')
+  })
+
+  it('classifies explicit and usage-detected context overflow separately from output truncation', async () => {
+    const { adapter, models } = createAdapter()
+    models.completeResult = {
+      ...assistant('', 'error'),
+      errorMessage: 'Your input exceeds the context window of this model'
+    }
+    await expect(adapter.generate(MODEL.id, { prompt: 'oversized' }))
+      .rejects.toBeInstanceOf(ModelContextOverflowError)
+
+    models.completeResult = {
+      ...assistant('silently accepted'),
+      usage: { ...usage(), input: MODEL.contextWindow + 1, totalTokens: MODEL.contextWindow + 2 }
+    }
+    await expect(adapter.generate(MODEL.id, { prompt: 'oversized' }))
+      .rejects.toBeInstanceOf(ModelContextOverflowError)
+
+    models.completeResult = assistant('partial output', 'length')
+    let outputError: unknown
+    try {
+      await adapter.generate(MODEL.id, { prompt: 'valid input' })
+    } catch (error) {
+      outputError = error
+    }
+    expect(outputError).toBeInstanceOf(Error)
+    expect(outputError).not.toBeInstanceOf(ModelContextOverflowError)
+    expect((outputError as Error).message).toContain('不完整')
   })
 
   it('provides a selected-model StreamFn for Pi Agent Core', () => {

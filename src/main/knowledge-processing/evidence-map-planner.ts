@@ -1,15 +1,16 @@
-export const DEFAULT_OBSERVATION_SEGMENT_CHARACTERS = 120_000
-export const DEFAULT_ADJACENT_CONTEXT_CHARACTERS = 4_096
-export const DEFAULT_MAP_MERGE_CHARACTERS = 120_000
-export const MAX_ADDRESSABLE_OBSERVATION_LINES = 999_999
+import type { ObservationCharacterWindow, ObservationUnit } from '../observation/model'
+
+export const DEFAULT_OBSERVATION_SEGMENT_BYTES = 120_000
+export const DEFAULT_ADJACENT_CONTEXT_BYTES = 4_096
+export const DEFAULT_MAP_MERGE_BYTES = 120_000
 
 export interface ObservationSegment {
   id: string
   startLine: number
   endLine: number
-  lines: string[]
+  units: ObservationUnit[]
   contextStartLine?: number
-  contextLines: string[]
+  contextUnits: ObservationUnit[]
 }
 
 export interface EvidenceMapNode {
@@ -17,20 +18,19 @@ export interface EvidenceMapNode {
   startLine: number
   endLine: number
   sectionIds: string[]
+  characterWindow?: ObservationCharacterWindow
 }
 
 export interface EvidenceMapPlannerOptions {
-  segmentCharacters?: number
-  adjacentContextCharacters?: number
-  mergeCharacters?: number
-  maxLines?: number
+  segmentBytes?: number
+  adjacentContextBytes?: number
+  mergeBytes?: number
 }
 
 export interface ResolvedEvidenceMapPlannerOptions {
-  segmentCharacters: number
-  adjacentContextCharacters: number
-  mergeCharacters: number
-  maxLines: number
+  segmentBytes: number
+  adjacentContextBytes: number
+  mergeBytes: number
 }
 
 function positiveInteger(value: number, name: string): number {
@@ -41,35 +41,28 @@ function positiveInteger(value: number, name: string): number {
 export function resolveEvidenceMapPlannerOptions(
   options: EvidenceMapPlannerOptions = {}
 ): ResolvedEvidenceMapPlannerOptions {
-  const segmentCharacters = positiveInteger(
-    options.segmentCharacters ?? DEFAULT_OBSERVATION_SEGMENT_CHARACTERS,
+  const segmentBytes = positiveInteger(
+    options.segmentBytes ?? DEFAULT_OBSERVATION_SEGMENT_BYTES,
     'Observation 分段预算'
   )
-  const adjacentContextCharacters = positiveInteger(
-    options.adjacentContextCharacters ?? DEFAULT_ADJACENT_CONTEXT_CHARACTERS,
+  const adjacentContextBytes = positiveInteger(
+    options.adjacentContextBytes ?? DEFAULT_ADJACENT_CONTEXT_BYTES,
     '相邻上下文预算'
   )
-  const mergeCharacters = positiveInteger(
-    options.mergeCharacters ?? DEFAULT_MAP_MERGE_CHARACTERS,
+  const mergeBytes = positiveInteger(
+    options.mergeBytes ?? DEFAULT_MAP_MERGE_BYTES,
     'Evidence Map 归并预算'
   )
-  const maxLines = positiveInteger(
-    options.maxLines ?? MAX_ADDRESSABLE_OBSERVATION_LINES,
-    'Observation 行数上限'
-  )
-  if (maxLines > MAX_ADDRESSABLE_OBSERVATION_LINES) {
-    throw new Error(`Observation 行数上限不能超过 ${MAX_ADDRESSABLE_OBSERVATION_LINES}`)
+  if (segmentBytes > DEFAULT_OBSERVATION_SEGMENT_BYTES) {
+    throw new Error(`Observation 分段预算不能超过 ${DEFAULT_OBSERVATION_SEGMENT_BYTES}`)
   }
-  if (segmentCharacters > DEFAULT_OBSERVATION_SEGMENT_CHARACTERS) {
-    throw new Error(`Observation 分段预算不能超过 ${DEFAULT_OBSERVATION_SEGMENT_CHARACTERS}`)
+  if (adjacentContextBytes > DEFAULT_ADJACENT_CONTEXT_BYTES) {
+    throw new Error(`相邻上下文预算不能超过 ${DEFAULT_ADJACENT_CONTEXT_BYTES}`)
   }
-  if (adjacentContextCharacters > DEFAULT_ADJACENT_CONTEXT_CHARACTERS) {
-    throw new Error(`相邻上下文预算不能超过 ${DEFAULT_ADJACENT_CONTEXT_CHARACTERS}`)
+  if (mergeBytes > DEFAULT_MAP_MERGE_BYTES) {
+    throw new Error(`Evidence Map 归并预算不能超过 ${DEFAULT_MAP_MERGE_BYTES}`)
   }
-  if (mergeCharacters > DEFAULT_MAP_MERGE_CHARACTERS) {
-    throw new Error(`Evidence Map 归并预算不能超过 ${DEFAULT_MAP_MERGE_CHARACTERS}`)
-  }
-  return { segmentCharacters, adjacentContextCharacters, mergeCharacters, maxLines }
+  return { segmentBytes, adjacentContextBytes, mergeBytes }
 }
 
 export function observationLineNumber(line: number): string {
@@ -88,63 +81,92 @@ export function numberedObservation(lines: string[], startLine = 1): string {
   return lines.map((line, index) => `${observationLineNumber(startLine + index)} | ${line}`).join('\n')
 }
 
-function lineWeight(line: string): number {
-  return `${observationLineNumber(1)} | ${line}`.length
+function isWholeLine(unit: ObservationUnit): boolean {
+  return unit.startCharacter === 0 && unit.endCharacter === unit.totalCharacters
+}
+
+function serializedObservationUnit(unit: ObservationUnit): string {
+  const prefix = isWholeLine(unit)
+    ? observationLineNumber(unit.lineNumber)
+    : `${observationLineNumber(unit.lineNumber)} C${unit.startCharacter}:${unit.endCharacter}/${unit.totalCharacters}`
+  const recordContext = unit.recordContext ? ` [${unit.recordContext}]` : ''
+  return `${prefix}${recordContext} | ${unit.content}`
+}
+
+/** Serializes adapter-owned units without changing their original raw line numbers. */
+export function numberedObservationUnits(units: ObservationUnit[]): string {
+  return units.map((unit) => serializedObservationUnit(unit)).join('\n')
+}
+
+function utf8Bytes(value: string): number {
+  return Buffer.byteLength(value, 'utf8')
 }
 
 function adjacentContext(
-  lines: string[],
+  units: ObservationUnit[],
   startIndex: number,
-  maximumCharacters: number
-): { startLine?: number; lines: string[] } {
-  const selected: string[] = []
-  let characters = 0
+  maximumBytes: number
+): { startLine?: number; units: ObservationUnit[] } {
+  const selected: ObservationUnit[] = []
+  let bytes = 0
   for (let index = startIndex - 1; index >= 0; index--) {
-    const weight = lineWeight(lines[index]) + (selected.length ? 1 : 0)
-    if (weight > maximumCharacters || characters + weight > maximumCharacters) break
-    selected.unshift(lines[index])
-    characters += weight
+    const weight = utf8Bytes(serializedObservationUnit(units[index])) + (selected.length ? 1 : 0)
+    if (weight > maximumBytes || bytes + weight > maximumBytes) break
+    selected.unshift(units[index])
+    bytes += weight
   }
   return selected.length
-    ? { startLine: startIndex - selected.length + 1, lines: selected }
-    : { lines: [] }
+    ? { startLine: selected[0].lineNumber, units: selected }
+    : { units: [] }
 }
 
-/** Splits one already-normalized Observation without changing its global line address space. */
+/**
+ * Packs adapter-produced units into model-bounded segments. The planner never
+ * interprets or slices an Agent's raw history format.
+ */
 export function planObservationSegments(
-  lines: string[],
+  units: ObservationUnit[],
   options: ResolvedEvidenceMapPlannerOptions
 ): ObservationSegment[] {
-  if (lines.length > options.maxLines) {
-    throw new Error(`Observation 超过可寻址的 ${options.maxLines} 行上限`)
-  }
   const segments: ObservationSegment[] = []
   let startIndex = 0
-  while (startIndex < lines.length) {
-    const segmentLines: string[] = []
-    let characters = 0
+  while (startIndex < units.length) {
+    const segmentUnits: ObservationUnit[] = []
+    let bytes = 0
     let index = startIndex
-    while (index < lines.length) {
-      const serializedLine = lineWeight(lines[index])
-      const weight = serializedLine + (segmentLines.length ? 1 : 0)
-      if (serializedLine > options.segmentCharacters) {
+    while (index < units.length) {
+      const nextUnit = units[index]
+      const nextIsFragment = !isWholeLine(nextUnit)
+      const segmentIsFragment = segmentUnits.some((unit) => !isWholeLine(unit))
+      if (
+        segmentUnits.length
+        && (
+          (segmentIsFragment && nextUnit.lineNumber !== segmentUnits[0].lineNumber)
+          || (!segmentIsFragment && nextIsFragment)
+        )
+      ) {
+        break
+      }
+      const serializedBytes = utf8Bytes(serializedObservationUnit(nextUnit))
+      if (serializedBytes > options.segmentBytes) {
         throw new Error(
-          `Observation ${observationLineNumber(index + 1)} 加入全局行号后超过 ${options.segmentCharacters} 个字符的单次处理上限`
+          `Observation view unit ${observationLineNumber(nextUnit.lineNumber)} exceeds the selected model material budget`
         )
       }
-      if (segmentLines.length && characters + weight > options.segmentCharacters) break
-      segmentLines.push(lines[index])
-      characters += weight
+      const weight = serializedBytes + (segmentUnits.length ? 1 : 0)
+      if (segmentUnits.length && bytes + weight > options.segmentBytes) break
+      segmentUnits.push(nextUnit)
+      bytes += weight
       index++
     }
-    const context = adjacentContext(lines, startIndex, options.adjacentContextCharacters)
+    const context = adjacentContext(units, startIndex, options.adjacentContextBytes)
     segments.push({
       id: evidenceMapSectionId(segments.length),
-      startLine: startIndex + 1,
-      endLine: index,
-      lines: segmentLines,
+      startLine: segmentUnits[0].lineNumber,
+      endLine: segmentUnits[segmentUnits.length - 1].lineNumber,
+      units: segmentUnits,
       contextStartLine: context.startLine,
-      contextLines: context.lines
+      contextUnits: context.units
     })
     startIndex = index
   }
@@ -154,6 +176,9 @@ export function planObservationSegments(
 export function evidenceMapNodeText(node: EvidenceMapNode): string {
   return [
     `Covered range: ${observationSelector(node.startLine, node.endLine)}`,
+    ...(node.characterWindow
+      ? [`Character window: C${node.characterWindow.startCharacter}:${node.characterWindow.endCharacter}/${node.characterWindow.totalCharacters}`]
+      : []),
     `Expandable map sections: ${node.sectionIds.join(', ')}`,
     node.content
   ].join('\n')
@@ -162,24 +187,24 @@ export function evidenceMapNodeText(node: EvidenceMapNode): string {
 /** Groups adjacent map nodes without dropping or reordering any input. */
 export function groupEvidenceMapNodes(
   nodes: EvidenceMapNode[],
-  maximumCharacters: number
+  maximumBytes: number
 ): EvidenceMapNode[][] {
-  positiveInteger(maximumCharacters, 'Evidence Map 归并预算')
+  positiveInteger(maximumBytes, 'Evidence Map 归并预算')
   const groups: EvidenceMapNode[][] = []
   let group: EvidenceMapNode[] = []
-  let characters = 0
+  let bytes = 0
   for (const node of nodes) {
-    const nodeCharacters = evidenceMapNodeText(node).length
-    if (nodeCharacters > maximumCharacters) {
+    const nodeBytes = utf8Bytes(evidenceMapNodeText(node))
+    if (nodeBytes > maximumBytes) {
       throw new Error('局部 Evidence Map 超过单次导航归并输入上限')
     }
-    const separatorCharacters = '\n\n---\n\n'.length
-    if (group.length && characters + separatorCharacters + nodeCharacters > maximumCharacters) {
+    const separatorBytes = utf8Bytes('\n\n---\n\n')
+    if (group.length && bytes + separatorBytes + nodeBytes > maximumBytes) {
       groups.push(group)
       group = []
-      characters = 0
+      bytes = 0
     }
-    characters += (group.length ? separatorCharacters : 0) + nodeCharacters
+    bytes += (group.length ? separatorBytes : 0) + nodeBytes
     group.push(node)
   }
   if (group.length) groups.push(group)

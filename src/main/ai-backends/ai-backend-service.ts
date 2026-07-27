@@ -21,7 +21,7 @@ import {
 import { createOysterModelRuntime } from '../knowledge-processing/oyster-model-stream'
 import { CODEX_CONNECTION_ID } from './codex-adapter'
 import type { ModelRuntime, ModelGenerationRequest, ModelGenerationResult } from './model'
-import { ModelConnectionFailureError } from './model'
+import { ModelConnectionFailureError, ModelContextOverflowError } from './model'
 import type {
   AgentBackendAdapter,
   AiBackendRepository,
@@ -194,6 +194,24 @@ function defaultApiModels(connection: StoredModelConnection): AvailableModel[] {
     displayName: connection.model,
     reasoningEfforts: reasoningEffortsForModel(connection.providerId, connection.model)
   }]
+}
+
+function runtimeWithModelMetadata(runtime: ModelRuntime, model: AvailableModel): ModelRuntime {
+  const contextWindow = model.contextWindowTokens ?? runtime.model.contextWindow
+  const maxTokens = model.maxOutputTokens
+    ? Math.min(runtime.model.maxTokens, model.maxOutputTokens)
+    : runtime.model.maxTokens
+  if (contextWindow === runtime.model.contextWindow && maxTokens === runtime.model.maxTokens) {
+    return runtime
+  }
+  return {
+    ...runtime,
+    model: {
+      ...runtime.model,
+      contextWindow,
+      maxTokens
+    }
+  }
 }
 
 function modelDiscoveryKey(providerId: StoredModelConnection['providerId'], baseUrl: string): string {
@@ -555,7 +573,7 @@ export class AiBackendService {
       })
       return result
     } catch (error) {
-      if (!request.signal?.aborted) {
+      if (!request.signal?.aborted && !(error instanceof ModelContextOverflowError)) {
         this.updateHealth(connectionId, {
           status: 'unavailable',
           errorMessage: error instanceof Error ? error.message : String(error),
@@ -572,14 +590,17 @@ export class AiBackendService {
     operation: (runtime: ModelRuntime) => Promise<T>,
     options: { trackHealth?: boolean } = {}
   ): Promise<T> {
-    this.connectionModel(connectionId, modelId)
+    const model = this.connectionModel(connectionId, modelId)
     try {
       const result = connectionId === CODEX_CONNECTION_ID
-        ? await operation(this.codingPlanAdapter.runtime(modelId))
+        ? await operation(runtimeWithModelMetadata(this.codingPlanAdapter.runtime(modelId), model))
         : await this.withApiConnection(
             connectionId,
             modelId,
-            (connection, apiKey) => operation(this.apiRuntimeFactory(connection, apiKey))
+            (connection, apiKey) => operation(runtimeWithModelMetadata(
+              this.apiRuntimeFactory(connection, apiKey),
+              model
+            ))
           )
       if (options.trackHealth) {
         this.updateHealth(connectionId, {

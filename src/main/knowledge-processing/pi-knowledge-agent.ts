@@ -48,7 +48,7 @@ const TRACEABLE_TOOL_NAMES = new Set([
   'submit_knowledge_contribution'
 ])
 
-const SOURCE_SELECTOR = /^L(\d{6})-L(\d{6})$/
+const SOURCE_SELECTOR = /^L(\d{6,})-L(\d{6,})$/
 
 const searchKnowledgeParameters = Type.Object({
   query: Type.String({ minLength: 1, maxLength: 1_024 }),
@@ -61,7 +61,9 @@ const readKnowledgeParameters = Type.Object({
 
 const readEvidenceParameters = Type.Object({
   sourceRef: Type.String({ minLength: 1, maxLength: 512 }),
-  selector: Type.String({ pattern: '^L\\d{6}-L\\d{6}$' })
+  selector: Type.String({ pattern: '^L\\d{6,}-L\\d{6,}$' }),
+  startCharacter: Type.Optional(Type.Integer({ minimum: 0 })),
+  endCharacter: Type.Optional(Type.Integer({ minimum: 1 }))
 }, { additionalProperties: false })
 
 const readEvidenceMapSectionParameters = Type.Object({
@@ -70,7 +72,7 @@ const readEvidenceMapSectionParameters = Type.Object({
 
 const contributionSourceParameters = Type.Object({
   sourceRef: Type.String({ minLength: 1, maxLength: 2_048 }),
-  selector: Type.Optional(Type.String({ pattern: '^L\\d{6}-L\\d{6}$' }))
+  selector: Type.Optional(Type.String({ pattern: '^L\\d{6,}-L\\d{6,}$' }))
 }, { additionalProperties: false })
 
 const contributionRelationParameters = Type.Object({
@@ -174,16 +176,16 @@ function safeTraceDetails(toolName: string, result: unknown, isError: boolean): 
     return typeof record.found === 'boolean' ? (record.found ? '已找到 Statement' : '未找到 Statement') : undefined
   }
   if (toolName === 'read_evidence_map_section') {
-    const sectionId = typeof record.sectionId === 'string' && /^M\d{6}$/.test(record.sectionId)
+    const sectionId = typeof record.sectionId === 'string' && /^M\d{6,}$/.test(record.sectionId)
       ? record.sectionId
       : undefined
-    const selector = typeof record.selector === 'string' && /^L\d{6}-L\d{6}$/.test(record.selector)
+    const selector = typeof record.selector === 'string' && /^L\d{6,}-L\d{6,}$/.test(record.selector)
       ? record.selector
       : undefined
     return [sectionId, selector].filter(Boolean).join(' · ') || undefined
   }
   if (toolName === 'read_evidence') {
-    const selector = typeof record.selector === 'string' && /^L\d{6}-L\d{6}$/.test(record.selector)
+    const selector = typeof record.selector === 'string' && /^L\d{6,}-L\d{6,}$/.test(record.selector)
       ? record.selector
       : undefined
     const lineCount = safeTraceInteger(record.lineCount)
@@ -207,11 +209,35 @@ function modelTraceDetail(message: AssistantMessage): string {
   ].filter((part): part is string => Boolean(part)).join(' · ')
 }
 
-function rangesOverlap(
-  left: { start: number; end: number },
-  right: { start: number; end: number }
-): boolean {
-  return left.start <= right.end && right.start <= left.end
+interface EvidenceReadRange {
+  start: number
+  end: number
+  startCharacter?: number
+  endCharacter?: number
+}
+
+function rangesOverlap(left: EvidenceReadRange, right: EvidenceReadRange): boolean {
+  if (left.start > right.end || right.start > left.end) return false
+  const bothAreWindowsOnSameLine = left.start === left.end
+    && right.start === right.end
+    && left.start === right.start
+    && left.startCharacter !== undefined
+    && left.endCharacter !== undefined
+    && right.startCharacter !== undefined
+    && right.endCharacter !== undefined
+  if (!bothAreWindowsOnSameLine) return true
+  return left.startCharacter! < right.endCharacter! && right.startCharacter! < left.endCharacter!
+}
+
+function lineAddress(line: number): string {
+  return `L${String(line).padStart(6, '0')}`
+}
+
+function splitsSurrogatePair(value: string, offset: number): boolean {
+  if (offset <= 0 || offset >= value.length) return false
+  const left = value.charCodeAt(offset - 1)
+  const right = value.charCodeAt(offset)
+  return left >= 0xd800 && left <= 0xdbff && right >= 0xdc00 && right <= 0xdfff
 }
 
 function searchResultText(records: KnowledgeStatementRecord[]): string {
@@ -246,6 +272,13 @@ function validateRunInput(input: KnowledgeAgentRunInput): void {
     throw new Error('思考强度无效')
   }
   if (!Array.isArray(input.observationLines)) throw new Error('Observation 行数据无效')
+  if (
+    typeof input.observationFormatVersion !== 'string'
+    || !input.observationFormatVersion.trim()
+    || input.observationFormatVersion.length > 128
+  ) {
+    throw new Error('Observation View 版本无效')
+  }
   if (input.observationLines.some((line) => typeof line !== 'string' || /[\r\n]/.test(line))) {
     throw new Error('Observation 必须按单行数组提供')
   }
@@ -257,7 +290,7 @@ function validateRunInput(input: KnowledgeAgentRunInput): void {
       : undefined
     if (
       !section
-      || !/^M\d{6}$/.test(section.id)
+      || !/^M\d{6,}$/.test(section.id)
       || !selector
       || !section.content.trim()
       || section.content.length > MAX_EVIDENCE_MAP_SECTION_OUTPUT_CHARS
@@ -270,7 +303,30 @@ function validateRunInput(input: KnowledgeAgentRunInput): void {
     if (start < 1 || end < start || end > input.observationLines.length) {
       throw new Error('Evidence Map 局部材料超出当前 Observation 范围')
     }
+    if (section.children?.some((child) => !/^M\d{6,}$/.test(child))) {
+      throw new Error('Evidence Map 子节点引用无效')
+    }
+    if (section.characterWindow) {
+      const { startCharacter, endCharacter, totalCharacters } = section.characterWindow
+      if (
+        start !== end
+        || !Number.isSafeInteger(startCharacter)
+        || !Number.isSafeInteger(endCharacter)
+        || !Number.isSafeInteger(totalCharacters)
+        || startCharacter < 0
+        || endCharacter <= startCharacter
+        || endCharacter > totalCharacters
+        || totalCharacters !== input.observationLines[start - 1].length
+      ) {
+        throw new Error('Evidence Map 字符窗口无效')
+      }
+    }
     sectionIds.add(section.id)
+  }
+  for (const section of input.evidenceMapSections) {
+    if (section.children?.some((child) => !sectionIds.has(child))) {
+      throw new Error('Evidence Map 子节点不属于当前工作区')
+    }
   }
   input.signal.throwIfAborted()
 }
@@ -305,22 +361,19 @@ function contributionFromSubmission(
 }
 
 function taskPrompt(input: KnowledgeAgentRunInput): string {
-  const lastLine = Math.min(input.observationLines.length, 999_999)
+  const lastLine = input.observationLines.length
   const readableRange = lastLine > 0
-    ? `L000001-L${String(lastLine).padStart(6, '0')}`
+    ? `${lineAddress(1)}-${lineAddress(lastLine)}`
     : 'No readable lines'
-  const mapSections = input.evidenceMapSections.length
-    ? [
-        'Expandable Evidence Map sections available through read_evidence_map_section:',
-        ...input.evidenceMapSections.map((section) => `- ${section.id}: ${section.selector}`)
-      ].join('\n')
-    : undefined
   return [
     'Maintain the knowledge in this authorized workspace. The Evidence Map is navigation only; use tools to verify details when necessary. Follow the System Prompt\'s language policy and write Statements in the primary language of the original observation.',
     `Observation sourceRef: ${input.sourceRef}`,
+    `Observation view format: ${input.observationFormatVersion}`,
     `Range available to read_evidence: ${readableRange}`,
     `Run budget: at most ${MAX_TOTAL_TOOL_OUTPUT_CHARS} total tool-output characters and ${MAX_TOTAL_EVIDENCE_LINES} original-evidence lines. Do not repeat searches, reread a Statement, or read overlapping evidence ranges.`,
-    mapSections,
+    input.evidenceMapSections.length
+      ? 'Expandable map section IDs and their immediate children are disclosed progressively inside the Evidence Map. Use read_evidence_map_section only for IDs you discover there.'
+      : undefined,
     input.attention?.trim() ? `Attention:\n${input.attention.trim()}` : undefined,
     `Evidence Map:\n${input.evidenceMap.trim()}`
   ].filter((part): part is string => Boolean(part)).join('\n\n')
@@ -338,7 +391,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
     const completedSearches = new Set<string>()
     const completedStatementReads = new Set<string>()
     const completedEvidenceMapSections = new Set<string>()
-    const completedEvidenceRanges: Array<{ start: number; end: number }> = []
+    const completedEvidenceRanges: EvidenceReadRange[] = []
     let totalToolOutputCharacters = 0
     let totalEvidenceLines = 0
     let contribution: KnowledgeContributionDraft | undefined
@@ -462,8 +515,14 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
           const text = truncateWithNotice([
             `Section: ${section.id}`,
             `Observation range: ${section.selector}`,
+            section.characterWindow
+              ? `Character window: [${section.characterWindow.startCharacter}, ${section.characterWindow.endCharacter}) of ${section.characterWindow.totalCharacters}`
+              : undefined,
+            section.children?.length
+              ? `Immediate child sections: ${section.children.join(', ')}`
+              : 'Immediate child sections: none',
             section.content
-          ].join('\n'), MAX_EVIDENCE_MAP_SECTION_OUTPUT_CHARS)
+          ].filter((part): part is string => Boolean(part)).join('\n'), MAX_EVIDENCE_MAP_SECTION_OUTPUT_CHARS)
           recordToolOutput(text)
           completedEvidenceMapSections.add(sectionId)
           return {
@@ -486,14 +545,44 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
           const start = Number(match[1])
           const end = Number(match[2])
           if (start < 1 || end < start) throw new Error('selector 行范围无效')
+          const hasStartCharacter = parameters.startCharacter !== undefined
+          const hasEndCharacter = parameters.endCharacter !== undefined
+          if (hasStartCharacter !== hasEndCharacter) {
+            throw new Error('startCharacter 与 endCharacter 必须同时提供')
+          }
+          if (hasStartCharacter && start !== end) {
+            throw new Error('字符窗口只能用于单行 selector')
+          }
           const lineCount = end - start + 1
           if (lineCount > MAX_EVIDENCE_LINES_PER_READ) {
             throw new Error(`read_evidence 单次最多读取 ${MAX_EVIDENCE_LINES_PER_READ} 行`)
           }
           if (end > input.observationLines.length) throw new Error('selector 超出当前 Observation 范围')
-          const overlapping = completedEvidenceRanges.find((range) => rangesOverlap(range, { start, end }))
+          const sourceLine = input.observationLines[start - 1]
+          const startCharacter = parameters.startCharacter
+          const endCharacter = parameters.endCharacter
+          if (startCharacter !== undefined && endCharacter !== undefined) {
+            if (
+              endCharacter <= startCharacter
+              || endCharacter > sourceLine.length
+              || splitsSurrogatePair(sourceLine, startCharacter)
+              || splitsSurrogatePair(sourceLine, endCharacter)
+            ) {
+              throw new Error('字符窗口无效或切开了 Unicode 字符')
+            }
+          }
+          const requestedRange: EvidenceReadRange = {
+            start,
+            end,
+            ...(startCharacter !== undefined ? { startCharacter } : {}),
+            ...(endCharacter !== undefined ? { endCharacter } : {})
+          }
+          const overlapping = completedEvidenceRanges.find((range) => rangesOverlap(range, requestedRange))
           if (overlapping) {
-            const previous = `L${String(overlapping.start).padStart(6, '0')}-L${String(overlapping.end).padStart(6, '0')}`
+            const previous = `${lineAddress(overlapping.start)}-${lineAddress(overlapping.end)}`
+              + (overlapping.startCharacter !== undefined
+                ? ` [${overlapping.startCharacter}, ${overlapping.endCharacter})`
+                : '')
             throw new Error(`selector 与已读取范围 ${previous} 重叠；请选择尚未读取的范围`)
           }
           if (totalEvidenceLines + lineCount > MAX_TOTAL_EVIDENCE_LINES) {
@@ -501,16 +590,25 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
               `本次运行累计最多读取 ${MAX_TOTAL_EVIDENCE_LINES} 行原始证据；请复用已有结果或直接提交`
             )
           }
-          const text = input.observationLines
-            .slice(start - 1, end)
-            .map((line, index) => `L${String(start + index).padStart(6, '0')} ${line}`)
-            .join('\n')
+          const text = startCharacter !== undefined && endCharacter !== undefined
+            ? [
+                `${lineAddress(start)} character window [${startCharacter}, ${endCharacter}) of ${sourceLine.length}`,
+                sourceLine.slice(startCharacter, endCharacter)
+              ].join('\n')
+            : input.observationLines
+                .slice(start - 1, end)
+                .map((line, index) => `${lineAddress(start + index)} ${line}`)
+                .join('\n')
           if (text.length > MAX_EVIDENCE_OUTPUT_CHARS) {
-            throw new Error('所选证据内容过大，请缩小 selector 范围')
+            throw new Error(
+              start === end
+                ? '该原始行过长，请为同一 selector 提供更小的 startCharacter/endCharacter 字符窗口'
+                : '所选证据内容过大，请缩小 selector 范围'
+            )
           }
           recordToolOutput(text)
           totalEvidenceLines += lineCount
-          completedEvidenceRanges.push({ start, end })
+          completedEvidenceRanges.push(requestedRange)
           return {
             content: [{ type: 'text', text }],
             details: { sourceRef: input.sourceRef, selector: parameters.selector, lineCount }

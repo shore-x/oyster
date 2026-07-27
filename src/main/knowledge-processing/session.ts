@@ -4,9 +4,6 @@ import type {
   AvailableSessionEvidence,
   DiscoveryService
 } from '../discovery/discovery-service'
-import { MAX_SOURCE_EVIDENCE_READ_BYTES } from '../discovery/source-evidence-reader'
-
-export const MAX_SESSION_OBSERVATION_BYTES = MAX_SOURCE_EVIDENCE_READ_BYTES
 
 type SessionSelection = Pick<
   RunSessionPreprocessorInput,
@@ -48,7 +45,7 @@ export async function loadSessionMaterial(
   const evidence = await discovery.readAvailableSession({
     artifactId: input.artifactId,
     expectedRevision: input.expectedRevision
-  }, MAX_SESSION_OBSERVATION_BYTES)
+  })
   if (!evidence.content.trim()) throw new Error('所选 Session 没有可处理的 Observation 内容')
 
   return {

@@ -20,7 +20,7 @@ import type {
   ArtifactCandidate
 } from './model'
 import type { SourceEvidenceReader } from './source-evidence-reader'
-import { SessionInspector } from './session-inspection'
+import type { ObservationView } from '../observation/model'
 
 type SnapshotListener = (snapshot: DiscoverySnapshot) => void
 
@@ -45,6 +45,7 @@ export interface AvailableSessionEvidence {
   contentHash: string
   sizeBytes: number
   content: string
+  observationView: ObservationView
 }
 
 function now(): string {
@@ -209,7 +210,7 @@ export class DiscoveryService {
     }
 
     const adapter = this.requireAdapter(source.agentType)
-    const inspector = new SessionInspector(source.agentType)
+    const inspector = adapter.createSessionInspector()
     await this.sourceEvidenceReader.scanLines({
       artifactId: artifact.id,
       absolutePath: adapter.resolveArtifactPath(source.rootPath, artifact),
@@ -231,7 +232,7 @@ export class DiscoveryService {
 
   async readAvailableSession(
     input: ReadAvailableSessionInput,
-    maxBytes: number
+    maxBytes?: number
   ): Promise<AvailableSessionEvidence> {
     assertSessionReference(input)
     const artifact = this.state.artifacts.find((candidate) => candidate.id === input.artifactId)
@@ -249,7 +250,7 @@ export class DiscoveryService {
       absolutePath: adapter.resolveArtifactPath(source.rootPath, artifact),
       expectedSizeBytes: artifact.sizeBytes,
       expectedModifiedAt: artifact.modifiedAt,
-      maxBytes
+      ...(maxBytes === undefined ? {} : { maxBytes })
     })
     const content = new TextDecoder('utf-8', { fatal: true }).decode(evidence.content)
     return {
@@ -257,7 +258,8 @@ export class DiscoveryService {
       revision: artifact.fingerprint,
       contentHash: evidence.contentHash,
       sizeBytes: evidence.sizeBytes,
-      content
+      content,
+      observationView: adapter.createObservationView(content)
     }
   }
 

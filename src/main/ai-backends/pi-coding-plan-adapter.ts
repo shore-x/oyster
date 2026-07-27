@@ -11,6 +11,7 @@ import {
   contentText,
   createModels,
   getSupportedThinkingLevels,
+  isContextOverflow,
   type Api,
   type AssistantMessage,
   type AssistantMessageEventStream,
@@ -29,6 +30,7 @@ import type {
   ModelGenerationResult,
   ModelRuntime
 } from './model'
+import { ModelContextOverflowError } from './model'
 
 const PROVIDER_ID = 'openai-codex'
 const DEFAULT_AUTHENTICATION_TIMEOUT_MS = 15 * 60_000
@@ -141,6 +143,10 @@ function ensureReasoningEffort(model: Model<Api>, effort?: ReasoningEffort): voi
   }
 }
 
+function modelTokenLimit(value: number): number | undefined {
+  return Number.isSafeInteger(value) && value > 0 ? value : undefined
+}
+
 /**
  * Model-call adapter for a ChatGPT/Codex Coding Plan authenticated by Pi OAuth.
  * It never reads the Codex Runtime token. Browser authorization URLs stay in the main process;
@@ -162,7 +168,13 @@ export class PiCodingPlanAdapter {
       return [{
         id: model.id,
         displayName: model.name || model.id,
-        reasoningEfforts: reasoningEfforts(model)
+        reasoningEfforts: reasoningEfforts(model),
+        ...(modelTokenLimit(model.contextWindow)
+          ? { contextWindowTokens: model.contextWindow }
+          : {}),
+        ...(modelTokenLimit(model.maxTokens)
+          ? { maxOutputTokens: model.maxTokens }
+          : {})
       }]
     })
   }
@@ -339,6 +351,11 @@ export class PiCodingPlanAdapter {
         ...(request.reasoningEffort ? { reasoning: request.reasoningEffort } : {})
       })
       operation.signal.throwIfAborted()
+      if (isContextOverflow(result, model.contextWindow)) {
+        throw new ModelContextOverflowError(
+          result.errorMessage || `模型 ${model.id} 的输入超过上下文窗口`
+        )
+      }
       if (result.stopReason === 'error' || result.stopReason === 'aborted') {
         throw new Error(result.errorMessage || 'Coding Plan 模型调用失败')
       }

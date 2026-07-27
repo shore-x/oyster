@@ -9,6 +9,7 @@ import type {
   ModelGenerationResult,
   StoredModelConnection
 } from './model'
+import { ModelContextOverflowError } from './model'
 import { reasoningEffortsForModel } from './model-capabilities'
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000
@@ -20,6 +21,34 @@ const MAX_RESPONSE_BYTES = 16 * 1_024 * 1_024
 const MODELS_REQUEST_TIMEOUT_MS = 30_000
 const MODELS_MAX_RESPONSE_BYTES = 2 * 1_024 * 1_024
 const MAX_DISCOVERED_MODELS = 10_000
+const ERROR_RESPONSE_MAX_BYTES = 64 * 1_024
+const MAX_DECLARED_MODEL_TOKENS = 100_000_000
+
+const CONTEXT_WINDOW_FIELDS = [
+  'context_window',
+  'context_length',
+  'max_context_length',
+  'max_model_len',
+  'contextWindowTokens'
+] as const
+
+const MAX_OUTPUT_FIELDS = [
+  'max_output_tokens',
+  'max_completion_tokens',
+  'maxOutputTokens'
+] as const
+
+const CONTEXT_OVERFLOW_CODES = new Set([
+  'context_length_exceeded',
+  'context_window_exceeded',
+  'input_too_long',
+  'prompt_too_long',
+  'model_context_window_exceeded',
+  'max_context_length',
+  'max_context_window',
+  'input_tokens_exceeded',
+  'request_too_large'
+])
 
 function isLocalHostname(hostname: string): boolean {
   const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, '')
@@ -75,7 +104,7 @@ function requestSignal(signal: AbortSignal | undefined, timeoutMs: number): { si
   }
 }
 
-async function readBoundedJson(response: Response, maxBytes: number): Promise<unknown> {
+async function readBoundedBytes(response: Response, maxBytes: number): Promise<Uint8Array> {
   const declaredLength = Number(response.headers.get('content-length'))
   if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
     throw new Error('模型端点返回内容过大')
@@ -106,11 +135,92 @@ async function readBoundedJson(response: Response, maxBytes: number): Promise<un
     bytes.set(chunk, offset)
     offset += chunk.byteLength
   }
+  return bytes
+}
+
+async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
+  return new TextDecoder().decode(await readBoundedBytes(response, maxBytes))
+}
+
+async function readBoundedJson(response: Response, maxBytes: number): Promise<unknown> {
+  const text = await readBoundedText(response, maxBytes)
   try {
-    return JSON.parse(new TextDecoder().decode(bytes)) as unknown
+    return JSON.parse(text) as unknown
   } catch {
     throw new Error('模型端点返回了无效 JSON')
   }
+}
+
+function declaredModelLimit(
+  record: Record<string, unknown>,
+  fields: readonly string[]
+): number | undefined {
+  for (const field of fields) {
+    const value = record[field]
+    if (
+      typeof value === 'number'
+      && Number.isSafeInteger(value)
+      && value > 0
+      && value <= MAX_DECLARED_MODEL_TOKENS
+    ) {
+      return value
+    }
+  }
+  return undefined
+}
+
+interface ModelEndpointErrorDetails {
+  codes: string[]
+  text: string
+}
+
+function modelEndpointErrorDetails(raw: string): ModelEndpointErrorDetails {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw) as unknown
+  } catch {
+    return { codes: [], text: raw }
+  }
+  if (!parsed || typeof parsed !== 'object') return { codes: [], text: raw }
+  const payload = parsed as Record<string, unknown>
+  const nested = payload.error && typeof payload.error === 'object'
+    ? payload.error as Record<string, unknown>
+    : undefined
+  const records = nested ? [nested, payload] : [payload]
+  const codes = records.flatMap((record) => ['code', 'type', 'reason'].flatMap((field) => {
+    const value = record[field]
+    return typeof value === 'string' ? [value] : []
+  }))
+  const messages = records.flatMap((record) => {
+    const value = record.message
+    return typeof value === 'string' ? [value] : []
+  })
+  return {
+    codes,
+    text: [...codes, ...messages].join(' ') || raw
+  }
+}
+
+function isContextOverflowDetails(details: ModelEndpointErrorDetails): boolean {
+  if (details.codes.some((code) => CONTEXT_OVERFLOW_CODES.has(code.trim().toLowerCase()))) return true
+  if (/rate[ _-]?limit|too many requests/i.test(details.text)) return false
+  return [
+    /exceeds? (?:the )?(?:model'?s )?context window/i,
+    /exceeds? (?:the )?(?:model'?s )?maximum context length/i,
+    /maximum context length is [\d,]+ tokens/i,
+    /(?:input|prompt)(?: token count)?[^.]{0,80}(?:too long|exceeds? (?:the )?maximum)/i,
+    /context[_ ](?:length|window)[_ ]exceeded/i,
+    /too many tokens/i,
+    /token limit exceeded/i
+  ].some((pattern) => pattern.test(details.text))
+}
+
+async function modelEndpointHttpError(response: Response): Promise<Error> {
+  if (!response.body) return new Error(`模型端点返回 HTTP ${response.status}`)
+  const details = modelEndpointErrorDetails(await readBoundedText(response, ERROR_RESPONSE_MAX_BYTES))
+  return isContextOverflowDetails(details)
+    ? new ModelContextOverflowError('模型输入超过所选模型的上下文窗口')
+    : new Error(`模型端点返回 HTTP ${response.status}`)
 }
 
 function responseText(value: unknown): string | undefined {
@@ -157,6 +267,12 @@ function assertResponseComplete(value: unknown): void {
     const reason = details && typeof details === 'object'
       ? (details as Record<string, unknown>).reason
       : undefined
+    if (
+      typeof reason === 'string'
+      && isContextOverflowDetails({ codes: [reason], text: reason })
+    ) {
+      throw new ModelContextOverflowError('模型输入超过所选模型的上下文窗口')
+    }
     throw new Error(
       typeof reason === 'string'
         ? `模型输出不完整：${reason}`
@@ -217,10 +333,18 @@ export class OpenAiCompatibleAdapter implements ModelBackendAdapter {
         const name = typeof record.name === 'string' && record.name.trim().length <= 200
           ? record.name.trim()
           : id
+        const contextWindowTokens = declaredModelLimit(record, CONTEXT_WINDOW_FIELDS)
+        const declaredMaxOutputTokens = declaredModelLimit(record, MAX_OUTPUT_FIELDS)
+        const maxOutputTokens = declaredMaxOutputTokens
+          && (!contextWindowTokens || declaredMaxOutputTokens <= contextWindowTokens)
+          ? declaredMaxOutputTokens
+          : undefined
         models.set(id, {
           id,
           displayName: name,
-          reasoningEfforts: reasoningEffortsForModel(providerId, id)
+          reasoningEfforts: reasoningEffortsForModel(providerId, id),
+          ...(contextWindowTokens ? { contextWindowTokens } : {}),
+          ...(maxOutputTokens ? { maxOutputTokens } : {})
         })
       }
       return [...models.values()].sort((left, right) => left.id.localeCompare(right.id))
@@ -297,7 +421,7 @@ export class OpenAiCompatibleAdapter implements ModelBackendAdapter {
       if (response.status >= 300 && response.status < 400) {
         throw new Error('模型端点返回了重定向，为避免凭据泄露已拒绝跟随')
       }
-      if (!response.ok) throw new Error(`模型端点返回 HTTP ${response.status}`)
+      if (!response.ok) throw await modelEndpointHttpError(response)
 
       const payload = await readBoundedJson(response, maxResponseBytes)
       assertResponseComplete(payload)

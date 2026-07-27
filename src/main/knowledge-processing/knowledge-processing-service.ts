@@ -18,8 +18,12 @@ import {
 import {
   REASONING_EFFORTS,
   type AiConnection,
+  type AvailableModel,
   type ReasoningEffort
 } from '../../shared/ai-backends'
+import { ModelContextOverflowError } from '../ai-backends/model'
+import type { ObservationView } from '../observation/model'
+import { createPlainTextObservationView } from '../observation/observation-view'
 import type {
   AiBackendPort,
   EvidenceMapSection,
@@ -32,12 +36,10 @@ import type {
   StoredProcessingStage
 } from './model'
 import {
-  DEFAULT_ADJACENT_CONTEXT_CHARACTERS,
-  DEFAULT_MAP_MERGE_CHARACTERS,
-  DEFAULT_OBSERVATION_SEGMENT_CHARACTERS,
+  evidenceMapSectionId,
   evidenceMapNodeText,
   groupEvidenceMapNodes,
-  numberedObservation,
+  numberedObservationUnits,
   observationSelector,
   planObservationSegments,
   resolveEvidenceMapPlannerOptions,
@@ -49,29 +51,27 @@ import {
 import { PROCESSING_STAGE_DEFINITIONS, stageDefinition } from './prompts'
 
 const MAX_INSTRUCTIONS_CHARACTERS = 20_000
-const MAX_MANUAL_OBSERVATION_CHARACTERS = 120_000
-const MAX_SEGMENTED_OBSERVATION_CHARACTERS = 16 * 1024 * 1024
 const MAX_ATTENTION_CHARACTERS = 10_000
 const MAX_SOURCE_REF_CHARACTERS = 512
-const MAX_PREPROCESSOR_PROMPT_STRUCTURE_CHARACTERS = 8 * 1_024
 const MAX_EVIDENCE_MAP_CHARACTERS = 128 * 1_024
-const MAX_EVIDENCE_MAP_SECTION_CHARACTERS = 24 * 1_024
-const MAX_PREPROCESSOR_SEGMENTS = 32
-const MAX_PREPROCESSOR_MODEL_CALLS = MAX_PREPROCESSOR_SEGMENTS * 2 - 1
-const MAX_PREPROCESSOR_RUN_MS = 30 * 60_000
+const MAX_EVIDENCE_MAP_SECTION_BYTES = 24 * 1_024
 const MAX_WORKSPACES = 20
-const MAX_WORKSPACE_CHARACTERS = 64 * 1024 * 1024
-const ESTIMATED_OBSERVATION_LINE_OVERHEAD = 16
 const MAX_DEBUG_TRACE_ERROR_CHARACTERS = 2 * 1_024
 const MAX_DEBUG_TRACE_DETAIL_CHARACTERS = 1 * 1_024
 const MAX_DEBUG_TRACE_PREPROCESSOR_OUTPUT_CHARACTERS = 8 * 1_024
+const PREPROCESSOR_OUTPUT_TOKENS = 4_096
+const PREPROCESSOR_CONTEXT_SAFETY_TOKENS = 2_048
+const UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS = 32_768
+const MIN_PREPROCESSOR_MATERIAL_BYTES = 1
+const PREPROCESSOR_PROMPT_ENVELOPE_BYTES = 2 * 1_024
 
-const MAX_PREPROCESSOR_MODEL_INPUT_CHARACTERS = MAX_INSTRUCTIONS_CHARACTERS
-  + MAX_ATTENTION_CHARACTERS
-  + MAX_SOURCE_REF_CHARACTERS
-  + Math.max(DEFAULT_OBSERVATION_SEGMENT_CHARACTERS, DEFAULT_MAP_MERGE_CHARACTERS)
-  + DEFAULT_ADJACENT_CONTEXT_CHARACTERS
-  + MAX_PREPROCESSOR_PROMPT_STRUCTURE_CHARACTERS
+interface PreprocessorContextBudget {
+  maxInputBytes: number
+  maxOutputTokens: number
+  planner: ResolvedEvidenceMapPlannerOptions
+}
+
+class PreprocessorInputBudgetError extends Error {}
 
 export interface ProcessingStageRunBinding {
   connectionId: string
@@ -93,7 +93,6 @@ export interface ObservationPreprocessorRunOptions {
   binding?: ProcessingStageRunBinding
   lease?: ProcessingRunLease
   sourceRef?: string
-  allowSegmentedObservation?: boolean
   debugTrace?: ProcessingDebugTraceContext
 }
 
@@ -121,11 +120,84 @@ function debugError(error: unknown): string {
   return boundedDebugText(errorText(error), MAX_DEBUG_TRACE_ERROR_CHARACTERS)
 }
 
-class PreprocessingDeadlineExceededError extends Error {}
+function utf8Bytes(value: string): number {
+  return Buffer.byteLength(value, 'utf8')
+}
+
+function maximumMergeNodeBytes(mergeBytes: number): number {
+  return Math.floor((mergeBytes - utf8Bytes('\n\n---\n\n')) / 2)
+}
+
+function maximumNodeContentBytes(
+  node: Omit<EvidenceMapNode, 'content'>,
+  mergeBytes: number
+): number {
+  const metadataBytes = utf8Bytes(evidenceMapNodeText({ ...node, content: '' }))
+  const maximum = maximumMergeNodeBytes(mergeBytes) - metadataBytes
+  if (maximum < 1) {
+    throw new Error('所选模型的上下文不足以生成可归并的 Evidence Map 导航节点')
+  }
+  return Math.min(MAX_EVIDENCE_MAP_SECTION_BYTES, maximum)
+}
+
+function preprocessorContextBudget(
+  model: AvailableModel,
+  stage: ProcessingStageRunBinding,
+  sourceRef: string,
+  attention: string | undefined,
+  configuredPlanner: ResolvedEvidenceMapPlannerOptions,
+  divisor = 1
+): PreprocessorContextBudget {
+  const contextWindow = model.contextWindowTokens ?? UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS
+  const maxOutputTokens = Math.min(
+    PREPROCESSOR_OUTPUT_TOKENS,
+    model.maxOutputTokens ?? PREPROCESSOR_OUTPUT_TOKENS
+  )
+  const maxInputBytes = contextWindow - maxOutputTokens - PREPROCESSOR_CONTEXT_SAFETY_TOKENS
+  const fixedBytes = utf8Bytes(stage.instructions)
+    + utf8Bytes(sourceRef)
+    + utf8Bytes(attention ?? '')
+    + PREPROCESSOR_PROMPT_ENVELOPE_BYTES
+  const availableMaterialBytes = Math.floor((maxInputBytes - fixedBytes) / divisor)
+  if (availableMaterialBytes < MIN_PREPROCESSOR_MATERIAL_BYTES) {
+    throw new Error('所选模型的上下文不足以容纳当前 Observation Preprocessor System Prompt')
+  }
+  const adjacentContextBytes = Math.min(
+    configuredPlanner.adjacentContextBytes,
+    Math.max(1, Math.floor(availableMaterialBytes / 5))
+  )
+  const segmentBytes = Math.min(
+    configuredPlanner.segmentBytes,
+    availableMaterialBytes - adjacentContextBytes
+  )
+  const mergeBytes = Math.min(
+    configuredPlanner.mergeBytes,
+    availableMaterialBytes
+  )
+  if (
+    segmentBytes < MIN_PREPROCESSOR_MATERIAL_BYTES
+    || mergeBytes < MIN_PREPROCESSOR_MATERIAL_BYTES
+  ) {
+    throw new Error('所选模型的上下文不足以容纳 Observation 预处理材料')
+  }
+  return {
+    maxInputBytes,
+    maxOutputTokens,
+    planner: {
+      ...configuredPlanner,
+      segmentBytes,
+      adjacentContextBytes,
+      mergeBytes
+    }
+  }
+}
+
+function retryableContextOverflow(error: unknown): boolean {
+  return error instanceof ModelContextOverflowError || error instanceof PreprocessorInputBudgetError
+}
 
 function traceTerminalStatus(signal: AbortSignal): 'failed' | 'cancelled' {
-  if (!signal.aborted) return 'failed'
-  return signal.reason instanceof PreprocessingDeadlineExceededError ? 'failed' : 'cancelled'
+  return signal.aborted ? 'cancelled' : 'failed'
 }
 
 const KNOWLEDGE_TOOL_LABELS: Record<string, string> = {
@@ -188,20 +260,79 @@ function normalizeAttention(value: unknown): string | undefined {
   return normalized
 }
 
-function assertObservationInput(
-  input: unknown,
-  allowSegmentedObservation: boolean
-): asserts input is RunObservationPreprocessorInput {
+function assertObservationInput(input: unknown): asserts input is RunObservationPreprocessorInput {
   if (!input || typeof input !== 'object') throw new Error('观察预处理输入无效')
   const observation = (input as Record<string, unknown>).observation
   if (typeof observation !== 'string' || !observation.trim()) throw new Error('请输入需要处理的 Observation')
-  const maximum = allowSegmentedObservation
-    ? MAX_SEGMENTED_OBSERVATION_CHARACTERS
-    : MAX_MANUAL_OBSERVATION_CHARACTERS
-  if (observation.length > maximum) {
-    throw new Error(`Observation 不能超过 ${maximum} 个字符`)
-  }
   normalizeAttention((input as Record<string, unknown>).attention)
+}
+
+function assertObservationView(view: ObservationView): void {
+  if (
+    !view
+    || typeof view !== 'object'
+    || typeof view.formatVersion !== 'string'
+    || !view.formatVersion.trim()
+    || view.formatVersion.length > 128
+    || !Array.isArray(view.rawLines)
+    || !view.rawLines.length
+    || view.rawLines.some((line) => typeof line !== 'string' || /[\r\n]/.test(line))
+    || !view.rawLines.some((line) => line.trim())
+    || !Array.isArray(view.units)
+    || !view.units.length
+  ) {
+    throw new Error('Observation View 无效')
+  }
+
+  const nextOffsetByLine = new Map<number, number>()
+  let previousLineNumber = 0
+  for (const unit of view.units) {
+    const line = view.rawLines[unit.lineNumber - 1]
+    const expectedOffset = nextOffsetByLine.get(unit.lineNumber) ?? 0
+    const splitsSurrogatePair = (offset: number): boolean => (
+      offset > 0
+      && offset < (line?.length ?? 0)
+      && line!.charCodeAt(offset - 1) >= 0xd800
+      && line!.charCodeAt(offset - 1) <= 0xdbff
+      && line!.charCodeAt(offset) >= 0xdc00
+      && line!.charCodeAt(offset) <= 0xdfff
+    )
+    if (
+      line === undefined
+      || !Number.isSafeInteger(unit.lineNumber)
+      || unit.lineNumber < 1
+      || unit.lineNumber < previousLineNumber
+      || !Number.isSafeInteger(unit.startCharacter)
+      || !Number.isSafeInteger(unit.endCharacter)
+      || !Number.isSafeInteger(unit.totalCharacters)
+      || unit.totalCharacters !== line.length
+      || unit.startCharacter !== expectedOffset
+      || unit.endCharacter < unit.startCharacter
+      || (line.length > 0 && unit.endCharacter === unit.startCharacter)
+      || unit.endCharacter > line.length
+      || splitsSurrogatePair(unit.startCharacter)
+      || splitsSurrogatePair(unit.endCharacter)
+      || unit.content !== line.slice(unit.startCharacter, unit.endCharacter)
+      || (
+        unit.recordContext !== undefined
+        && (
+          typeof unit.recordContext !== 'string'
+          || !unit.recordContext.trim()
+          || utf8Bytes(unit.recordContext) > 512
+          || /[\r\n]/.test(unit.recordContext)
+        )
+      )
+    ) {
+      throw new Error('Observation View unit 与原始证据不一致')
+    }
+    nextOffsetByLine.set(unit.lineNumber, unit.endCharacter)
+    previousLineNumber = unit.lineNumber
+  }
+  for (let index = 0; index < view.rawLines.length; index++) {
+    if (nextOffsetByLine.get(index + 1) !== view.rawLines[index].length) {
+      throw new Error('Observation View 未完整覆盖原始证据')
+    }
+  }
 }
 
 function assertMaintenanceInput(input: unknown): asserts input is RunKnowledgeMaintenanceInput {
@@ -239,18 +370,20 @@ function segmentPrompt(
   sourceRef: string,
   attention?: string
 ): string {
-  const context = segment.contextLines.length && segment.contextStartLine
-    ? `\nBEGIN_ADJACENT_CONTEXT\n${numberedObservation(segment.contextLines, segment.contextStartLine)}\nEND_ADJACENT_CONTEXT\n`
+  const context = segment.contextUnits.length
+    ? `\nBEGIN_ADJACENT_CONTEXT\n${numberedObservationUnits(segment.contextUnits)}\nEND_ADJACENT_CONTEXT\n`
     : ''
   return `Create the Evidence Map material for the primary Observation range ${observationSelector(segment.startLine, segment.endLine)}. This may be one part of a longer Session. Follow the System Prompt's language policy and preserve global line references exactly.
 
 Adjacent context, when present, is provided only to resolve continuity at the boundary. Do not treat it as new coverage or repeat its candidates unless it is necessary to explain a correction or dependency in the primary range.${context}
+When a long physical line is shown in multiple Cstart:end/total character windows, those windows are transport-only fragments of the same L line. Preserve all significant details, use the character window for navigation when helpful, and cite the original L selector rather than inventing a fragment selector.
+Bracketed record context is generated by the owning source adapter from that Agent's history format and is repeated only to make split records understandable. It does not replace the raw evidence.
 Operator attention:
 ${attention ?? 'No additional focus.'}
 
 Source reference: ${sourceRef}
 BEGIN_AUTHORIZED_OBSERVATION
-${numberedObservation(segment.lines, segment.startLine)}
+${numberedObservationUnits(segment.units)}
 END_AUTHORIZED_OBSERVATION`
 }
 
@@ -270,35 +403,70 @@ Output only the assembled navigation map as Markdown.`
 }
 
 function completedEvidenceMap(
-  navigation: string,
+  root: EvidenceMapNode,
   sourceRef: string,
+  lineCount: number,
   sections: EvidenceMapSection[],
-  lineCount: number
+  formatVersion: string
 ): string {
-  const manifest = sections.map((section) => `- ${section.id}: ${section.selector}`).join('\n')
+  const rootSection = sections.find((section) => section.id === root.sectionIds[0])
   return [
     '# Evidence Map',
     '',
     '## Coverage',
     `- Source: ${sourceRef}`,
+    `- Observation view: ${formatVersion}`,
     `- Processed range: ${observationSelector(1, lineCount)}`,
-    `- Local map sections: ${sections.length}`,
+    `- Root map section: ${root.sectionIds[0]}`,
     '',
-    '## Expandable map sections',
-    manifest,
+    '## Progressive disclosure',
+    `- Expand the root section ${root.sectionIds[0]} to discover only its immediate child sections.`,
+    rootSection?.children?.length
+      ? `- Immediate child sections: ${rootSection.children.join(', ')}`
+      : '- Immediate child sections: none.',
+    '- Descendant section IDs are intentionally not flattened into this root prompt.',
     '',
     '## Navigation',
-    navigation
+    root.content
   ].join('\n')
 }
 
-function workspaceCharacters(workspace: PreprocessingWorkspace): number {
-  return workspace.observationLines.reduce(
-    (total, line) => total + line.length + 1 + ESTIMATED_OBSERVATION_LINE_OVERHEAD,
-    0
-  )
-    + workspace.evidenceMap.length
-    + workspace.evidenceMapSections.reduce((total, section) => total + section.content.length, 0)
+function segmentCharacterWindow(
+  segment: ObservationSegment
+): EvidenceMapSection['characterWindow'] | undefined {
+  if (segment.startLine !== segment.endLine || !segment.units.length) return undefined
+  const first = segment.units[0]
+  const last = segment.units[segment.units.length - 1]
+  if (first.startCharacter === 0 && last.endCharacter === first.totalCharacters) return undefined
+  return {
+    startCharacter: first.startCharacter,
+    endCharacter: last.endCharacter,
+    totalCharacters: first.totalCharacters
+  }
+}
+
+function mergedCharacterWindow(
+  nodes: EvidenceMapNode[]
+): EvidenceMapSection['characterWindow'] | undefined {
+  if (!nodes.length || nodes.some((node) => (
+    node.startLine !== nodes[0].startLine
+    || node.endLine !== nodes[0].endLine
+    || !node.characterWindow
+  ))) {
+    return undefined
+  }
+  const windows = nodes.map((node) => node.characterWindow!)
+  if (windows.some((window, index) => (
+    window.totalCharacters !== windows[0].totalCharacters
+    || (index > 0 && window.startCharacter !== windows[index - 1].endCharacter)
+  ))) {
+    return undefined
+  }
+  return {
+    startCharacter: windows[0].startCharacter,
+    endCharacter: windows[windows.length - 1].endCharacter,
+    totalCharacters: windows[0].totalCharacters
+  }
 }
 
 export class KnowledgeProcessingService {
@@ -840,30 +1008,22 @@ export class KnowledgeProcessingService {
   }
 
   private rememberWorkspace(workspace: PreprocessingWorkspace): void {
-    const newWeight = workspaceCharacters(workspace)
-    if (newWeight > MAX_WORKSPACE_CHARACTERS) {
-      throw new Error('预处理工作区超过内存上限；请缩小所选 Session 范围')
-    }
     this.workspaces.set(workspace.runId, workspace)
-    let totalWeight = [...this.workspaces.values()].reduce(
-      (total, candidate) => total + workspaceCharacters(candidate),
-      0
-    )
-    while (this.workspaces.size > MAX_WORKSPACES || totalWeight > MAX_WORKSPACE_CHARACTERS) {
+    while (this.workspaces.size > MAX_WORKSPACES) {
       const oldest = this.workspaces.keys().next().value as string | undefined
       if (!oldest) break
-      const removed = this.workspaces.get(oldest)
       this.workspaces.delete(oldest)
-      if (removed) totalWeight -= workspaceCharacters(removed)
     }
   }
 
   private async generateEvidenceMapMaterial(
     stage: ProcessingStageRunBinding,
     prompt: string,
+    budget: PreprocessorContextBudget,
     signal: AbortSignal,
     modelCallCount: { value: number },
     traceContext: ProcessingDebugTraceContext,
+    maximumOutputBytes: number,
     call: {
       kind: 'segment_map' | 'navigation_merge'
       selector: string
@@ -881,16 +1041,18 @@ export class KnowledgeProcessingService {
       if (stage.instructions.length > MAX_INSTRUCTIONS_CHARACTERS) {
         throw new Error('Observation Preprocessor System Prompt 内容过长')
       }
-      if (stage.instructions.length + prompt.length > MAX_PREPROCESSOR_MODEL_INPUT_CHARACTERS) {
-        throw new Error('观察预处理模型输入超过单次有界调用上限')
+      const boundedPrompt = `${prompt}\n\nHard output limit: return no more than ${maximumOutputBytes} UTF-8 bytes.`
+      if (utf8Bytes(stage.instructions) + utf8Bytes(boundedPrompt) > budget.maxInputBytes) {
+        throw new PreprocessorInputBudgetError('模型输入预算不足，正在自动缩小预处理分段')
       }
-      if (modelCallCount.value >= MAX_PREPROCESSOR_MODEL_CALLS) {
-        throw new Error(`观察预处理超过 ${MAX_PREPROCESSOR_MODEL_CALLS} 次模型调用上限`)
-      }
+      modelCallCount.value++
       const generated = await this.aiBackend.generateWithModel(stage.connectionId, stage.modelId, {
         systemPrompt: stage.instructions,
-        prompt,
-        maxOutputTokens: 4_096,
+        prompt: boundedPrompt,
+        maxOutputTokens: Math.min(
+          budget.maxOutputTokens,
+          Math.max(1, Math.floor(maximumOutputBytes / 4))
+        ),
         timeoutMs: 5 * 60_000,
         maxResponseBytes: 8 * 1_024 * 1_024,
         reasoningEffort: stage.reasoningEffort,
@@ -899,10 +1061,9 @@ export class KnowledgeProcessingService {
       signal.throwIfAborted()
       const content = generated.text.trim()
       if (!content) throw new Error('观察预处理器未返回 Evidence Map')
-      if (content.length > MAX_EVIDENCE_MAP_SECTION_CHARACTERS) {
-        throw new Error('局部 Evidence Map 内容过长')
+      if (utf8Bytes(content) > maximumOutputBytes) {
+        throw new Error('观察预处理器返回的 Evidence Map 超过本层导航预算')
       }
-      modelCallCount.value++
       this.finishPreprocessingCall(traceContext, traceCallId, 'completed', content)
       return content
     } catch (error) {
@@ -919,14 +1080,17 @@ export class KnowledgeProcessingService {
   private async assembleEvidenceMapNavigation(
     stage: ProcessingStageRunBinding,
     leafNodes: EvidenceMapNode[],
+    sections: EvidenceMapSection[],
     attention: string | undefined,
+    budget: PreprocessorContextBudget,
     signal: AbortSignal,
     modelCallCount: { value: number },
     traceContext: ProcessingDebugTraceContext
-  ): Promise<string> {
+  ): Promise<EvidenceMapNode> {
     let nodes = leafNodes
+    let nextSectionIndex = sections.length
     while (nodes.length > 1) {
-      const groups = groupEvidenceMapNodes(nodes, this.evidenceMapPlanner.mergeCharacters)
+      const groups = groupEvidenceMapNodes(nodes, budget.planner.mergeBytes)
       const next: EvidenceMapNode[] = []
       let mergedAny = false
       for (const group of groups) {
@@ -936,29 +1100,46 @@ export class KnowledgeProcessingService {
           continue
         }
         mergedAny = true
+        const id = evidenceMapSectionId(nextSectionIndex++)
+        const characterWindow = mergedCharacterWindow(group)
+        const nodeShape = {
+          startLine: group[0].startLine,
+          endLine: group[group.length - 1].endLine,
+          sectionIds: [id],
+          ...(characterWindow ? { characterWindow } : {})
+        }
         const content = await this.generateEvidenceMapMaterial(
           stage,
           mergePrompt(group, attention),
+          budget,
           signal,
           modelCallCount,
           traceContext,
+          maximumNodeContentBytes(nodeShape, budget.planner.mergeBytes),
           {
             kind: 'navigation_merge',
             selector: observationSelector(group[0].startLine, group[group.length - 1].endLine),
             sectionIds: group.flatMap((node) => node.sectionIds)
           }
         )
+        const selector = observationSelector(group[0].startLine, group[group.length - 1].endLine)
+        const children = group.flatMap((node) => node.sectionIds)
+        sections.push({
+          id,
+          selector,
+          content,
+          children,
+          ...(characterWindow ? { characterWindow } : {})
+        })
         next.push({
           content,
-          startLine: group[0].startLine,
-          endLine: group[group.length - 1].endLine,
-          sectionIds: group.flatMap((node) => node.sectionIds)
+          ...nodeShape
         })
       }
       if (!mergedAny) throw new Error('局部 Evidence Map 无法在当前输入预算内完成导航归并')
       nodes = next
     }
-    return nodes[0].content
+    return nodes[0]
   }
 
   async runObservationPreprocessor(
@@ -966,11 +1147,29 @@ export class KnowledgeProcessingService {
     expectedConnectionId?: string,
     options: ObservationPreprocessorRunOptions = {}
   ): Promise<ObservationPreprocessingResult> {
-    assertObservationInput(input, Boolean(options.allowSegmentedObservation))
+    assertObservationInput(input)
+    return this.runObservationPreprocessorView(
+      createPlainTextObservationView(input.observation),
+      input.attention,
+      expectedConnectionId,
+      options
+    )
+  }
+
+  /** Main-process entry for an Agent adapter's deterministic Observation View. */
+  async runObservationPreprocessorView(
+    observationView: ObservationView,
+    attentionInput?: string,
+    expectedConnectionId?: string,
+    options: ObservationPreprocessorRunOptions = {}
+  ): Promise<ObservationPreprocessingResult> {
+    assertObservationView(observationView)
     const stageId = 'observation_preprocessor' as const
     const stage = options.binding ?? this.configuredStage(stageId, expectedConnectionId)
     const connection = this.aiBackend.snapshot().connections.find((item) => item.id === stage.connectionId)
     if (!connection) throw new Error('已配置的 Connection 不再可用')
+    const model = connection.models.find((candidate) => candidate.id === stage.modelId)
+    if (!model) throw new Error('已配置的 Model 不再可用')
 
     const startedAt = Date.now()
     const runId = randomUUID()
@@ -982,101 +1181,148 @@ export class KnowledgeProcessingService {
     if (!sourceRef.trim() || sourceRef.length > MAX_SOURCE_REF_CHARACTERS) {
       throw new Error('Observation sourceRef 无效')
     }
-    const attention = normalizeAttention(input.attention)
-    const observationLines = input.observation.split(/\r\n|\r|\n/)
+    const attention = normalizeAttention(attentionInput)
+    const observationLines = observationView.rawLines
     const controller = this.beginRun(stageId, options.lease)
     this.beginPreprocessingDebugTrace(debugTrace)
-    const deadline = setTimeout(() => {
-      controller.abort(new PreprocessingDeadlineExceededError('观察预处理运行超过 30 分钟上限'))
-    }, MAX_PREPROCESSOR_RUN_MS)
-    deadline.unref()
 
     try {
       this.updatePreprocessingProgress({
         phase: 'preparing',
         completedSegments: 0
       })
-      const segments = planObservationSegments(observationLines, this.evidenceMapPlanner)
-      this.updatePreprocessingDebug(debugTrace, (trace) => {
-        trace.totalSegments = segments.length
-      })
-      if (segments.length > MAX_PREPROCESSOR_SEGMENTS) {
-        throw new Error(
-          `Observation 需要 ${segments.length} 个分段，超过单次运行 ${MAX_PREPROCESSOR_SEGMENTS} 个分段的上限`
-        )
-      }
-      this.updatePreprocessingProgress({
-        phase: 'mapping',
-        completedSegments: 0,
-        totalSegments: segments.length
-      })
-      this.updatePreprocessingDebug(debugTrace, (trace) => {
-        trace.phase = 'mapping'
-      })
       const modelCallCount = { value: 0 }
-      const sections: EvidenceMapSection[] = []
-      const leafNodes: EvidenceMapNode[] = []
-      for (const segment of segments) {
+      let divisor = 1
+      let segments: ObservationSegment[] = []
+      let evidenceMap = ''
+      let workspaceSections: EvidenceMapSection[] = []
+      for (;;) {
         controller.signal.throwIfAborted()
-        const content = await this.generateEvidenceMapMaterial(
+        const budget = preprocessorContextBudget(
+          model,
           stage,
-          segmentPrompt(segment, sourceRef, attention),
-          controller.signal,
-          modelCallCount,
-          debugTrace,
-          {
-            kind: 'segment_map',
-            selector: observationSelector(segment.startLine, segment.endLine),
-            sectionIds: [segment.id]
-          }
+          sourceRef,
+          attention,
+          this.evidenceMapPlanner,
+          divisor
         )
-        const selector = observationSelector(segment.startLine, segment.endLine)
-        sections.push({ id: segment.id, selector, content })
-        leafNodes.push({
-          content,
-          startLine: segment.startLine,
-          endLine: segment.endLine,
-          sectionIds: [segment.id]
-        })
+        try {
+          segments = planObservationSegments(observationView.units, budget.planner)
+        } catch (error) {
+          if (
+            divisor > 1
+            || budget.planner.segmentBytes < this.evidenceMapPlanner.segmentBytes
+          ) {
+            throw new Error('所选模型的上下文不足以容纳 Observation Preprocessor 的固定指令与最小证据片段')
+          }
+          throw error
+        }
         this.updatePreprocessingProgress({
           phase: 'mapping',
-          completedSegments: sections.length,
+          completedSegments: 0,
           totalSegments: segments.length
         })
         this.updatePreprocessingDebug(debugTrace, (trace) => {
-          trace.completedSegments = sections.length
+          trace.phase = 'mapping'
+          trace.completedSegments = 0
+          trace.totalSegments = segments.length
         })
-      }
 
-      let evidenceMap: string
-      let workspaceSections: EvidenceMapSection[]
-      if (segments.length === 1) {
-        evidenceMap = sections[0].content
-        workspaceSections = []
-      } else {
-        this.updatePreprocessingProgress({
-          phase: 'assembling',
-          completedSegments: segments.length,
-          totalSegments: segments.length
-        })
-        this.updatePreprocessingDebug(debugTrace, (trace) => {
-          trace.phase = 'assembling'
-        })
-        const navigation = await this.assembleEvidenceMapNavigation(
-          stage,
-          leafNodes,
-          attention,
-          controller.signal,
-          modelCallCount,
-          debugTrace
-        )
-        evidenceMap = completedEvidenceMap(
-          navigation,
-          sourceRef,
-          sections,
-          observationLines.length
-        )
-        workspaceSections = sections
+        const sections: EvidenceMapSection[] = []
+        const leafNodes: EvidenceMapNode[] = []
+        try {
+          for (const segment of segments) {
+            controller.signal.throwIfAborted()
+            const characterWindow = segmentCharacterWindow(segment)
+            const leafShape = {
+              startLine: segment.startLine,
+              endLine: segment.endLine,
+              sectionIds: [segment.id],
+              ...(characterWindow ? { characterWindow } : {})
+            }
+            const maximumOutputBytes = segments.length === 1
+              ? MAX_EVIDENCE_MAP_SECTION_BYTES
+              : maximumNodeContentBytes(leafShape, budget.planner.mergeBytes)
+            const content = await this.generateEvidenceMapMaterial(
+              stage,
+              segmentPrompt(segment, sourceRef, attention),
+              budget,
+              controller.signal,
+              modelCallCount,
+              debugTrace,
+              maximumOutputBytes,
+              {
+                kind: 'segment_map',
+                selector: observationSelector(segment.startLine, segment.endLine),
+                sectionIds: [segment.id]
+              }
+            )
+            const selector = observationSelector(segment.startLine, segment.endLine)
+            sections.push({
+              id: segment.id,
+              selector,
+              content,
+              ...(characterWindow ? { characterWindow } : {})
+            })
+            leafNodes.push({
+              content,
+              ...leafShape
+            })
+            this.updatePreprocessingProgress({
+              phase: 'mapping',
+              completedSegments: leafNodes.length,
+              totalSegments: segments.length
+            })
+            this.updatePreprocessingDebug(debugTrace, (trace) => {
+              trace.completedSegments = leafNodes.length
+            })
+          }
+
+          if (segments.length === 1) {
+            evidenceMap = sections[0].content
+            workspaceSections = []
+          } else {
+            this.updatePreprocessingProgress({
+              phase: 'assembling',
+              completedSegments: segments.length,
+              totalSegments: segments.length
+            })
+            this.updatePreprocessingDebug(debugTrace, (trace) => {
+              trace.phase = 'assembling'
+            })
+            const root = await this.assembleEvidenceMapNavigation(
+              stage,
+              leafNodes,
+              sections,
+              attention,
+              budget,
+              controller.signal,
+              modelCallCount,
+              debugTrace
+            )
+            evidenceMap = completedEvidenceMap(
+              root,
+              sourceRef,
+              observationLines.length,
+              sections,
+              observationView.formatVersion
+            )
+            workspaceSections = sections
+          }
+          break
+        } catch (error) {
+          if (!retryableContextOverflow(error) || controller.signal.aborted) throw error
+          divisor *= 2
+          if (!Number.isSafeInteger(divisor)) {
+            throw new Error('所选模型的上下文不足以容纳 Observation 预处理指令')
+          }
+          this.updatePreprocessingProgress({ phase: 'preparing', completedSegments: 0 })
+          this.updatePreprocessingDebug(debugTrace, (trace) => {
+            trace.phase = 'preparing'
+            trace.completedSegments = 0
+            delete trace.totalSegments
+          })
+        }
       }
       if (evidenceMap.length > MAX_EVIDENCE_MAP_CHARACTERS) throw new Error('Evidence Map 内容过长')
 
@@ -1084,6 +1330,7 @@ export class KnowledgeProcessingService {
         runId,
         sourceRef,
         observationLines,
+        observationFormatVersion: observationView.formatVersion,
         evidenceMap,
         evidenceMapSections: workspaceSections,
         attention,
@@ -1118,7 +1365,6 @@ export class KnowledgeProcessingService {
       )
       throw error
     } finally {
-      clearTimeout(deadline)
       this.updatePreprocessingProgress(undefined)
       this.finishRun(stageId, controller)
     }
@@ -1155,6 +1401,7 @@ export class KnowledgeProcessingService {
           evidenceMap: workspace.evidenceMap,
           evidenceMapSections: workspace.evidenceMapSections.map((section) => ({ ...section })),
           observationLines: [...workspace.observationLines],
+          observationFormatVersion: workspace.observationFormatVersion,
           sourceRef: workspace.sourceRef,
           contributionRunRef: options.contributionRunRef ?? `manual:${randomUUID()}`,
           attention,

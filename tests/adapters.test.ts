@@ -24,6 +24,81 @@ async function scan(
 }
 
 describe('agent history adapters', () => {
+  it.each([
+    {
+      adapter: new ClaudeHistoryAdapter(),
+      formatVersion: 'claude-jsonl-v2',
+      context: 'Claude · record=assistant · role=assistant · blocks=text',
+      record: { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: `Claude ${'😀'.repeat(6_000)}` }] } }
+    },
+    {
+      adapter: new PiHistoryAdapter(),
+      formatVersion: 'pi-jsonl-v2',
+      context: 'Pi · record=message · role=assistant',
+      record: { type: 'message', message: { role: 'assistant', content: `Pi ${'😀'.repeat(6_000)}` } }
+    },
+    {
+      adapter: new CodexHistoryAdapter(),
+      formatVersion: 'codex-jsonl-v2',
+      context: 'Codex · record=response_item · payload=function_call_output',
+      record: { type: 'response_item', payload: { type: 'function_call_output', output: `Codex ${'😀'.repeat(6_000)}` } }
+    }
+  ])('lets the $formatVersion adapter deterministically frame a long JSONL record', ({
+    adapter,
+    formatVersion,
+    context,
+    record
+  }) => {
+    const rawLine = JSON.stringify(record)
+    const view = adapter.createObservationView(rawLine)
+
+    expect(view.formatVersion).toBe(formatVersion)
+    expect(view.rawLines).toEqual([rawLine])
+    expect(view.units.length).toBeGreaterThan(1)
+    expect(view.units.map((unit) => unit.content).join('')).toBe(rawLine)
+    expect(view.units.every((unit) => (
+      unit.lineNumber === 1 && Buffer.byteLength(unit.content, 'utf8') <= 3 * 1_024
+    ))).toBe(true)
+    expect(view.units.every((unit) => unit.recordContext === context)).toBe(true)
+    expect(view.units.every((unit) => Buffer.byteLength(unit.recordContext ?? '', 'utf8') <= 512)).toBe(true)
+    expect(view.units[0].startCharacter).toBe(0)
+    expect(view.units.at(-1)?.endCharacter).toBe(rawLine.length)
+    expect(view.units.every((unit, index) => (
+      index === 0 || unit.startCharacter === view.units[index - 1].endCharacter
+    ))).toBe(true)
+    for (const unit of view.units) {
+      const first = unit.content.charCodeAt(0)
+      const last = unit.content.charCodeAt(unit.content.length - 1)
+      expect(first < 0xdc00 || first > 0xdfff).toBe(true)
+      expect(last < 0xd800 || last > 0xdbff).toBe(true)
+    }
+  })
+
+  it('keeps JSON escape sequences intact at adapter-owned long-record boundaries', () => {
+    const rawLine = JSON.stringify({
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: `${'a'.repeat(3_050)}\\n${'b'.repeat(4_000)}` }]
+      }
+    })
+    const view = new CodexHistoryAdapter().createObservationView(rawLine)
+
+    expect(view.units.map((unit) => unit.content).join('')).toBe(rawLine)
+    for (const unit of view.units.slice(0, -1)) {
+      let trailingBackslashes = 0
+      for (let index = unit.content.length - 1; index >= 0 && unit.content[index] === '\\'; index--) {
+        trailingBackslashes++
+      }
+      expect(trailingBackslashes % 2).toBe(0)
+      expect(unit.content).not.toMatch(/\\u[0-9a-f]{0,3}$/i)
+    }
+    expect(view.units.every((unit) => (
+      unit.recordContext === 'Codex · record=response_item · payload=message · role=user · blocks=input_text'
+    ))).toBe(true)
+  })
+
   it('extracts Claude sessions and counts unrecognized JSONL files', async () => {
     const entries = await scan(new ClaudeHistoryAdapter(), resolve(fixtureRoot, 'claude/projects'))
     const session = entries.find(

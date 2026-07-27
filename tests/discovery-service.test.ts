@@ -164,8 +164,9 @@ describe('DiscoveryService', () => {
     const evidence = await service.readAvailableSession({
       artifactId: selected.artifactId,
       expectedRevision: selected.revision
-    }, selected.sizeBytes)
+    })
     expect(readEvidence).toHaveBeenCalledOnce()
+    expect(readEvidence).toHaveBeenCalledWith(expect.not.objectContaining({ maxBytes: expect.anything() }))
     expect(evidence).toMatchObject({
       artifactId: selected.artifactId,
       revision: selected.revision,
@@ -173,6 +174,11 @@ describe('DiscoveryService', () => {
       sizeBytes: selected.sizeBytes
     })
     expect(evidence.content).toContain('"sessionId":"one"')
+    expect(evidence.observationView).toMatchObject({
+      formatVersion: 'claude-jsonl-v2',
+      rawLines: expect.any(Array),
+      units: expect.any(Array)
+    })
     await expect(service.readAvailableSession({
       artifactId: selected.artifactId,
       expectedRevision: '0'.repeat(64)

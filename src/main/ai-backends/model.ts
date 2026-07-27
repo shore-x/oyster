@@ -64,6 +64,14 @@ export class ModelConnectionFailureError extends Error {
   }
 }
 
+/** A request-local failure that can be recovered by reducing model input. */
+export class ModelContextOverflowError extends Error {
+  constructor(message = '模型输入超过上下文窗口') {
+    super(message)
+    this.name = 'ModelContextOverflowError'
+  }
+}
+
 export interface ModelBackendAdapter {
   readonly id: 'openai-compatible'
   listModels(

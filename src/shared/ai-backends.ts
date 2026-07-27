@@ -92,6 +92,10 @@ export interface AvailableModel {
   id: string
   displayName: string
   reasoningEfforts: ReasoningEffort[]
+  /** Known total context window. Omitted when the backend cannot establish it. */
+  contextWindowTokens?: number
+  /** Known maximum generated tokens. Omitted when the backend cannot establish it. */
+  maxOutputTokens?: number
 }
 
 export interface ModelDiscoveryResult {

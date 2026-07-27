@@ -22,7 +22,7 @@ import {
 } from './knowledge-processing-service'
 
 const MAX_CONTRIBUTION_CHARACTERS = 64 * 1_024
-const SOURCE_SELECTOR = /^L(\d{6})-L(\d{6})$/
+const SOURCE_SELECTOR = /^L(\d{6,})-L(\d{6,})$/
 
 export interface KnowledgeFullChainBindings {
   preprocessor: ProcessingStageRunBinding
@@ -43,19 +43,6 @@ function validateInput(input: RunKnowledgeFullChainInput): void {
   if (input.attention !== undefined && typeof input.attention !== 'string') {
     throw new Error('Attention 格式无效')
   }
-}
-
-function observationLineCount(content: string): number {
-  let count = 1
-  for (let index = 0; index < content.length; index++) {
-    if (content[index] === '\n') {
-      count++
-    } else if (content[index] === '\r') {
-      count++
-      if (content[index + 1] === '\n') index++
-    }
-  }
-  return count
 }
 
 function validateContribution(
@@ -126,22 +113,23 @@ export class KnowledgeFullChainService {
       this.processing.beginFullChainDebugTrace(debugTrace)
       const { session, evidence, sourceRef } = await loadSessionMaterial(this.discovery, input)
       controller.signal.throwIfAborted()
-      const lineCount = observationLineCount(evidence.content)
+      const lineCount = evidence.observationView.rawLines.length
       const sandbox = await this.stores.createSandbox()
       sandboxId = sandbox.id
       active.sandboxId = sandbox.id
       controller.signal.throwIfAborted()
 
-      const preprocessing = await this.processing.runObservationPreprocessor({
-        observation: evidence.content,
-        attention: input.attention
-      }, undefined, {
-        binding: structuredClone(bindings.preprocessor),
-        lease,
-        sourceRef,
-        allowSegmentedObservation: true,
-        debugTrace
-      })
+      const preprocessing = await this.processing.runObservationPreprocessorView(
+        evidence.observationView,
+        input.attention,
+        undefined,
+        {
+          binding: structuredClone(bindings.preprocessor),
+          lease,
+          sourceRef,
+          debugTrace
+        }
+      )
       controller.signal.throwIfAborted()
 
       const contributionRunRef = `full-chain:${runId}`

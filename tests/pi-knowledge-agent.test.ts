@@ -65,7 +65,8 @@ function runInput(overrides: Partial<KnowledgeAgentRunInput> = {}): KnowledgeAge
     contributionRunRef: 'test-run:1',
     attention: 'Track explicit preferences.',
     signal: new AbortController().signal,
-    ...overrides
+    ...overrides,
+    observationFormatVersion: overrides.observationFormatVersion ?? 'test-v1'
   }
 }
 
@@ -384,7 +385,8 @@ describe('PiKnowledgeMaintenanceAgent', () => {
         const initial = JSON.stringify(context.messages)
         expect(context.tools?.map((tool) => tool.name)).toEqual(sectionToolNames)
         expect(initial).toContain('ROOT NAVIGATION')
-        expect(initial).toContain('M000001: L000001-L000001')
+        expect(initial).toContain('Immediate child sections: M000001, M000002')
+        expect(initial).not.toContain('M000001: L000001-L000001')
         expect(initial).not.toContain('LEAF_A_SECRET')
         expect(initial).not.toContain('LEAF_B_SECRET')
         expect(initial).not.toContain('RAW_B_SECRET')
@@ -433,7 +435,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
 
     const result = await agent.run(runInput({
       runtime: runtime.runtime,
-      evidenceMap: 'ROOT NAVIGATION',
+      evidenceMap: 'ROOT NAVIGATION\nImmediate child sections: M000001, M000002',
       evidenceMapSections: [
         { id: 'M000001', selector: 'L000001-L000001', content: 'LEAF_A_SECRET' },
         { id: 'M000002', selector: 'L000002-L000002', content: 'LEAF_B_SECRET' }
@@ -496,6 +498,59 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       contribution: { statements: [{ content: 'No durable claim; evidence was only inspected.' }] },
       modelCallCount: 4
     })
+  })
+
+  it('reads separate character windows from one oversized raw line while keeping L provenance', async () => {
+    const longLine = `${'a'.repeat(70_000)}TAIL`
+    const runtime = fauxRuntime([
+      fauxAssistantMessage(fauxToolCall('read_evidence', {
+        sourceRef: 'observation:test:1',
+        selector: 'L000001-L000001'
+      }), { stopReason: 'toolUse' }),
+      (context) => {
+        expect(lastToolResult(context).isError).toBe(true)
+        expect(textContent(lastToolResult(context))).toContain('startCharacter/endCharacter')
+        return fauxAssistantMessage(fauxToolCall('read_evidence', {
+          sourceRef: 'observation:test:1',
+          selector: 'L000001-L000001',
+          startCharacter: 0,
+          endCharacter: 100
+        }), { stopReason: 'toolUse' })
+      },
+      (context) => {
+        expect(textContent(lastToolResult(context))).toContain('character window [0, 100)')
+        return fauxAssistantMessage(fauxToolCall('read_evidence', {
+          sourceRef: 'observation:test:1',
+          selector: 'L000001-L000001',
+          startCharacter: 69_900,
+          endCharacter: longLine.length
+        }), { stopReason: 'toolUse' })
+      },
+      (context) => {
+        expect(textContent(lastToolResult(context))).toContain('TAIL')
+        return fauxAssistantMessage(fauxToolCall('submit_knowledge_contribution', {
+          statements: [{
+            localRef: 'long-line',
+            title: 'Long line evidence',
+            content: 'The relevant detail was verified through bounded windows.',
+            sources: [{
+              sourceRef: 'observation:test:1',
+              selector: 'L000001-L000001'
+            }]
+          }]
+        }), { stopReason: 'toolUse' })
+      }
+    ])
+
+    const result = await new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
+      runtime: runtime.runtime,
+      observationLines: [longLine]
+    }))
+
+    expect(result.contribution.statements[0].sources).toEqual([{
+      sourceRef: 'observation:test:1',
+      selector: 'L000001-L000001'
+    }])
   })
 
   it('returns recoverable tool errors for repeated searches, statements, and overlapping evidence', async () => {

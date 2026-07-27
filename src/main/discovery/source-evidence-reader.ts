@@ -1,8 +1,6 @@
 import { createHash } from 'node:crypto'
 import { lstat, open } from 'node:fs/promises'
 
-export const MAX_SOURCE_EVIDENCE_READ_BYTES = 16 * 1024 * 1024
-
 export interface SourceEvidenceRevisionInput {
   artifactId: string
   absolutePath: string
@@ -11,7 +9,8 @@ export interface SourceEvidenceRevisionInput {
 }
 
 export interface SourceEvidenceReadInput extends SourceEvidenceRevisionInput {
-  maxBytes: number
+  /** Optional caller-owned bound for uses that intentionally require a bounded read. */
+  maxBytes?: number
 }
 
 export interface SourceEvidenceReadResult {
@@ -28,15 +27,13 @@ export interface SourceEvidenceReader {
   ): Promise<{ sizeBytes: number }>
 }
 
-function assertReadLimit(maxBytes: number): void {
+function assertReadLimit(maxBytes: number | undefined): void {
+  if (maxBytes === undefined) return
   if (
     !Number.isSafeInteger(maxBytes)
     || maxBytes <= 0
-    || maxBytes > MAX_SOURCE_EVIDENCE_READ_BYTES
   ) {
-    throw new Error(
-      `Source Evidence read limit must be between 1 and ${MAX_SOURCE_EVIDENCE_READ_BYTES} bytes`
-    )
+    throw new Error('Source Evidence read limit must be a positive safe integer')
   }
 }
 
@@ -75,7 +72,7 @@ export class FileSourceEvidenceReader implements SourceEvidenceReader {
     if (!matchesExpectedRevision(pathMetadata, input)) {
       throw new Error('The source Session revision has changed')
     }
-    if (pathMetadata.size > input.maxBytes) {
+    if (input.maxBytes !== undefined && pathMetadata.size > input.maxBytes) {
       throw new Error(`Source Evidence exceeds the ${input.maxBytes} byte read limit`)
     }
 
@@ -205,7 +202,7 @@ export class MemorySourceEvidenceReader implements SourceEvidenceReader {
     if (stored.length !== input.expectedSizeBytes) {
       throw new Error('The source Session revision has changed')
     }
-    if (stored.length > input.maxBytes) {
+    if (input.maxBytes !== undefined && stored.length > input.maxBytes) {
       throw new Error(`Source Evidence exceeds the ${input.maxBytes} byte read limit`)
     }
     const content = Buffer.from(stored)

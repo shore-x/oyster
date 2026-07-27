@@ -3,9 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { AvailableSessionSummary } from '../src/shared/discovery'
 import type { ObservationPreprocessingResult } from '../src/shared/knowledge-processing'
 import type { DiscoveryService } from '../src/main/discovery/discovery-service'
-import {
-  MAX_SESSION_OBSERVATION_BYTES
-} from '../src/main/knowledge-processing/session'
+import { CodexHistoryAdapter } from '../src/main/discovery/adapters'
 import { SessionPreprocessor } from '../src/main/knowledge-processing/session-preprocessor'
 import type {
   KnowledgeProcessingService,
@@ -81,21 +79,21 @@ function createHarness(options: {
   const availableSession = session(content)
   const sessions = options.sessions ?? [availableSession]
   const contentHash = sha256(content)
+  const observationView = new CodexHistoryAdapter().createObservationView(content)
   const listAvailableSessions = vi.fn(() => structuredClone(sessions))
   const readAvailableSession = vi.fn(async (
-    input: { artifactId: string; expectedRevision: string },
-    maxBytes: number
+    input: { artifactId: string; expectedRevision: string }
   ) => {
     if (input.artifactId !== availableSession.artifactId) throw new Error('Unknown Session')
     if (input.expectedRevision !== availableSession.revision) throw new Error('Stale Session')
     const sizeBytes = Buffer.byteLength(content)
-    if (sizeBytes > maxBytes) throw new Error('Raw evidence exceeds maximum size')
     return {
       artifactId: availableSession.artifactId,
       revision: availableSession.revision,
       contentHash,
       sizeBytes,
-      content
+      content,
+      observationView
     }
   })
   const discovery = {
@@ -103,19 +101,20 @@ function createHarness(options: {
     readAvailableSession
   } as unknown as DiscoveryService
 
-  const runObservationPreprocessor = vi.fn(async (
-    _input: { observation: string; attention?: string },
+  const runObservationPreprocessorView = vi.fn(async (
+    _view: typeof observationView,
+    _attention: string | undefined,
     _expectedConnectionId: string | undefined,
     options: { sourceRef?: string }
   ) => preprocessingResult(options.sourceRef!))
-  const processing = { runObservationPreprocessor } as unknown as KnowledgeProcessingService
+  const processing = { runObservationPreprocessorView } as unknown as KnowledgeProcessingService
 
   return {
     availableSession,
     contentHash,
     listAvailableSessions,
     readAvailableSession,
-    runObservationPreprocessor,
+    runObservationPreprocessorView,
     service: new SessionPreprocessor(discovery, processing)
   }
 }
@@ -143,15 +142,16 @@ describe('SessionPreprocessor', () => {
     expect(harness.readAvailableSession).toHaveBeenCalledWith({
       artifactId: ARTIFACT_ID,
       expectedRevision: harness.availableSession.revision
-    }, MAX_SESSION_OBSERVATION_BYTES)
-    expect(harness.runObservationPreprocessor).toHaveBeenCalledWith({
-      observation: CONTENT,
-      attention
-    }, undefined, {
-      binding,
-      sourceRef,
-      allowSegmentedObservation: true
     })
+    expect(harness.runObservationPreprocessorView).toHaveBeenCalledWith(
+      expect.objectContaining({ formatVersion: 'codex-jsonl-v2' }),
+      attention,
+      undefined,
+      {
+      binding,
+      sourceRef
+      }
+    )
     expect(result.sourceRef).toBe(sourceRef)
   })
 
@@ -176,7 +176,7 @@ describe('SessionPreprocessor', () => {
       .rejects.toThrow()
 
     expect(harness.readAvailableSession).not.toHaveBeenCalled()
-    expect(harness.runObservationPreprocessor).not.toHaveBeenCalled()
+    expect(harness.runObservationPreprocessorView).not.toHaveBeenCalled()
   })
 
   it('allows an external Session above the former single-call limit to reach segmented preprocessing', async () => {
@@ -189,30 +189,30 @@ describe('SessionPreprocessor', () => {
       expectedRevision: harness.availableSession.revision
     }, binding)).resolves.toMatchObject({ segmentCount: 1 })
 
-    expect(harness.readAvailableSession).toHaveBeenCalledWith(
-      expect.any(Object),
-      MAX_SESSION_OBSERVATION_BYTES
-    )
-    expect(harness.runObservationPreprocessor).toHaveBeenCalledWith(
-      expect.objectContaining({ observation: content }),
+    expect(harness.readAvailableSession).toHaveBeenCalledWith(expect.any(Object))
+    expect(harness.runObservationPreprocessorView).toHaveBeenCalledWith(
+      expect.objectContaining({ formatVersion: 'codex-jsonl-v2' }),
       undefined,
-      expect.objectContaining({ allowSegmentedObservation: true })
+      undefined,
+      expect.objectContaining({ sourceRef: expect.stringMatching(/^raw:/) })
     )
   })
 
-  it('rejects raw evidence above the byte limit without invoking preprocessing', async () => {
-    const content = 'x'.repeat(MAX_SESSION_OBSERVATION_BYTES + 1)
+  it('does not reject a selected Session above the former 16 MiB limit', async () => {
+    const content = 'x'.repeat(16 * 1024 * 1024 + 1)
     const harness = createHarness({ content })
 
     await expect(harness.service.run({
       artifactId: harness.availableSession.artifactId,
       expectedRevision: harness.availableSession.revision
-    }, binding)).rejects.toThrow('Raw evidence exceeds maximum size')
+    }, binding)).resolves.toMatchObject({ sourceRef: `raw:${ARTIFACT_ID}@sha256:${harness.contentHash}` })
 
-    expect(harness.readAvailableSession).toHaveBeenCalledWith(
-      expect.any(Object),
-      MAX_SESSION_OBSERVATION_BYTES
+    expect(harness.readAvailableSession).toHaveBeenCalledWith(expect.any(Object))
+    expect(harness.runObservationPreprocessorView).toHaveBeenCalledWith(
+      expect.objectContaining({ formatVersion: 'codex-jsonl-v2' }),
+      undefined,
+      undefined,
+      expect.objectContaining({ sourceRef: expect.stringMatching(/^raw:/) })
     )
-    expect(harness.runObservationPreprocessor).not.toHaveBeenCalled()
   })
 })
