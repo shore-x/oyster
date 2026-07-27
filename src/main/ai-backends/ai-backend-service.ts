@@ -268,9 +268,13 @@ export class AiBackendService {
       ...this.codingPlanConnection,
       models: this.codingPlanAdapter.listModels()
     }
-    // Coding Plan authentication is application state, not a side effect of visiting its UI.
-    // API model discovery remains explicit so unreachable custom endpoints do not delay startup.
+    // Backend state belongs to the service rather than to whichever page happens to be open.
     await this.refreshCodingPlan()
+    // Restore API model catalogs in the background so unreachable custom endpoints do not
+    // delay startup and a previously selected non-default model does not depend on opening UI.
+    void Promise.all(this.state.connections.map(
+      (connection) => this.refreshApiModels(connection)
+    ))
   }
 
   snapshot(): AiBackendSnapshot {
@@ -651,7 +655,13 @@ export class AiBackendService {
 
   private emit(): void {
     const snapshot = this.snapshot()
-    for (const listener of this.listeners) listener(snapshot)
+    for (const listener of this.listeners) {
+      try {
+        listener(snapshot)
+      } catch {
+        // UI observers must not change backend discovery or model execution results.
+      }
+    }
   }
 
   dispose(): void {

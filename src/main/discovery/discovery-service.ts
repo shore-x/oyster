@@ -44,7 +44,6 @@ export interface AvailableSessionEvidence {
   revision: string
   contentHash: string
   sizeBytes: number
-  content: string
   observationView: ObservationView
 }
 
@@ -258,7 +257,6 @@ export class DiscoveryService {
       revision: artifact.fingerprint,
       contentHash: evidence.contentHash,
       sizeBytes: evidence.sizeBytes,
-      content,
       observationView: adapter.createObservationView(content)
     }
   }

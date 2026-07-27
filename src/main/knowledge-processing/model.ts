@@ -1,7 +1,10 @@
 import type { ModelGenerationRequest, ModelRuntime } from '../ai-backends/model'
 import type { AiBackendSnapshot } from '../../shared/ai-backends'
 import type { ReasoningEffort } from '../../shared/ai-backends'
-import type { KnowledgeContributionDraft } from '../../shared/knowledge'
+import type {
+  KnowledgeContributionDraft,
+  KnowledgeStatementDetails
+} from '../../shared/knowledge'
 import type { EvidenceLocation, ObservationCharacterWindow } from '../observation/model'
 import type {
   KnowledgeProcessingSnapshot,
@@ -48,8 +51,15 @@ export interface KnowledgeStatementRecord {
 }
 
 export interface KnowledgeReader {
-  search(query: string, limit: number, signal?: AbortSignal): Promise<KnowledgeStatementRecord[]>
-  read(statementId: string, signal?: AbortSignal): Promise<KnowledgeStatementRecord | undefined>
+  /** Discover current Statements; historical versions remain reachable by stable ID and relations. */
+  search(
+    query: string,
+    limit: number,
+    offset?: number,
+    signal?: AbortSignal
+  ): Promise<KnowledgeStatementRecord[]>
+  /** Read one exact immutable Statement together with its direct provenance and relation context. */
+  read(statementId: string, signal?: AbortSignal): Promise<KnowledgeStatementDetails | undefined>
 }
 
 export interface KnowledgeAgentRunInput {
@@ -125,7 +135,12 @@ export interface PreprocessingWorkspace {
 export type ProcessingSnapshotListener = (snapshot: KnowledgeProcessingSnapshot) => void
 
 export class EmptyKnowledgeReader implements KnowledgeReader {
-  async search(_query: string, _limit: number, signal?: AbortSignal): Promise<KnowledgeStatementRecord[]> {
+  async search(
+    _query: string,
+    _limit: number,
+    _offset?: number,
+    signal?: AbortSignal
+  ): Promise<KnowledgeStatementRecord[]> {
     signal?.throwIfAborted()
     return []
   }

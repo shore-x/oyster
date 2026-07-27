@@ -166,6 +166,14 @@ function utf8Bytes(value: string): number {
   return Buffer.byteLength(value, 'utf8')
 }
 
+/** Byte size of numberedObservationUnits without materializing the full joined string. */
+export function observationUnitsMaterialBytes(units: ObservationUnit[]): number {
+  return units.reduce(
+    (total, unit, index) => total + utf8Bytes(serializedObservationUnit(unit)) + (index ? 1 : 0),
+    0
+  )
+}
+
 function selectorBytes(range: ObservationSourceRange): number {
   return utf8Bytes(observationSelector(range.startLine, range.endLine))
 }

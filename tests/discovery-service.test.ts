@@ -173,7 +173,7 @@ describe('DiscoveryService', () => {
       contentHash: createHash('sha256').update(sourceContent).digest('hex'),
       sizeBytes: selected.sizeBytes
     })
-    expect(evidence.content).toContain('"sessionId":"one"')
+    expect(evidence.observationView.rawLines).toContainEqual(expect.stringContaining('"sessionId":"one"'))
     expect(evidence.observationView).toMatchObject({
       formatVersion: 'claude-jsonl-v2',
       rawLines: expect.any(Array),

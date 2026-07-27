@@ -64,15 +64,15 @@ Knowledge Maintenance Agent 是普通、可替换的工具使用 Agent，当前�
 
 当前开放五个工具，其中局部地图只在长 Session 产生可展开部分时提供：
 
-- `search_knowledge`：在本次绑定的 Knowledge Store 中搜索当前未被修订替代的 Statement；
-- `read_knowledge_statement`：按已知 ID 读取一条 Statement 的完整标题和正文；
+- `search_knowledge`：在本次绑定的 Knowledge Store 中分页搜索当前未被修订替代的 Statement；每次返回有界候选，并在仍可继续时给出下一 `offset`；
+- `read_knowledge_statement`：按已知 ID 读取一条不可变 Statement 的完整记录、Observation 来源和直接 incoming/outgoing 关系，并根据 incoming `revises` 派生其是否仍为当前理解；相邻 Statement 可继续按 ID 渐进读取，不递归展开整张关系图；
 - `read_evidence_map_section`：按当前 Workspace 授权的 section ID 展开局部 Evidence Map；
 - `read_evidence`：从本次 Workspace 内的 `line` 与 `offset` 开始，按 Agent 指定且由 Core 再次约束的 `limit` 返回原始格式文本，并给出实际范围、下一 EvidenceLocation 与 `eof`；`offset` 和 `limit` 均以 UTF-16 code unit 计量；
 - `submit_knowledge_contribution`：提交本次唯一的结构化 Contribution 并结束 Agent 运行。
 
 完整链路将前两个读取工具绑定到 Sandbox。Agent 必须通过一次最终的 `submit_knowledge_contribution` 结束运行；Core 校验后原子提交整份 Contribution。阶段调试使用同一 Agent Runtime 和结束协议，但只捕获 Contribution 预览，不执行提交。
 
-当前读取工具尚不向 Agent 展开 Statement 的修订历史、来源和关系；这是验证 MVP 的能力边界，不是知识层的长期接口定义。
+`search_knowledge` 只承担当前知识的轻量发现，`read_knowledge_statement` 再提供所选 Statement 的完整语义上下文。来源身份和 selector 可见并不扩大当前 Workspace 的 Observation 权限；`read_evidence` 仍只读取本次运行已经授权的唯一来源，不会因为某条既有 Statement 指向其他来源而跨来源回读原文。
 
 Knowledge Maintenance Agent 的 Debug Trace 只记录模型轮次的状态、停止原因和 token 总量，以及工具名称和严格白名单化的结果摘要，例如候选数量、局部地图 selector、证据读取的起点、实际范围、continuation 或候选 Statement 数量。读取失败只展示来源失效、位置无效、预算等安全错误类别，不展示本地路径和原文。它不记录 Assistant 文本、thinking/reasoning、工具结果正文、原始证据或完整模型上下文。最终 Contribution 和 Sandbox 中的 Statement 继续由各自的结构化结果视图展示，不复制进轨迹。
 

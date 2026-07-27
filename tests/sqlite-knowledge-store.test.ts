@@ -150,7 +150,13 @@ describe('SqliteKnowledgeStore', () => {
     expect(await store.search('editor preference', 10)).toEqual([
       expect.objectContaining({ id: result.statementIdsByLocalRef['current-preference'] })
     ])
-    expect(await store.read(oldId)).toEqual(expect.objectContaining({ id: oldId }))
+    const matchingEditorStatements = await store.search('Editor B', 10)
+    expect(matchingEditorStatements).toHaveLength(2)
+    expect(await store.search('Editor B', 1, 1)).toEqual([matchingEditorStatements[1]])
+    expect(await store.read(oldId)).toEqual(oldDetails)
+    expect(await store.read(result.statementIdsByLocalRef['current-preference'])).toEqual(
+      store.getStatement(result.statementIdsByLocalRef['current-preference'])
+    )
   })
 
   it('rolls back the entire Contribution when any target is invalid', async () => {

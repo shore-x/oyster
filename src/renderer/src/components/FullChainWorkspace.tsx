@@ -122,6 +122,8 @@ function stageConfiguration(
     destination: '—', model: '—', prompt: '—', reasoning: '—', runtime: '—', status: '正在读取', runnable: false
   }
   const model = selectedStageModel(stage, connection)
+  const reasoningSupported = !stage.reasoningEffort
+    || Boolean(model?.reasoningEfforts.includes(stage.reasoningEffort))
   const codingPlanContext = [connection?.accountLabel, connection?.planType].filter(Boolean).join(' · ')
   return {
     connection: connection?.displayName || (stage.connectionId ? '连接配置不可用' : '尚未选择 Model Connection'),
@@ -129,7 +131,7 @@ function stageConfiguration(
     provider: connection ? providerLabel(connection.providerId) : '—',
     destinationLabel: connection?.backendKind === 'coding_plan' ? 'Account / Plan' : 'Endpoint',
     destination: connection?.backendKind === 'coding_plan' ? codingPlanContext || '—' : connection?.destination || '—',
-    model: model?.id || '未选择',
+    model: model?.id || (stage.modelId ? `当前不可用 · ${stage.modelId}` : '未选择'),
     prompt: stage.isCustomized ? 'Customized Prompt' : 'Default Prompt',
     reasoning: reasoningLabel(stage.reasoningEffort),
     runtime: runtimeLabel(stage.runtime),
@@ -137,6 +139,7 @@ function stageConfiguration(
     runnable: Boolean(
       connection
       && model
+      && reasoningSupported
       && connectionCanAttemptRun(connection)
     )
   }
@@ -184,10 +187,24 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
     if (!selectedSession()) return '请先选择一个 Session。'
     if (props.selectedSessionInspectionError) return '所选 Session 无法读取，请重新扫描或选择其他 Session。'
     if (!props.preprocessor?.connectionId) return '请先为 Observation Preprocessor 选择 Connection。'
+    if (!props.preprocessorConnection) return `Observation Preprocessor 已保存的 Connection 当前不可用：${props.preprocessor.connectionId}。`
     if (!props.preprocessor?.modelId) return '请先为 Observation Preprocessor 选择 Model。'
+    const preprocessorModel = selectedStageModel(props.preprocessor, props.preprocessorConnection)
+    if (!preprocessorModel) return `Observation Preprocessor 已保存的 Model 当前不可用：${props.preprocessor.modelId}。`
+    if (
+      props.preprocessor.reasoningEffort
+      && !preprocessorModel.reasoningEfforts.includes(props.preprocessor.reasoningEffort)
+    ) return 'Observation Preprocessor 已保存的思考强度不再受当前 Model 支持。'
     if (!preprocessorConfig().runnable) return 'Observation Preprocessor 的 Connection 需要先完成认证或配置。'
     if (!props.maintainer?.connectionId) return '请先为 Knowledge Maintenance Agent 选择 Connection。'
+    if (!props.maintainerConnection) return `Knowledge Maintenance Agent 已保存的 Connection 当前不可用：${props.maintainer.connectionId}。`
     if (!props.maintainer?.modelId) return '请先为 Knowledge Maintenance Agent 选择 Model。'
+    const maintainerModel = selectedStageModel(props.maintainer, props.maintainerConnection)
+    if (!maintainerModel) return `Knowledge Maintenance Agent 已保存的 Model 当前不可用：${props.maintainer.modelId}。`
+    if (
+      props.maintainer.reasoningEffort
+      && !maintainerModel.reasoningEfforts.includes(props.maintainer.reasoningEffort)
+    ) return 'Knowledge Maintenance Agent 已保存的思考强度不再受当前 Model 支持。'
     if (!maintainerConfig().runnable) return 'Knowledge Maintenance Agent 的 Connection 需要先完成认证或配置。'
     return undefined
   })

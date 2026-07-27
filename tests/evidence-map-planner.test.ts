@@ -6,6 +6,7 @@ import {
   numberedObservationUnits,
   observationLineNumber,
   observationSourceSelectorsText,
+  observationUnitsMaterialBytes,
   planObservationSegments,
   resolveEvidenceMapPlannerOptions,
   type EvidenceMapNode
@@ -82,6 +83,9 @@ describe('Evidence Map preprocessing planner', () => {
       (segment) => utf8Bytes(numberedObservationUnits(segment.units))
         + utf8Bytes(observationSourceSelectorsText(segment.sourceRanges)) <= 55
     )).toBe(true)
+    expect(observationUnitsMaterialBytes(prepared)).toBe(
+      utf8Bytes(numberedObservationUnits(prepared))
+    )
   })
 
   it('budgets and serializes an adapter-provided model representation without losing its raw locator', () => {

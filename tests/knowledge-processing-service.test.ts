@@ -433,7 +433,50 @@ describe('KnowledgeProcessingService', () => {
 
     await configure(service, 'observation_preprocessor', 'model:a')
     backend.connections.splice(backend.connections.findIndex((item) => item.id === 'model:a'), 1)
-    expect(service.snapshot().stages[0].connectionId).toBeUndefined()
+    expect(service.snapshot().stages[0]).toMatchObject({
+      connectionId: 'model:a',
+      modelId: 'model:a'
+    })
+    await expect(service.runObservationPreprocessor({ observation: 'test' }))
+      .rejects.toThrow('已配置的 Model Connection 不再可用')
+  })
+
+  it('never falls back when the explicitly selected Model or reasoning effort disappears', async () => {
+    const connection = modelConnection('model:dynamic', 'selected', ['high'])
+    connection.models.push({
+      id: 'fallback',
+      displayName: 'Fallback',
+      reasoningEfforts: []
+    })
+    connection.defaultModelId = 'fallback'
+    const { service, backend } = createService({ connections: [connection] })
+    await service.initialize()
+    await service.saveStage({
+      stageId: 'observation_preprocessor',
+      connectionId: connection.id,
+      modelId: 'selected',
+      instructionsOverride: null,
+      reasoningEffort: 'high'
+    })
+
+    connection.models.splice(connection.models.findIndex((model) => model.id === 'selected'), 1)
+    expect(service.snapshot().stages[0]).toMatchObject({
+      connectionId: connection.id,
+      modelId: 'selected',
+      reasoningEffort: 'high'
+    })
+    await expect(service.runObservationPreprocessor({ observation: 'test' }))
+      .rejects.toThrow('系统不会自动回退到其他 Model')
+    expect(backend.generationCalls).toHaveLength(0)
+
+    connection.models.unshift({
+      id: 'selected',
+      displayName: 'Selected',
+      reasoningEfforts: []
+    })
+    await expect(service.runObservationPreprocessor({ observation: 'test' }))
+      .rejects.toThrow('系统不会自动改用模型默认值')
+    expect(backend.generationCalls).toHaveLength(0)
   })
 
   it('requires each stage to have an explicitly saved Connection and Model', async () => {

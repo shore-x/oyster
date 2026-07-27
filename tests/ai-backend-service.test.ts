@@ -142,6 +142,7 @@ class FakeModelAdapter implements ModelBackendAdapter {
   }> = []
   failure?: Error
   discoveredModels: AvailableModel[] = []
+  listModelsHandler?: () => Promise<AvailableModel[]>
   listCalls: Array<{ providerId: ModelProviderId; baseUrl: string; apiKey?: string }> = []
 
   async listModels(
@@ -150,6 +151,7 @@ class FakeModelAdapter implements ModelBackendAdapter {
     apiKey?: string
   ): Promise<AvailableModel[]> {
     this.listCalls.push({ providerId, baseUrl, apiKey })
+    if (this.listModelsHandler) return structuredClone(await this.listModelsHandler())
     return structuredClone(this.discoveredModels)
   }
 
@@ -203,7 +205,7 @@ async function saveApiConnection(
 }
 
 describe('AiBackendService', () => {
-  it('checks Coding Plan readiness during initialization without probing API model endpoints', async () => {
+  it('restores API model catalogs without making their endpoints block initialization', async () => {
     const repository = new InMemoryAiBackendRepository({
       connections: [{
         id: 'model:stored',
@@ -215,6 +217,8 @@ describe('AiBackendService', () => {
       }]
     })
     const { service, model } = createService(repository)
+    let resolveModels!: (models: AvailableModel[]) => void
+    model.listModelsHandler = () => new Promise((resolve) => { resolveModels = resolve })
 
     await service.initialize()
 
@@ -229,7 +233,22 @@ describe('AiBackendService', () => {
     expect(service.snapshot().connections.find(
       (connection) => connection.id === 'model:stored'
     )).toMatchObject({ status: 'unverified' })
-    expect(model.listCalls).toEqual([])
+    await vi.waitFor(() => expect(model.listCalls).toHaveLength(1))
+
+    resolveModels([{
+      id: 'previously-selected-model',
+      displayName: 'Previously selected model',
+      reasoningEfforts: ['low']
+    }])
+    await vi.waitFor(() => expect(service.snapshot().connections.find(
+      (connection) => connection.id === 'model:stored'
+    )).toMatchObject({
+      status: 'ready',
+      models: expect.arrayContaining([
+        expect.objectContaining({ id: 'previously-selected-model' }),
+        expect.objectContaining({ id: 'stored-model' })
+      ])
+    }))
   })
 
   it('discovers models without persisting the temporary key and uses the fixed OpenAI endpoint', async () => {

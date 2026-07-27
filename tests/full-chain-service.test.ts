@@ -183,7 +183,7 @@ function fakeDiscovery(options: FakeDiscoveryOptions = {}): {
       if (input.expectedRevision !== revision) throw new Error('The Session revision has changed')
       const sizeBytes = Buffer.byteLength(content)
       if (maxBytes !== undefined && sizeBytes > maxBytes) throw new Error('Raw evidence exceeds maximum size')
-      return { artifactId, revision, contentHash, sizeBytes, content, observationView }
+      return { artifactId, revision, contentHash, sizeBytes, observationView }
     }
   } as unknown as DiscoveryService
   return { service, session, content }

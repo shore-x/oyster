@@ -51,6 +51,7 @@ import {
   observationSelector,
   observationSourceSelectors,
   observationSourceSelectorsText,
+  observationUnitsMaterialBytes,
   planObservationSegments,
   resolveEvidenceMapPlannerOptions,
   type EvidenceMapNode,
@@ -358,7 +359,7 @@ function observationViewDebugSummary(
     selectedLineCount: new Set(view.units.map((unit) => unit.lineNumber)).size,
     selectedUnitCount: view.units.length,
     selectedSourceBytes: view.units.reduce((total, unit) => total + utf8Bytes(unit.content), 0),
-    modelMaterialBytes: utf8Bytes(numberedObservationUnits(view.units))
+    modelMaterialBytes: observationUnitsMaterialBytes(view.units)
   }
 }
 
@@ -565,16 +566,6 @@ export class KnowledgeProcessingService {
     return structuredClone({
       stages: PROCESSING_STAGE_DEFINITIONS.map((definition) => {
         const stored = this.state.stages.find((candidate) => candidate.stageId === definition.id)
-        const connectionId = connections.some((connection) => connection.id === stored?.connectionId)
-          ? stored?.connectionId
-          : undefined
-        const connection = connections.find((candidate) => candidate.id === connectionId)
-        const modelId = selectedModel(connection, stored?.modelId)?.id
-          ?? selectedModel(connection, connection?.defaultModelId)?.id
-        const reasoningEffort = stored?.reasoningEffort
-          && selectedModel(connection, modelId)?.reasoningEfforts.includes(stored.reasoningEffort)
-          ? stored.reasoningEffort
-          : undefined
         return {
           id: definition.id,
           displayName: definition.displayName,
@@ -583,9 +574,9 @@ export class KnowledgeProcessingService {
           outputDescription: definition.outputDescription,
           runtime: definition.runtime,
           capabilities: [...definition.capabilities],
-          connectionId,
-          modelId,
-          reasoningEffort,
+          connectionId: stored?.connectionId,
+          modelId: stored?.modelId,
+          reasoningEffort: stored?.reasoningEffort,
           defaultInstructions: definition.defaultInstructions,
           effectiveInstructions: stored?.instructionsOverride ?? definition.defaultInstructions,
           isCustomized: stored?.instructionsOverride !== undefined
@@ -699,18 +690,18 @@ export class KnowledgeProcessingService {
       throw new Error('确认后 Model Connection 已发生变化，请重新运行并确认数据目的地')
     }
     const connection = processingConnections(this.aiBackend).find((candidate) => candidate.id === stored.connectionId)
-    const modelId = selectedModel(connection, stored.modelId)?.id
-      ?? selectedModel(connection, connection?.defaultModelId)?.id
-    if (!connection || !modelId) throw new Error('已配置的 Connection 或 Model 不再可用')
-    const reasoningEffort = stored.reasoningEffort
-      && selectedModel(connection, modelId)?.reasoningEfforts.includes(stored.reasoningEffort)
-      ? stored.reasoningEffort
-      : undefined
+    if (!connection) throw new Error('已配置的 Model Connection 不再可用')
+    if (!stored.modelId) throw new Error('请先为该阶段选择并保存 Model')
+    const model = selectedModel(connection, stored.modelId)
+    if (!model) throw new Error('已配置的 Model 不再可用，系统不会自动回退到其他 Model')
+    if (stored.reasoningEffort && !model.reasoningEfforts.includes(stored.reasoningEffort)) {
+      throw new Error('已配置的思考强度不再受当前 Model 支持，系统不会自动改用模型默认值')
+    }
     return {
       connectionId: stored.connectionId,
-      modelId,
+      modelId: model.id,
       instructions: stored.instructionsOverride ?? stageDefinition(stageId).defaultInstructions,
-      ...(reasoningEffort ? { reasoningEffort } : {})
+      ...(stored.reasoningEffort ? { reasoningEffort: stored.reasoningEffort } : {})
     }
   }
 

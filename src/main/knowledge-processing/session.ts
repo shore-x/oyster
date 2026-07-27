@@ -46,7 +46,12 @@ export async function loadSessionMaterial(
     artifactId: input.artifactId,
     expectedRevision: input.expectedRevision
   })
-  if (!evidence.content.trim()) throw new Error('所选 Session 没有可处理的 Observation 内容')
+  if (
+    !evidence.observationView.rawLines.some((line) => line.trim())
+    || !evidence.observationView.units.length
+  ) {
+    throw new Error('所选 Session 没有可处理的 Observation 内容')
+  }
 
   return {
     session,

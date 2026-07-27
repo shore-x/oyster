@@ -92,7 +92,6 @@ function createHarness(options: {
       revision: availableSession.revision,
       contentHash,
       sizeBytes,
-      content,
       observationView
     }
   })

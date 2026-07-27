@@ -1,6 +1,10 @@
 import { createRoot } from 'solid-js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { AvailableSessionSummary } from '../src/shared/discovery'
+import type {
+  AvailableSessionSummary,
+  DiscoveryApi,
+  DiscoverySnapshot
+} from '../src/shared/discovery'
 import type {
   KnowledgeFullChainResult,
   KnowledgeMaintenanceResult,
@@ -16,6 +20,26 @@ const SNAPSHOT: KnowledgeProcessingSnapshot = {
   connections: [],
   runningStageIds: [],
   debugTraces: []
+}
+
+function discoverySnapshot(sessionCount = 0, lastScannedAt?: string): DiscoverySnapshot {
+  return {
+    sources: [{
+      id: 'source-1',
+      agentType: 'codex',
+      displayName: 'Codex',
+      rootPath: '/external/codex',
+      discoveryState: 'found',
+      scanState: 'ready',
+      fileCount: sessionCount,
+      sessionCount,
+      instructionFileCount: 0,
+      totalBytes: 0,
+      invalidFileCount: 0,
+      lastScannedAt
+    }],
+    runs: []
+  }
 }
 
 function debugTrace(
@@ -121,7 +145,8 @@ function fullChainResult(): KnowledgeFullChainResult {
 
 function installApi(
   overrides: Partial<KnowledgeProcessingApi> = {},
-  sessions: AvailableSessionSummary[] = []
+  sessions: AvailableSessionSummary[] = [],
+  discoveryOverrides: Partial<DiscoveryApi> = {}
 ): KnowledgeProcessingApi {
   const api: KnowledgeProcessingApi = {
     getSnapshot: async () => SNAPSHOT,
@@ -136,10 +161,23 @@ function installApi(
     subscribe: () => () => undefined,
     ...overrides
   }
+  const discovery: DiscoveryApi = {
+    getSnapshot: async () => discoverySnapshot(sessions.length),
+    listAvailableSessions: async () => sessions,
+    inspectAvailableSession: async (input) => sessions.find((session) => (
+      session.artifactId === input.artifactId && session.revision === input.expectedRevision
+    ))!,
+    detectAgents: async () => discoverySnapshot(sessions.length),
+    scanSource: async () => discoverySnapshot(sessions.length),
+    cancelRun: async () => discoverySnapshot(sessions.length),
+    chooseSourceRoot: async () => discoverySnapshot(sessions.length),
+    subscribe: () => () => undefined,
+    ...discoveryOverrides
+  }
   vi.stubGlobal('window', {
     oyster: {
       knowledgeProcessing: api,
-      discovery: { listAvailableSessions: async () => sessions }
+      discovery
     }
   })
   return api
@@ -279,6 +317,35 @@ describe('knowledge processing controller', () => {
         dispose()
       }
     })
+  })
+
+  it('reloads available Sessions when the Discovery catalog changes', async () => {
+    const sessions: AvailableSessionSummary[] = []
+    let discoveryListener: ((snapshot: DiscoverySnapshot) => void) | undefined
+    installApi({}, sessions, {
+      getSnapshot: async () => discoverySnapshot(0, '2026-07-26T00:00:00.000Z'),
+      subscribe: (listener) => {
+        discoveryListener = listener
+        return () => { discoveryListener = undefined }
+      }
+    })
+
+    let disposeRoot!: () => void
+    const controller = createRoot((dispose) => {
+      disposeRoot = dispose
+      return createKnowledgeProcessingController()
+    })
+    try {
+      await vi.waitFor(() => expect(controller.sessionsLoading()).toBe(false))
+      expect(controller.availableSessions()).toEqual([])
+
+      sessions.push(fullChainResult().session)
+      discoveryListener?.(discoverySnapshot(1, '2026-07-26T00:01:00.000Z'))
+
+      await vi.waitFor(() => expect(controller.availableSessions()).toEqual(sessions))
+    } finally {
+      disposeRoot()
+    }
   })
 
   it('loads and caches details only for the selected Session revision', async () => {

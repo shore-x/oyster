@@ -30,7 +30,9 @@ import {
 import {
   MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH,
   type KnowledgeContributionDraft,
-  type KnowledgeStatementDraft
+  type KnowledgeStatementDetails,
+  type KnowledgeStatementDraft,
+  type KnowledgeStatementRelation
 } from '../../shared/knowledge'
 import { REASONING_EFFORTS } from '../../shared/ai-backends'
 import type {
@@ -43,7 +45,6 @@ import type {
 
 const MAX_EVIDENCE_OUTPUT_CHARS = 64 * 1_024
 const MAX_SEARCH_RESULTS = 20
-const MAX_SEARCH_OUTPUT_CHARS = 16 * 1_024
 const UNKNOWN_TRACE_TOOL_NAME = '未知工具'
 
 const TRACEABLE_TOOL_NAMES = new Set([
@@ -58,7 +59,8 @@ const SOURCE_SELECTOR = /^L(\d{6,})-L(\d{6,})$/
 
 const searchKnowledgeParameters = Type.Object({
   query: Type.String({ minLength: 1, maxLength: 1_024 }),
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_SEARCH_RESULTS }))
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_SEARCH_RESULTS })),
+  offset: Type.Optional(Type.Integer({ minimum: 0 }))
 }, { additionalProperties: false })
 
 const readKnowledgeParameters = Type.Object({
@@ -145,12 +147,6 @@ function compactInline(value: string, maximum: number): string {
   const compact = value.replace(/\s+/g, ' ').trim()
   if (compact.length <= maximum) return compact
   return `${compact.slice(0, maximum - 1)}…`
-}
-
-function truncateWithNotice(value: string, maximum: number): string {
-  if (value.length <= maximum) return value
-  const notice = '\n\n[内容因工具输出上限而截断]'
-  return `${value.slice(0, Math.max(0, maximum - notice.length))}${notice}`
 }
 
 function safeTraceInteger(value: unknown): number | undefined {
@@ -247,22 +243,62 @@ function modelTraceDetail(message: AssistantMessage): string {
   ].filter((part): part is string => Boolean(part)).join(' · ')
 }
 
-function searchResultText(records: KnowledgeStatementRecord[]): string {
-  if (!records.length) return '没有找到相关 Knowledge Statement。'
+function searchResultText(
+  records: KnowledgeStatementRecord[],
+  offset: number,
+  hasNextPage: boolean
+): string {
+  if (!records.length) return '没有找到更多相关 Knowledge Statement。\nNext offset: none'
   const lines = records.map((record) => [
     `- ID: ${compactInline(record.id, 256)}`,
     `  标题: ${compactInline(record.title, 512)}`,
     `  内容预览: ${compactInline(record.content, 1_024)}`
   ].join('\n'))
-  return truncateWithNotice(lines.join('\n'), MAX_SEARCH_OUTPUT_CHARS)
+  const nextOffset = hasNextPage ? offset + records.length : undefined
+  return [
+    ...lines,
+    '',
+    `Next offset: ${nextOffset ?? 'none'}`
+  ].join('\n')
 }
 
-function statementResultText(record: KnowledgeStatementRecord): string {
+function outgoingRelationText(relation: KnowledgeStatementRelation): string {
+  return relation.relation === 'revises'
+    ? `- This Statement revises Statement ${relation.targetStatementId}.`
+    : `- This Statement is derived from Statement ${relation.targetStatementId}.`
+}
+
+function incomingRelationText(relation: KnowledgeStatementRelation): string {
+  return relation.relation === 'revises'
+    ? `- Statement ${relation.sourceStatementId} revises this Statement.`
+    : `- Statement ${relation.sourceStatementId} is derived from this Statement.`
+}
+
+function statementResultText(details: KnowledgeStatementDetails): string {
+  const { statement, sources, outgoingRelations, incomingRelations } = details
+  const isCurrent = !incomingRelations.some((relation) => relation.relation === 'revises')
   return [
-    `ID: ${record.id}`,
-    `标题: ${record.title}`,
-    '内容:',
-    record.content
+    `ID: ${statement.id}`,
+    `Current: ${isCurrent ? 'yes' : 'no'} (derived from direct incoming revises relations)`,
+    `Created at: ${statement.createdAt}`,
+    `Origin Contribution: ${statement.originRef}`,
+    `Title: ${statement.title}`,
+    'Content:',
+    statement.content,
+    'Observation sources (provenance only; availability in this Workspace is not implied):',
+    sources.length
+      ? sources.map((source) => (
+          `- ${source.sourceRef}${source.selector ? ` · selector ${source.selector}` : ''}`
+        )).join('\n')
+      : '- none',
+    'Direct outgoing relations:',
+    outgoingRelations.length
+      ? outgoingRelations.map(outgoingRelationText).join('\n')
+      : '- none',
+    'Direct incoming relations:',
+    incomingRelations.length
+      ? incomingRelations.map(incomingRelationText).join('\n')
+      : '- none'
   ].join('\n')
 }
 
@@ -447,7 +483,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
       {
         name: 'search_knowledge',
         label: '搜索知识',
-        description: '按语义查询获得授权的 Knowledge Statement，返回有界的候选列表。',
+        description: '按语义查询获得授权的当前 Knowledge Statement，返回有界的候选列表；结果给出 Next offset 时可用相同 query 继续读取。',
         parameters: searchKnowledgeParameters,
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
@@ -457,28 +493,36 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
           let records: KnowledgeStatementRecord[]
           try {
             const limit = parameters.limit ?? 8
-            records = (await this.knowledgeReader.search(query, limit, signal)).slice(0, limit)
+            const offset = parameters.offset ?? 0
+            records = (await this.knowledgeReader.search(query, limit, offset, signal)).slice(0, limit)
           } catch (error) {
             throw asError(error, '搜索 Knowledge Statement 失败')
           }
-          const text = searchResultText(records)
+          const limit = parameters.limit ?? 8
+          const offset = parameters.offset ?? 0
+          const hasNextPage = records.length === limit
+          const text = searchResultText(records, offset, hasNextPage)
           return {
             content: [{ type: 'text', text }],
-            details: { count: records.length }
+            details: {
+              count: records.length,
+              offset,
+              nextOffset: hasNextPage ? offset + records.length : null
+            }
           }
         }
       } as AgentTool<typeof searchKnowledgeParameters>,
       {
         name: 'read_knowledge_statement',
         label: '读取知识',
-        description: '按稳定 ID 读取一条获得授权的不可变 Knowledge Statement。',
+        description: '按稳定 ID 读取一条获得授权的不可变 Knowledge Statement、Observation 来源及直接关系。来源身份可见不代表其原文已在当前 Workspace 授权。',
         parameters: readKnowledgeParameters,
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
           signal?.throwIfAborted()
           const statementId = parameters.statementId.trim()
           if (!statementId) throw new Error('Statement ID 去除空白后不能为空')
-          let record: KnowledgeStatementRecord | undefined
+          let record: KnowledgeStatementDetails | undefined
           try {
             record = await this.knowledgeReader.read(statementId, signal)
           } catch (error) {

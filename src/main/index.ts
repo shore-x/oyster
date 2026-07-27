@@ -137,23 +137,24 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   await mkdir(dirname(capturePath), { recursive: true })
   await writeFile(capturePath, image.toPNG())
   const semantics = await window.webContents.executeJavaScript(`(() => {
-    const primaryButton = document.querySelector('.ui-button--primary')
+    const page = document.querySelector('[data-testid="page-sources"]')
+    const primaryButton = page.querySelector('.ui-button--primary')
     const primaryLabel = primaryButton.querySelector('.ui-button__label')
     const primaryBounds = primaryButton.getBoundingClientRect()
     const labelBounds = primaryLabel.getBoundingClientRect()
     return {
-      title: document.querySelector('h1')?.textContent,
-      sourceCards: document.querySelectorAll('[data-testid="source-card"]').length,
+      title: page.querySelector('h1')?.textContent,
+      sourceCards: page.querySelectorAll('[data-testid="source-card"]').length,
       dragRegion: getComputedStyle(document.querySelector('[data-testid="window-drag-region"]')).getPropertyValue('-webkit-app-region'),
       primaryButtonColor: getComputedStyle(primaryButton).backgroundColor,
-      secondaryButtonColor: getComputedStyle(document.querySelector('.ui-button--secondary')).color,
+      secondaryButtonColor: getComputedStyle(page.querySelector('.ui-button--secondary')).color,
       buttonLabelCenterDelta: Math.abs((primaryBounds.left + primaryBounds.width / 2) - (labelBounds.left + labelBounds.width / 2)),
-      buttonCount: document.querySelectorAll('button').length,
-      sharedButtonCount: document.querySelectorAll('.ui-button').length,
-      buttonIconCount: Array.from(document.querySelectorAll('.ui-button')).filter((button) => button.querySelector('.ui-button__icon .ui-icon')?.childElementCount > 0).length,
-      primaryActions: Array.from(document.querySelectorAll('button')).map((button) => button.textContent?.trim()),
+      buttonCount: page.querySelectorAll('button').length,
+      sharedButtonCount: page.querySelectorAll('.ui-button').length,
+      buttonIconCount: Array.from(page.querySelectorAll('.ui-button')).filter((button) => button.querySelector('.ui-button__icon .ui-icon')?.childElementCount > 0).length,
+      primaryActions: Array.from(page.querySelectorAll('button')).map((button) => button.textContent?.trim()),
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-      bodyText: document.body.innerText
+      bodyText: page.innerText
     }
   })()`)
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-knowledge-processing"]').click()`)
@@ -161,17 +162,18 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   const processingImage = await window.webContents.capturePage()
   await writeFile(join(dirname(capturePath), 'knowledge-processing.png'), processingImage.toPNG())
   const fullChainSemantics = await window.webContents.executeJavaScript(`(() => {
-    const select = document.querySelector('[data-testid="full-chain-session-select"]')
-    const initialButton = document.querySelector('[data-testid="run-full-chain"]')
+    const page = document.querySelector('[data-testid="page-knowledge-processing"]')
+    const select = page.querySelector('[data-testid="full-chain-session-select"]')
+    const initialButton = page.querySelector('[data-testid="run-full-chain"]')
     const result = {
-      fullChainSelected: document.querySelector('[data-testid="processing-view-full-chain"]')?.getAttribute('aria-selected'),
-      workspaceExists: Boolean(document.querySelector('[data-testid="full-chain-workspace"]')),
+      fullChainSelected: page.querySelector('[data-testid="processing-view-full-chain"]')?.getAttribute('aria-selected'),
+      workspaceExists: Boolean(page.querySelector('[data-testid="full-chain-workspace"]')),
       sessionOptionCount: select?.options.length,
       fullChainButtonExists: Boolean(initialButton),
       fullChainButtonDisabled: initialButton?.disabled,
-      initialDisabledReason: document.querySelector('[data-testid="full-chain-disabled-reason"]')?.textContent?.trim(),
-      stageConfigurations: Array.from(document.querySelectorAll('[data-testid^="full-chain-config-"]')).map((node) => node.textContent?.trim()),
-      bodyText: document.body.innerText,
+      initialDisabledReason: page.querySelector('[data-testid="full-chain-disabled-reason"]')?.textContent?.trim(),
+      stageConfigurations: Array.from(page.querySelectorAll('[data-testid^="full-chain-config-"]')).map((node) => node.textContent?.trim()),
+      bodyText: page.innerText,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
     }
     if (select?.options[1]) {
@@ -182,13 +184,13 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       ...result,
       selectedSession: select?.value,
       selectedSessionDetails: {
-        title: document.querySelector('[data-testid="full-chain-session-meta-title"]')?.textContent?.trim(),
-        timeRange: document.querySelector('[data-testid="full-chain-session-meta-time-range"]')?.textContent?.trim(),
-        messageCount: document.querySelector('[data-testid="full-chain-session-meta-message-count"]')?.textContent?.trim(),
-        project: document.querySelector('[data-testid="full-chain-session-meta-project"]')?.textContent?.trim()
+        title: page.querySelector('[data-testid="full-chain-session-meta-title"]')?.textContent?.trim(),
+        timeRange: page.querySelector('[data-testid="full-chain-session-meta-time-range"]')?.textContent?.trim(),
+        messageCount: page.querySelector('[data-testid="full-chain-session-meta-message-count"]')?.textContent?.trim(),
+        project: page.querySelector('[data-testid="full-chain-session-meta-project"]')?.textContent?.trim()
       },
-      fullChainButtonEnabledAfterSelection: document.querySelector('[data-testid="run-full-chain"]')?.disabled === false,
-      readyReason: document.querySelector('[data-testid="full-chain-disabled-reason"]')?.textContent?.trim()
+      fullChainButtonEnabledAfterSelection: page.querySelector('[data-testid="run-full-chain"]')?.disabled === false,
+      readyReason: page.querySelector('[data-testid="full-chain-disabled-reason"]')?.textContent?.trim()
     })))
   })()`)
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="processing-view-stage-debug"]').click()`)
@@ -198,45 +200,47 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   const stageDebugImage = await window.webContents.capturePage()
   await writeFile(join(dirname(capturePath), 'knowledge-processing-stage-debug.png'), stageDebugImage.toPNG())
   const processingSemantics = await window.webContents.executeJavaScript(`(() => {
-    const prompts = Array.from(document.querySelectorAll('[data-testid^="processing-instructions-"]'))
-    const badges = Array.from(document.querySelectorAll('[data-testid^="processing-prompt-badge-"]'))
-    const connections = Array.from(document.querySelectorAll('[data-testid^="processing-connection-"]'))
-    const models = Array.from(document.querySelectorAll('[data-testid^="processing-model-"]'))
-    const reasoning = Array.from(document.querySelectorAll('[data-testid^="processing-reasoning-"]'))
-    const buttons = Array.from(document.querySelectorAll('button'))
+    const page = document.querySelector('[data-testid="page-knowledge-processing"]')
+    const prompts = Array.from(page.querySelectorAll('[data-testid^="processing-instructions-"]'))
+    const badges = Array.from(page.querySelectorAll('[data-testid^="processing-prompt-badge-"]'))
+    const connections = Array.from(page.querySelectorAll('[data-testid^="processing-connection-"]'))
+    const models = Array.from(page.querySelectorAll('[data-testid^="processing-model-"]'))
+    const reasoning = Array.from(page.querySelectorAll('[data-testid^="processing-reasoning-"]'))
+    const buttons = Array.from(page.querySelectorAll('button'))
     return {
-      title: document.querySelector('h1')?.textContent,
-      stageCount: document.querySelectorAll('[data-testid="processing-stage-observation_preprocessor"], [data-testid="processing-stage-knowledge_maintenance_agent"]').length,
+      title: page.querySelector('h1')?.textContent,
+      stageCount: page.querySelectorAll('[data-testid="processing-stage-observation_preprocessor"], [data-testid="processing-stage-knowledge_maintenance_agent"]').length,
       promptCount: prompts.length,
       promptValues: prompts.map((prompt) => prompt.value),
       badgeValues: badges.map((badge) => badge.textContent?.trim()),
       connectionValues: connections.map((connection) => connection.value),
       modelValues: models.map((model) => model.value),
       reasoningValues: reasoning.map((effort) => effort.value),
-      configurationText: Array.from(document.querySelectorAll('[data-testid^="processing-config-"]')).map((node) => node.textContent?.trim()),
-      preprocessorSessionSourceSelected: document.querySelector('[data-testid="preprocessor-source-session"]')?.getAttribute('aria-pressed'),
-      preprocessorSessionOptionCount: document.querySelector('[data-testid="processing-preprocessor-session"]')?.options.length,
-      preprocessorSessionValue: document.querySelector('[data-testid="processing-preprocessor-session"]')?.value,
-      preprocessorReadyReason: document.querySelector('[data-testid="preprocessor-disabled-reason"]')?.textContent?.trim(),
-      manualObservationVisible: Boolean(document.querySelector('[data-testid="processing-observation-input"]')),
-      preprocessorButtonExists: Boolean(document.querySelector('[data-testid="run-preprocessor"]')),
-      preprocessorDisabled: document.querySelector('[data-testid="run-preprocessor"]')?.disabled,
-      maintainerButtonExists: Boolean(document.querySelector('[data-testid="run-maintainer"]')),
-      maintainerDisabled: document.querySelector('[data-testid="run-maintainer"]')?.disabled,
-      resultCount: document.querySelectorAll('[data-testid^="processing-result-"]').length,
+      configurationText: Array.from(page.querySelectorAll('[data-testid^="processing-config-"]')).map((node) => node.textContent?.trim()),
+      preprocessorSessionSourceSelected: page.querySelector('[data-testid="preprocessor-source-session"]')?.getAttribute('aria-pressed'),
+      preprocessorSessionOptionCount: page.querySelector('[data-testid="processing-preprocessor-session"]')?.options.length,
+      preprocessorSessionValue: page.querySelector('[data-testid="processing-preprocessor-session"]')?.value,
+      preprocessorReadyReason: page.querySelector('[data-testid="preprocessor-disabled-reason"]')?.textContent?.trim(),
+      manualObservationVisible: Boolean(page.querySelector('[data-testid="processing-observation-input"]')),
+      preprocessorButtonExists: Boolean(page.querySelector('[data-testid="run-preprocessor"]')),
+      preprocessorDisabled: page.querySelector('[data-testid="run-preprocessor"]')?.disabled,
+      maintainerButtonExists: Boolean(page.querySelector('[data-testid="run-maintainer"]')),
+      maintainerDisabled: page.querySelector('[data-testid="run-maintainer"]')?.disabled,
+      resultCount: page.querySelectorAll('[data-testid^="processing-result-"]').length,
       buttonCount: buttons.length,
-      sharedButtonCount: document.querySelectorAll('.ui-button').length,
-      tabButtonCount: document.querySelectorAll('button[role="tab"]').length,
-      sourceSwitchButtonCount: document.querySelectorAll('.processing-input-source button').length,
+      sharedButtonCount: page.querySelectorAll('.ui-button').length,
+      tabButtonCount: page.querySelectorAll('button[role="tab"]').length,
+      sourceSwitchButtonCount: page.querySelectorAll('.processing-input-source button').length,
       buttonIconCount: buttons.filter((button) => button.querySelector('.ui-button__icon .ui-icon')?.childElementCount > 0).length,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-      bodyText: document.body.innerText
+      bodyText: page.innerText
     }
   })()`)
   const promptRestoreSemantics = await window.webContents.executeJavaScript(`(() => {
-    const editor = document.querySelector('[data-testid="processing-instructions-observation_preprocessor"]')
-    const badge = document.querySelector('[data-testid="processing-prompt-badge-observation_preprocessor"]')
-    const restore = document.querySelector('[data-testid="restore-processing-instructions-observation_preprocessor"]')
+    const page = document.querySelector('[data-testid="page-knowledge-processing"]')
+    const editor = page.querySelector('[data-testid="processing-instructions-observation_preprocessor"]')
+    const badge = page.querySelector('[data-testid="processing-prompt-badge-observation_preprocessor"]')
+    const restore = page.querySelector('[data-testid="restore-processing-instructions-observation_preprocessor"]')
     const original = editor.value
     editor.value = original + '\\n未保存的测试草稿'
     editor.dispatchEvent(new Event('input', { bubbles: true }))
@@ -260,15 +264,16 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   })
   await new Promise((resolve) => setTimeout(resolve, 120))
   const traceSemantics = await window.webContents.executeJavaScript(`(() => {
-    const calls = Array.from(document.querySelectorAll('[data-testid^="preprocessing-call-"]'))
+    const page = document.querySelector('[data-testid="page-knowledge-processing"]')
+    const calls = Array.from(page.querySelectorAll('[data-testid^="preprocessing-call-"]'))
     if (calls[0]) calls[0].open = true
     calls[0]?.scrollIntoView({ block: 'center' })
     return {
-      panelCount: document.querySelectorAll('[data-testid="processing-debug-trace"]').length,
+      panelCount: page.querySelectorAll('[data-testid="processing-debug-trace"]').length,
       preprocessingCallCount: calls.length,
       preprocessingOutput: calls[0]?.querySelector('pre')?.textContent,
-      maintenanceEventCount: document.querySelectorAll('[data-testid^="maintenance-event-"]').length,
-      bodyText: document.body.innerText,
+      maintenanceEventCount: page.querySelectorAll('[data-testid^="maintenance-event-"]').length,
+      bodyText: page.innerText,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
     }
   })()`)
@@ -290,34 +295,44 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   const aiImage = await window.webContents.capturePage()
   await writeFile(join(dirname(capturePath), 'ai-backends.png'), aiImage.toPNG())
   const aiSemantics = await window.webContents.executeJavaScript(`(() => {
+    const page = document.querySelector('[data-testid="page-ai-backends"]')
     const agent = {
-      title: document.querySelector('h1')?.textContent,
-      backendKind: document.querySelector('[data-testid="backend-kind-select"]')?.value,
-      provider: document.querySelector('[data-testid="provider-select"]')?.value,
-      codexCards: document.querySelectorAll('[data-testid="codex-runtime-card"]').length,
-      modelCards: document.querySelectorAll('[data-testid="model-connection-card"]').length,
-      codingPlanModel: document.querySelector('[data-testid="coding-plan-model-select"]')?.value,
-      codingPlanReasoning: document.querySelector('[data-testid="coding-plan-reasoning-select"]')?.value,
-      codingPlanConfiguration: document.querySelector('[data-testid="coding-plan-test-configuration"]')?.textContent,
-      bodyText: document.body.innerText,
+      title: page.querySelector('h1')?.textContent,
+      backendKind: page.querySelector('[data-testid="backend-kind-select"]')?.value,
+      provider: page.querySelector('[data-testid="provider-select"]')?.value,
+      codexCards: page.querySelectorAll('[data-testid="codex-runtime-card"]').length,
+      modelCards: page.querySelectorAll('[data-testid="model-connection-card"]').length,
+      codingPlanModel: page.querySelector('[data-testid="coding-plan-model-select"]')?.value,
+      codingPlanReasoning: page.querySelector('[data-testid="coding-plan-reasoning-select"]')?.value,
+      codingPlanConfiguration: page.querySelector('[data-testid="coding-plan-test-configuration"]')?.textContent,
+      bodyText: page.innerText,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
     }
-    const backend = document.querySelector('[data-testid="backend-kind-select"]')
+    const backend = page.querySelector('[data-testid="backend-kind-select"]')
     backend.value = 'api'
     backend.dispatchEvent(new Event('change', { bubbles: true }))
     return new Promise((resolve) => requestAnimationFrame(() => resolve({
       agent,
       model: {
-        backendKind: document.querySelector('[data-testid="backend-kind-select"]')?.value,
-        provider: document.querySelector('[data-testid="provider-select"]')?.value,
-        passwordFields: document.querySelectorAll('input[type="password"]').length,
-        passwordValues: Array.from(document.querySelectorAll('input[type="password"]')).map((input) => input.value),
-        configuredModel: document.querySelector('[data-testid="api-connection-model-select"]')?.value,
-        configuredReasoning: document.querySelector('[data-testid="api-connection-reasoning-select"]')?.value,
-        configuredSummary: document.querySelector('[data-testid="api-connection-test-configuration"]')?.textContent,
-        bodyText: document.body.innerText
+        backendKind: page.querySelector('[data-testid="backend-kind-select"]')?.value,
+        provider: page.querySelector('[data-testid="provider-select"]')?.value,
+        passwordFields: page.querySelectorAll('input[type="password"]').length,
+        passwordValues: Array.from(page.querySelectorAll('input[type="password"]')).map((input) => input.value),
+        configuredModel: page.querySelector('[data-testid="api-connection-model-select"]')?.value,
+        configuredReasoning: page.querySelector('[data-testid="api-connection-reasoning-select"]')?.value,
+        configuredSummary: page.querySelector('[data-testid="api-connection-test-configuration"]')?.textContent,
+        bodyText: page.innerText
       }
     })))
+  })()`)
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-knowledge-processing"]').click()`)
+  await new Promise((resolve) => setTimeout(resolve, 120))
+  const processingStateAfterNavigation = await window.webContents.executeJavaScript(`(() => {
+    const page = document.querySelector('[data-testid="page-knowledge-processing"]')
+    return {
+      selectedSession: page.querySelector('[data-testid="full-chain-session-select"]')?.value,
+      stageDebugSelected: page.querySelector('[data-testid="processing-view-stage-debug"]')?.getAttribute('aria-selected')
+    }
   })()`)
   await writeFile(
     `${capturePath}.json`,
@@ -328,7 +343,8 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
         fullChain: fullChainSemantics,
         ...processingSemantics,
         promptRestore: promptRestoreSemantics,
-        trace: traceSemantics
+        trace: traceSemantics,
+        stateAfterNavigation: processingStateAfterNavigation
       }
     }, null, 2)}\n`,
     'utf8'

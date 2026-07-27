@@ -127,10 +127,10 @@ Knowledge Maintenance Agent 是一个普通、可替换的工具使用 Agent：�
 
 ### 6.5 检索和供给上下文
 
-MVP 提供本地搜索 UI，以及只读优先的 MCP 能力：
+对外检索保持只读优先，并从以下最小能力逐步开放：
 
-- `search_knowledge`：按 query、project/topic、source agent、时间和知识类型检索；
-- `get_knowledge`：读取一条知识及其出处、版本和置信状态；
+- `search_knowledge`：按 query 分页发现当前 Knowledge Statement；
+- `get_knowledge`：按稳定身份读取一条不可变 Statement、出处和直接关系；
 - `get_evidence`：在权限允许时读取最小必要的原始证据；
 - `build_context`：按目标、Scope 和 Token Budget 生成带引用的 Context Packet。
 

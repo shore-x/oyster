@@ -478,11 +478,17 @@ export class SqliteKnowledgeStore implements KnowledgeReader {
     }
   }
 
-  async search(query: string, limit?: number, signal?: AbortSignal): Promise<KnowledgeStatementRecord[]> {
+  async search(
+    query: string,
+    limit?: number,
+    offset?: number,
+    signal?: AbortSignal
+  ): Promise<KnowledgeStatementRecord[]> {
     this.assertOpen()
     signal?.throwIfAborted()
     const normalizedQuery = requiredTrimmed(query, '搜索 query', 1_024)
     const normalizedLimit = normalizeLimit(limit, 8, MAX_SEARCH_LIMIT)
+    const normalizedOffset = normalizeOffset(offset)
     const contains = `%${normalizedQuery.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')}%`
     const prefix = `${normalizedQuery.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')}%`
     const rows = this.database.prepare(`
@@ -501,19 +507,24 @@ export class SqliteKnowledgeStore implements KnowledgeReader {
         END,
         s.created_at DESC,
         s.id DESC
-      LIMIT ?
-    `).all(...asSqlParameters([contains, contains, normalizedQuery, prefix, normalizedLimit])) as unknown as StatementRow[]
+      LIMIT ? OFFSET ?
+    `).all(...asSqlParameters([
+      contains,
+      contains,
+      normalizedQuery,
+      prefix,
+      normalizedLimit,
+      normalizedOffset
+    ])) as unknown as StatementRow[]
     signal?.throwIfAborted()
     return rows.map((row) => ({ id: row.id, title: row.title, content: row.content }))
   }
 
-  async read(statementId: string, signal?: AbortSignal): Promise<KnowledgeStatementRecord | undefined> {
+  async read(statementId: string, signal?: AbortSignal): Promise<KnowledgeStatementDetails | undefined> {
     signal?.throwIfAborted()
     const details = this.getStatement(statementId)
     signal?.throwIfAborted()
     return details
-      ? { id: details.statement.id, title: details.statement.title, content: details.statement.content }
-      : undefined
   }
 
   listStatements(options: ListKnowledgeStatementsOptions = {}): KnowledgeStatement[] {

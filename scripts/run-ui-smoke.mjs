@@ -101,7 +101,7 @@ if (processing.fullChain.stageConfigurations.length !== 2) {
   throw new Error('Full-chain view must show the exact configuration of both stages')
 }
 const fullChainConfiguration = processing.fullChain.stageConfigurations.join('\n')
-for (const requiredCopy of ['API', 'OpenAI-compatible', 'fixture-model', '模型默认', '未测试']) {
+for (const requiredCopy of ['API', 'OpenAI-compatible', 'fixture-model', '模型默认', '可用']) {
   if (!fullChainConfiguration.includes(requiredCopy)) {
     throw new Error(`Full-chain stage configuration is missing: ${requiredCopy}`)
   }
@@ -202,6 +202,12 @@ for (const requiredCopy of ['模型输出可能复述原始材料', '模型轮�
   }
 }
 if (processing.trace.overflowX) throw new Error('Debug trace view has unexpected horizontal overflow')
+if (processing.stateAfterNavigation.selectedSession !== processing.fullChain.selectedSession) {
+  throw new Error('Knowledge processing Session selection was lost after navigating away and back')
+}
+if (processing.stateAfterNavigation.stageDebugSelected !== 'true') {
+  throw new Error('Knowledge processing workspace state was lost after navigating away and back')
+}
 const processingImage = await readFile(join(dirname(capturePath), 'knowledge-processing.png'))
 if (processingImage.length === 0) throw new Error('Knowledge processing screenshot is empty')
 const stageDebugImage = await readFile(join(dirname(capturePath), 'knowledge-processing-stage-debug.png'))

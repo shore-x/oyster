@@ -31,6 +31,11 @@ function authenticationExpiry(value?: string): string | undefined {
   }).format(date)
 }
 
+function modelLabel(model: AvailableModel | undefined, fallback = '—'): string {
+  if (!model) return fallback
+  return model.displayName === model.id ? model.id : `${model.displayName} · ${model.id}`
+}
+
 function StatusBadge(props: { connection: AiConnection }) {
   const value = () => STATUS[props.connection.status]
   return (
@@ -166,11 +171,7 @@ function ApiConnectionCard(props: {
             onChange={(event) => chooseModel(event.currentTarget.value)}
           >
             <For each={models()}>{(candidate) => (
-              <option value={candidate.id}>
-                {candidate.displayName === candidate.id
-                  ? candidate.id
-                  : `${candidate.displayName} · ${candidate.id}`}
-              </option>
+              <option value={candidate.id}>{modelLabel(candidate)}</option>
             )}</For>
           </select>
         </label>
@@ -194,7 +195,7 @@ function ApiConnectionCard(props: {
         </label>
       </div>
       <p class="path" data-testid="api-connection-test-configuration">
-        测试将使用 {selectedModel()?.displayName ?? '—'}
+        测试将使用 {modelLabel(selectedModel())}
         {selectedReasoningEffort() ? ` · ${selectedReasoningEffort()}` : ' · 模型默认思考强度'}
       </p>
       <Show when={props.connection.errorMessage}>
@@ -419,11 +420,7 @@ export function AiBackendsPage() {
                       <option value="">暂无可用模型</option>
                     </Show>
                     <For each={connection().models}>{(candidate) => (
-                      <option value={candidate.id}>
-                        {candidate.displayName === candidate.id
-                          ? candidate.id
-                          : `${candidate.displayName} · ${candidate.id}`}
-                      </option>
+                      <option value={candidate.id}>{modelLabel(candidate)}</option>
                     )}</For>
                   </select>
                 </label>
@@ -447,7 +444,7 @@ export function AiBackendsPage() {
                 </label>
               </div>
               <p class="path" data-testid="coding-plan-test-configuration">
-                测试将使用 {selectedCodingPlanModel()?.displayName ?? '尚无可用模型'}
+                测试将使用 {modelLabel(selectedCodingPlanModel(), '尚无可用模型')}
                 {selectedCodingPlanReasoningEffort()
                   ? ` · ${selectedCodingPlanReasoningEffort()}`
                   : ' · 模型默认思考强度'}
@@ -565,11 +562,7 @@ export function AiBackendsPage() {
                     onChange={(event) => setModel(event.currentTarget.value === '__manual__' ? '' : event.currentTarget.value)}
                   >
                     <For each={availableModels()}>{(candidate) => (
-                      <option value={candidate.id}>
-                        {candidate.displayName === candidate.id
-                          ? candidate.id
-                          : `${candidate.displayName} · ${candidate.id}`}
-                      </option>
+                      <option value={candidate.id}>{modelLabel(candidate)}</option>
                     )}</For>
                     <option value="__manual__">手动输入其他 Model ID…</option>
                   </select>

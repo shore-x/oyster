@@ -1,5 +1,5 @@
-import { createSignal, onCleanup, onMount } from 'solid-js'
-import type { AvailableSessionSummary } from '../../shared/discovery'
+import { createSignal, onCleanup } from 'solid-js'
+import type { AvailableSessionSummary, DiscoverySnapshot } from '../../shared/discovery'
 import type {
   KnowledgeFullChainResult,
   KnowledgeMaintenanceResult,
@@ -22,6 +22,18 @@ const EMPTY_SNAPSHOT: KnowledgeProcessingSnapshot = {
   debugTraces: []
 }
 
+function sessionCatalogRevision(snapshot: DiscoverySnapshot): string {
+  return JSON.stringify([...snapshot.sources]
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map((source) => [
+      source.id,
+      source.rootPath,
+      source.discoveryState,
+      source.sessionCount,
+      source.lastScannedAt
+    ]))
+}
+
 export function createKnowledgeProcessingController() {
   const [snapshot, setSnapshot] = createSignal(EMPTY_SNAPSHOT)
   const [pendingStageIds, setPendingStageIds] = createSignal<ProcessingStageId[]>([])
@@ -38,6 +50,7 @@ export function createKnowledgeProcessingController() {
   const [discardingSandboxId, setDiscardingSandboxId] = createSignal<string>()
   const [hiddenStageDebugTraceId, setHiddenStageDebugTraceId] = createSignal<string>()
   const sessionInspectionTasks = new Map<string, Promise<void>>()
+  let sessionLoadRevision = 0
 
   function errorMessage(cause: unknown): string {
     return cause instanceof Error ? cause.message : String(cause)
@@ -81,29 +94,51 @@ export function createKnowledgeProcessingController() {
     return trace
   }
 
-  onMount(() => {
-    let receivedSubscriptionSnapshot = false
-    const unsubscribe = window.oyster.knowledgeProcessing.subscribe((nextSnapshot) => {
-      receivedSubscriptionSnapshot = true
-      setSnapshot(nextSnapshot)
+  let receivedSubscriptionSnapshot = false
+  const unsubscribe = window.oyster.knowledgeProcessing.subscribe((nextSnapshot) => {
+    receivedSubscriptionSnapshot = true
+    setSnapshot(nextSnapshot)
+  })
+  void window.oyster.knowledgeProcessing.getSnapshot()
+    .then((initialSnapshot) => {
+      if (!receivedSubscriptionSnapshot) setSnapshot(initialSnapshot)
     })
-    void window.oyster.knowledgeProcessing.getSnapshot()
-      .then((initialSnapshot) => {
-        if (!receivedSubscriptionSnapshot) setSnapshot(initialSnapshot)
-      })
-      .catch((cause) => setError(errorMessage(cause)))
+    .catch((cause) => setError(errorMessage(cause)))
+
+  let receivedDiscoverySnapshot = false
+  let catalogRevision: string | undefined
+  const updateAvailableSessions = (discoverySnapshot: DiscoverySnapshot): void => {
+    const nextRevision = sessionCatalogRevision(discoverySnapshot)
+    if (nextRevision === catalogRevision) return
+    catalogRevision = nextRevision
     void loadAvailableSessions()
-    onCleanup(unsubscribe)
+  }
+  const unsubscribeDiscovery = window.oyster.discovery.subscribe((discoverySnapshot) => {
+    receivedDiscoverySnapshot = true
+    updateAvailableSessions(discoverySnapshot)
+  })
+  void loadAvailableSessions()
+  void window.oyster.discovery.getSnapshot()
+    .then((discoverySnapshot) => {
+      if (!receivedDiscoverySnapshot) updateAvailableSessions(discoverySnapshot)
+    })
+    .catch((cause) => setError(errorMessage(cause)))
+
+  onCleanup(() => {
+    unsubscribe()
+    unsubscribeDiscovery()
   })
 
   async function loadAvailableSessions(): Promise<void> {
+    const revision = ++sessionLoadRevision
     try {
       setSessionsLoading(true)
-      setAvailableSessions(await window.oyster.discovery.listAvailableSessions())
+      const sessions = await window.oyster.discovery.listAvailableSessions()
+      if (revision === sessionLoadRevision) setAvailableSessions(sessions)
     } catch (cause) {
-      setError(errorMessage(cause))
+      if (revision === sessionLoadRevision) setError(errorMessage(cause))
     } finally {
-      setSessionsLoading(false)
+      if (revision === sessionLoadRevision) setSessionsLoading(false)
     }
   }
 

@@ -156,6 +156,17 @@ function ConnectionConfiguration(props: {
   onReasoningEffortChange(reasoningEffort: ReasoningEffort | null): void
 }) {
   const selectedModel = () => selectedStageModel(props.stage, props.selected)
+  const unavailableConnectionId = () => (
+    props.stage.connectionId && !props.selected ? props.stage.connectionId : undefined
+  )
+  const unavailableModelId = () => (
+    props.stage.modelId && props.selected && !selectedModel() ? props.stage.modelId : undefined
+  )
+  const unsupportedReasoningEffort = () => {
+    const effort = props.stage.reasoningEffort
+    const model = selectedModel()
+    return effort && model && !model.reasoningEfforts.includes(effort) ? effort : undefined
+  }
   return (
     <div class="processing-connection">
       <div class="processing-connection__selectors">
@@ -168,6 +179,11 @@ function ConnectionConfiguration(props: {
             onChange={(event) => props.onChange(event.currentTarget.value || null)}
           >
             <option value="">选择已配置的 Connection</option>
+            <Show when={unavailableConnectionId()}>{(connectionId) => (
+              <option value={connectionId()} disabled>
+                已保存但当前不可用 · {connectionId()}
+              </option>
+            )}</Show>
             <For each={props.connections}>{(connection) => (
               <option value={connection.id}>
                 {connection.displayName} · {backendLabel(connection.backendKind)} · {connectionStatusLabel(connection.status)}
@@ -184,6 +200,11 @@ function ConnectionConfiguration(props: {
             onChange={(event) => props.onModelChange(event.currentTarget.value)}
           >
             <option value="">选择 Model</option>
+            <Show when={unavailableModelId()}>{(modelId) => (
+              <option value={modelId()} disabled>
+                已保存但当前不可用 · {modelId()}
+              </option>
+            )}</Show>
             <For each={props.selected?.models ?? []}>{(model) => (
               <option value={model.id}>
                 {model.displayName === model.id ? model.id : `${model.displayName} · ${model.id}`}
@@ -202,6 +223,11 @@ function ConnectionConfiguration(props: {
             )}
           >
             <option value="">模型默认</option>
+            <Show when={unsupportedReasoningEffort()}>{(effort) => (
+              <option value={effort()} disabled>
+                已保存但当前不受支持 · {REASONING_LABELS[effort()]}
+              </option>
+            )}</Show>
             <For each={selectedModel()?.reasoningEfforts ?? []}>{(effort) => (
               <option value={effort}>{REASONING_LABELS[effort]}</option>
             )}</For>
@@ -210,7 +236,13 @@ function ConnectionConfiguration(props: {
       </div>
       <Show
         when={props.selected}
-        fallback={<p class="processing-connection__empty">请先选择执行此阶段的 Connection；系统不会自动切换或回退。</p>}
+        fallback={(
+          <p class="processing-connection__empty">
+            {props.stage.connectionId
+              ? `已保存的 Connection 当前不可用：${props.stage.connectionId}；Model：${props.stage.modelId || '未选择'}。系统不会自动切换或回退。`
+              : '请先选择执行此阶段的 Connection；系统不会自动切换或回退。'}
+          </p>
+        )}
       >
         {(connection) => (
           <dl
@@ -227,7 +259,9 @@ function ConnectionConfiguration(props: {
               <div><dt>Account</dt><dd>{connection().accountLabel || '—'}</dd></div>
               <div><dt>Plan</dt><dd>{connection().planType || '—'}</dd></div>
             </Show>
-            <div><dt>Model</dt><dd data-testid={`processing-config-model-${props.stage.id}`}>{selectedModel()?.id || '未选择'}</dd></div>
+            <div><dt>Model</dt><dd data-testid={`processing-config-model-${props.stage.id}`}>
+              {selectedModel()?.id || (props.stage.modelId ? `当前不可用 · ${props.stage.modelId}` : '未选择')}
+            </dd></div>
             <div><dt>Reasoning</dt><dd data-testid={`processing-config-reasoning-${props.stage.id}`}>{reasoningLabel(props.stage.reasoningEffort)}</dd></div>
             <div><dt>Runtime</dt><dd data-testid={`processing-config-runtime-${props.stage.id}`}>{runtimeLabel(props.stage.runtime)}</dd></div>
             <div><dt>状态</dt><dd>{connectionStatusLabel(connection().status)}</dd></div>
@@ -450,14 +484,23 @@ export function KnowledgeProcessingPage() {
     (connection) => connection.id === stage?.connectionId
   )
   const stageModel = (stage?: ProcessingStageView) => selectedStageModel(stage, selectedConnection(stage))
-  const stageConfigured = (stage?: ProcessingStageView) => {
+  const stageConfigurationIssue = (stage?: ProcessingStageView): string | undefined => {
+    if (!stage) return '正在读取阶段配置…'
+    if (!stage.connectionId) return `请先为 ${stage.displayName} 选择 Connection。`
     const connection = selectedConnection(stage)
-    return Boolean(
-      connection
-      && stageModel(stage)
-      && connectionCanAttemptRun(connection)
-    )
+    if (!connection) return `${stage.displayName} 已保存的 Connection 当前不可用：${stage.connectionId}。`
+    if (!stage.modelId) return `请先为 ${stage.displayName} 选择 Model。`
+    const model = stageModel(stage)
+    if (!model) return `${stage.displayName} 已保存的 Model 当前不可用：${stage.modelId}。`
+    if (stage.reasoningEffort && !model.reasoningEfforts.includes(stage.reasoningEffort)) {
+      return `${stage.displayName} 已保存的思考强度不再受当前 Model 支持。`
+    }
+    if (!connectionCanAttemptRun(connection)) {
+      return `${stage.displayName} 的 Connection 状态为“${connectionStatusLabel(connection.status)}”，需要先完成认证或配置。`
+    }
+    return undefined
   }
+  const stageConfigured = (stage?: ProcessingStageView) => !stageConfigurationIssue(stage)
   const preprocessorPromptDirty = createMemo(() => {
     const stage = preprocessor()
     return stage ? preprocessorPrompt() !== stage.effectiveInstructions : false
@@ -513,13 +556,8 @@ export function KnowledgeProcessingPage() {
     if (!stage) return '正在读取 Observation Preprocessor 配置…'
     if (anyStageRunning()) return '已有知识加工任务正在运行。'
     if (controller.isSaving(stage.id)) return '正在保存 Observation Preprocessor 配置…'
-    if (!stage.connectionId) return '请先选择 Observation Preprocessor 的 Connection。'
-    const connection = selectedConnection(stage)
-    if (!connection) return '当前 Connection 不可用，或尚未发现可用模型。'
-    if (!stage.modelId || !stageModel(stage)) return '请先选择 Observation Preprocessor 使用的 Model。'
-    if (!connectionCanAttemptRun(connection)) {
-      return `当前 Connection 状态为“${connectionStatusLabel(connection.status)}”，需要先完成认证或配置。`
-    }
+    const configurationIssue = stageConfigurationIssue(stage)
+    if (configurationIssue) return configurationIssue
     if (preprocessorPromptDirty()) return '处理指令有未保存修改，请先保存。'
     if (preprocessorInputSource() === 'manual') {
       return observation().trim() ? undefined : '请输入用于调试的 Observation。'
@@ -1125,6 +1163,9 @@ export function KnowledgeProcessingPage() {
 
               <Show when={maintenancePromptDirty()}>
                 <p class="processing-stage__action-note">请先保存处理指令，再运行知识维护。</p>
+              </Show>
+              <Show when={stageConfigurationIssue(stage())}>
+                {(issue) => <p class="processing-stage__action-note">{issue()}</p>}
               </Show>
               <div class="processing-stage__actions">
                 <Show
