@@ -198,9 +198,7 @@ function defaultApiModels(connection: StoredModelConnection): AvailableModel[] {
 
 function runtimeWithModelMetadata(runtime: ModelRuntime, model: AvailableModel): ModelRuntime {
   const contextWindow = model.contextWindowTokens ?? runtime.model.contextWindow
-  const maxTokens = model.maxOutputTokens
-    ? Math.min(runtime.model.maxTokens, model.maxOutputTokens)
-    : runtime.model.maxTokens
+  const maxTokens = model.maxOutputTokens ?? runtime.model.maxTokens
   if (contextWindow === runtime.model.contextWindow && maxTokens === runtime.model.maxTokens) {
     return runtime
   }

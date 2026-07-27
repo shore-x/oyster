@@ -14,7 +14,11 @@ import {
 import { ModelConnectionFailureError } from '../ai-backends/model'
 import type { ModelRuntime } from '../ai-backends/model'
 import {
-  compareEvidenceLocations,
+  createPiContextCompactor,
+  PiContextCompactionOutputError,
+  PiContextWindowError
+} from '../agent-runtime/pi-context-compactor'
+import {
   evidenceReadCallHint,
   formatEvidenceLocation,
   formatEvidenceReadPage,
@@ -23,8 +27,11 @@ import {
   readEvidencePage,
   splitsSurrogatePair
 } from '../observation/evidence-location'
-import type { EvidenceLocation } from '../observation/model'
-import type { KnowledgeContributionDraft, KnowledgeStatementDraft } from '../../shared/knowledge'
+import {
+  MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH,
+  type KnowledgeContributionDraft,
+  type KnowledgeStatementDraft
+} from '../../shared/knowledge'
 import { REASONING_EFFORTS } from '../../shared/ai-backends'
 import type {
   KnowledgeAgentRunInput,
@@ -34,19 +41,9 @@ import type {
   KnowledgeStatementRecord
 } from './model'
 
-const MAX_MODEL_CALLS = 4
-const MAX_TOOL_CALLS = 12
-const RUN_TIMEOUT_MS = 5 * 60_000
 const MAX_EVIDENCE_OUTPUT_CHARS = 64 * 1_024
-const MAX_TOTAL_TOOL_OUTPUT_CHARS = 96 * 1_024
 const MAX_SEARCH_RESULTS = 20
 const MAX_SEARCH_OUTPUT_CHARS = 16 * 1_024
-const MAX_STATEMENT_OUTPUT_CHARS = 32 * 1_024
-const MAX_EVIDENCE_MAP_SECTION_OUTPUT_CHARS = 32 * 1_024
-const MAX_CONTRIBUTION_CHARS = 64 * 1_024
-const MAX_STATEMENTS_PER_CONTRIBUTION = 100
-const MAX_EVIDENCE_MAP_CHARS = 128 * 1_024
-const MAX_ATTENTION_CHARS = 16 * 1_024
 const UNKNOWN_TRACE_TOOL_NAME = '未知工具'
 
 const TRACEABLE_TOOL_NAMES = new Set([
@@ -100,15 +97,13 @@ const contributionRelationParameters = Type.Object({
 const contributionStatementParameters = Type.Object({
   localRef: Type.String({ minLength: 1, maxLength: 128 }),
   title: Type.String({ minLength: 1, maxLength: 2_048 }),
-  content: Type.String({ minLength: 1, maxLength: MAX_CONTRIBUTION_CHARS }),
-  sources: Type.Optional(Type.Array(contributionSourceParameters, { maxItems: 100 })),
-  relations: Type.Optional(Type.Array(contributionRelationParameters, { maxItems: 100 }))
+  content: Type.String({ minLength: 1, maxLength: MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH }),
+  sources: Type.Optional(Type.Array(contributionSourceParameters)),
+  relations: Type.Optional(Type.Array(contributionRelationParameters))
 }, { additionalProperties: false })
 
 const submitContributionParameters = Type.Object({
-  statements: Type.Array(contributionStatementParameters, {
-    maxItems: MAX_STATEMENTS_PER_CONTRIBUTION
-  })
+  statements: Type.Array(contributionStatementParameters)
 }, { additionalProperties: false })
 
 function emptyUsage(): Usage {
@@ -158,10 +153,6 @@ function truncateWithNotice(value: string, maximum: number): string {
   return `${value.slice(0, Math.max(0, maximum - notice.length))}${notice}`
 }
 
-function normalizedSearchKey(query: string): string {
-  return query.replace(/\s+/g, ' ').trim().toLowerCase()
-}
-
 function safeTraceInteger(value: unknown): number | undefined {
   return Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : undefined
 }
@@ -184,7 +175,6 @@ function safeToolErrorCategory(toolName: string, result: unknown): string {
           }
         })()
   if (toolName === 'read_evidence') {
-    if (/重叠|overlap/i.test(errorText)) return '证据读取范围重叠'
     if (/不存在|失效|revision|unavailable/i.test(errorText)) return '原始证据不可用'
     if (/line|offset|location|位置|参数|property|integer|unicode/i.test(errorText)) {
       return '证据读取位置或参数无效'
@@ -257,16 +247,6 @@ function modelTraceDetail(message: AssistantMessage): string {
   ].filter((part): part is string => Boolean(part)).join(' · ')
 }
 
-interface EvidenceReadRange {
-  start: EvidenceLocation
-  end: EvidenceLocation
-}
-
-function rangesOverlap(left: EvidenceReadRange, right: EvidenceReadRange): boolean {
-  return compareEvidenceLocations(left.start, right.end) < 0
-    && compareEvidenceLocations(right.start, left.end) < 0
-}
-
 function searchResultText(records: KnowledgeStatementRecord[]): string {
   if (!records.length) return '没有找到相关 Knowledge Statement。'
   const lines = records.map((record) => [
@@ -278,23 +258,21 @@ function searchResultText(records: KnowledgeStatementRecord[]): string {
 }
 
 function statementResultText(record: KnowledgeStatementRecord): string {
-  return truncateWithNotice([
-    `ID: ${compactInline(record.id, 512)}`,
-    `标题: ${compactInline(record.title, 1_024)}`,
+  return [
+    `ID: ${record.id}`,
+    `标题: ${record.title}`,
     '内容:',
     record.content
-  ].join('\n'), MAX_STATEMENT_OUTPUT_CHARS)
+  ].join('\n')
 }
 
 function validateRunInput(input: KnowledgeAgentRunInput): void {
   if (!input.systemPrompt.trim()) throw new Error('Knowledge Maintenance Agent 的 System Prompt 不能为空')
   if (!input.evidenceMap.trim()) throw new Error('Evidence Map 不能为空')
-  if (input.evidenceMap.length > MAX_EVIDENCE_MAP_CHARS) throw new Error('Evidence Map 超出运行上限')
   if (!input.sourceRef.trim() || input.sourceRef.length > 512) throw new Error('Observation sourceRef 无效')
   if (!input.contributionRunRef.trim() || input.contributionRunRef.length > 1_024) {
     throw new Error('Knowledge Contribution runRef 无效')
   }
-  if (input.attention && input.attention.length > MAX_ATTENTION_CHARS) throw new Error('Attention 超出运行上限')
   if (input.reasoningEffort && !REASONING_EFFORTS.includes(input.reasoningEffort)) {
     throw new Error('思考强度无效')
   }
@@ -318,7 +296,6 @@ function validateRunInput(input: KnowledgeAgentRunInput): void {
       || !Array.isArray(section.selectors)
       || !section.selectors.length
       || !section.content.trim()
-      || section.content.length > MAX_EVIDENCE_MAP_SECTION_OUTPUT_CHARS
       || sectionIds.has(section.id)
     ) {
       throw new Error('Evidence Map 局部材料无效')
@@ -395,9 +372,6 @@ function contributionFromSubmission(
     runRef: input.contributionRunRef,
     statements: structuredClone(statements)
   }
-  if (JSON.stringify(contribution).length > MAX_CONTRIBUTION_CHARS) {
-    throw new Error(`Knowledge Contribution 总大小不能超过 ${MAX_CONTRIBUTION_CHARS} 个字符`)
-  }
   for (const statement of contribution.statements) {
     for (const source of statement.sources ?? []) {
       if (source.sourceRef !== input.sourceRef) {
@@ -426,7 +400,7 @@ function taskPrompt(input: KnowledgeAgentRunInput): string {
     `Observation sourceRef: ${input.sourceRef}`,
     `Observation view format: ${input.observationFormatVersion}`,
     `Range available to read_evidence: ${readableRange}. Evidence Map locations use one-based line and zero-based UTF-16 offset; limit is also measured in UTF-16 code units and must be at least 2 (maximum applied limit ${MAX_EVIDENCE_READ_LIMIT}). Always set a bounded limit and copy the returned Next location when more detail is needed.`,
-    `Run budget: at most ${MAX_TOTAL_TOOL_OUTPUT_CHARS} total tool-output characters. Do not repeat searches, reread a Statement, or read overlapping evidence ranges.`,
+    'Tool calls may be repeated when useful. Keep each read bounded and use returned continuation locations to inspect more material progressively.',
     input.evidenceMapSections.length
       ? 'Expandable map section IDs and their immediate children are disclosed progressively inside the Evidence Map. Use read_evidence_map_section only for IDs you discover there.'
       : undefined,
@@ -442,17 +416,12 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
     validateRunInput(input)
     const runtime: ModelRuntime = input.runtime
     let modelCallCount = 0
-    let toolCallCount = 0
     const toolCalls: string[] = []
-    const completedSearches = new Set<string>()
-    const completedStatementReads = new Set<string>()
-    const completedEvidenceMapSections = new Set<string>()
-    const completedEvidenceRanges: EvidenceReadRange[] = []
-    let totalToolOutputCharacters = 0
     let contribution: KnowledgeContributionDraft | undefined
-    let fatalError: Error | undefined
-    let timedOut = false
+    let protocolError: Error | undefined
+    let compactionError: Error | undefined
     let activeModelCall: number | undefined
+    let activeCompactionCall: number | undefined
 
     const reportTrace = (event: Parameters<NonNullable<KnowledgeAgentRunInput['onTrace']>>[0]): void => {
       try {
@@ -462,27 +431,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
       }
     }
 
-    const fail = (error: unknown, fallback: string): Error => {
-      const normalized = asError(error, fallback)
-      fatalError ??= normalized
-      return normalized
-    }
-
-    const recordToolOutput = (text: string): void => {
-      if (totalToolOutputCharacters + text.length > MAX_TOTAL_TOOL_OUTPUT_CHARS) {
-        throw new Error(
-          `本次运行的工具输出累计最多 ${MAX_TOTAL_TOOL_OUTPUT_CHARS} 个字符；请减少搜索结果、缩小读取范围，或复用已有结果提交`
-        )
-      }
-      totalToolOutputCharacters += text.length
-    }
-
     const guardedStreamFn: StreamFn = (model, context, options) => {
-      if (fatalError) return failedModelStream(model, fatalError.message)
-      if (modelCallCount >= MAX_MODEL_CALLS) {
-        const error = fail(new Error(`Knowledge Maintenance Agent 最多允许 ${MAX_MODEL_CALLS} 次模型调用`), '模型调用次数超限')
-        return failedModelStream(model, error.message)
-      }
       modelCallCount++
       activeModelCall = modelCallCount
       reportTrace({ type: 'model_started', callNumber: modelCallCount })
@@ -504,21 +453,15 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         execute: async (_toolCallId, parameters, signal) => {
           signal?.throwIfAborted()
           const query = parameters.query.trim()
-          const searchKey = normalizedSearchKey(query)
-          if (!searchKey) throw new Error('搜索 query 去除空白后不能为空')
-          if (completedSearches.has(searchKey)) {
-            throw new Error('重复搜索已拒绝；请复用已有结果或改写 query')
-          }
+          if (!query) throw new Error('搜索 query 去除空白后不能为空')
           let records: KnowledgeStatementRecord[]
           try {
             const limit = parameters.limit ?? 8
             records = (await this.knowledgeReader.search(query, limit, signal)).slice(0, limit)
           } catch (error) {
-            throw fail(error, '搜索 Knowledge Statement 失败')
+            throw asError(error, '搜索 Knowledge Statement 失败')
           }
           const text = searchResultText(records)
-          recordToolOutput(text)
-          completedSearches.add(searchKey)
           return {
             content: [{ type: 'text', text }],
             details: { count: records.length }
@@ -535,18 +478,13 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
           signal?.throwIfAborted()
           const statementId = parameters.statementId.trim()
           if (!statementId) throw new Error('Statement ID 去除空白后不能为空')
-          if (completedStatementReads.has(statementId)) {
-            throw new Error('该 Knowledge Statement 已读取；请复用已有结果或读取其他 Statement')
-          }
           let record: KnowledgeStatementRecord | undefined
           try {
             record = await this.knowledgeReader.read(statementId, signal)
           } catch (error) {
-            throw fail(error, '读取 Knowledge Statement 失败')
+            throw asError(error, '读取 Knowledge Statement 失败')
           }
           const text = record ? statementResultText(record) : '未找到该 Knowledge Statement。'
-          recordToolOutput(text)
-          completedStatementReads.add(statementId)
           return {
             content: [{ type: 'text', text }],
             details: { found: Boolean(record) }
@@ -564,24 +502,23 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
           const sectionId = parameters.sectionId.trim()
           const section = input.evidenceMapSections.find((candidate) => candidate.id === sectionId)
           if (!section) throw new Error('Evidence Map section 不属于当前授权工作区')
-          if (completedEvidenceMapSections.has(sectionId)) {
-            throw new Error('该 Evidence Map section 已读取；请复用已有结果或展开其他 section')
-          }
-          const text = truncateWithNotice([
+          const hasChildren = Boolean(section.children?.length)
+          const sourceDisclosure = hasChildren
+            ? `Source coverage extent (navigation only; not exact selectors): ${section.selectors[0].split('-')[0]}-${section.selectors[section.selectors.length - 1].split('-')[1]}`
+            : `Selected source ranges: ${section.selectors.join(', ')}`
+          const text = [
             `Section: ${section.id}`,
-            `Selected source ranges: ${section.selectors.join(', ')}`,
+            sourceDisclosure,
+            hasChildren
+              ? `Immediate child sections: ${section.children?.join(', ')}`
+              : 'Immediate child sections: none',
             `First evidence read location: ${formatEvidenceLocation(section.readLocation)}`,
             `First bounded read call: ${evidenceReadCallHint(section.readLocation)}`,
             section.characterWindow
               ? `Character window: [${section.characterWindow.startCharacter}, ${section.characterWindow.endCharacter}) of ${section.characterWindow.totalCharacters}`
               : undefined,
-            section.children?.length
-              ? `Immediate child sections: ${section.children.join(', ')}`
-              : 'Immediate child sections: none',
             section.content
-          ].filter((part): part is string => Boolean(part)).join('\n'), MAX_EVIDENCE_MAP_SECTION_OUTPUT_CHARS)
-          recordToolOutput(text)
-          completedEvidenceMapSections.add(sectionId)
+          ].filter((part): part is string => Boolean(part)).join('\n')
           return {
             content: [{ type: 'text' as const, text }],
             details: { sectionId: section.id, selectors: [...section.selectors] }
@@ -601,22 +538,9 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
             { line: parameters.line, offset: parameters.offset },
             parameters.limit
           )
-          const returnedRange: EvidenceReadRange = { start: page.start, end: page.end }
-          const overlapping = compareEvidenceLocations(page.start, page.end) < 0
-            ? completedEvidenceRanges.find((range) => rangesOverlap(range, returnedRange))
-            : undefined
-          if (overlapping) {
-            throw new Error(
-              `读取位置与已返回范围 ${formatEvidenceLocation(overlapping.start)}-${formatEvidenceLocation(overlapping.end)} 重叠；请使用上次返回的 Next 位置`
-            )
-          }
           const text = formatEvidenceReadPage(page)
           if (text.length > MAX_EVIDENCE_OUTPUT_CHARS) {
             throw new Error('read_evidence 内部输出超过安全上限')
-          }
-          recordToolOutput(text)
-          if (compareEvidenceLocations(page.start, page.end) < 0) {
-            completedEvidenceRanges.push(returnedRange)
           }
           return {
             content: [{ type: 'text', text }],
@@ -641,7 +565,6 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
           signal?.throwIfAborted()
-          if (contribution !== undefined) throw fail(new Error('Knowledge Contribution 只能提交一次'), '重复提交')
           contribution = contributionFromSubmission(
             input,
             parameters.statements as KnowledgeStatementDraft[]
@@ -655,29 +578,85 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
       } as AgentTool<typeof submitContributionParameters>
     ]
 
+    const thinkingLevel = runtime.model.reasoning ? (input.reasoningEffort ?? 'off') : 'off'
+    const compactContext = createPiContextCompactor({
+      model: runtime.model,
+      streamFn: runtime.streamFn,
+      systemPrompt: input.systemPrompt,
+      tools,
+      thinkingLevel,
+      onModelCall: (event) => {
+        if (event.type === 'started') {
+          modelCallCount++
+          activeCompactionCall = modelCallCount
+          reportTrace({
+            type: 'model_started',
+            callNumber: modelCallCount,
+            purpose: 'context_compaction'
+          })
+          return
+        }
+        if (event.type === 'failed') {
+          compactionError = event.error ?? new Error('Context compaction failed')
+        }
+        if (activeCompactionCall === undefined) return
+        reportTrace({
+          type: 'model_completed',
+          callNumber: activeCompactionCall,
+          status: event.type === 'completed'
+            ? 'completed'
+            : input.signal.aborted ? 'cancelled' : 'failed',
+          detail: event.message
+            ? `context compaction · ${modelTraceDetail(event.message)}`
+            : input.signal.aborted
+              ? 'context compaction cancelled'
+              : 'context compaction failed'
+        })
+        activeCompactionCall = undefined
+      }
+    })
+    const transformContext = async (
+      messages: Parameters<typeof compactContext>[0],
+      signal?: AbortSignal
+    ): ReturnType<typeof compactContext> => {
+      try {
+        return await compactContext(messages, signal)
+      } catch (error) {
+        compactionError = asError(error, 'Context compaction failed')
+        throw compactionError
+      }
+    }
+
     const agent = new Agent({
       initialState: {
         systemPrompt: input.systemPrompt,
         model: runtime.model,
-        thinkingLevel: runtime.model.reasoning ? (input.reasoningEffort ?? 'off') : 'off',
+        thinkingLevel,
         tools
       },
       streamFn: guardedStreamFn,
+      transformContext,
       toolExecution: 'sequential',
       beforeToolCall: async ({ toolCall }) => {
-        if (fatalError) return { block: true, reason: fatalError.message }
         if (contribution !== undefined) {
           const message = toolCall.name === 'submit_knowledge_contribution'
             ? 'Knowledge Contribution 只能提交一次'
             : '提交 Knowledge Contribution 后不能继续调用工具'
-          return { block: true, reason: fail(new Error(message), message).message }
+          protocolError ??= new Error(message)
+          return { block: true, reason: message }
         }
         return undefined
       },
-      afterToolCall: async ({ assistantMessage }) => {
+      afterToolCall: async ({ assistantMessage, toolCall }) => {
         const batchSubmits = assistantMessage.content.some((content) =>
           content.type === 'toolCall' && content.name === 'submit_knowledge_contribution')
-        return batchSubmits ? { terminate: true } : undefined
+        if (!batchSubmits) return undefined
+
+        // Pi ends a batch only when every result carries the hint. Other calls in a submit batch
+        // can terminate; a rejected first submit remains a normal tool error so the model can retry.
+        return toolCall.name !== 'submit_knowledge_contribution' || contribution !== undefined
+          ? { terminate: true }
+          : undefined
       }
     })
 
@@ -722,34 +701,18 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
           toolCallId: event.toolCallId,
           toolName
         })
-        toolCallCount++
         toolCalls.push(toolName)
-        if (toolCallCount > MAX_TOOL_CALLS) {
-          fail(new Error(`Knowledge Maintenance Agent 最多允许 ${MAX_TOOL_CALLS} 次工具调用`), '工具调用次数超限')
-          return
-        }
-        if (contribution !== undefined) {
-          const message = event.toolName === 'submit_knowledge_contribution'
-            ? 'Knowledge Contribution 只能提交一次'
-            : '提交 Knowledge Contribution 后不能继续调用工具'
-          fail(new Error(message), message)
-        }
       }
     })
 
     const abortAgent = (): void => agent.abort()
     input.signal.addEventListener('abort', abortAgent, { once: true })
-    const timeout = setTimeout(() => {
-      timedOut = true
-      agent.abort()
-    }, RUN_TIMEOUT_MS)
 
     try {
       const run = agent.prompt(taskPrompt(input))
       if (input.signal.aborted) agent.abort()
       await run
     } finally {
-      clearTimeout(timeout)
       input.signal.removeEventListener('abort', abortAgent)
       if (activeModelCall !== undefined) {
         reportTrace({
@@ -760,11 +723,26 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         })
         activeModelCall = undefined
       }
+      if (activeCompactionCall !== undefined) {
+        reportTrace({
+          type: 'model_completed',
+          callNumber: activeCompactionCall,
+          status: input.signal.aborted ? 'cancelled' : 'failed',
+          detail: 'context compaction did not complete normally'
+        })
+        activeCompactionCall = undefined
+      }
     }
 
-    if (timedOut) throw new Error('Knowledge Maintenance Agent 运行超时（5 分钟）')
     if (input.signal.aborted) throw asError(input.signal.reason, 'Knowledge Maintenance Agent 运行已取消')
-    if (fatalError) throw fatalError
+    if (protocolError) throw protocolError
+    if (
+      compactionError instanceof PiContextWindowError
+      || compactionError instanceof PiContextCompactionOutputError
+    ) throw compactionError
+    if (compactionError) {
+      throw new ModelConnectionFailureError(compactionError)
+    }
     if (agent.state.errorMessage) {
       throw new ModelConnectionFailureError(
         new Error(`Knowledge Maintenance Agent 模型调用失败：${agent.state.errorMessage}`)

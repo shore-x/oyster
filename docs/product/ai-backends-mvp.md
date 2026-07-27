@@ -18,7 +18,7 @@ AI Backend 是 Oyster 获得模型调用能力的边界。MVP 只区分两种计
 - **Model** 表示该 Connection 当前可调用的具体模型；
 - **Stage Configuration** 表示某个处理阶段明确选择的 Connection、Model 和可选思考强度。
 
-Connection 不等于 Model。同一个 Connection 可以暴露多个 Model，Observation Preprocessor 与 Knowledge Maintenance Agent 可以分别选择不同组合。Direct Model Call 或 Pi Agent Core 是阶段的执行 Runtime，不是另一类 Backend。
+Connection 不等于 Model。同一个 Connection 可以暴露多个 Model，Observation Preprocessor 与 Knowledge Maintenance Agent 可以分别选择不同组合。Direct Model Call 或通用 Agent Runtime 是阶段的执行方式，不是另一类 Backend；当前 Agent Runtime 由 Pi Agent Core 实现，但不构成知识模型的一部分。
 
 Agent 数据来源与 AI Connection 也是两个独立概念。不建立 Subscription 领域对象；套餐和账号信息只是认证后显示的 Connection 上下文。
 
@@ -45,7 +45,7 @@ API 模型发现结果和 Coding Plan 模型目录是可重建的运行时索引
 - 当前可用 Model；
 - 测试实际使用的 Model 与思考强度。
 
-知识加工的每个阶段独立保存 Connection、Model、可选思考强度和 Prompt 覆盖。界面必须同时展示阶段 Runtime，避免把 Pi Agent Core 与 Backend 混为一谈。
+知识加工的每个阶段独立保存 Connection、Model、可选思考强度和 Prompt 覆盖。界面必须同时展示阶段 Runtime，避免把通用 Agent Runtime 或其当前 Pi 实现与 Backend 混为一谈。
 
 只有模型明确声明支持的思考强度才可选择；“模型默认”不发送额外参数。系统不猜测未知或自定义模型的能力。测试与正式运行都只使用用户明确选择的组合，不自动选择或回退到其他 Connection、Model 或计费来源。
 
@@ -55,9 +55,9 @@ Coding Plan 提供两个明确登录入口：Device Code 适合远程或 loopbac
 
 主进程负责本机发现、OAuth、Keychain、模型目录与实际调用；Renderer 只通过 typed preload API 获得脱敏状态。Browser OAuth URL 由主进程直接交给系统浏览器；Device Code 的验证地址和用户码可以短暂显示在 Renderer，token 始终不经过 Renderer。API Key 首次输入时只经受信 IPC 用于发现或保存，之后不进入配置文件、日志、Prompt、Agent transcript 或 IPC 返回。
 
-Coding Plan 的直接生成和 Pi Agent Core 都复用同一个已选 Model 与 Pi model stream，因此不会为了使用订阅再嵌套一个外部 Coding Agent loop。角色能够读取的 Observation、Knowledge 与工具仍由 Oyster 当前运行授予，与 Backend 类型无关。
+Coding Plan 的直接生成和通用 Agent Runtime（当前为 Pi Agent Core）都复用同一个已选 Model 与 Pi model stream，因此不会为了使用订阅再嵌套一个外部 Coding Agent loop。Runtime 负责普通模型—工具循环和上下文压缩；角色能够读取的 Observation、Knowledge 与工具仍由 Oyster 当前运行授予，与 Backend 类型无关。
 
-自定义远程 URL 默认必须使用 HTTPS；只有用户显式填写的 localhost 端点可以使用 HTTP。模型请求固定到所选端点，拒绝重定向，并限制超时、响应大小和调用次数。连接失效只影响该 Connection；应用可以继续启动，也不会自动切换计费来源。
+自定义远程 URL 默认必须使用 HTTPS；只有用户显式填写的 localhost 端点可以使用 HTTP。模型请求固定到所选端点，拒绝重定向，并遵循所选模型的上下文边界与每次请求的超时、输出边界；不以固定的整次 Agent 调用次数作为 Backend 安全边界。连接失效只影响该 Connection；应用可以继续启动，也不会自动切换计费来源。
 
 ## 5. 当前不做
 

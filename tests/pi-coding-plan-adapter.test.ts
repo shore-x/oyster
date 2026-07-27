@@ -442,7 +442,19 @@ describe('PiCodingPlanAdapter', () => {
     expect(models.streamCalls).toEqual([{
       model: MODEL,
       context,
-      options: { reasoning: 'high' }
+      options: { reasoning: 'high', timeoutMs: 120_000 }
     }])
+  })
+
+  it('preserves a bounded per-request timeout supplied to the Pi Agent StreamFn', () => {
+    const { adapter, models } = createAdapter()
+    const runtime = adapter.runtime(MODEL.id)
+    const context: Context = { messages: [] }
+
+    runtime.streamFn(runtime.model, context, { timeoutMs: 30_000 })
+
+    expect(models.streamCalls[0]?.options?.timeoutMs).toBe(30_000)
+    expect(() => runtime.streamFn(runtime.model, context, { timeoutMs: 0 }))
+      .toThrow('请求超时')
   })
 })

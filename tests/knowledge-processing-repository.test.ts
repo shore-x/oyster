@@ -98,6 +98,19 @@ describe('JsonKnowledgeProcessingRepository', () => {
     })
   })
 
+  it('loads a non-empty prompt override without an arbitrary character ceiling', async () => {
+    const { filePath, repository } = await temporaryRepository()
+    const instructionsOverride = 'prompt '.repeat(4_000)
+    await writeFile(filePath, JSON.stringify({
+      stages: [{ stageId: 'knowledge_maintenance_agent', instructionsOverride }]
+    }), 'utf8')
+
+    expect(instructionsOverride.length).toBeGreaterThan(20_000)
+    await expect(repository.load()).resolves.toEqual({
+      stages: [{ stageId: 'knowledge_maintenance_agent', instructionsOverride }]
+    })
+  })
+
   it('rejects malformed JSON and invalid or duplicate stage records instead of filtering them', async () => {
     const { filePath, repository } = await temporaryRepository()
 

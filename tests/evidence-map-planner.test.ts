@@ -5,6 +5,7 @@ import {
   numberedObservation,
   numberedObservationUnits,
   observationLineNumber,
+  observationSourceSelectorsText,
   planObservationSegments,
   resolveEvidenceMapPlannerOptions,
   type EvidenceMapNode
@@ -14,9 +15,9 @@ import type { ObservationUnit } from '../src/main/observation/model'
 
 function options(overrides: Parameters<typeof resolveEvidenceMapPlannerOptions>[0] = {}) {
   return resolveEvidenceMapPlannerOptions({
-    segmentBytes: 26,
+    segmentBytes: 45,
     adjacentContextBytes: 13,
-    mergeBytes: 100,
+    mergeBytes: 1_000,
     ...overrides
   })
 }
@@ -64,13 +65,13 @@ describe('Evidence Map preprocessing planner', () => {
   })
 
   it('packs adapter-produced units without changing their boundaries', () => {
-    expect(planObservationSegments(units('12345'), options({ segmentBytes: 15 }))).toHaveLength(1)
+    expect(planObservationSegments(units('12345'), options({ segmentBytes: 30 }))).toHaveLength(1)
     const prepared: ObservationUnit[] = [
       { lineNumber: 1, content: '12345', startCharacter: 0, endCharacter: 5, totalCharacters: 10 },
       { lineNumber: 1, content: '67890', startCharacter: 5, endCharacter: 10, totalCharacters: 10 }
     ]
 
-    const segments = planObservationSegments(prepared, options({ segmentBytes: 40 }))
+    const segments = planObservationSegments(prepared, options({ segmentBytes: 55 }))
 
     expect(segments.flatMap((segment) => segment.units)).toEqual(prepared)
     expect(segments.map((segment) => segment.readLocation)).toEqual([
@@ -78,7 +79,8 @@ describe('Evidence Map preprocessing planner', () => {
       { line: 1, offset: 5 }
     ])
     expect(segments.every(
-      (segment) => utf8Bytes(numberedObservationUnits(segment.units)) <= 40
+      (segment) => utf8Bytes(numberedObservationUnits(segment.units))
+        + utf8Bytes(observationSourceSelectorsText(segment.sourceRanges)) <= 55
     )).toBe(true)
   })
 
@@ -117,12 +119,37 @@ describe('Evidence Map preprocessing planner', () => {
       { startLine: 7, endLine: 7 },
       { startLine: 9, endLine: 10 }
     ])
-    expect(evidenceMapNodeText({
+    const navigationText = evidenceMapNodeText({
       content: 'map',
       sourceRanges: segment.sourceRanges,
       sectionIds: [segment.id],
       readLocation: segment.readLocation
-    })).toContain('Selected source ranges: L000001-L000002, L000007-L000007, L000009-L000010')
+    })
+    expect(navigationText).toContain('Source coverage extent: L000001-L000010')
+    expect(navigationText).not.toContain('L000007-L000007')
+  })
+
+  it('includes exact sparse selector text in each segment material budget', () => {
+    const prepared: ObservationUnit[] = Array.from({ length: 40 }, (_, index) => {
+      const lineNumber = index * 2 + 1
+      return {
+        lineNumber,
+        content: 'x',
+        startCharacter: 0,
+        endCharacter: 1,
+        totalCharacters: 1
+      }
+    })
+
+    const segments = planObservationSegments(prepared, options({ segmentBytes: 200 }))
+
+    expect(segments.length).toBeGreaterThan(1)
+    expect(segments.every((segment) => (
+      utf8Bytes(numberedObservationUnits(segment.units))
+        + utf8Bytes(observationSourceSelectorsText(segment.sourceRanges)) <= 200
+    ))).toBe(true)
+    expect(segments.flatMap((segment) => segment.sourceRanges.map((range) => range.startLine)))
+      .toEqual(prepared.map((unit) => unit.lineNumber))
   })
 
   it('budgets the serialized global selectors even when the Observation contains many empty lines', () => {
@@ -133,7 +160,8 @@ describe('Evidence Map preprocessing planner', () => {
 
     expect(segments).toHaveLength(15)
     expect(segments.every(
-      (segment) => numberedObservationUnits(segment.units).length <= 26
+      (segment) => utf8Bytes(numberedObservationUnits(segment.units))
+        + utf8Bytes(observationSourceSelectorsText(segment.sourceRanges)) <= 45
     )).toBe(true)
   })
 
@@ -143,10 +171,11 @@ describe('Evidence Map preprocessing planner', () => {
   })
 
   it('uses UTF-8 bytes rather than JavaScript character counts for segment budgets', () => {
-    const cjkSegments = planObservationSegments(units('汉字\n汉字'), options({ segmentBytes: 26 }))
+    const cjkSegments = planObservationSegments(units('汉字\n汉字'), options({ segmentBytes: 46 }))
     expect(cjkSegments).toHaveLength(2)
     expect(cjkSegments.every(
-      (segment) => utf8Bytes(numberedObservationUnits(segment.units)) <= 26
+      (segment) => utf8Bytes(numberedObservationUnits(segment.units))
+        + utf8Bytes(observationSourceSelectorsText(segment.sourceRanges)) <= 46
     )).toBe(true)
   })
 
@@ -220,7 +249,7 @@ describe('Evidence Map preprocessing planner', () => {
   it('allows more than 32 bounded segments', () => {
     const segments = planObservationSegments(
       units(Array.from({ length: 34 }, () => '12345').join('\n')),
-      options({ segmentBytes: 15, adjacentContextBytes: 13 })
+      options({ segmentBytes: 30, adjacentContextBytes: 13 })
     )
 
     expect(segments).toHaveLength(34)
@@ -238,13 +267,13 @@ describe('Evidence Map preprocessing planner', () => {
       readLocation: { line: index + 1, offset: 0 }
     }))
 
-    const groups = groupEvidenceMapNodes(nodes, 160)
+    const groups = groupEvidenceMapNodes(nodes, 500)
 
     expect(groups.flat()).toEqual(nodes)
     expect(groups.every((group) => group.length > 0)).toBe(true)
     expect(groups.every((group) => group
       .map((node) => evidenceMapNodeText(node))
-      .join('\n\n---\n\n').length <= 160)).toBe(true)
+      .join('\n\n---\n\n').length <= 500)).toBe(true)
     expect(groups.length).toBeGreaterThan(1)
   })
 
@@ -280,9 +309,15 @@ describe('Evidence Map preprocessing planner', () => {
     expect(groupEvidenceMapNodes(nodes, maximumBytes)).toEqual([nodes])
   })
 
-  it('does not allow runtime options to weaken the production input caps', () => {
-    expect(() => options({ segmentBytes: 120_001 })).toThrow('不能超过 120000')
-    expect(() => options({ adjacentContextBytes: 4_097 })).toThrow('不能超过 4096')
-    expect(() => options({ mergeBytes: 120_001 })).toThrow('不能超过 120000')
+  it('uses the production budgets as defaults rather than hard maximums', () => {
+    expect(options({
+      segmentBytes: 120_001,
+      adjacentContextBytes: 4_097,
+      mergeBytes: 120_002
+    })).toEqual({
+      segmentBytes: 120_001,
+      adjacentContextBytes: 4_097,
+      mergeBytes: 120_002
+    })
   })
 })

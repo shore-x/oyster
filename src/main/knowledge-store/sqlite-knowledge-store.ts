@@ -14,18 +14,20 @@ import type {
   KnowledgeStatementSource,
   ListKnowledgeStatementsOptions
 } from './model'
-import { KNOWLEDGE_RELATION_KINDS } from './model'
+import {
+  KNOWLEDGE_RELATION_KINDS,
+  MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH
+} from './model'
 import type {
   KnowledgeReader,
   KnowledgeStatementRecord
 } from '../knowledge-processing/model'
 
 const SCHEMA_VERSION = 1
-const MAX_STATEMENTS_PER_CONTRIBUTION = 100
 const MAX_LOCAL_REF_LENGTH = 128
 const MAX_RUN_REF_LENGTH = 1_024
 const MAX_TITLE_LENGTH = 2_048
-const MAX_CONTENT_LENGTH = 1024 * 1024
+
 const MAX_SOURCE_REF_LENGTH = 2_048
 const MAX_SELECTOR_LENGTH = 2_048
 const MAX_LIST_LIMIT = 1_000
@@ -192,9 +194,6 @@ function normalizeDraft(draft: KnowledgeContributionDraft): NormalizedContributi
   if (!draft || typeof draft !== 'object') throw new Error('Knowledge Contribution 格式无效')
   const runRef = requiredTrimmed(draft.runRef, 'runRef', MAX_RUN_REF_LENGTH)
   if (!Array.isArray(draft.statements)) throw new Error('statements 必须是数组')
-  if (draft.statements.length > MAX_STATEMENTS_PER_CONTRIBUTION) {
-    throw new Error(`一次 Contribution 最多包含 ${MAX_STATEMENTS_PER_CONTRIBUTION} 条 Statement`)
-  }
 
   const localRefs = new Set<string>()
   const statements = draft.statements.map((statement, index): NormalizedStatementDraft => {
@@ -206,8 +205,8 @@ function normalizeDraft(draft: KnowledgeContributionDraft): NormalizedContributi
     if (typeof statement.content !== 'string' || !statement.content.trim()) {
       throw new Error(`${localRef} content 不能为空`)
     }
-    if (statement.content.length > MAX_CONTENT_LENGTH) {
-      throw new Error(`${localRef} content 超出长度上限 ${MAX_CONTENT_LENGTH}`)
+    if (statement.content.length > MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH) {
+      throw new Error(`${localRef} content 超出长度上限 ${MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH}`)
     }
     if (statement.sources !== undefined && !Array.isArray(statement.sources)) {
       throw new Error(`${localRef} sources 必须是数组`)
@@ -269,19 +268,31 @@ function assertNoDraftCycles(statements: NormalizedStatementDraft[]): void {
         : [])
     )
   }
-  const visiting = new Set<string>()
-  const visited = new Set<string>()
+  const state = new Map<string, 'visiting' | 'visited'>()
+  for (const root of edges.keys()) {
+    if (state.has(root)) continue
+    state.set(root, 'visiting')
+    const stack: Array<{ localRef: string; nextTarget: number }> = [{ localRef: root, nextTarget: 0 }]
 
-  const visit = (localRef: string): void => {
-    if (visiting.has(localRef)) throw new Error('Knowledge Statement 的本地关系不能形成循环')
-    if (visited.has(localRef)) return
-    visiting.add(localRef)
-    for (const target of edges.get(localRef) ?? []) visit(target)
-    visiting.delete(localRef)
-    visited.add(localRef)
+    while (stack.length) {
+      const frame = stack[stack.length - 1]
+      const targets = edges.get(frame.localRef) ?? []
+      if (frame.nextTarget >= targets.length) {
+        state.set(frame.localRef, 'visited')
+        stack.pop()
+        continue
+      }
+
+      const target = targets[frame.nextTarget++]
+      const targetState = state.get(target)
+      if (targetState === 'visiting') {
+        throw new Error('Knowledge Statement 的本地关系不能形成循环')
+      }
+      if (targetState === 'visited') continue
+      state.set(target, 'visiting')
+      stack.push({ localRef: target, nextTarget: 0 })
+    }
   }
-
-  for (const localRef of edges.keys()) visit(localRef)
 }
 
 function asSqlParameters(values: Array<string | number>): SQLInputValue[] {
@@ -578,4 +589,3 @@ export class SqliteKnowledgeStore implements KnowledgeReader {
     this.database.close()
   }
 }
-

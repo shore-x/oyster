@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { SqliteKnowledgeStore } from '../src/main/knowledge-store/sqlite-knowledge-store'
 import { SqliteKnowledgeStoreManager } from '../src/main/knowledge-store/knowledge-store-manager'
+import { MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH } from '../src/shared/knowledge'
 
 const temporaryDirectories: string[] = []
 const closeables: Array<{ close(): void }> = []
@@ -35,6 +36,41 @@ describe('SqliteKnowledgeStore', () => {
     expect(store.getContributionByRunRef('run:empty')).toEqual(result.contribution)
     expect(store.listStatements()).toEqual([])
     expect(() => store.commit({ runRef: 'run:empty', statements: [] })).toThrow('runRef 已提交')
+  })
+
+  it('does not impose an arbitrary Statement count on one atomic Contribution', async () => {
+    const directory = await temporaryPath('oyster-knowledge-store-')
+    const store = new SqliteKnowledgeStore(join(directory, 'knowledge.sqlite'))
+    closeables.push(store)
+    const statements = Array.from({ length: 101 }, (_, index) => ({
+      localRef: `statement-${index}`,
+      title: `Statement ${index}`,
+      content: `Knowledge ${index}.`,
+      sources: [{ sourceRef: 'raw:large-contribution' }]
+    }))
+
+    const result = store.commit({ runRef: 'run:large-contribution', statements })
+
+    expect(result.statements).toHaveLength(101)
+    expect(result.sources).toHaveLength(101)
+  })
+
+  it('enforces the shared per-Statement content boundary', async () => {
+    const directory = await temporaryPath('oyster-knowledge-store-')
+    const store = new SqliteKnowledgeStore(join(directory, 'knowledge.sqlite'))
+    closeables.push(store)
+
+    expect(() => store.commit({
+      runRef: 'run:oversized-statement',
+      statements: [{
+        localRef: 'oversized',
+        title: 'Oversized Statement',
+        content: 'x'.repeat(MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH + 1),
+        sources: [{ sourceRef: 'raw:oversized' }]
+      }]
+    })).toThrow(`content 超出长度上限 ${MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH}`)
+
+    expect(store.getContributionByRunRef('run:oversized-statement')).toBeUndefined()
   })
 
   it('atomically commits free-text Statements, provenance, and minimal relations', async () => {
@@ -171,6 +207,31 @@ describe('SqliteKnowledgeStore', () => {
     expect(store.listStatements({ includeRevised: true })).toEqual([])
   })
 
+  it('detects a deeply nested draft cycle without recursive stack growth', async () => {
+    const directory = await temporaryPath('oyster-knowledge-store-')
+    const store = new SqliteKnowledgeStore(join(directory, 'knowledge.sqlite'))
+    closeables.push(store)
+    const statementCount = 15_000
+    const statements = Array.from({ length: statementCount }, (_, index) => ({
+      localRef: `deep-${index}`,
+      title: `Deep ${index}`,
+      content: `Deep relation ${index}.`,
+      relations: [{
+        relation: 'derived_from' as const,
+        target: {
+          kind: 'draft' as const,
+          localRef: `deep-${(index + 1) % statementCount}`
+        }
+      }]
+    }))
+
+    expect(() => store.commit({
+      runRef: 'run:deep-cycle',
+      statements
+    })).toThrow('Knowledge Statement 的本地关系不能形成循环')
+    expect(store.getContributionByRunRef('run:deep-cycle')).toBeUndefined()
+  })
+
   it('enforces Statement immutability at the database boundary', async () => {
     const directory = await temporaryPath('oyster-knowledge-store-')
     const databasePath = join(directory, 'knowledge.sqlite')
@@ -243,4 +304,3 @@ describe('SqliteKnowledgeStoreManager', () => {
     await expect(manager.discardSandbox('../knowledge.sqlite')).rejects.toThrow('Sandbox ID 无效')
   })
 })
-

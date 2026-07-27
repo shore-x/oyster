@@ -11,6 +11,7 @@ import {
   KnowledgeProcessingService,
   type KnowledgeProcessingServiceOptions
 } from '../src/main/knowledge-processing/knowledge-processing-service'
+import { MAX_OBSERVATION_SEGMENT_SELECTOR_BYTES } from '../src/main/knowledge-processing/evidence-map-planner'
 import type {
   AiBackendPort,
   KnowledgeAgentRunInput,
@@ -313,6 +314,27 @@ describe('KnowledgeProcessingService', () => {
     })
   })
 
+  it('does not impose a separate fixed character ceiling on editable stage prompts', async () => {
+    const repository = new InMemoryKnowledgeProcessingRepository()
+    const { service } = createService({ repository })
+    await service.initialize()
+    const instructions = `Maintain the configured role.\n${'context '.repeat(3_000)}`.trim()
+
+    const snapshot = await service.saveStage({
+      stageId: 'knowledge_maintenance_agent',
+      connectionId: 'model:a',
+      modelId: 'model:a',
+      instructionsOverride: instructions
+    })
+
+    expect(instructions.length).toBeGreaterThan(20_000)
+    expect(snapshot.stages.find((stage) => stage.id === 'knowledge_maintenance_agent'))
+      .toMatchObject({ effectiveInstructions: instructions, isCustomized: true })
+    await expect(repository.load()).resolves.toMatchObject({
+      stages: [expect.objectContaining({ instructionsOverride: instructions })]
+    })
+  })
+
   it('persists a supported per-stage reasoning effort and passes it through both runtimes', async () => {
     const connection = modelConnection('model:reasoning', 'reasoning-model', ['low', 'high'])
     const repository = new InMemoryKnowledgeProcessingRepository()
@@ -458,6 +480,22 @@ describe('KnowledgeProcessingService', () => {
     expect(result.segmentCount).toBe(1)
   })
 
+  it('lets the selected model context budget, rather than a fixed Attention length, govern preprocessing', async () => {
+    const connection = modelConnection('model:attention', 'attention-model', [], 100_000)
+    const { service, backend } = createService({ connections: [connection] })
+    await service.initialize()
+    await configure(service, 'observation_preprocessor', connection.id, null, 'attention-model')
+    const attention = 'important context '.repeat(700)
+
+    await expect(service.runObservationPreprocessor({
+      observation: 'one fact',
+      attention
+    })).resolves.toMatchObject({ segmentCount: 1 })
+
+    expect(attention.length).toBeGreaterThan(10_000)
+    expect(backend.generationCalls[0].request.prompt).toContain(attention.trim())
+  })
+
   it('keeps the Evidence Map complete while bounding its debug trace copy', async () => {
     const { service, backend } = createService()
     await service.initialize()
@@ -479,11 +517,78 @@ describe('KnowledgeProcessingService', () => {
     expect(result.debugTrace.preprocessing?.calls[0].output?.endsWith('…')).toBe(true)
   })
 
+  it('splits sparse selectors and keeps exact leaf locators out of the bounded root navigation', async () => {
+    const connection = modelConnection('model:large-context', 'large-context', [], 400_000)
+    const { service, backend, agent } = createService({ connections: [connection] })
+    await service.initialize()
+    await configure(
+      service,
+      'observation_preprocessor',
+      connection.id,
+      null,
+      'large-context'
+    )
+    await configure(
+      service,
+      'knowledge_maintenance_agent',
+      connection.id,
+      null,
+      'large-context'
+    )
+    backend.generationHandler = async () => ({ text: 'M'.repeat(20_000) })
+    // The serialized Observation plus selectors fits the normal 120 KB material
+    // budget; the per-section selector boundary must still prevent one huge root.
+    const rawLines = Array.from({ length: 3_999 }, (_, index) => index % 2 === 0 ? 'x' : '')
+    const view: ObservationView = {
+      formatVersion: 'sparse-test-v1',
+      rawLines,
+      units: rawLines.flatMap((content, index) => content
+        ? [{
+            lineNumber: index + 1,
+            content,
+            startCharacter: 0,
+            endCharacter: content.length,
+            totalCharacters: content.length
+          }]
+        : [])
+    }
+
+    const result = await service.runObservationPreprocessorView(view)
+
+    expect(result.segmentCount).toBeGreaterThan(1)
+    expect(result.evidenceMap.length).toBeLessThan(32 * 1_024)
+    expect(result.evidenceMap).toContain('M'.repeat(20_000))
+    expect(result.evidenceMap).not.toContain('Selected source ranges:')
+    const mergeCalls = backend.generationCalls.filter(
+      (call) => call.request.prompt.includes('BEGIN_EVIDENCE_MAP_MATERIALS')
+    )
+    expect(mergeCalls.length).toBeGreaterThan(0)
+    expect(mergeCalls.every((call) => (
+      call.request.prompt.includes('Source coverage extent:')
+      && call.request.prompt.includes('Exact selected ranges remain attached')
+      && !call.request.prompt.includes('Selected source ranges:')
+    ))).toBe(true)
+
+    await service.runKnowledgeMaintenance({ preprocessingRunId: result.runId })
+    const exactLeafSelectors = agent.calls[0].evidenceMapSections
+      .filter((section) => !section.children)
+      .flatMap((section) => section.selectors)
+    expect(agent.calls[0].evidenceMapSections
+      .filter((section) => !section.children)
+      .every((section) => (
+        Buffer.byteLength(section.selectors.join(', '), 'utf8')
+          <= MAX_OBSERVATION_SEGMENT_SELECTOR_BYTES
+      ))).toBe(true)
+    expect(exactLeafSelectors).toHaveLength(rawLines.filter(Boolean).length)
+    expect(exactLeafSelectors[0]).toBe('L000001-L000001')
+    expect(exactLeafSelectors.at(-1)).toBe('L003999-L003999')
+  })
+
   it('maps a long Observation in independent global ranges and assembles a bounded navigation map', async () => {
     const { service, backend, agent } = createService({
       serviceOptions: {
         evidenceMapPlanner: {
-          segmentBytes: 40,
+          segmentBytes: 55,
           adjacentContextBytes: 18,
           mergeBytes: 1_000
         }
@@ -661,7 +766,7 @@ describe('KnowledgeProcessingService', () => {
     const { service, backend } = createService({
       serviceOptions: {
         evidenceMapPlanner: {
-          segmentBytes: 16,
+          segmentBytes: 32,
           adjacentContextBytes: 16,
           mergeBytes: 1_000
         }
@@ -724,9 +829,9 @@ describe('KnowledgeProcessingService', () => {
     const { service, backend } = createService({
       serviceOptions: {
         evidenceMapPlanner: {
-          segmentBytes: 23,
+          segmentBytes: 39,
           adjacentContextBytes: 11,
-          mergeBytes: 280
+          mergeBytes: 600
         }
       }
     })
@@ -880,7 +985,7 @@ describe('KnowledgeProcessingService', () => {
     const { service, backend } = createService({
       serviceOptions: {
         evidenceMapPlanner: {
-          segmentBytes: 15,
+          segmentBytes: 30,
           adjacentContextBytes: 2,
           mergeBytes: 1_000
         }
@@ -905,7 +1010,7 @@ describe('KnowledgeProcessingService', () => {
     const { service, backend, agent } = createService({
       serviceOptions: {
         evidenceMapPlanner: {
-          segmentBytes: 16,
+          segmentBytes: 32,
           adjacentContextBytes: 16,
           mergeBytes: 1_000
         }
@@ -949,7 +1054,7 @@ describe('KnowledgeProcessingService', () => {
     const { service, backend } = createService({
       serviceOptions: {
         evidenceMapPlanner: {
-          segmentBytes: 16,
+          segmentBytes: 32,
           adjacentContextBytes: 16,
           mergeBytes: 1_000
         }
@@ -1091,6 +1196,42 @@ describe('KnowledgeProcessingService', () => {
     service.dispose()
     await expect(service.runKnowledgeMaintenance({ preprocessingRunId: preprocessing.runId }))
       .rejects.toThrow('工作区已不存在')
+  })
+
+  it('keeps only the Workspace owned by the current visible stage-debug result', async () => {
+    const { service, agent } = createService()
+    await service.initialize()
+    await configure(service, 'observation_preprocessor')
+    await configure(service, 'knowledge_maintenance_agent')
+    const first = await service.runObservationPreprocessor({ observation: 'workspace-first' })
+    const second = await service.runObservationPreprocessor({ observation: 'workspace-second' })
+
+    await expect(service.runKnowledgeMaintenance({
+      preprocessingRunId: first.runId
+    })).rejects.toThrow('工作区已不存在')
+    await expect(service.runKnowledgeMaintenance({
+      preprocessingRunId: second.runId
+    })).resolves.toMatchObject({ preprocessingRunId: second.runId })
+    expect(agent.calls.at(-1)?.observationLines).toEqual(['workspace-second'])
+  })
+
+  it('releases a full-chain Workspace when its exclusive run ends before maintenance', async () => {
+    const { service } = createService()
+    await service.initialize()
+    await configure(service, 'observation_preprocessor')
+    await configure(service, 'knowledge_maintenance_agent')
+    const lease = service.acquireExclusiveRun()
+    const preprocessing = await service.runObservationPreprocessor(
+      { observation: 'temporary full-chain workspace' },
+      undefined,
+      { lease }
+    )
+
+    service.releaseExclusiveRun(lease)
+
+    await expect(service.runKnowledgeMaintenance({
+      preprocessingRunId: preprocessing.runId
+    })).rejects.toThrow('工作区已不存在')
   })
 
   it('pairs same-name Knowledge Agent tool events by their internal tool call ID', async () => {

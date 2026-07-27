@@ -68,7 +68,11 @@ export interface KnowledgeAgentRunInput {
 }
 
 export type KnowledgeAgentTraceEvent =
-  | { type: 'model_started'; callNumber: number }
+  | {
+      type: 'model_started'
+      callNumber: number
+      purpose?: 'agent' | 'context_compaction'
+    }
   | {
       type: 'model_completed'
       callNumber: number

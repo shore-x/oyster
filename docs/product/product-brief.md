@@ -119,6 +119,8 @@ MVP 的“实时”定义为 **turn 级近实时**，不是 token streaming。�
 4. Oyster Core 统一执行 Scope、出处、审计、持久化和删除规则；
 5. 用户可以检查来源，接受、修改、拒绝、固定、删除或重新加工派生知识。
 
+Knowledge Maintenance Agent 是一个普通、可替换的工具使用 Agent：角色差异来自 System Prompt、Workspace、授权工具和最终 Knowledge Contribution 协议，而不是专用状态机或固定运行步骤。系统不预设模型轮次、工具次数或总时长；通用 Agent Runtime 在上下文增长时负责压缩临时 transcript。模型的实际上下文、单次请求、分页读取和持久化完整性仍有各自的边界，最终结果仍由 Oyster Core 校验和提交；这些边界不变成整次 Agent 的行为配额。
+
 任何默认或自定义处理器一旦产生 Knowledge Contribution，就没有不同的本体身份，但必须保留处理器、Attention、输入依赖和版本。模型、Prompt、策略或 Agent 升级时可以重新加工派生的 Knowledge Statement，不重写 Raw Evidence。
 
 持久投影文档允许用户直接编辑，也允许 Projection Agent 基于当前文档、共享知识和 Attention 形成新修订。Projection Agent 发现知识不足时可以提出 Knowledge Need，交由 Knowledge Maintenance Agent 继续探索；它不能把当前 Markdown 自动回流为世界事实。临时 Context Packet 不需要持久文档的协作生命周期。
@@ -190,9 +192,9 @@ Oyster 把认证和计费通道与处理 Runtime 分开：
 - **Coding Plan / API Backend** 决定凭据、Provider、传输和额度来源；
 - **Connection** 是用户实际配置并授权的一条通道，可以暴露多个 Model；
 - **Stage Configuration** 固定某个阶段使用的 Connection、Model 和可选思考强度；
-- **Runtime** 决定该阶段做一次直接生成，还是用同一模型驱动受控 Agent loop。
+- **Runtime** 决定该阶段做一次直接生成，还是用同一模型驱动通用 Agent loop，并负责 Agent 的上下文生命周期。
 
-因此，Coding Plan 与 API 可以共享最小模型调用契约，同时仍保留各自不同的认证和计费语义。Knowledge Maintenance Agent 与 Projection Agent 的角色和工具权限由 Oyster 当前运行授予，不由 Backend 类型隐式扩大。Oyster 可以发现官方 Agent Runtime 中可公开读取的账号与套餐信息，但不会把该 Runtime 的内部 Agent loop 或凭据当作业务执行接口。
+因此，Coding Plan 与 API 可以共享最小模型调用契约，同时仍保留各自不同的认证和计费语义。Knowledge Maintenance Agent 与 Projection Agent 的角色和工具权限由 Oyster 当前运行授予，不由 Backend 类型隐式扩大；它们可以共用负责模型—工具循环和上下文压缩的通用 Runtime。Oyster 可以发现官方 Agent Runtime 中可公开读取的账号与套餐信息，但不会把该 Runtime 的内部 Agent loop 或凭据当作业务执行接口。
 
 LLM 适合承担：
 

@@ -28,6 +28,8 @@ Knowledge Statement 以数据库中的自由文本记录作为权威内容，持
 
 Observation Preprocessor、Knowledge Maintenance Agent 和 Projection Agent 不是互相竞争的整套架构，而是承担不同责任的处理器。越靠近观察层，流程越固定、来源约束越强；越靠近知识维护和投影，越需要 Agent 根据 Attention 探索现有状态并进行多步判断。
 
+当前仍处于核心链路验证阶段，默认采用能完整表达上述模型的最小机制。不能为了假设中的极端体验问题，静默增加整次运行的次数或时长配额、禁止普通 Agent 操作，或引入专用状态机和特殊分支。权限、数据完整性、用户取消以及单次模型或工具 I/O 的资源边界仍由 Core 明确保证；它们与限制 Agent 正常探索的产品策略不是同一类约束。后者若确有必要，应先说明实际问题与取舍并获得用户确认。
+
 ## 2. 三个认识论层次
 
 ### 2.1 观察层
@@ -130,7 +132,7 @@ Attention 可以同时指导默认和自定义处理器，但不应：
 
 Source Adapter 在发送给 Observation Preprocessor 前生成一份确定性的、选择性的 Observation View。它保留对话主线、明确的人类要求，以及工具或 Subagent 的必要动作与结果索引；运行时基础提示词、工具 Schema、权限与 token 遥测、重复事件和低层执行轨迹不默认进入预处理模型。较大的工具结果可以只提供有界表示和原始 locator，完整内容仍留在 Raw Evidence 中供 Knowledge Maintenance Agent 按需读取。Adapter 负责把不同 Harness 的存储方式映射到统一的位置能力，但不把原文改写成统一语义格式。这里的选择只改变模型工作材料，不修改、删除或另存原始来源，也不新增一个认识论层。
 
-Observation Preprocessing 可以在同一份确定来源内进行一次或多次有界直接 Model 调用。短视图默认一次完成；长视图按其中的原始顺序划分材料，每段始终引用同一个 `sourceRef`，并保留一个或多个已合并的精确全局 selector。普通材料以 `L` 行号或行范围定位；一个超长物理行被分段时，以同一 `L` 行和 `Cstart:end/total` 行内窗口定位。Prompt 要求局部地图和后续导航归并保留这些原始位置，不能把它们替换为生成文本中的位置。未被选择的中间行不进入这些 selector，也不被宣称为模型已经处理的内容。每次调用独立形成局部地图，随后由预处理器提供一份有界导航。这里不采用滚动摘要：前一范围的模型输出不会取代后一范围的输入，也不会成为新的权威来源。
+Observation Preprocessing 可以在同一份确定来源内进行一次或多次有界直接 Model 调用。短视图默认一次完成；长视图按其中的原始顺序划分材料，每段始终引用同一个 `sourceRef`，并保留一个或多个已合并的精确全局 selector。分段预算同时计入模型材料和 selector 本身的实际序列化开销；当稀疏位置过多时继续分段，而不对总段数或 Session 长度设限。普通材料以 `L` 行号或行范围定位；一个超长物理行被分段时，以同一 `L` 行和 `Cstart:end/total` 行内窗口定位。Prompt 要求局部地图和后续导航归并保留这些原始位置，不能把它们替换为生成文本中的位置。未被选择的中间行不进入这些 selector，也不被宣称为模型已经处理的内容。每次调用独立形成局部地图，随后由预处理器提供一份有界导航。导航节点只展示明确标注为非精确 union 的 coverage extent 和直接子节点，精确 selector 保留在可展开的局部 Section，不在根地图或归并 Prompt 中反复平铺。这里不采用滚动摘要：前一范围的模型输出不会取代后一范围的输入，也不会成为新的权威来源。
 
 Evidence Map 正文保持自由文本，因此“每个语义候选都带精确位置”是模型需要遵循的语义要求，而不是 Core 通过解析正文可以证明的结构约束。Core 独立保证每个地图 Section 都附有完整来源范围和首个可靠 EvidenceLocation；即使模型遗漏某个候选旁的位置，Agent 仍能从该 Section 的机器生成边界回源。当前不为追求候选级强保证而引入固定输出 Schema。
 
@@ -165,6 +167,10 @@ Observation -> Observation Preprocessing -> Evidence Map (Working Artifact)
 - 当 Artifact 不完整、存在冲突或将导致知识修订时，回到最小原始证据核查；
 - 识别可以直接复用的知识，以及需要补充、限定、修订或并列保留的理解；
 - 形成新的 Knowledge Contribution，其中可以包含对一条或多条 Knowledge Statement 的维护建议。
+
+Knowledge Maintenance Agent 是一个普通、可替换的工具使用 Agent。它的角色只由本次运行的 System Prompt、Workspace、工具集合和最终提交协议定义，不需要知识维护专属的 loop、固定步骤或状态机。默认实现可以更换 Agent Runtime，也可以增加或替换工具，而不改变知识层的概念模型。
+
+系统不为一次知识维护运行预设固定的模型轮次、工具调用次数或总时长；运行可以根据材料和不确定性继续探索，并允许用户取消。Agent transcript 增长时，由通用 Agent Runtime 负责上下文整理或压缩，而不是为知识维护再引入滚动摘要等专用机制。运行时压缩只管理临时 transcript，不产生新的 Evidence Map 或 Knowledge Statement。System Prompt 与工具定义不进入被压缩的 transcript；来源授权、Workspace revision 和最终提交由 Core 与工具闭包独立校验，因此摘要遗漏不能扩大权限或绕过提交契约。模型请求遵循所选模型的上下文与单次输出边界，大体量原始证据通过分页渐进读取；这些都不限制 Agent 可以继续进行下一轮探索。
 
 Agent 不应把 Evidence Map 当作不可质疑的事实，也不需要默认读取全部原始观察。它从地图获得方向，再按风险和不确定性选择是否展开证据。最终 Knowledge Contribution 必须能经由 Working Artifact 或直接引用追溯到原始观察或已有 Knowledge Statement。
 
@@ -210,7 +216,7 @@ Evidence Map 和 Canonical Activity 的可读表示可以在 Workspace 中采用
 
 Oyster 可以提供默认 Observation Preprocessor 和默认 Knowledge Maintenance Agent；用户也可以针对不同 Attention 增加自定义 Pipeline 或 Agent。
 
-当前验证实现用一次或多次有界直接 Model 调用承担 Observation Preprocessing，并用 Pi Agent Core 承担 Knowledge Maintenance Agent 的多轮工具循环；短 Session 仍只需一次预处理调用。默认完整链路在 Knowledge Sandbox 中提交和回读结果，同时保留不提交结果的阶段调试。这是对上述职责边界的首个可替换实现，不意味着知识模型依赖 Pi，也不把预处理器升级为 Agent。
+当前验证实现用一次或多次有界直接 Model 调用承担 Observation Preprocessing，并用通用 Agent Runtime 驱动 Knowledge Maintenance Agent；该 Runtime 当前由 Pi Agent Core 实现。Runtime 负责普通的模型—工具循环和上下文生命周期，Oyster 只定义角色 Prompt、Workspace、授权工具和最终提交协议。短 Session 仍只需一次预处理调用。默认完整链路在 Knowledge Sandbox 中提交和回读结果，同时保留不提交结果的阶段调试。这是对上述职责边界的首个可替换实现，不意味着知识模型依赖 Pi，也不把预处理器升级为 Agent。
 
 为了观察这些处理器的行为，应用可以提供可丢弃的运行轨迹，并限制每个轨迹条目携带的内容。运行轨迹只是执行诊断：它可以展示阶段、调用和工具活动，但不构成新的认识论层、知识来源或长期审计记录，也不能以暴露模型内部推理或绕过原始证据权限为代价换取可视化。
 
@@ -312,10 +318,11 @@ Projection Agent 通过标题、关键词和语义搜索发现候选 Knowledge S
 8. Knowledge Maintenance Agent 可以按需到达全部获得授权的观察细节，但不默认把全部原始观察载入上下文；
 9. 外部 Raw Evidence 不复制到 Oyster；来源失效后保留出处身份，并明确暴露再次展开失败；
 10. Agent 对各层的可见性和提交权限由当前角色的工具集合决定，共用底层实现或模型不合并角色权限；
-11. Agent 的最终提交仍由 Oyster Core 校验并写入权威载体；
-12. 持久投影更新始终以当前文档为输入；
-13. 投影修订保留已经确认的完整 Knowledge Statement 依赖，正文中的可读引用不取代该依赖；
-14. 投影不会自动回流为知识，用户删除权始终高于追加式加工。
+11. Knowledge Maintenance Agent 不由固定轮次、工具次数或总时长定义；通用 Runtime 可以压缩临时 transcript，权限、出处和提交契约则由 Core 独立维持；
+12. Agent 的最终提交仍由 Oyster Core 校验并写入权威载体；
+13. 持久投影更新始终以当前文档为输入；
+14. 投影修订保留已经确认的完整 Knowledge Statement 依赖，正文中的可读引用不取代该依赖；
+15. 投影不会自动回流为知识，用户删除权始终高于追加式加工。
 
 ## 8. 暂不决定
 
@@ -323,7 +330,8 @@ Projection Agent 通过标题、关键词和语义搜索发现候选 Knowledge S
 
 - 最小字段的物理类型、约束、索引和 Contribution / 审计记录的具体结构；
 - Workspace 的长期目录布局，以及除当前行 selector 和 EvidenceLocation 之外的跨来源定位方式；
-- 各项能力的长期工具形态、参数、运行步数和调度方式；当前验证实现只提供最小受控工具集；
+- 各项能力的长期工具形态、物理参数、运行时压缩策略和调度方式；当前验证实现只提供最小受控工具集；
+- 知识搜索默认暴露当前版本还是修订历史，以及来源和关系的长期展开工具；
 - 读者可见引用的 Markdown 语法；
 - 默认 Attention 的完整内容；
 - 自定义处理器的安装和权限协议；

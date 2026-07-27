@@ -494,6 +494,32 @@ describe('AiBackendService', () => {
     })
   })
 
+  it('lets discovered model metadata raise an API Agent runtime fallback capability', async () => {
+    const { service, model } = createService()
+    await service.initialize()
+    const connectionId = await saveApiConnection(service, 'default-model')
+    model.discoveredModels = [{
+      id: 'large-output-model',
+      displayName: 'Large output model',
+      reasoningEfforts: [],
+      contextWindowTokens: 128_000,
+      maxOutputTokens: 16_384
+    }]
+    await service.refresh()
+
+    await expect(service.withModelRuntime(
+      connectionId,
+      'large-output-model',
+      async (selectedRuntime) => ({
+        contextWindow: selectedRuntime.model.contextWindow,
+        maxTokens: selectedRuntime.model.maxTokens
+      })
+    )).resolves.toEqual({
+      contextWindow: 128_000,
+      maxTokens: 16_384
+    })
+  })
+
   it('does not treat local Agent operation failures as connection failures', async () => {
     const { service } = createService()
     await service.initialize()

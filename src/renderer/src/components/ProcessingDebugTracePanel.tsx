@@ -33,7 +33,9 @@ function phaseLabel(phase: NonNullable<KnowledgeProcessingDebugTrace['preprocess
 }
 
 function callLabel(call: PreprocessingModelCallTrace): string {
-  const ranges = call.selectors.join(', ')
+  const ranges = call.selectors.length <= 4
+    ? call.selectors.join(', ')
+    : `${call.selectors.slice(0, 4).join(', ')} 等 ${call.selectors.length} 个精确范围`
   const location = `L${String(call.readLocation.line).padStart(6, '0')}:C${call.readLocation.offset}`
   return call.kind === 'segment_map'
     ? `分段映射 · 读取起点 ${location} · 来源范围 ${ranges}`

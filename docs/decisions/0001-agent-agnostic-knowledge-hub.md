@@ -5,6 +5,7 @@
 - 修订：2026-07-24，明确预处理、知识维护 Agent、共享 Attention 与投影的边界
 - 修订：2026-07-26，明确 Observation Preprocessor、Evidence Map、Knowledge Maintenance Agent、Knowledge Contribution 与 Knowledge Statement 的定义
 - 修订：2026-07-26，明确本地外部 Agent 历史原地按需读取，不复制到 Oyster
+- 修订：2026-07-27，明确 Knowledge Maintenance Agent 使用通用 Agent Runtime，不由固定轮次、工具次数或总时长定义
 - 关联文档：[Product Brief](../product/product-brief.md)、[本地 Agent 发现与外部证据访问](../product/local-agent-discovery-mvp.md)、[AI Backend MVP](../product/ai-backends-mvp.md)、[知识加工验证 MVP](../product/knowledge-processing-mvp.md)、[知识加工与协作式投影](../architecture/knowledge-model-and-projection.md)
 
 ## Context
@@ -24,6 +25,8 @@ Oyster 的主要产品身份是：本地优先、跨 Agent、跨项目的知识�
 3. 投影层：由共享知识和 Attention 初始化、由用户与 Projection Agent 基于当前版本共同维护的持久文档，以及临时 Context Packet。
 
 三层保持不同的数据所有权，但知识加工与投影通过共享 Attention 耦合。Observation Preprocessor 负责解析、降噪、索引和有界局部理解，只产生称为 Evidence Map 的可丢弃、可重算、可回源 Working Artifact；Knowledge Maintenance Agent 负责多步探索现有知识，并通过 Knowledge Contribution 提出对一条或多条 Knowledge Statement 的创建、补充、限定、修订或关联；Oyster Core 统一拥有 Scope、出处校验、审计、提交和删除。任何 Pipeline 若被授权直接产生 Knowledge Contribution，就成为正式知识生产者并服从同一治理契约，不按处理器或投影建立不同的真相存储。
+
+Knowledge Maintenance Agent 是普通、可替换的工具使用 Agent，其角色由 System Prompt、Workspace、工具权限和最终 Contribution 协议定义，不引入专用状态机或固定运行步骤。一次运行不预设模型轮次、工具调用次数或总时长；通用 Agent Runtime 负责模型—工具循环与 transcript 压缩。模型的实际上下文、单次请求、分页读取和持久化完整性仍有各自的边界，但这些边界不限制 Agent 的总探索轮次；最终 Contribution 仍由 Core 校验和提交。
 
 投影文档不是新的世界事实，也不是可由下层覆盖式重建的纯派生物。后续更新必须基于当前文档版本；Projection Agent 可以提出 Knowledge Need，但不能把当前 Markdown 自动回流为知识。
 

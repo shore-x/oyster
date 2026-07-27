@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
   createAssistantMessageEventStream,
   createModels,
@@ -22,6 +22,11 @@ import type {
   KnowledgeStatementRecord
 } from '../src/main/knowledge-processing/model'
 import { PiKnowledgeMaintenanceAgent } from '../src/main/knowledge-processing/pi-knowledge-agent'
+import {
+  PiContextCompactionOutputError,
+  PiContextWindowError
+} from '../src/main/agent-runtime/pi-context-compactor'
+import { MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH } from '../src/shared/knowledge'
 
 const TOOL_NAMES = [
   'search_knowledge',
@@ -160,10 +165,6 @@ function waitingRuntime(model: Model<Api>): ModelRuntime {
   return { model, streamFn: waitingStreamFn() }
 }
 
-afterEach(() => {
-  vi.useRealTimers()
-})
-
 describe('PiKnowledgeMaintenanceAgent', () => {
   it('forwards the configured reasoning effort through the Pi Agent loop only for a reasoning model', async () => {
     const response = fauxAssistantMessage(fauxToolCall(
@@ -215,8 +216,8 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       },
       (context) => {
         const result = textContent(lastToolResult(context))
-        expect(result.length).toBeLessThanOrEqual(32 * 1_024)
-        expect(result).toContain('内容因工具输出上限而截断')
+        expect(result).toContain(hugeContent)
+        expect(result).not.toContain('内容因工具输出上限而截断')
         return fauxAssistantMessage(
           fauxToolCall('read_evidence', {
             line: 1,
@@ -292,6 +293,201 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       contribution: { statements: [{ content: 'Trace callback isolation' }] },
       modelCallCount: 1
     })
+  })
+
+  it('does not reject a large Evidence Map or Attention through knowledge-specific character ceilings', async () => {
+    const response = fauxAssistantMessage(fauxToolCall(
+      'submit_knowledge_contribution',
+      contributionSubmission('Accepted without a knowledge-specific input ceiling.')
+    ), { stopReason: 'toolUse' })
+    const prepared = fauxRuntime([response])
+    prepared.runtime.model.contextWindow = 1_000_000
+
+    await expect(new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
+      runtime: prepared.runtime,
+      evidenceMap: `Root navigation\n${'map '.repeat(40_000)}`,
+      attention: 'attention '.repeat(2_000)
+    }))).resolves.toMatchObject({
+      contribution: {
+        statements: [{ content: 'Accepted without a knowledge-specific input ceiling.' }]
+      },
+      modelCallCount: 1
+    })
+  })
+
+  it('uses generic context compaction when a normal tool loop outgrows the model context', async () => {
+    const reader = new MemoryKnowledgeReader([{
+      id: 'statement:large',
+      title: 'Large existing statement',
+      content: 'detail '.repeat(4_000)
+    }])
+    const model = {
+      ...fauxProvider().getModel(),
+      contextWindow: 8_000,
+      maxTokens: 512
+    }
+    let normalCalls = 0
+    let compactionCalls = 0
+    const runtime: ModelRuntime = {
+      model,
+      streamFn: (_requestedModel, context) => {
+        const stream = createAssistantMessageEventStream()
+        if (context.systemPrompt?.startsWith('You compact an agent')) {
+          compactionCalls++
+          stream.end(fauxAssistantMessage('The large statement was inspected; continue with the task.'))
+          return stream
+        }
+        normalCalls++
+        stream.end(normalCalls === 1
+          ? fauxAssistantMessage(fauxToolCall(
+              'read_knowledge_statement',
+              { statementId: 'statement:large' }
+            ), { stopReason: 'toolUse' })
+          : fauxAssistantMessage(fauxToolCall(
+              'submit_knowledge_contribution',
+              contributionSubmission('Completed after context compaction.')
+            ), { stopReason: 'toolUse' }))
+        return stream
+      }
+    }
+    const traceEvents: KnowledgeAgentTraceEvent[] = []
+
+    const result = await new PiKnowledgeMaintenanceAgent(reader).run(runInput({
+      runtime,
+      onTrace: (event) => traceEvents.push(event)
+    }))
+
+    expect(normalCalls).toBe(2)
+    expect(compactionCalls).toBeGreaterThan(0)
+    expect(result.modelCallCount).toBe(normalCalls + compactionCalls)
+    expect(result.contribution.statements[0].content).toBe('Completed after context compaction.')
+    expect(traceEvents).toContainEqual(expect.objectContaining({
+      type: 'model_started',
+      purpose: 'context_compaction'
+    }))
+  })
+
+  it('classifies a compaction provider error without exposing it in debug traces', async () => {
+    const reader = new MemoryKnowledgeReader([{
+      id: 'statement:large',
+      title: 'Large existing statement',
+      content: 'detail '.repeat(6_000)
+    }])
+    const model = {
+      ...fauxProvider().getModel(),
+      contextWindow: 8_000,
+      maxTokens: 512
+    }
+    let normalCalls = 0
+    let compactionCalls = 0
+    const runtime: ModelRuntime = {
+      model,
+      streamFn: (_requestedModel, context) => {
+        if (context.systemPrompt?.startsWith('You compact an agent')) {
+          compactionCalls++
+          const stream = createAssistantMessageEventStream()
+          stream.end(fauxAssistantMessage('', {
+            stopReason: 'error',
+            errorMessage: 'SECRET_PROVIDER_COMPACTION_FAILURE'
+          }))
+          return stream
+        }
+        const stream = createAssistantMessageEventStream()
+        normalCalls++
+        stream.end(normalCalls === 1
+          ? fauxAssistantMessage(fauxToolCall(
+              'read_knowledge_statement',
+              { statementId: 'statement:large' }
+            ), { stopReason: 'toolUse' })
+          : fauxAssistantMessage(fauxToolCall(
+              'submit_knowledge_contribution',
+              contributionSubmission('Completed despite unavailable compaction.')
+            ), { stopReason: 'toolUse' }))
+        return stream
+      }
+    }
+    const traceEvents: KnowledgeAgentTraceEvent[] = []
+
+    const run = new PiKnowledgeMaintenanceAgent(reader).run(runInput({
+      runtime,
+      onTrace: (event) => traceEvents.push(event)
+    }))
+
+    await expect(run).rejects.toBeInstanceOf(ModelConnectionFailureError)
+    expect(compactionCalls).toBeGreaterThan(0)
+    expect(traceEvents).toContainEqual(expect.objectContaining({
+      type: 'model_completed',
+      status: 'failed',
+      detail: 'context compaction failed'
+    }))
+    expect(JSON.stringify(traceEvents)).not.toContain('SECRET_PROVIDER_COMPACTION_FAILURE')
+  })
+
+  it('does not mark a healthy connection unavailable when a compaction summary is incomplete', async () => {
+    const reader = new MemoryKnowledgeReader([{
+      id: 'statement:large',
+      title: 'Large existing statement',
+      content: 'detail '.repeat(6_000)
+    }])
+    const model = {
+      ...fauxProvider().getModel(),
+      contextWindow: 8_000,
+      maxTokens: 512
+    }
+    const runtime: ModelRuntime = {
+      model,
+      streamFn: (_requestedModel, context) => {
+        const stream = createAssistantMessageEventStream()
+        stream.end(context.systemPrompt?.startsWith('You compact an agent')
+          ? fauxAssistantMessage('partial summary', { stopReason: 'length' })
+          : fauxAssistantMessage(fauxToolCall(
+              'read_knowledge_statement',
+              { statementId: 'statement:large' }
+            ), { stopReason: 'toolUse' }))
+        return stream
+      }
+    }
+
+    const run = new PiKnowledgeMaintenanceAgent(reader).run(runInput({ runtime }))
+
+    await expect(run).rejects.toBeInstanceOf(PiContextCompactionOutputError)
+    await expect(run).rejects.not.toBeInstanceOf(ModelConnectionFailureError)
+  })
+
+  it('preserves a local context-window failure instead of misclassifying the backend connection', async () => {
+    const reader = new MemoryKnowledgeReader([{
+      id: 'statement:large',
+      title: 'Large existing statement',
+      content: 'detail '.repeat(6_000)
+    }])
+    const model = {
+      ...fauxProvider().getModel(),
+      contextWindow: 8_000,
+      maxTokens: 512
+    }
+    let normalCalls = 0
+    const runtime: ModelRuntime = {
+      model,
+      streamFn: (_requestedModel, context) => {
+        const stream = createAssistantMessageEventStream()
+        if (context.systemPrompt?.startsWith('You compact an agent')) {
+          stream.end(fauxAssistantMessage('oversized summary '.repeat(4_000)))
+          return stream
+        }
+        normalCalls++
+        stream.end(fauxAssistantMessage(fauxToolCall(
+          'read_knowledge_statement',
+          { statementId: 'statement:large' }
+        ), { stopReason: 'toolUse' }))
+        return stream
+      }
+    }
+
+    const run = new PiKnowledgeMaintenanceAgent(reader).run(runInput({ runtime }))
+
+    await expect(run).rejects.toBeInstanceOf(PiContextWindowError)
+    await expect(run).rejects.not.toBeInstanceOf(ModelConnectionFailureError)
+    expect(normalCalls).toBe(1)
   })
 
   it('redacts an unknown model-generated tool name from traces and execution summaries', async () => {
@@ -378,6 +574,105 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       toolName: 'read_evidence',
       status: 'failed'
     }))
+  })
+
+  it('lets the normal Agent recover from a Knowledge Reader tool failure', async () => {
+    const reader: KnowledgeReader = {
+      async search() {
+        throw new Error('temporary index failure')
+      },
+      async read() {
+        return undefined
+      }
+    }
+    const runtime = fauxRuntime([
+      fauxAssistantMessage(fauxToolCall('search_knowledge', { query: 'candidate' }), {
+        stopReason: 'toolUse'
+      }),
+      (context) => {
+        expect(lastToolResult(context).isError).toBe(true)
+        return fauxAssistantMessage(fauxToolCall(
+          'submit_knowledge_contribution',
+          contributionSubmission('Recovered from a temporary reader failure.')
+        ), { stopReason: 'toolUse' })
+      }
+    ])
+
+    await expect(new PiKnowledgeMaintenanceAgent(reader).run(runInput({
+      runtime: runtime.runtime
+    }))).resolves.toMatchObject({
+      contribution: {
+        statements: [{ content: 'Recovered from a temporary reader failure.' }]
+      },
+      modelCallCount: 2
+    })
+  })
+
+  it('lets the Agent inspect a semantically rejected submission and retry it', async () => {
+    const rejected = contributionSubmission('Rejected source reference.')
+    rejected.statements[0].sources[0].sourceRef = 'observation:outside-workspace'
+    const runtime = fauxRuntime([
+      fauxAssistantMessage(fauxToolCall(
+        'submit_knowledge_contribution',
+        rejected
+      ), { stopReason: 'toolUse' }),
+      (context) => {
+        expect(lastToolResult(context).isError).toBe(true)
+        expect(textContent(lastToolResult(context))).toContain('sourceRef')
+        return fauxAssistantMessage(fauxToolCall(
+          'submit_knowledge_contribution',
+          contributionSubmission('Accepted after correcting the source reference.')
+        ), { stopReason: 'toolUse' })
+      }
+    ])
+
+    await expect(new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
+      runtime: runtime.runtime
+    }))).resolves.toMatchObject({
+      contribution: {
+        statements: [{ content: 'Accepted after correcting the source reference.' }]
+      },
+      modelCallCount: 2,
+      toolCalls: ['submit_knowledge_contribution', 'submit_knowledge_contribution']
+    })
+  })
+
+  it('uses the Store content boundary in its recoverable submit schema', async () => {
+    const invalid = contributionSubmission('')
+    const prepared = fauxRuntime([
+      (context) => {
+        const submit = context.tools?.find((tool) => tool.name === 'submit_knowledge_contribution')
+        const parameters = submit?.parameters as {
+          properties?: {
+            statements?: {
+              items?: { properties?: { content?: { maxLength?: number } } }
+            }
+          }
+        }
+        expect(parameters.properties?.statements?.items?.properties?.content?.maxLength)
+          .toBe(MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH)
+        return fauxAssistantMessage(fauxToolCall(
+          'submit_knowledge_contribution',
+          invalid
+        ), { stopReason: 'toolUse' })
+      },
+      (context) => {
+        expect(lastToolResult(context).isError).toBe(true)
+        return fauxAssistantMessage(fauxToolCall(
+          'submit_knowledge_contribution',
+          contributionSubmission('Accepted after reducing the Statement content.')
+        ), { stopReason: 'toolUse' })
+      }
+    ])
+
+    await expect(new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
+      runtime: prepared.runtime
+    }))).resolves.toMatchObject({
+      contribution: {
+        statements: [{ content: 'Accepted after reducing the Statement content.' }]
+      },
+      modelCallCount: 2
+    })
   })
 
   it('expands only an authorized local Evidence Map section before reading its raw range', async () => {
@@ -477,6 +772,98 @@ describe('PiKnowledgeMaintenanceAgent', () => {
         'read_evidence',
         'submit_knowledge_contribution'
       ]
+    })
+  })
+
+  it('discloses only coverage and child navigation for an intermediate Evidence Map section', async () => {
+    const selectors = Array.from({ length: 2_500 }, (_, index) => {
+      const line = String(index * 2 + 1).padStart(6, '0')
+      return `L${line}-L${line}`
+    })
+    const observationLines = Array.from({ length: 5_000 }, (_, index) => `line-${index + 1}`)
+    const runtime = fauxRuntime([
+      fauxAssistantMessage(
+        fauxToolCall('read_evidence_map_section', { sectionId: 'M000001' }),
+        { stopReason: 'toolUse' }
+      ),
+      (context) => {
+        const section = textContent(lastToolResult(context))
+        expect(section).toContain(
+          'Source coverage extent (navigation only; not exact selectors): L000001-L004999'
+        )
+        expect(section).toContain('Immediate child sections: M000002')
+        expect(section).toContain('PARENT_NAVIGATION_CONTENT')
+        expect(section).not.toContain('Selected source ranges:')
+        expect(section).not.toContain('L002001-L002001')
+        return fauxAssistantMessage(fauxToolCall(
+          'submit_knowledge_contribution',
+          contributionSubmission('Intermediate map navigation remained compact.')
+        ), { stopReason: 'toolUse' })
+      }
+    ])
+
+    await expect(new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
+      runtime: runtime.runtime,
+      evidenceMap: 'ROOT NAVIGATION\nImmediate child sections: M000001',
+      evidenceMapSections: [
+        {
+          id: 'M000001',
+          selectors,
+          readLocation: { line: 1, offset: 0 },
+          children: ['M000002'],
+          content: 'PARENT_NAVIGATION_CONTENT'
+        },
+        {
+          id: 'M000002',
+          selectors: ['L000001-L000001'],
+          readLocation: { line: 1, offset: 0 },
+          content: 'LEAF_CONTENT'
+        }
+      ],
+      observationLines
+    }))).resolves.toMatchObject({
+      contribution: { statements: [{ content: 'Intermediate map navigation remained compact.' }] },
+      modelCallCount: 2
+    })
+  })
+
+  it('does not silently truncate a leaf Evidence Map section', async () => {
+    const selectors = Array.from({ length: 1_000 }, (_, index) => {
+      const line = String(index * 2 + 1).padStart(6, '0')
+      return `L${line}-L${line}`
+    })
+    const content = `MAP_START\n${'x'.repeat(24_000)}\nMAP_END`
+    const runtime = fauxRuntime([
+      fauxAssistantMessage(
+        fauxToolCall('read_evidence_map_section', { sectionId: 'M000001' }),
+        { stopReason: 'toolUse' }
+      ),
+      (context) => {
+        const section = textContent(lastToolResult(context))
+        expect(section.length).toBeGreaterThan(32 * 1_024)
+        expect(section).toContain('L001999-L001999')
+        expect(section).toContain(content)
+        expect(section).not.toContain('内容因工具输出上限而截断')
+        return fauxAssistantMessage(fauxToolCall(
+          'submit_knowledge_contribution',
+          contributionSubmission('The complete leaf map remained available.')
+        ), { stopReason: 'toolUse' })
+      }
+    ])
+
+    await expect(new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
+      runtime: runtime.runtime,
+      evidenceMap: 'ROOT NAVIGATION\nImmediate child sections: M000001',
+      evidenceMapSections: [{
+        id: 'M000001',
+        selectors,
+        readLocation: { line: 1, offset: 0 },
+        content
+      }],
+      observationLines: Array.from({ length: 2_000 }, (_, index) => `line-${index + 1}`)
+    }))).resolves.toMatchObject({
+      contribution: { statements: [{ content: 'The complete leaf map remained available.' }] },
+      modelCallCount: 2
     })
   })
 
@@ -671,7 +1058,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
     })
   })
 
-  it('returns recoverable tool errors for repeated searches, statements, and overlapping evidence', async () => {
+  it('allows repeated searches, knowledge and map reads, and overlapping evidence reads', async () => {
     const reader = new MemoryKnowledgeReader([{
       id: 'statement:1',
       title: 'Output preference',
@@ -681,6 +1068,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       fauxAssistantMessage([
         fauxToolCall('search_knowledge', { query: '  Output   preference  ' }, { id: 'search-first' }),
         fauxToolCall('read_knowledge_statement', { statementId: 'statement:1' }, { id: 'statement-first' }),
+        fauxToolCall('read_evidence_map_section', { sectionId: 'M000001' }, { id: 'map-first' }),
         fauxToolCall('read_evidence', {
           line: 1,
           offset: 0,
@@ -690,6 +1078,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       fauxAssistantMessage([
         fauxToolCall('search_knowledge', { query: 'output preference' }, { id: 'search-repeat' }),
         fauxToolCall('read_knowledge_statement', { statementId: 'statement:1' }, { id: 'statement-repeat' }),
+        fauxToolCall('read_evidence_map_section', { sectionId: 'M000001' }, { id: 'map-repeat' }),
         fauxToolCall('read_evidence', {
           line: 1,
           offset: 10,
@@ -697,29 +1086,41 @@ describe('PiKnowledgeMaintenanceAgent', () => {
         }, { id: 'evidence-overlap' })
       ], { stopReason: 'toolUse' }),
       (context) => {
-        const repeated = toolResults(context).slice(-3)
-        expect(repeated).toHaveLength(3)
-        expect(repeated.every((result) => result.isError)).toBe(true)
-        expect(textContent(repeated[0])).toContain('重复搜索已拒绝')
-        expect(textContent(repeated[1])).toContain('已读取')
-        expect(textContent(repeated[2])).toContain('重叠')
+        const repeated = toolResults(context).slice(-4)
+        expect(repeated).toHaveLength(4)
+        expect(repeated.every((result) => !result.isError)).toBe(true)
+        expect(textContent(repeated[0])).toContain('statement:1')
+        expect(textContent(repeated[1])).toContain('The user prefers concise output.')
+        expect(textContent(repeated[2])).toContain('MAP_DETAIL')
+        expect(textContent(repeated[3])).toContain('prefers concise output')
         return fauxAssistantMessage(fauxToolCall(
           'submit_knowledge_contribution',
-          contributionSubmission('Recovered from duplicate reads and submitted.')
+          contributionSubmission('Repeated reads remained available and the result was submitted.')
         ), { stopReason: 'toolUse' })
       }
     ])
     const agent = new PiKnowledgeMaintenanceAgent(reader)
 
-    await expect(agent.run(runInput({ runtime: runtime.runtime }))).resolves.toMatchObject({
-      contribution: { statements: [{ content: 'Recovered from duplicate reads and submitted.' }] },
+    await expect(agent.run(runInput({
+      runtime: runtime.runtime,
+      evidenceMapSections: [{
+        id: 'M000001',
+        selectors: ['L000001-L000001'],
+        readLocation: { line: 1, offset: 0 },
+        content: 'MAP_DETAIL'
+      }]
+    }))).resolves.toMatchObject({
+      contribution: { statements: [{ content: 'Repeated reads remained available and the result was submitted.' }] },
       modelCallCount: 3
     })
-    expect(reader.searchCalls).toEqual([{ query: 'Output   preference', limit: 8 }])
-    expect(reader.readCalls).toEqual(['statement:1'])
+    expect(reader.searchCalls).toEqual([
+      { query: 'Output   preference', limit: 8 },
+      { query: 'output preference', limit: 8 }
+    ])
+    expect(reader.readCalls).toEqual(['statement:1', 'statement:1'])
   })
 
-  it('enforces a cumulative tool-output budget before the next model context grows too large', async () => {
+  it('allows individually bounded tool outputs to accumulate across the run', async () => {
     const observationLines = Array.from({ length: 3 }, () => 'x'.repeat(40_000))
     const runtime = fauxRuntime([
       fauxAssistantMessage(fauxToolCall('read_evidence', {
@@ -739,35 +1140,47 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       }), { stopReason: 'toolUse' }),
       (context) => {
         const result = lastToolResult(context)
-        expect(result.isError).toBe(true)
-        expect(textContent(result)).toContain('工具输出累计最多 98304 个字符')
+        expect(result.isError).toBe(false)
+        expect(textContent(result)).toContain('Returned source characters: 40000')
+        expect(textContent(result)).toContain('EOF: true')
         return fauxAssistantMessage(fauxToolCall(
           'submit_knowledge_contribution',
-          contributionSubmission('Submitted within the cumulative output budget.')
+          contributionSubmission('All three bounded evidence pages were available before submission.')
         ), { stopReason: 'toolUse' })
       }
     ])
     const agent = new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader())
 
     await expect(agent.run(runInput({ runtime: runtime.runtime, observationLines }))).resolves.toMatchObject({
-      contribution: { statements: [{ content: 'Submitted within the cumulative output budget.' }] },
+      contribution: { statements: [{ content: 'All three bounded evidence pages were available before submission.' }] },
       modelCallCount: 4
     })
   })
 
-  it('fails before making a fifth model call', async () => {
-    const responses = Array.from({ length: 4 }, () => fauxAssistantMessage(
-      fauxToolCall('search_knowledge', { query: 'again' }),
+  it('continues past four model calls and submits normally', async () => {
+    const responses = Array.from({ length: 4 }, (_, index) => fauxAssistantMessage(
+      fauxToolCall('search_knowledge', { query: `exploration-${index}` }),
+      { stopReason: 'toolUse' }
+    )).concat(fauxAssistantMessage(
+      fauxToolCall(
+        'submit_knowledge_contribution',
+        contributionSubmission('Submitted after more than four model calls.')
+      ),
       { stopReason: 'toolUse' }
     ))
     const runtime = fauxRuntime(responses)
-    const agent = new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader())
+    const reader = new MemoryKnowledgeReader()
+    const agent = new PiKnowledgeMaintenanceAgent(reader)
 
-    await expect(agent.run(runInput({ runtime: runtime.runtime }))).rejects.toThrow('最多允许 4 次模型调用')
-    expect(runtime.callCount()).toBe(4)
+    await expect(agent.run(runInput({ runtime: runtime.runtime }))).resolves.toMatchObject({
+      contribution: { statements: [{ content: 'Submitted after more than four model calls.' }] },
+      modelCallCount: 5
+    })
+    expect(runtime.callCount()).toBe(5)
+    expect(reader.searchCalls).toHaveLength(4)
   })
 
-  it('executes at most twelve requested tools', async () => {
+  it('continues past twelve tool calls and submits normally', async () => {
     const reader = new MemoryKnowledgeReader()
     const calls = Array.from({ length: 13 }, (_, index) => fauxToolCall(
       'search_knowledge',
@@ -775,12 +1188,42 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       { id: `call-${index}` }
     ))
     const runtime = fauxRuntime([
-      fauxAssistantMessage(calls, { stopReason: 'toolUse' })
+      fauxAssistantMessage(calls, { stopReason: 'toolUse' }),
+      fauxAssistantMessage(fauxToolCall(
+        'submit_knowledge_contribution',
+        contributionSubmission('Submitted after more than twelve tool calls.')
+      ), { stopReason: 'toolUse' })
     ])
     const agent = new PiKnowledgeMaintenanceAgent(reader)
 
-    await expect(agent.run(runInput({ runtime: runtime.runtime }))).rejects.toThrow('最多允许 12 次工具调用')
-    expect(reader.searchCalls).toHaveLength(12)
+    await expect(agent.run(runInput({ runtime: runtime.runtime }))).resolves.toMatchObject({
+      contribution: { statements: [{ content: 'Submitted after more than twelve tool calls.' }] },
+      modelCallCount: 2,
+      toolCalls: [...Array(13).fill('search_knowledge'), 'submit_knowledge_contribution']
+    })
+    expect(reader.searchCalls).toHaveLength(13)
+  })
+
+  it('does not impose a run-level Statement count on the final Contribution', async () => {
+    const statements = Array.from({ length: 101 }, (_, index) => ({
+      localRef: `candidate-${index}`,
+      title: `Candidate ${index}`,
+      content: `Knowledge candidate ${index}.`,
+      sources: [{
+        sourceRef: 'observation:test:1',
+        selector: 'L000001-L000001'
+      }]
+    }))
+    const runtime = fauxRuntime([fauxAssistantMessage(fauxToolCall(
+      'submit_knowledge_contribution',
+      { statements }
+    ), { stopReason: 'toolUse' })])
+
+    const result = await new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
+      runtime: runtime.runtime
+    }))
+
+    expect(result.contribution.statements).toHaveLength(101)
   })
 
   it.each([
@@ -858,21 +1301,4 @@ describe('PiKnowledgeMaintenanceAgent', () => {
     }))
   })
 
-  it('aborts an active run after five minutes', async () => {
-    vi.useFakeTimers()
-    const faux = fauxProvider()
-    const agent = new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader())
-    const traceEvents: KnowledgeAgentTraceEvent[] = []
-    const assertion = expect(agent.run(runInput({
-      runtime: waitingRuntime(faux.getModel()),
-      onTrace: (event) => traceEvents.push(event)
-    }))).rejects.toThrow('运行超时（5 分钟）')
-
-    await vi.advanceTimersByTimeAsync(5 * 60_000)
-    await assertion
-    expect(traceEvents).toContainEqual(expect.objectContaining({
-      type: 'model_completed',
-      status: 'failed'
-    }))
-  })
 })

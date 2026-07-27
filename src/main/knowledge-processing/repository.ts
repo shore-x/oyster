@@ -39,7 +39,6 @@ function isStoredStage(value: unknown): value is StoredProcessingStage {
       || (
         typeof record.instructionsOverride === 'string'
         && Boolean(record.instructionsOverride.trim())
-        && record.instructionsOverride.length <= 20_000
       )
     )
 }

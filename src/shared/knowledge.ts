@@ -1,5 +1,8 @@
 export const KNOWLEDGE_RELATION_KINDS = ['derived_from', 'revises'] as const
 
+/** Per-Statement persistence boundary shared by producers and the authoritative Store. */
+export const MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH = 1_024 * 1_024
+
 export type KnowledgeRelationKind = typeof KNOWLEDGE_RELATION_KINDS[number]
 
 export interface KnowledgeContributionRecord {
@@ -81,4 +84,3 @@ export interface ListKnowledgeStatementsOptions {
   limit?: number
   offset?: number
 }
-

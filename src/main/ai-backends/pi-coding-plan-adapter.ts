@@ -376,7 +376,16 @@ export class PiCodingPlanAdapter {
       if (options?.reasoning) {
         ensureReasoningEffort(model, options.reasoning as ReasoningEffort)
       }
-      return this.models.streamSimple(model, context, options)
+      const timeoutMs = boundedInteger(
+        options?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+        1,
+        MAX_REQUEST_TIMEOUT_MS,
+        '请求超时'
+      )
+      return this.models.streamSimple(model, context, {
+        ...options,
+        timeoutMs
+      })
     }
     return { model, streamFn }
   }

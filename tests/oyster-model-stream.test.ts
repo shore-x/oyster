@@ -125,6 +125,7 @@ describe('Oyster model Agent stream', () => {
     expect(request!.headers.get('authorization')).toBe('Bearer secret-key')
     expect(request!.body).toMatchObject({
       model: 'test-model',
+      max_tokens: 4_096,
       messages: [
         { role: 'system', content: 'SYSTEM INSTRUCTIONS' },
         { role: 'user', content: 'Maintain this knowledge.' }
@@ -139,6 +140,38 @@ describe('Oyster model Agent stream', () => {
       name: 'submit_knowledge_contribution',
       arguments: { content: 'candidate' }
     }))
+  })
+
+  it('uses the requested model capability and a lower per-call maxTokens for Chat Completions', async () => {
+    let request: Awaited<ReturnType<typeof requestDetails>> | undefined
+    const fetchImpl: typeof fetch = vi.fn(async (input, init) => {
+      request = await requestDetails(input, init)
+      return sse([
+        {
+          id: 'chatcmpl-capability',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: 'gpt-5-mini',
+          choices: [{ index: 0, delta: { role: 'assistant', content: 'OYSTER' }, finish_reason: null }]
+        },
+        {
+          id: 'chatcmpl-capability',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: 'gpt-5-mini',
+          choices: [{ index: 0, delta: {}, finish_reason: 'stop' }]
+        }
+      ])
+    }) as typeof fetch
+    const runtime = createOysterModelRuntime({
+      ...connection('openai_chat_completions', 'openai'),
+      model: 'gpt-5-mini'
+    }, 'secret-key', fetchImpl)
+    const selectedModel = { ...runtime.model, maxTokens: 16_384 }
+
+    await (await runtime.streamFn(selectedModel, context(), { maxTokens: 6_000 })).result()
+
+    expect(request?.body.max_completion_tokens).toBe(6_000)
   })
 
   it('encodes a supported Pi reasoning effort in the provider request body', async () => {
@@ -231,7 +264,8 @@ describe('Oyster model Agent stream', () => {
     }) as typeof fetch
     const runtime = createOysterModelRuntime(connection('openai_responses'), undefined, fetchImpl)
 
-    const result = await (await runtime.streamFn(runtime.model, context())).result()
+    const selectedModel = { ...runtime.model, maxTokens: 12_000 }
+    const result = await (await runtime.streamFn(selectedModel, context(), { maxTokens: 7_000 })).result()
 
     expect(request).toBeDefined()
     expect(request!.url).toBe('http://localhost:11434/v1/responses')
@@ -240,7 +274,8 @@ describe('Oyster model Agent stream', () => {
       model: 'test-model',
       instructions: 'SYSTEM INSTRUCTIONS',
       store: false,
-      stream: true
+      stream: true,
+      max_output_tokens: 7_000
     })
     expect(JSON.stringify(request!.body.input)).not.toContain('SYSTEM INSTRUCTIONS')
     expect(result.stopReason).toBe('toolUse')
@@ -249,6 +284,26 @@ describe('Oyster model Agent stream', () => {
       name: 'submit_knowledge_contribution',
       arguments: { content: 'candidate' }
     }))
+  })
+
+  it('applies timeoutMs to one request without an implicit retry', async () => {
+    const fetchImpl: typeof fetch = vi.fn((_input, init) => new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal
+      const abort = (): void => reject(signal?.reason ?? new Error('request aborted'))
+      if (signal?.aborted) abort()
+      else signal?.addEventListener('abort', abort, { once: true })
+    })) as typeof fetch
+    const runtime = createOysterModelRuntime(
+      connection('openai_chat_completions'),
+      undefined,
+      fetchImpl
+    )
+
+    const result = await (await runtime.streamFn(runtime.model, context(), { timeoutMs: 10 })).result()
+
+    expect(result.stopReason).toBe('error')
+    expect(result.errorMessage?.toLowerCase()).toContain('timed out')
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 
   it('does not accept a tool call unless the provider explicitly finishes with tool_calls', async () => {

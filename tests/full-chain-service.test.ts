@@ -370,7 +370,7 @@ describe('KnowledgeFullChainService', () => {
     })
     const harness = await createHarness(discovery, {
       evidenceMapPlanner: {
-        segmentBytes: 64,
+        segmentBytes: 80,
         adjacentContextBytes: 32,
         mergeBytes: 1_000
       }
@@ -385,7 +385,7 @@ describe('KnowledgeFullChainService', () => {
     }
     const fullChain = harness.createFullChain(() => new StaticAgent(async (input) => {
       expect(input.evidenceMap).toContain('ROOT NAVIGATION')
-      expect(input.evidenceMap).toContain('Source ranges and reliable read starts are attached to the immediate child sections.')
+      expect(input.evidenceMap).toContain('Exact selected ranges remain attached to map sections')
       expect(input.evidenceMap).not.toContain('First bounded read call:')
       expect(input.evidenceMapSections).toEqual([
         {

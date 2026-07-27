@@ -13,6 +13,8 @@ export { observationLineAddress as observationLineNumber } from '../observation/
 export const DEFAULT_OBSERVATION_SEGMENT_BYTES = 120_000
 export const DEFAULT_ADJACENT_CONTEXT_BYTES = 4_096
 export const DEFAULT_MAP_MERGE_BYTES = 120_000
+/** Per-section locator metadata boundary; it never limits total Session coverage. */
+export const MAX_OBSERVATION_SEGMENT_SELECTOR_BYTES = 24 * 1_024
 
 export interface ObservationSourceRange {
   startLine: number
@@ -72,15 +74,6 @@ export function resolveEvidenceMapPlannerOptions(
     options.mergeBytes ?? DEFAULT_MAP_MERGE_BYTES,
     'Evidence Map 归并预算'
   )
-  if (segmentBytes > DEFAULT_OBSERVATION_SEGMENT_BYTES) {
-    throw new Error(`Observation 分段预算不能超过 ${DEFAULT_OBSERVATION_SEGMENT_BYTES}`)
-  }
-  if (adjacentContextBytes > DEFAULT_ADJACENT_CONTEXT_BYTES) {
-    throw new Error(`相邻上下文预算不能超过 ${DEFAULT_ADJACENT_CONTEXT_BYTES}`)
-  }
-  if (mergeBytes > DEFAULT_MAP_MERGE_BYTES) {
-    throw new Error(`Evidence Map 归并预算不能超过 ${DEFAULT_MAP_MERGE_BYTES}`)
-  }
   return { segmentBytes, adjacentContextBytes, mergeBytes }
 }
 
@@ -137,6 +130,13 @@ export function observationSourceSelectorsText(ranges: ObservationSourceRange[])
   return observationSourceSelectors(ranges).join(', ')
 }
 
+function observationSourceExtent(ranges: ObservationSourceRange[]): string {
+  const first = ranges[0]
+  const last = ranges.at(-1)
+  if (!first || !last) throw new Error('Observation source ranges 不能为空')
+  return observationSelector(first.startLine, last.endLine)
+}
+
 export function evidenceMapSectionId(index: number): string {
   return `M${String(index + 1).padStart(6, '0')}`
 }
@@ -166,6 +166,38 @@ function utf8Bytes(value: string): number {
   return Buffer.byteLength(value, 'utf8')
 }
 
+function selectorBytes(range: ObservationSourceRange): number {
+  return utf8Bytes(observationSelector(range.startLine, range.endLine))
+}
+
+function nextSelectorTextBytes(
+  ranges: ObservationSourceRange[],
+  selectorTextBytes: number,
+  lineNumber: number
+): number {
+  const previous = ranges.at(-1)
+  if (!previous) {
+    const range = { startLine: lineNumber, endLine: lineNumber }
+    return selectorBytes(range)
+  }
+  if (lineNumber <= previous.endLine + 1) {
+    if (lineNumber <= previous.endLine) return selectorTextBytes
+    const extended = { startLine: previous.startLine, endLine: lineNumber }
+    return selectorTextBytes - selectorBytes(previous) + selectorBytes(extended)
+  }
+  const range = { startLine: lineNumber, endLine: lineNumber }
+  return selectorTextBytes + utf8Bytes(', ') + selectorBytes(range)
+}
+
+function includeSourceLine(ranges: ObservationSourceRange[], lineNumber: number): void {
+  const previous = ranges.at(-1)
+  if (!previous || lineNumber > previous.endLine + 1) {
+    ranges.push({ startLine: lineNumber, endLine: lineNumber })
+  } else {
+    previous.endLine = Math.max(previous.endLine, lineNumber)
+  }
+}
+
 function adjacentContext(
   units: ObservationUnit[],
   startIndex: number,
@@ -184,7 +216,8 @@ function adjacentContext(
 
 /**
  * Packs adapter-produced units into model-bounded segments. The planner never
- * interprets or slices an Agent's raw history format.
+ * interprets or slices an Agent's raw history format. Each segment's material
+ * budget includes both its serialized units and its exact selector text.
  */
 export function planObservationSegments(
   units: ObservationUnit[],
@@ -194,26 +227,48 @@ export function planObservationSegments(
   let startIndex = 0
   while (startIndex < units.length) {
     const segmentUnits: ObservationUnit[] = []
-    let bytes = 0
+    let observationBytes = 0
+    let sourceRanges: ObservationSourceRange[] = []
+    let selectorTextBytes = 0
     let index = startIndex
     while (index < units.length) {
       const nextUnit = units[index]
       const serializedBytes = utf8Bytes(serializedObservationUnit(nextUnit))
-      if (serializedBytes > options.segmentBytes) {
+      const observationWeight = serializedBytes + (segmentUnits.length ? 1 : 0)
+      const nextSelectorBytes = nextSelectorTextBytes(
+        sourceRanges,
+        selectorTextBytes,
+        nextUnit.lineNumber
+      )
+      const materialBytes = observationBytes + observationWeight + nextSelectorBytes
+      if (
+        !segmentUnits.length
+        && (
+          materialBytes > options.segmentBytes
+          || nextSelectorBytes > MAX_OBSERVATION_SEGMENT_SELECTOR_BYTES
+        )
+      ) {
         throw new Error(
           `Observation view unit ${observationLineAddress(nextUnit.lineNumber)} exceeds the selected model material budget`
         )
       }
-      const weight = serializedBytes + (segmentUnits.length ? 1 : 0)
-      if (segmentUnits.length && bytes + weight > options.segmentBytes) break
+      if (
+        segmentUnits.length
+        && (
+          materialBytes > options.segmentBytes
+          || nextSelectorBytes > MAX_OBSERVATION_SEGMENT_SELECTOR_BYTES
+        )
+      ) break
       segmentUnits.push(nextUnit)
-      bytes += weight
+      observationBytes += observationWeight
+      includeSourceLine(sourceRanges, nextUnit.lineNumber)
+      selectorTextBytes = nextSelectorBytes
       index++
     }
     const context = adjacentContext(units, startIndex, options.adjacentContextBytes)
     segments.push({
       id: evidenceMapSectionId(segments.length),
-      sourceRanges: observationSourceRanges(segmentUnits),
+      sourceRanges,
       units: segmentUnits,
       contextSourceRanges: context.sourceRanges,
       contextUnits: context.units,
@@ -229,7 +284,8 @@ export function planObservationSegments(
 
 export function evidenceMapNodeText(node: EvidenceMapNode): string {
   return [
-    `Selected source ranges: ${observationSourceSelectorsText(node.sourceRanges)}`,
+    `Source coverage extent: ${observationSourceExtent(node.sourceRanges)} (not an exact selected-range union)`,
+    'Exact selected ranges remain attached to the referenced map sections and are not flattened here.',
     `First evidence read location: ${formatEvidenceLocation(node.readLocation)}`,
     ...(node.characterWindow
       ? [`Character window: C${node.characterWindow.startCharacter}:${node.characterWindow.endCharacter}/${node.characterWindow.totalCharacters}`]

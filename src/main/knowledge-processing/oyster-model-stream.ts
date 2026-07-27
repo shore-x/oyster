@@ -29,8 +29,8 @@ import { reasoningEffortsForModel } from '../ai-backends/model-capabilities'
 import type { ReasoningEffort } from '../../shared/ai-backends'
 
 const MAX_AGENT_RESPONSE_BYTES = 8 * 1_024 * 1_024
-const AGENT_REQUEST_TIMEOUT_MS = 5 * 60_000
-const AGENT_MAX_OUTPUT_TOKENS = 4_096
+const DEFAULT_AGENT_REQUEST_TIMEOUT_MS = 5 * 60_000
+const UNKNOWN_MODEL_MAX_OUTPUT_TOKENS = 4_096
 const MAX_ERROR_MESSAGE_CHARACTERS = 4_096
 
 interface StreamingToolCall extends ToolCall {
@@ -75,6 +75,25 @@ function errorText(error: unknown): string {
   return message.length <= MAX_ERROR_MESSAGE_CHARACTERS
     ? message
     : `${message.slice(0, MAX_ERROR_MESSAGE_CHARACTERS - 1)}…`
+}
+
+function positiveSafeInteger(value: number | undefined): number | undefined {
+  return value !== undefined && Number.isSafeInteger(value) && value > 0 ? value : undefined
+}
+
+function requestMaxOutputTokens(model: Model<Api>, requested: number | undefined): number {
+  const modelMaximum = positiveSafeInteger(model.maxTokens) ?? UNKNOWN_MODEL_MAX_OUTPUT_TOKENS
+  if (requested === undefined) return modelMaximum
+  const normalized = positiveSafeInteger(requested)
+  if (!normalized) throw new Error('maxTokens must be a positive safe integer')
+  return Math.min(normalized, modelMaximum)
+}
+
+function requestTimeoutMs(requested: number | undefined): number {
+  if (requested === undefined) return DEFAULT_AGENT_REQUEST_TIMEOUT_MS
+  const normalized = positiveSafeInteger(requested)
+  if (!normalized) throw new Error('timeoutMs must be a positive safe integer')
+  return normalized
 }
 
 function responseBodyWithLimit(body: ReadableStream<Uint8Array>, maxBytes: number): ReadableStream<Uint8Array> {
@@ -147,7 +166,7 @@ function openAiClient(
     apiKey: apiKey || 'unused',
     baseURL: baseUrl,
     maxRetries: 0,
-    timeout: AGENT_REQUEST_TIMEOUT_MS,
+    timeout: DEFAULT_AGENT_REQUEST_TIMEOUT_MS,
     fetch: guardedFetch(expectedEndpoint, fetchImpl),
     ...(!apiKey ? { defaultHeaders: { authorization: null } } : {})
   })
@@ -225,7 +244,9 @@ function chatStream(
   client: OpenAI,
   context: Context,
   reasoningEffort?: ReasoningEffort,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  requestedMaxTokens?: number,
+  requestedTimeoutMs?: number
 ): AssistantMessageEventStream {
   const stream = createAssistantMessageEventStream()
   const output = assistantMessage(model)
@@ -235,20 +256,26 @@ function chatStream(
     let finishReason: string | null = null
     try {
       signal?.throwIfAborted()
+      const maxOutputTokens = requestMaxOutputTokens(model, requestedMaxTokens)
+      const timeoutMs = requestTimeoutMs(requestedTimeoutMs)
       const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
         model: connection.model,
         messages: chatMessages(context),
         stream: true,
         ...(connection.providerId === 'openai' ? { stream_options: { include_usage: true }, store: false } : {}),
         ...(connection.providerId === 'openai'
-          ? { max_completion_tokens: AGENT_MAX_OUTPUT_TOKENS }
-          : { max_tokens: AGENT_MAX_OUTPUT_TOKENS }),
+          ? { max_completion_tokens: maxOutputTokens }
+          : { max_tokens: maxOutputTokens }),
         ...(reasoningEffort
           ? { reasoning_effort: reasoningEffort as OpenAI.ReasoningEffort }
           : {}),
         ...(chatTools(context) ? { tools: chatTools(context) } : {})
       }
-      const providerStream = await client.chat.completions.create(params, { signal, timeout: AGENT_REQUEST_TIMEOUT_MS })
+      const providerStream = await client.chat.completions.create(params, {
+        signal,
+        timeout: timeoutMs,
+        maxRetries: 0
+      })
       stream.push({ type: 'start', partial: output })
       for await (const chunk of providerStream) {
         applyChatUsage(output, chunk)
@@ -346,13 +373,17 @@ function responsesStream(
   client: OpenAI,
   context: Context,
   reasoningEffort?: ReasoningEffort,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  requestedMaxTokens?: number,
+  requestedTimeoutMs?: number
 ): AssistantMessageEventStream {
   const stream = createAssistantMessageEventStream()
   const output = assistantMessage(model)
   void (async () => {
     try {
       signal?.throwIfAborted()
+      const maxOutputTokens = requestMaxOutputTokens(model, requestedMaxTokens)
+      const timeoutMs = requestTimeoutMs(requestedTimeoutMs)
       const tools = context.tools?.length
         ? convertResponsesTools(context.tools, { supportsStrictMode: false, strict: false })
         : undefined
@@ -367,13 +398,17 @@ function responsesStream(
         ...(context.systemPrompt ? { instructions: context.systemPrompt } : {}),
         stream: true,
         store: false,
-        max_output_tokens: AGENT_MAX_OUTPUT_TOKENS,
+        max_output_tokens: maxOutputTokens,
         ...(reasoningEffort
           ? { reasoning: { effort: reasoningEffort as OpenAI.ReasoningEffort } }
           : {}),
         ...(tools ? { tools } : {})
       }
-      const providerStream = await client.responses.create(params, { signal, timeout: AGENT_REQUEST_TIMEOUT_MS })
+      const providerStream = await client.responses.create(params, {
+        signal,
+        timeout: timeoutMs,
+        maxRetries: 0
+      })
       stream.push({ type: 'start', partial: output })
       await processResponsesStream(providerStream, output, stream, model)
       signal?.throwIfAborted()
@@ -410,7 +445,7 @@ export function createOysterModelRuntime(
     input: ['text'],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 0,
-    maxTokens: AGENT_MAX_OUTPUT_TOKENS,
+    maxTokens: UNKNOWN_MODEL_MAX_OUTPUT_TOKENS,
     compat: {
       supportsDeveloperRole: connection.providerId === 'openai',
       supportsStrictMode: false,
@@ -419,14 +454,39 @@ export function createOysterModelRuntime(
     }
   }
   const client = openAiClient(connection, apiKey, fetchImpl)
-  const streamFn: StreamFn = (_model, context, options) => {
+  const streamFn: StreamFn = (requestedModel, context, options) => {
+    const effectiveModel = requestedModel.id === model.id
+      ? {
+          ...model,
+          contextWindow: requestedModel.contextWindow,
+          maxTokens: requestedModel.maxTokens
+        }
+      : model
     const reasoningEffort = options?.reasoning
       && reasoningEfforts.includes(options.reasoning)
       ? options.reasoning
       : undefined
     return connection.protocol === 'openai_responses'
-      ? responsesStream(model, connection, client, context, reasoningEffort, options?.signal)
-      : chatStream(model, connection, client, context, reasoningEffort, options?.signal)
+      ? responsesStream(
+          effectiveModel,
+          connection,
+          client,
+          context,
+          reasoningEffort,
+          options?.signal,
+          options?.maxTokens,
+          options?.timeoutMs
+        )
+      : chatStream(
+          effectiveModel,
+          connection,
+          client,
+          context,
+          reasoningEffort,
+          options?.signal,
+          options?.maxTokens,
+          options?.timeoutMs
+        )
   }
   return { model, streamFn }
 }

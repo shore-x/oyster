@@ -21,7 +21,6 @@ import {
   type ProcessingStageRunBinding
 } from './knowledge-processing-service'
 
-const MAX_CONTRIBUTION_CHARACTERS = 64 * 1_024
 const SOURCE_SELECTOR = /^L(\d{6,})-L(\d{6,})$/
 
 export interface KnowledgeFullChainBindings {
@@ -53,9 +52,6 @@ function validateContribution(
 ): void {
   if (!contribution || contribution.runRef !== expectedRunRef || !Array.isArray(contribution.statements)) {
     throw new Error('Agent 返回的 Knowledge Contribution 与当前运行不匹配')
-  }
-  if (JSON.stringify(contribution).length > MAX_CONTRIBUTION_CHARACTERS) {
-    throw new Error(`Knowledge Contribution 总大小不能超过 ${MAX_CONTRIBUTION_CHARACTERS} 个字符`)
   }
   for (const statement of contribution.statements as KnowledgeStatementDraft[]) {
     for (const source of statement.sources ?? []) {

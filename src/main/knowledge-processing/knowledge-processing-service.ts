@@ -60,12 +60,8 @@ import {
 } from './evidence-map-planner'
 import { PROCESSING_STAGE_DEFINITIONS, stageDefinition } from './prompts'
 
-const MAX_INSTRUCTIONS_CHARACTERS = 20_000
-const MAX_ATTENTION_CHARACTERS = 10_000
 const MAX_SOURCE_REF_CHARACTERS = 512
-const MAX_EVIDENCE_MAP_CHARACTERS = 128 * 1_024
 const MAX_EVIDENCE_MAP_SECTION_BYTES = 24 * 1_024
-const MAX_WORKSPACES = 20
 const MAX_DEBUG_TRACE_ERROR_CHARACTERS = 2 * 1_024
 const MAX_DEBUG_TRACE_DETAIL_CHARACTERS = 1 * 1_024
 const MAX_DEBUG_TRACE_PREPROCESSOR_OUTPUT_CHARACTERS = 8 * 1_024
@@ -266,7 +262,6 @@ function normalizeAttention(value: unknown): string | undefined {
   if (typeof value !== 'string') throw new Error('关注点格式无效')
   const normalized = value.trim()
   if (!normalized) return undefined
-  if (normalized.length > MAX_ATTENTION_CHARACTERS) throw new Error('关注点内容过长')
   return normalized
 }
 
@@ -455,7 +450,7 @@ function completedEvidenceMap(
     '- Unshown raw evidence remains available for on-demand verification.',
     `- Root map section: ${root.sectionIds[0]}`,
     ...(expandable
-      ? ['- Source ranges and reliable read starts are attached to the immediate child sections.']
+      ? ['- Exact selected ranges remain attached to map sections and are disclosed progressively instead of being flattened into this root view.']
       : [
           `- Selected source ranges: ${observationSourceSelectorsText(root.sourceRanges)}`,
           `- First evidence read location: ${formatEvidenceLocation(root.readLocation)}`,
@@ -533,6 +528,7 @@ export class KnowledgeProcessingService {
   private mutationQueue: Promise<void> = Promise.resolve()
   private readonly listeners = new Set<ProcessingSnapshotListener>()
   private readonly workspaces = new Map<string, PreprocessingWorkspace>()
+  private readonly workspaceRunIds = new Map<ProcessingDebugTraceOrigin, string>()
   private readonly activeRuns = new Map<ProcessingStageId, AbortController>()
   private readonly debugTraces = new Map<ProcessingDebugTraceOrigin, KnowledgeProcessingDebugTrace>()
   private readonly maintenanceToolTraceIds = new Map<ProcessingDebugTraceOrigin, {
@@ -657,7 +653,6 @@ export class KnowledgeProcessingService {
       if (typeof input.instructionsOverride === 'string') {
         instructionsOverride = input.instructionsOverride.trim()
         if (!instructionsOverride) throw new Error('System Prompt 不能为空')
-        if (instructionsOverride.length > MAX_INSTRUCTIONS_CHARACTERS) throw new Error('System Prompt 内容过长')
         if (instructionsOverride === stageDefinition(input.stageId).defaultInstructions) {
           instructionsOverride = undefined
         }
@@ -735,6 +730,8 @@ export class KnowledgeProcessingService {
   releaseExclusiveRun(lease: ProcessingRunLease): void {
     if (this.exclusiveLease !== lease) throw new Error('知识加工运行租约无效')
     if (this.activeRuns.size) throw new Error('知识加工阶段尚未结束，不能释放运行租约')
+    const workspaceRunId = this.workspaceRunIds.get('full_chain')
+    if (workspaceRunId) this.releaseWorkspace(workspaceRunId, 'full_chain')
     this.exclusiveLease = undefined
   }
 
@@ -1008,7 +1005,9 @@ export class KnowledgeProcessingService {
           id: `model-call-${event.callNumber}`,
           sequence: maintenance.events.length + 1,
           kind: 'model_call',
-          label: `模型轮次 ${event.callNumber}`,
+          label: event.purpose === 'context_compaction'
+            ? `上下文压缩 ${event.callNumber}`
+            : `模型轮次 ${event.callNumber}`,
           status: 'running',
           startedAt: new Date().toISOString()
         })
@@ -1067,13 +1066,22 @@ export class KnowledgeProcessingService {
     })
   }
 
-  private rememberWorkspace(workspace: PreprocessingWorkspace): void {
-    this.workspaces.set(workspace.runId, workspace)
-    while (this.workspaces.size > MAX_WORKSPACES) {
-      const oldest = this.workspaces.keys().next().value as string | undefined
-      if (!oldest) break
-      this.workspaces.delete(oldest)
+  private rememberWorkspace(
+    workspace: PreprocessingWorkspace,
+    owner: ProcessingDebugTraceOrigin
+  ): void {
+    const previousRunId = this.workspaceRunIds.get(owner)
+    if (previousRunId && previousRunId !== workspace.runId) {
+      this.workspaces.delete(previousRunId)
     }
+    this.workspaces.set(workspace.runId, workspace)
+    this.workspaceRunIds.set(owner, workspace.runId)
+  }
+
+  private releaseWorkspace(runId: string, owner: ProcessingDebugTraceOrigin): void {
+    if (this.workspaceRunIds.get(owner) !== runId) return
+    this.workspaceRunIds.delete(owner)
+    this.workspaces.delete(runId)
   }
 
   private async generateEvidenceMapMaterial(
@@ -1100,9 +1108,6 @@ export class KnowledgeProcessingService {
     )
     try {
       if (!stage.instructions.trim()) throw new Error('Observation Preprocessor System Prompt 不能为空')
-      if (stage.instructions.length > MAX_INSTRUCTIONS_CHARACTERS) {
-        throw new Error('Observation Preprocessor System Prompt 内容过长')
-      }
       const boundedPrompt = `${prompt}\n\nHard output limit: return no more than ${maximumOutputBytes} UTF-8 bytes.`
       if (utf8Bytes(stage.instructions) + utf8Bytes(boundedPrompt) > budget.maxInputBytes) {
         throw new PreprocessorInputBudgetError('模型输入预算不足，正在自动缩小预处理分段')
@@ -1405,8 +1410,6 @@ export class KnowledgeProcessingService {
           })
         }
       }
-      if (evidenceMap.length > MAX_EVIDENCE_MAP_CHARACTERS) throw new Error('Evidence Map 内容过长')
-
       this.rememberWorkspace({
         runId,
         sourceRef,
@@ -1416,7 +1419,7 @@ export class KnowledgeProcessingService {
         evidenceMapSections: workspaceSections,
         attention,
         createdAt: Date.now()
-      })
+      }, debugTrace.origin)
 
       const completedDebugTrace = this.completeProcessingStageDebugTrace(debugTrace, stageId)
       return {
@@ -1567,6 +1570,7 @@ export class KnowledgeProcessingService {
     this.preprocessingProgress = undefined
     this.exclusiveLease = undefined
     this.workspaces.clear()
+    this.workspaceRunIds.clear()
     this.debugTraces.clear()
     this.maintenanceToolTraceIds.clear()
     this.listeners.clear()
