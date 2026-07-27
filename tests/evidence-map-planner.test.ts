@@ -33,14 +33,25 @@ describe('Evidence Map preprocessing planner', () => {
   it('covers every Observation line exactly once while preserving global numbering', () => {
     const segments = planObservationSegments(units('aa\nbbb\nc\ndddd'), options())
 
-    expect(segments.map(({ id, sourceRanges, units }) => ({
+    expect(segments.map(({ id, sourceRanges, readLocation, units }) => ({
       id,
       sourceRanges,
+      readLocation,
       lines: units.map((unit) => unit.content)
     })))
       .toEqual([
-        { id: 'M000001', sourceRanges: [{ startLine: 1, endLine: 2 }], lines: ['aa', 'bbb'] },
-        { id: 'M000002', sourceRanges: [{ startLine: 3, endLine: 4 }], lines: ['c', 'dddd'] }
+        {
+          id: 'M000001',
+          sourceRanges: [{ startLine: 1, endLine: 2 }],
+          readLocation: { line: 1, offset: 0 },
+          lines: ['aa', 'bbb']
+        },
+        {
+          id: 'M000002',
+          sourceRanges: [{ startLine: 3, endLine: 4 }],
+          readLocation: { line: 3, offset: 0 },
+          lines: ['c', 'dddd']
+        }
       ])
     expect(segments[1]).toMatchObject({
       contextSourceRanges: [{ startLine: 2, endLine: 2 }],
@@ -62,6 +73,10 @@ describe('Evidence Map preprocessing planner', () => {
     const segments = planObservationSegments(prepared, options({ segmentBytes: 40 }))
 
     expect(segments.flatMap((segment) => segment.units)).toEqual(prepared)
+    expect(segments.map((segment) => segment.readLocation)).toEqual([
+      { line: 1, offset: 0 },
+      { line: 1, offset: 5 }
+    ])
     expect(segments.every(
       (segment) => utf8Bytes(numberedObservationUnits(segment.units)) <= 40
     )).toBe(true)
@@ -105,7 +120,8 @@ describe('Evidence Map preprocessing planner', () => {
     expect(evidenceMapNodeText({
       content: 'map',
       sourceRanges: segment.sourceRanges,
-      sectionIds: [segment.id]
+      sectionIds: [segment.id],
+      readLocation: segment.readLocation
     })).toContain('Selected source ranges: L000001-L000002, L000007-L000007, L000009-L000010')
   })
 
@@ -193,10 +209,12 @@ describe('Evidence Map preprocessing planner', () => {
       content: 'map',
       sourceRanges: [{ startLine: 7, endLine: 7 }],
       sectionIds: ['M000003'],
+      readLocation: { line: 7, offset: 3_000 },
       characterWindow: { startCharacter: 3_000, endCharacter: 6_000, totalCharacters: 9_000 }
     })
 
     expect(text).toContain('Character window: C3000:6000/9000')
+    expect(text).toContain('First evidence read location: L000007:C3000')
   })
 
   it('allows more than 32 bounded segments', () => {
@@ -216,7 +234,8 @@ describe('Evidence Map preprocessing planner', () => {
     const nodes: EvidenceMapNode[] = Array.from({ length: 5 }, (_, index) => ({
       content: `map-${index + 1}`,
       sourceRanges: [{ startLine: index + 1, endLine: index + 1 }],
-      sectionIds: [`M00000${index + 1}`]
+      sectionIds: [`M00000${index + 1}`],
+      readLocation: { line: index + 1, offset: 0 }
     }))
 
     const groups = groupEvidenceMapNodes(nodes, 160)
@@ -233,7 +252,8 @@ describe('Evidence Map preprocessing planner', () => {
     const nodes: EvidenceMapNode[] = [1, 2].map((line) => ({
       content: '汉'.repeat(10),
       sourceRanges: [{ startLine: line, endLine: line }],
-      sectionIds: [`M00000${line}`]
+      sectionIds: [`M00000${line}`],
+      readLocation: { line, offset: 0 }
     }))
     const singleNodeBytes = utf8Bytes(evidenceMapNodeText(nodes[0]))
     const groups = groupEvidenceMapNodes(nodes, singleNodeBytes + 1)
@@ -249,7 +269,8 @@ describe('Evidence Map preprocessing planner', () => {
       const shape = {
         content: '',
         sourceRanges: [{ startLine: line, endLine: line }],
-        sectionIds: [`M00000${line}`]
+        sectionIds: [`M00000${line}`],
+        readLocation: { line, offset: 0 }
       }
       const metadataBytes = utf8Bytes(evidenceMapNodeText(shape))
       return { ...shape, content: '汉'.repeat(Math.floor((maximumNodeBytes - metadataBytes) / 3)) }

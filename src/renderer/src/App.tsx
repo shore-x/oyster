@@ -40,7 +40,7 @@ export function App() {
         </nav>
       </aside>
 
-      <main class="content">
+      <main class={`content${page() === 'knowledge-processing' ? ' content--wide' : ''}`}>
         <div class="window-drag-region" data-testid="window-drag-region" aria-hidden="true" />
         <Switch>
           <Match when={page() === 'sources'}>

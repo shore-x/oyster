@@ -1,4 +1,14 @@
-import type { ObservationCharacterWindow, ObservationUnit } from '../observation/model'
+import {
+  formatEvidenceLocation,
+  observationLineAddress
+} from '../observation/evidence-location'
+import type {
+  EvidenceLocation,
+  ObservationCharacterWindow,
+  ObservationUnit
+} from '../observation/model'
+
+export { observationLineAddress as observationLineNumber } from '../observation/evidence-location'
 
 export const DEFAULT_OBSERVATION_SEGMENT_BYTES = 120_000
 export const DEFAULT_ADJACENT_CONTEXT_BYTES = 4_096
@@ -17,6 +27,8 @@ export interface ObservationSegment {
   /** Exact raw source lines supplied only as adjacent context. */
   contextSourceRanges: ObservationSourceRange[]
   contextUnits: ObservationUnit[]
+  /** Host-derived starting point that can be passed directly to read_evidence. */
+  readLocation: EvidenceLocation
 }
 
 export interface EvidenceMapNode {
@@ -24,6 +36,7 @@ export interface EvidenceMapNode {
   /** Exact, sorted and coalesced raw source lines represented by this node. */
   sourceRanges: ObservationSourceRange[]
   sectionIds: string[]
+  readLocation: EvidenceLocation
   characterWindow?: ObservationCharacterWindow
 }
 
@@ -71,12 +84,8 @@ export function resolveEvidenceMapPlannerOptions(
   return { segmentBytes, adjacentContextBytes, mergeBytes }
 }
 
-export function observationLineNumber(line: number): string {
-  return `L${String(line).padStart(6, '0')}`
-}
-
 export function observationSelector(startLine: number, endLine: number): string {
-  return `${observationLineNumber(startLine)}-${observationLineNumber(endLine)}`
+  return `${observationLineAddress(startLine)}-${observationLineAddress(endLine)}`
 }
 
 /**
@@ -133,7 +142,7 @@ export function evidenceMapSectionId(index: number): string {
 }
 
 export function numberedObservation(lines: string[], startLine = 1): string {
-  return lines.map((line, index) => `${observationLineNumber(startLine + index)} | ${line}`).join('\n')
+  return lines.map((line, index) => `${observationLineAddress(startLine + index)} | ${line}`).join('\n')
 }
 
 function isWholeLine(unit: ObservationUnit): boolean {
@@ -142,8 +151,8 @@ function isWholeLine(unit: ObservationUnit): boolean {
 
 function serializedObservationUnit(unit: ObservationUnit): string {
   const prefix = isWholeLine(unit)
-    ? observationLineNumber(unit.lineNumber)
-    : `${observationLineNumber(unit.lineNumber)} C${unit.startCharacter}:${unit.endCharacter}/${unit.totalCharacters}`
+    ? observationLineAddress(unit.lineNumber)
+    : `${observationLineAddress(unit.lineNumber)} C${unit.startCharacter}:${unit.endCharacter}/${unit.totalCharacters}`
   const recordContext = unit.recordContext ? ` [${unit.recordContext}]` : ''
   return `${prefix}${recordContext} | ${unit.modelContent ?? unit.content}`
 }
@@ -192,7 +201,7 @@ export function planObservationSegments(
       const serializedBytes = utf8Bytes(serializedObservationUnit(nextUnit))
       if (serializedBytes > options.segmentBytes) {
         throw new Error(
-          `Observation view unit ${observationLineNumber(nextUnit.lineNumber)} exceeds the selected model material budget`
+          `Observation view unit ${observationLineAddress(nextUnit.lineNumber)} exceeds the selected model material budget`
         )
       }
       const weight = serializedBytes + (segmentUnits.length ? 1 : 0)
@@ -207,7 +216,11 @@ export function planObservationSegments(
       sourceRanges: observationSourceRanges(segmentUnits),
       units: segmentUnits,
       contextSourceRanges: context.sourceRanges,
-      contextUnits: context.units
+      contextUnits: context.units,
+      readLocation: {
+        line: segmentUnits[0].lineNumber,
+        offset: segmentUnits[0].startCharacter
+      }
     })
     startIndex = index
   }
@@ -217,6 +230,7 @@ export function planObservationSegments(
 export function evidenceMapNodeText(node: EvidenceMapNode): string {
   return [
     `Selected source ranges: ${observationSourceSelectorsText(node.sourceRanges)}`,
+    `First evidence read location: ${formatEvidenceLocation(node.readLocation)}`,
     ...(node.characterWindow
       ? [`Character window: C${node.characterWindow.startCharacter}:${node.characterWindow.endCharacter}/${node.characterWindow.totalCharacters}`]
       : []),

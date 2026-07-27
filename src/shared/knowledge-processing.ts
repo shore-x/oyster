@@ -76,6 +76,8 @@ export interface PreprocessingModelCallTrace {
   status: ProcessingDebugStatus
   /** Exact, sorted and coalesced raw source ranges represented by this call. */
   selectors: string[]
+  /** First host-derived raw position represented by this call. */
+  readLocation: { line: number; offset: number }
   sectionIds: string[]
   startedAt: string
   completedAt?: string

@@ -23,6 +23,18 @@ export interface ObservationCharacterWindow {
 }
 
 /**
+ * A transient, model-facing position in one immutable Observation revision.
+ * It is used to navigate raw evidence and is deliberately separate from the
+ * stable line-range selector stored as Knowledge provenance.
+ */
+export interface EvidenceLocation {
+  /** One-based physical line in the unchanged raw source. */
+  line: number
+  /** Zero-based UTF-16 offset within that line. */
+  offset: number
+}
+
+/**
  * An Agent-format-specific, deterministic preprocessing view of one raw Session revision.
  * `rawLines` retains the complete revision for later evidence reads; `units` may select
  * or compact only the material useful for building an Evidence Map.

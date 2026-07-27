@@ -22,7 +22,11 @@ import {
   type ReasoningEffort
 } from '../../shared/ai-backends'
 import { ModelContextOverflowError } from '../ai-backends/model'
-import type { ObservationView } from '../observation/model'
+import type { EvidenceLocation, ObservationView } from '../observation/model'
+import {
+  evidenceReadCallHint,
+  formatEvidenceLocation
+} from '../observation/evidence-location'
 import {
   MAX_OBSERVATION_UNIT_BYTES,
   createPlainTextObservationView
@@ -404,7 +408,7 @@ function segmentPrompt(
   return `Create the Evidence Map material for the selected Observation material within exact source ranges ${observationSourceSelectorsText(segment.sourceRanges)}. This may be one part of a longer Session. Follow the System Prompt's language policy and preserve global line references exactly. Lines between these ranges are not part of this preprocessing material; do not infer that their raw evidence does not exist.
 
 Adjacent context, when present, is provided only to resolve continuity at the boundary. Do not treat it as new coverage or repeat its candidates unless it is necessary to explain a correction or dependency in the primary range.${context}
-When a long physical line is shown in multiple Cstart:end/total character windows, those windows are transport-only fragments of the same L line. Preserve all significant details, use the character window for navigation when helpful, and cite the original L selector rather than inventing a fragment selector.
+When a long physical line is shown in multiple Cstart:end/total character windows, those windows are transport-only fragments of the same L line. Preserve the shown L and C location beside every relevant navigation item so the downstream Agent can use it as the read_evidence starting point. The stable provenance remains the original L selector.
 The owning source adapter may replace execution detail with a deterministic, bounded representation and bracketed record context. Treat it as navigation to the cited raw line, not as a replacement for the raw evidence. Runtime configuration, telemetry, duplicate representations, and low-level execution traces may be omitted from this view intentionally.
 Operator attention:
 ${attention ?? 'No additional focus.'}
@@ -418,7 +422,7 @@ END_AUTHORIZED_OBSERVATION`
 function mergePrompt(nodes: EvidenceMapNode[], attention?: string): string {
   return `Assemble the Evidence Map materials below into one concise navigation map for a downstream Knowledge Maintenance Agent. Follow the System Prompt's language policy.
 
-Preserve the original global line references and expandable map section IDs. Surface cross-range corrections, rejections, dependencies, conflicts, uncertainty, and areas that require consulting the original evidence. Do not turn candidates into facts, invent missing evidence, or replace the source citations with references to this generated map.
+Preserve the original global L references, any shown C offsets, and expandable map section IDs. Surface cross-range corrections, rejections, dependencies, conflicts, uncertainty, and areas that require consulting the original evidence. Do not turn candidates into facts, invent missing evidence, or replace the source citations with references to this generated map.
 
 Operator attention:
 ${attention ?? 'No additional focus.'}
@@ -439,6 +443,7 @@ function completedEvidenceMap(
   formatVersion: string
 ): string {
   const rootSection = sections.find((section) => section.id === root.sectionIds[0])
+  const expandable = Boolean(rootSection?.children?.length)
   return [
     '# Evidence Map',
     '',
@@ -449,13 +454,24 @@ function completedEvidenceMap(
     `- Source lines represented for preprocessing: ${selectedLineCount} of ${lineCount}`,
     '- Unshown raw evidence remains available for on-demand verification.',
     `- Root map section: ${root.sectionIds[0]}`,
+    ...(expandable
+      ? ['- Source ranges and reliable read starts are attached to the immediate child sections.']
+      : [
+          `- Selected source ranges: ${observationSourceSelectorsText(root.sourceRanges)}`,
+          `- First evidence read location: ${formatEvidenceLocation(root.readLocation)}`,
+          `- First bounded read call: ${evidenceReadCallHint(root.readLocation)}`
+        ]),
     '',
     '## Progressive disclosure',
-    `- Expand the root section ${root.sectionIds[0]} to discover only its immediate child sections.`,
-    rootSection?.children?.length
-      ? `- Immediate child sections: ${rootSection.children.join(', ')}`
+    expandable
+      ? `- Expand the root section ${root.sectionIds[0]} to discover only its immediate child sections.`
+      : '- The complete preprocessed map material is included in this root view.',
+    expandable
+      ? `- Immediate child sections: ${rootSection?.children?.join(', ')}`
       : '- Immediate child sections: none.',
-    '- Descendant section IDs are intentionally not flattened into this root prompt.',
+    expandable
+      ? '- Descendant section IDs are intentionally not flattened into this root prompt.'
+      : '- Use the selected source ranges and first read location above to verify the original material when necessary.',
     '',
     '## Navigation',
     root.content
@@ -935,6 +951,7 @@ export class KnowledgeProcessingService {
     context: ProcessingDebugTraceContext,
     kind: 'segment_map' | 'navigation_merge',
     selectors: string[],
+    readLocation: EvidenceLocation,
     sectionIds: string[]
   ): string {
     let callId = ''
@@ -947,6 +964,7 @@ export class KnowledgeProcessingService {
         kind,
         status: 'running',
         selectors: [...selectors],
+        readLocation: { ...readLocation },
         sectionIds: [...sectionIds],
         startedAt: new Date().toISOString()
       })
@@ -1069,6 +1087,7 @@ export class KnowledgeProcessingService {
     call: {
       kind: 'segment_map' | 'navigation_merge'
       selectors: string[]
+      readLocation: EvidenceLocation
       sectionIds: string[]
     }
   ): Promise<string> {
@@ -1076,6 +1095,7 @@ export class KnowledgeProcessingService {
       traceContext,
       call.kind,
       call.selectors,
+      call.readLocation,
       call.sectionIds
     )
     try {
@@ -1151,6 +1171,7 @@ export class KnowledgeProcessingService {
         const nodeShape = {
           sourceRanges,
           sectionIds: [id],
+          readLocation: { ...group[0].readLocation },
           ...(characterWindow ? { characterWindow } : {})
         }
         const content = await this.generateEvidenceMapMaterial(
@@ -1164,6 +1185,7 @@ export class KnowledgeProcessingService {
           {
             kind: 'navigation_merge',
             selectors,
+            readLocation: { ...nodeShape.readLocation },
             sectionIds: group.flatMap((node) => node.sectionIds)
           }
         )
@@ -1171,6 +1193,7 @@ export class KnowledgeProcessingService {
         sections.push({
           id,
           selectors,
+          readLocation: { ...nodeShape.readLocation },
           content,
           children,
           ...(characterWindow ? { characterWindow } : {})
@@ -1285,6 +1308,7 @@ export class KnowledgeProcessingService {
             const leafShape = {
               sourceRanges: segment.sourceRanges,
               sectionIds: [segment.id],
+              readLocation: { ...segment.readLocation },
               ...(characterWindow ? { characterWindow } : {})
             }
             const maximumOutputBytes = segments.length === 1
@@ -1301,12 +1325,14 @@ export class KnowledgeProcessingService {
               {
                 kind: 'segment_map',
                 selectors,
+                readLocation: { ...segment.readLocation },
                 sectionIds: [segment.id]
               }
             )
             sections.push({
               id: segment.id,
               selectors,
+              readLocation: { ...segment.readLocation },
               content,
               ...(characterWindow ? { characterWindow } : {})
             })
@@ -1325,7 +1351,15 @@ export class KnowledgeProcessingService {
           }
 
           if (segments.length === 1) {
-            evidenceMap = sections[0].content
+            const root = leafNodes[0]
+            evidenceMap = completedEvidenceMap(
+              root,
+              sourceRef,
+              observationLines.length,
+              new Set(observationView.units.map((unit) => unit.lineNumber)).size,
+              sections,
+              observationView.formatVersion
+            )
             workspaceSections = []
           } else {
             this.updatePreprocessingProgress({
@@ -1449,6 +1483,7 @@ export class KnowledgeProcessingService {
           evidenceMapSections: workspace.evidenceMapSections.map((section) => ({
             ...section,
             selectors: [...section.selectors],
+            readLocation: { ...section.readLocation },
             ...(section.children ? { children: [...section.children] } : {})
           })),
           observationLines: [...workspace.observationLines],

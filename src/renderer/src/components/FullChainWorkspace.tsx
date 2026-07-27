@@ -162,6 +162,7 @@ function preprocessingProgressText(progress: ObservationPreprocessingProgress): 
 }
 
 export function FullChainWorkspace(props: FullChainWorkspaceProps) {
+  const [workspace, setWorkspace] = createSignal<'input' | 'process' | 'result'>('input')
   const [output, setOutput] = createSignal<'knowledge' | 'evidence' | 'contributions'>('knowledge')
   const [selectedStatementId, setSelectedStatementId] = createSignal<string>()
   const selectedSession = createMemo(() => props.sessions.find(
@@ -202,6 +203,7 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
     const runId = props.result?.runId
     if (runId && runId !== previousRunId) {
       previousRunId = runId
+      setWorkspace('result')
       setOutput('knowledge')
       setSelectedStatementId(props.result?.statements[0]?.id)
     }
@@ -209,7 +211,40 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
 
   return (
     <div class="full-chain" data-testid="full-chain-workspace">
-      <section class="full-chain-card" aria-label="完整链路配置">
+      <div class="processing-workspace-tabs" role="tablist" aria-label="完整链路工作区">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={workspace() === 'input'}
+          aria-controls="full-chain-panel-input"
+          data-testid="full-chain-tab-input"
+          onClick={() => setWorkspace('input')}
+        >输入与运行</button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={workspace() === 'process'}
+          aria-controls="full-chain-panel-process"
+          data-testid="full-chain-tab-process"
+          onClick={() => setWorkspace('process')}
+        >调用过程</button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={workspace() === 'result'}
+          aria-controls="full-chain-panel-result"
+          data-testid="full-chain-tab-result"
+          onClick={() => setWorkspace('result')}
+        >结果</button>
+      </div>
+
+      <section
+        id="full-chain-panel-input"
+        class="full-chain-card processing-tab-panel"
+        role="tabpanel"
+        hidden={workspace() !== 'input'}
+        aria-label="完整链路配置"
+      >
         <div class="full-chain-card__heading">
           <div>
             <h2>从 Session 生成知识</h2>
@@ -316,7 +351,10 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
                   icon="play"
                   data-testid="run-full-chain"
                   disabled={!canRun()}
-                  onClick={props.onRun}
+                  onClick={() => {
+                    setWorkspace('process')
+                    props.onRun()
+                  }}
                 >运行完整链路</Button>
               )}
             >
@@ -332,17 +370,56 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
         </div>
       </section>
 
-      <Show when={visibleDebugTrace()}>
-        {(trace) => (
-          <ProcessingDebugTracePanel
-            trace={trace()}
-            title="完整链路运行调试"
-          />
-        )}
-      </Show>
+      <section
+        id="full-chain-panel-process"
+        class="full-chain-workspace-panel processing-tab-panel"
+        role="tabpanel"
+        hidden={workspace() !== 'process'}
+        aria-label="完整链路调用过程"
+      >
+        <Show
+          when={visibleDebugTrace()}
+          fallback={(
+            <div class="processing-workspace-empty">
+              运行开始后，这里会展示预处理分段、每次模型调用和知识维护 Agent 的工具活动。
+            </div>
+          )}
+        >
+          {(trace) => (
+            <ProcessingDebugTracePanel
+              trace={trace()}
+              title="完整链路运行调试"
+            />
+          )}
+        </Show>
+        <Show when={props.running}>
+          <div class="processing-workspace-running-actions">
+            <span>链路正在运行，可以继续查看上方进度。</span>
+            <Button
+              variant="danger"
+              icon="stop"
+              data-testid="cancel-full-chain-process"
+              onClick={props.onCancel}
+            >停止运行</Button>
+          </div>
+        </Show>
+      </section>
 
-      <Show when={!props.running}>
-        <Show when={props.result}>
+      <section
+        id="full-chain-panel-result"
+        class="full-chain-workspace-panel processing-tab-panel"
+        role="tabpanel"
+        hidden={workspace() !== 'result'}
+        aria-label="完整链路结果"
+      >
+        <Show
+          when={!props.running && props.result ? props.result : undefined}
+          fallback={(
+            <div class="processing-workspace-empty">
+              {props.running ? '链路正在运行；可以在“调用过程”中查看当前进度。' : '完成一次隔离运行后，这里会展示 Evidence Map、Contribution 和 Knowledge Statements。'}
+            </div>
+          )}
+        >
           {(result) => (
             <>
             <section class="full-chain-card" data-testid="full-chain-run-result" aria-label="完整链路运行结果">
@@ -399,13 +476,21 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
                 <button type="button" role="tab" aria-selected={output() === 'contributions'} onClick={() => setOutput('contributions')}>Agent Contributions</button>
               </div>
 
-              <Show when={output() === 'evidence'}>
+              <div
+                class="full-chain-output-panel processing-tab-panel"
+                role="tabpanel"
+                hidden={output() !== 'evidence'}
+              >
                 <Show when={result().evidenceMap} fallback={<div class="sandbox-knowledge__empty">尚未生成 Evidence Map。</div>}>
                   <pre class="full-chain-evidence">{result().evidenceMap}</pre>
                 </Show>
-              </Show>
+              </div>
 
-              <Show when={output() === 'contributions'}>
+              <div
+                class="full-chain-output-panel processing-tab-panel"
+                role="tabpanel"
+                hidden={output() !== 'contributions'}
+              >
                 <Show when={result().contributions.length} fallback={<div class="sandbox-knowledge__empty">Agent 尚未提交知识写入。</div>}>
                   <div class="full-chain-contributions">
                     <For each={result().contributions}>{(contribution, index) => (
@@ -416,9 +501,13 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
                     )}</For>
                   </div>
                 </Show>
-              </Show>
+              </div>
 
-              <Show when={output() === 'knowledge'}>
+              <div
+                class="full-chain-output-panel processing-tab-panel"
+                role="tabpanel"
+                hidden={output() !== 'knowledge'}
+              >
                 <Show when={result().statements.length} fallback={<div class="sandbox-knowledge__empty">Sandbox 中尚未产生 Knowledge Statement。</div>}>
                   <div class="sandbox-knowledge">
                     <aside class="sandbox-knowledge__list" aria-label="Knowledge Statements">
@@ -467,12 +556,12 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
                     </Show>
                   </div>
                 </Show>
-              </Show>
+              </div>
             </section>
             </>
           )}
         </Show>
-      </Show>
+      </section>
     </div>
   )
 }

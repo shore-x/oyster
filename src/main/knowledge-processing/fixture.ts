@@ -19,7 +19,7 @@ export class FixtureKnowledgeAgentRuntime implements KnowledgeAgentRuntime {
       toolCallId: 'fixture-read',
       toolName: 'read_evidence',
       status: 'completed',
-      detail: 'L000001-L000001 · 1 行'
+      detail: 'L000001:C0-L000001:C48 · 48 字符 · EOF'
     })
     input.onTrace?.({
       type: 'tool_started',

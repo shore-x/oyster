@@ -113,8 +113,8 @@ MVP 的“实时”定义为 **turn 级近实时**，不是 token streaming。�
 
 开始加工前，用户选择一个已配置且能力匹配的 AI Connection。数据来源与执行连接相互独立：从某个 Agent Harness 读取观察，不要求使用同一 Provider 进行知识加工。
 
-1. 默认或自定义 Observation Preprocessor 对观察进行分段、裁剪、Redaction、索引和有界摘要，生成可丢弃、可重算且可回源的 Evidence Map；
-2. 默认或自定义 Knowledge Maintenance Agent 以 Evidence Map 和相关已有 Knowledge Statement 为起点，多次搜索和比较，必要时回到最小原始证据；
+1. 默认或自定义 Observation Preprocessor 对观察进行分段、裁剪、Redaction、索引和有界摘要，生成保留原始定位、可丢弃、可重算且可回源的 Evidence Map；
+2. 默认或自定义 Knowledge Maintenance Agent 以 Evidence Map 和相关已有 Knowledge Statement 为起点，多次搜索和比较，必要时从地图给出的位置渐进读取最小原始证据；默认策略优先维护细粒度、持久且可复用的对象与概念理解，而不是生成 Session 总结或工作日志；
 3. Agent 通过 Knowledge Contribution 提出对一条或多条 Knowledge Statement 的创建、补充、限定、修订或并列保留；
 4. Oyster Core 统一执行 Scope、出处、审计、持久化和删除规则；
 5. 用户可以检查来源，接受、修改、拒绝、固定、删除或重新加工派生知识。
@@ -145,7 +145,7 @@ MVP 提供本地搜索 UI，以及只读优先的 MCP 能力：
 - 观察、知识、投影三层职责分离；观察层继续保留 Raw Evidence 与 Canonical Activity 两个子层；
 - 可重复的 catalog 扫描，以及来源变化、移动、删除和权限失效的确定行为；
 - 项目/会话 catalog 浏览、基础筛选和出处可用性展示；
-- 提供至少一个可替换的默认 Attention、Observation Preprocessor 和受控 Knowledge Maintenance Agent，优先覆盖决策、问题、尝试和结果，但不将其固化为核心本体；
+- 提供至少一个可替换的默认 Attention、Observation Preprocessor 和受控 Knowledge Maintenance Agent，优先维护细粒度、持久且可复用的对象与概念理解；任务事件只在形成这类理解或 Attention 明确要求时保留，且不将其固化为核心本体；
 - 默认和自定义知识处理器遵循统一的 Knowledge Contribution、出处、Scope 和审计契约；
 - 用户审查、纠正、删除和重新加工；
 - 可替换的 AI Connection；首个实现支持 Codex Coding Plan 与 OpenAI-compatible API，并允许每个加工阶段独立选择 Connection、Model 和思考强度；

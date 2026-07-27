@@ -467,7 +467,10 @@ describe('KnowledgeProcessingService', () => {
 
     const result = await service.runObservationPreprocessor({ observation: 'one line' })
 
-    expect(result.evidenceMap).toBe(completeOutput)
+    expect(result.evidenceMap).toContain('Selected source ranges: L000001-L000001')
+    expect(result.evidenceMap).toContain('First evidence read location: L000001:C0')
+    expect(result.evidenceMap).toContain('First bounded read call: read_evidence({"line":1,"offset":0,"limit":16384})')
+    expect(result.evidenceMap).toContain(completeOutput)
     expect(result.debugTrace.preprocessing?.calls[0]).toMatchObject({
       status: 'completed',
       outputTruncated: true
@@ -555,11 +558,22 @@ describe('KnowledgeProcessingService', () => {
     await service.runKnowledgeMaintenance({ preprocessingRunId: result.runId })
     expect(agent.calls[0].evidenceMap).toBe(result.evidenceMap)
     expect(agent.calls[0].evidenceMapSections).toEqual([
-      { id: 'M000001', selectors: ['L000001-L000002'], content: 'LEAF A' },
-      { id: 'M000002', selectors: ['L000003-L000004'], content: 'LEAF B' },
+      {
+        id: 'M000001',
+        selectors: ['L000001-L000002'],
+        readLocation: { line: 1, offset: 0 },
+        content: 'LEAF A'
+      },
+      {
+        id: 'M000002',
+        selectors: ['L000003-L000004'],
+        readLocation: { line: 3, offset: 0 },
+        content: 'LEAF B'
+      },
       {
         id: 'M000003',
         selectors: ['L000001-L000004'],
+        readLocation: { line: 1, offset: 0 },
         content: 'ROOT NAVIGATION',
         children: ['M000001', 'M000002']
       }
@@ -712,7 +726,7 @@ describe('KnowledgeProcessingService', () => {
         evidenceMapPlanner: {
           segmentBytes: 23,
           adjacentContextBytes: 11,
-          mergeBytes: 170
+          mergeBytes: 280
         }
       }
     })
@@ -845,12 +859,19 @@ describe('KnowledgeProcessingService', () => {
     const windows = agent.calls[0].evidenceMapSections.flatMap(
       (section) => section.characterWindow && !section.children ? [section.characterWindow] : []
     )
+    const readLocations = agent.calls[0].evidenceMapSections
+      .filter((section) => section.characterWindow && !section.children)
+      .map((section) => section.readLocation)
     expect(windows.length).toBe(result.segmentCount)
     expect(windows[0].startCharacter).toBe(0)
     expect(windows.at(-1)?.endCharacter).toBe(observation.length)
     expect(windows.every((window, index) => (
       index === 0 || window.startCharacter === windows[index - 1].endCharacter
     ))).toBe(true)
+    expect(readLocations).toEqual(windows.map((window) => ({
+      line: 1,
+      offset: window.startCharacter
+    })))
     expect(service.snapshot().runningStageIds).toEqual([])
     expect(service.snapshot().preprocessingProgress).toBeUndefined()
   })

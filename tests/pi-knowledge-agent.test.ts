@@ -219,16 +219,17 @@ describe('PiKnowledgeMaintenanceAgent', () => {
         expect(result).toContain('内容因工具输出上限而截断')
         return fauxAssistantMessage(
           fauxToolCall('read_evidence', {
-            sourceRef: 'observation:test:1',
-            selector: 'L000001-L000002'
+            line: 1,
+            offset: 0,
+            limit: 1_000
           }),
           { stopReason: 'toolUse' }
         )
       },
       (context) => {
         const result = textContent(lastToolResult(context))
-        expect(result).toContain('L000001 RAW_SECRET prefers concise output')
-        expect(result).toContain('L000002 The user rejected verbose output')
+        expect(result).toContain('RAW_SECRET prefers concise output\nThe user rejected verbose output')
+        expect(result).not.toContain('L000001 RAW_SECRET')
         return fauxAssistantMessage(
           fauxToolCall(
             'submit_knowledge_contribution',
@@ -262,7 +263,11 @@ describe('PiKnowledgeMaintenanceAgent', () => {
     expect(traceEvents.filter((event) => event.type === 'tool_completed')).toEqual([
       expect.objectContaining({ toolName: 'search_knowledge', status: 'completed', detail: '返回 1 条候选知识' }),
       expect.objectContaining({ toolName: 'read_knowledge_statement', status: 'completed', detail: '已找到 Statement' }),
-      expect.objectContaining({ toolName: 'read_evidence', status: 'completed', detail: 'L000001-L000002 · 2 行' }),
+      expect.objectContaining({
+        toolName: 'read_evidence',
+        status: 'completed',
+        detail: expect.stringMatching(/^L000001:C0-L000002:C\d+ · \d+ 字符 · EOF$/)
+      }),
       expect.objectContaining({ toolName: 'submit_knowledge_contribution', status: 'completed', detail: '捕获 1 条候选 Statement' })
     ])
     expect(JSON.stringify(traceEvents)).not.toContain('RAW_SECRET')
@@ -323,8 +328,9 @@ describe('PiKnowledgeMaintenanceAgent', () => {
     const traceEvents: KnowledgeAgentTraceEvent[] = []
     const runtime = fauxRuntime([
       fauxAssistantMessage(fauxToolCall('read_evidence', {
-        sourceRef: 'observation:test:1',
-        selector: 'L000001-L000001'
+        line: 1,
+        offset: 0,
+        limit: 100
       }), { stopReason: 'toolUse' })
     ])
 
@@ -347,12 +353,14 @@ describe('PiKnowledgeMaintenanceAgent', () => {
     expect(JSON.stringify(traceEvents)).not.toContain('工具调用失败')
   })
 
-  it('keeps a normal tool validation error classified as failed', async () => {
+  it('keeps a normal tool validation error classified as failed and does not accept sourceRef as a tool argument', async () => {
     const traceEvents: KnowledgeAgentTraceEvent[] = []
     const runtime = fauxRuntime([
       fauxAssistantMessage(fauxToolCall('read_evidence', {
         sourceRef: 'observation:outside-workspace',
-        selector: 'L000001-L000001'
+        line: 1,
+        offset: 0,
+        limit: 100
       }), { stopReason: 'toolUse' }),
       fauxAssistantMessage(fauxToolCall(
         'submit_knowledge_contribution',
@@ -410,15 +418,19 @@ describe('PiKnowledgeMaintenanceAgent', () => {
         expect(section).toContain('M000002')
         expect(section).toContain('L000002-L000002')
         expect(section).toContain('L000004-L000004')
+        expect(section).toContain('First evidence read location: L000002:C0')
+        expect(section).toContain('read_evidence({"line":2,"offset":0')
         expect(section).toContain('LEAF_B_SECRET')
         expect(section).not.toContain('LEAF_A_SECRET')
         return fauxAssistantMessage(fauxToolCall('read_evidence', {
-          sourceRef: 'observation:test:1',
-          selector: 'L000002-L000002'
+          line: 2,
+          offset: 0,
+          limit: 100
         }), { stopReason: 'toolUse' })
       },
       (context) => {
-        expect(textContent(lastToolResult(context))).toContain('L000002 RAW_B_SECRET')
+        expect(textContent(lastToolResult(context))).toContain('RAW_B_SECRET')
+        expect(textContent(lastToolResult(context))).not.toContain('L000002 RAW_B_SECRET')
         return fauxAssistantMessage(fauxToolCall('submit_knowledge_contribution', {
           statements: [{
             localRef: 'candidate-1',
@@ -438,10 +450,16 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       runtime: runtime.runtime,
       evidenceMap: 'ROOT NAVIGATION\nImmediate child sections: M000001, M000002',
       evidenceMapSections: [
-        { id: 'M000001', selectors: ['L000001-L000001'], content: 'LEAF_A_SECRET' },
+        {
+          id: 'M000001',
+          selectors: ['L000001-L000001'],
+          readLocation: { line: 1, offset: 0 },
+          content: 'LEAF_A_SECRET'
+        },
         {
           id: 'M000002',
           selectors: ['L000002-L000002', 'L000004-L000004'],
+          readLocation: { line: 2, offset: 0 },
           content: 'LEAF_B_SECRET'
         }
       ],
@@ -471,41 +489,69 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       evidenceMapSections: [{
         id: 'M000001',
         selectors: ['L000001-L000001', 'L000002-L000002'],
+        readLocation: { line: 1, offset: 0 },
         content: 'INVALID UNCOALESCED SECTION'
       }]
     }))).rejects.toThrow('必须按顺序且已合并')
     expect(runtime.callCount()).toBe(0)
   })
 
-  it('allows only the exact workspace sourceRef and six-digit selectors of at most 200 lines', async () => {
+  it('requires a long-line section read location to match its character-window start', async () => {
+    const runtime = fauxRuntime([])
+    const agent = new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader())
+
+    await expect(agent.run(runInput({
+      runtime: runtime.runtime,
+      observationLines: ['0123456789'],
+      evidenceMapSections: [{
+        id: 'M000001',
+        selectors: ['L000001-L000001'],
+        readLocation: { line: 1, offset: 0 },
+        characterWindow: { startCharacter: 3, endCharacter: 8, totalCharacters: 10 },
+        content: 'WINDOW STARTS AT C3'
+      }]
+    }))).rejects.toThrow('字符窗口无效')
+    expect(runtime.callCount()).toBe(0)
+  })
+
+  it('allows only valid workspace-bound line and offset locations', async () => {
     const observationLines = Array.from({ length: 201 }, (_, index) => `secret-line-${index + 1}`)
     const runtime = fauxRuntime([
-      fauxAssistantMessage(fauxToolCall('read_evidence', {
-        sourceRef: 'observation:other',
-        selector: 'L000001-L000001'
-      }), { stopReason: 'toolUse' }),
+      fauxAssistantMessage([
+        fauxToolCall('read_evidence', {
+          line: 0,
+          offset: 0,
+          limit: 100
+        }, { id: 'invalid-line' }),
+        fauxToolCall('read_evidence', {
+          line: 1,
+          offset: observationLines[0].length + 1,
+          limit: 100
+        }, { id: 'invalid-offset' }),
+        fauxToolCall('read_evidence', {
+          line: 1,
+          offset: 0,
+          limit: 0
+        }, { id: 'invalid-limit' })
+      ], { stopReason: 'toolUse' }),
       (context) => {
-        const result = lastToolResult(context)
-        expect(result.isError).toBe(true)
-        expect(textContent(result)).not.toContain('secret-line-1')
+        const invalid = toolResults(context).slice(-3)
+        expect(invalid).toHaveLength(3)
+        expect(invalid.every((result) => result.isError)).toBe(true)
+        expect(invalid.map(textContent).join('\n')).not.toContain('secret-line-1')
         return fauxAssistantMessage(fauxToolCall('read_evidence', {
-          sourceRef: 'observation:test:1',
-          selector: 'L000001-L000201'
-        }), { stopReason: 'toolUse' })
-      },
-      (context) => {
-        const result = lastToolResult(context)
-        expect(result.isError).toBe(true)
-        expect(textContent(result)).toContain('最多读取 200 行')
-        return fauxAssistantMessage(fauxToolCall('read_evidence', {
-          sourceRef: 'observation:test:1',
-          selector: 'L000201-L000201'
+          line: 201,
+          offset: 0,
+          limit: 100
         }), { stopReason: 'toolUse' })
       },
       (context) => {
         const result = lastToolResult(context)
         expect(result.isError).toBe(false)
-        expect(textContent(result)).toBe('L000201 secret-line-201')
+        expect(textContent(result)).toContain('L000201:C0')
+        expect(textContent(result)).toContain('secret-line-201')
+        expect(textContent(result)).toContain('Next: none')
+        expect(textContent(result)).toContain('EOF: true')
         return fauxAssistantMessage(fauxToolCall(
           'submit_knowledge_contribution',
           contributionSubmission('No durable claim; evidence was only inspected.')
@@ -516,38 +562,37 @@ describe('PiKnowledgeMaintenanceAgent', () => {
 
     await expect(agent.run(runInput({ runtime: runtime.runtime, observationLines }))).resolves.toMatchObject({
       contribution: { statements: [{ content: 'No durable claim; evidence was only inspected.' }] },
-      modelCallCount: 4
+      modelCallCount: 3
     })
   })
 
-  it('reads separate character windows from one oversized raw line while keeping L provenance', async () => {
+  it('pages one oversized raw line without a failure and keeps L provenance on submission', async () => {
     const longLine = `${'a'.repeat(70_000)}TAIL`
     const runtime = fauxRuntime([
       fauxAssistantMessage(fauxToolCall('read_evidence', {
-        sourceRef: 'observation:test:1',
-        selector: 'L000001-L000001'
+        line: 1,
+        offset: 0,
+        limit: 40_000
       }), { stopReason: 'toolUse' }),
       (context) => {
-        expect(lastToolResult(context).isError).toBe(true)
-        expect(textContent(lastToolResult(context))).toContain('startCharacter/endCharacter')
+        const firstPage = lastToolResult(context)
+        expect(firstPage.isError).toBe(false)
+        expect(textContent(firstPage)).toContain('L000001:C0')
+        expect(textContent(firstPage)).toContain('Next: L000001:C40000')
+        expect(textContent(firstPage)).toContain('EOF: false')
         return fauxAssistantMessage(fauxToolCall('read_evidence', {
-          sourceRef: 'observation:test:1',
-          selector: 'L000001-L000001',
-          startCharacter: 0,
-          endCharacter: 100
+          line: 1,
+          offset: 40_000,
+          limit: 40_000
         }), { stopReason: 'toolUse' })
       },
       (context) => {
-        expect(textContent(lastToolResult(context))).toContain('character window [0, 100)')
-        return fauxAssistantMessage(fauxToolCall('read_evidence', {
-          sourceRef: 'observation:test:1',
-          selector: 'L000001-L000001',
-          startCharacter: 69_900,
-          endCharacter: longLine.length
-        }), { stopReason: 'toolUse' })
-      },
-      (context) => {
-        expect(textContent(lastToolResult(context))).toContain('TAIL')
+        const finalPage = lastToolResult(context)
+        expect(finalPage.isError).toBe(false)
+        expect(textContent(finalPage)).toContain('L000001:C40000')
+        expect(textContent(finalPage)).toContain('TAIL')
+        expect(textContent(finalPage)).toContain('Next: none')
+        expect(textContent(finalPage)).toContain('EOF: true')
         return fauxAssistantMessage(fauxToolCall('submit_knowledge_contribution', {
           statements: [{
             localRef: 'long-line',
@@ -573,6 +618,59 @@ describe('PiKnowledgeMaintenanceAgent', () => {
     }])
   })
 
+  it('keeps Unicode code points intact across continuation pages and reports EOF', async () => {
+    const unicodeLine = 'A😀B'
+    const runtime = fauxRuntime([
+      fauxAssistantMessage(fauxToolCall('read_evidence', {
+        line: 1,
+        offset: 0,
+        limit: 2
+      }), { stopReason: 'toolUse' }),
+      (context) => {
+        const firstPage = textContent(lastToolResult(context))
+        expect(firstPage).toContain('A')
+        expect(firstPage).toContain('Next: L000001:C1')
+        expect(firstPage).not.toContain('\ud83d')
+        return fauxAssistantMessage(fauxToolCall('read_evidence', {
+          line: 1,
+          offset: 1,
+          limit: 2
+        }), { stopReason: 'toolUse' })
+      },
+      (context) => {
+        const secondPage = textContent(lastToolResult(context))
+        expect(secondPage).toContain('😀')
+        expect(secondPage).toContain('Next: L000001:C3')
+        return fauxAssistantMessage(fauxToolCall('read_evidence', {
+          line: 1,
+          offset: 3,
+          limit: 2
+        }), { stopReason: 'toolUse' })
+      },
+      (context) => {
+        const finalPage = textContent(lastToolResult(context))
+        expect(finalPage).toContain('B')
+        expect(finalPage).toContain('Next: none')
+        return fauxAssistantMessage(fauxToolCall(
+          'submit_knowledge_contribution',
+          contributionSubmission('Unicode evidence was read without splitting a code point.')
+        ), { stopReason: 'toolUse' })
+      }
+    ])
+
+    await expect(new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
+      runtime: runtime.runtime,
+      observationLines: [unicodeLine]
+    }))).resolves.toMatchObject({
+      contribution: {
+        statements: [{
+          sources: [{ sourceRef: 'observation:test:1', selector: 'L000001-L000001' }]
+        }]
+      },
+      modelCallCount: 4
+    })
+  })
+
   it('returns recoverable tool errors for repeated searches, statements, and overlapping evidence', async () => {
     const reader = new MemoryKnowledgeReader([{
       id: 'statement:1',
@@ -584,16 +682,18 @@ describe('PiKnowledgeMaintenanceAgent', () => {
         fauxToolCall('search_knowledge', { query: '  Output   preference  ' }, { id: 'search-first' }),
         fauxToolCall('read_knowledge_statement', { statementId: 'statement:1' }, { id: 'statement-first' }),
         fauxToolCall('read_evidence', {
-          sourceRef: 'observation:test:1',
-          selector: 'L000001-L000002'
+          line: 1,
+          offset: 0,
+          limit: 40
         }, { id: 'evidence-first' })
       ], { stopReason: 'toolUse' }),
       fauxAssistantMessage([
         fauxToolCall('search_knowledge', { query: 'output preference' }, { id: 'search-repeat' }),
         fauxToolCall('read_knowledge_statement', { statementId: 'statement:1' }, { id: 'statement-repeat' }),
         fauxToolCall('read_evidence', {
-          sourceRef: 'observation:test:1',
-          selector: 'L000002-L000002'
+          line: 1,
+          offset: 10,
+          limit: 40
         }, { id: 'evidence-overlap' })
       ], { stopReason: 'toolUse' }),
       (context) => {
@@ -619,53 +719,23 @@ describe('PiKnowledgeMaintenanceAgent', () => {
     expect(reader.readCalls).toEqual(['statement:1'])
   })
 
-  it('enforces a cumulative evidence line budget while allowing the Agent to submit afterwards', async () => {
-    const observationLines = Array.from({ length: 401 }, (_, index) => `line-${index + 1}`)
-    const runtime = fauxRuntime([
-      fauxAssistantMessage(fauxToolCall('read_evidence', {
-        sourceRef: 'observation:test:1',
-        selector: 'L000001-L000200'
-      }), { stopReason: 'toolUse' }),
-      fauxAssistantMessage(fauxToolCall('read_evidence', {
-        sourceRef: 'observation:test:1',
-        selector: 'L000201-L000400'
-      }), { stopReason: 'toolUse' }),
-      fauxAssistantMessage(fauxToolCall('read_evidence', {
-        sourceRef: 'observation:test:1',
-        selector: 'L000401-L000401'
-      }), { stopReason: 'toolUse' }),
-      (context) => {
-        const result = lastToolResult(context)
-        expect(result.isError).toBe(true)
-        expect(textContent(result)).toContain('累计最多读取 400 行')
-        return fauxAssistantMessage(fauxToolCall(
-          'submit_knowledge_contribution',
-          contributionSubmission('Submitted within the cumulative evidence budget.')
-        ), { stopReason: 'toolUse' })
-      }
-    ])
-    const agent = new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader())
-
-    await expect(agent.run(runInput({ runtime: runtime.runtime, observationLines }))).resolves.toMatchObject({
-      contribution: { statements: [{ content: 'Submitted within the cumulative evidence budget.' }] },
-      modelCallCount: 4
-    })
-  })
-
   it('enforces a cumulative tool-output budget before the next model context grows too large', async () => {
-    const observationLines = Array.from({ length: 350 }, () => 'x'.repeat(300))
+    const observationLines = Array.from({ length: 3 }, () => 'x'.repeat(40_000))
     const runtime = fauxRuntime([
       fauxAssistantMessage(fauxToolCall('read_evidence', {
-        sourceRef: 'observation:test:1',
-        selector: 'L000001-L000150'
+        line: 1,
+        offset: 0,
+        limit: 40_000
       }), { stopReason: 'toolUse' }),
       fauxAssistantMessage(fauxToolCall('read_evidence', {
-        sourceRef: 'observation:test:1',
-        selector: 'L000151-L000300'
+        line: 2,
+        offset: 0,
+        limit: 40_000
       }), { stopReason: 'toolUse' }),
       fauxAssistantMessage(fauxToolCall('read_evidence', {
-        sourceRef: 'observation:test:1',
-        selector: 'L000301-L000350'
+        line: 3,
+        offset: 0,
+        limit: 40_000
       }), { stopReason: 'toolUse' }),
       (context) => {
         const result = lastToolResult(context)
@@ -727,8 +797,9 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       calls: [
         fauxToolCall('submit_knowledge_contribution', contributionSubmission('first'), { id: 'submit' }),
         fauxToolCall('read_evidence', {
-          sourceRef: 'observation:test:1',
-          selector: 'L000001-L000001'
+          line: 1,
+          offset: 0,
+          limit: 100
         }, { id: 'read-after-submit' })
       ],
       error: '提交 Knowledge Contribution 后不能继续调用工具'

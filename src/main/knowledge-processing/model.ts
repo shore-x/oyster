@@ -2,7 +2,7 @@ import type { ModelGenerationRequest, ModelRuntime } from '../ai-backends/model'
 import type { AiBackendSnapshot } from '../../shared/ai-backends'
 import type { ReasoningEffort } from '../../shared/ai-backends'
 import type { KnowledgeContributionDraft } from '../../shared/knowledge'
-import type { ObservationCharacterWindow } from '../observation/model'
+import type { EvidenceLocation, ObservationCharacterWindow } from '../observation/model'
 import type {
   KnowledgeProcessingSnapshot,
   ProcessingStageId
@@ -88,6 +88,8 @@ export interface EvidenceMapSection {
   id: string
   /** Exact, sorted and coalesced raw source ranges represented by this section. */
   selectors: string[]
+  /** First host-derived position for this section; can be passed directly to read_evidence. */
+  readLocation: EvidenceLocation
   content: string
   /** Immediate child sections for progressive disclosure; descendants are never flattened. */
   children?: string[]

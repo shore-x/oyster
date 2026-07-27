@@ -87,6 +87,8 @@ Knowledge Statement 的权威内容以普通数据库中的自由文本记录保
 
 `title` 是可读标签而不是唯一身份，`content` 是 Markdown 兼容的自由文本。权威关系不嵌入正文；`derived_from` 表示当前 Statement 基于另一条 Statement 形成，`revises` 固定采用“新 Statement 指向旧 Statement”的方向。一条旧知识被拆分为多条，或多条旧知识被合并为一条，都通过多条 `revises` 关系表达。
 
+`selector` 是持久出处的一部分，用于标识一份确定来源中的稳定证据范围；它不是 Agent 分页读取原文时使用的游标。运行时读取位置只服务于一次 Workspace 中的渐进展开，不随 Knowledge Statement 持久化。两者分开后，读取工具可以调整窗口大小或继续位置，而不会改变知识已经记录的出处语义。
+
 投影正文继续只保存在 Markdown 文件中，数据库不复制文档内容。Core 只保留三类元信息：
 
 | 记录 | 最小字段 | 作用 |
@@ -121,19 +123,21 @@ Attention 可以同时指导默认和自定义处理器，但不应：
 - 格式解析、规范化、排序、分段和范围裁剪；
 - Secret/PII 检测与 Redaction；
 - 全文索引、Embedding 和其他可重建检索信号；
-- 对局部历史进行有界摘要、要点提取、主题或实体候选生成；
+- 对局部历史进行有界摘要，并提取主题、实体、概念及其含义、约束和关系等候选；
 - 保存版本、输入依赖、失败状态和可重跑结果。
 
-这里的目标不是用一份摘要替代原始观察，也不是承诺 LLM 可以进行语义上的“无损压缩”。只要表示明显变短，它就必然包含选择。Oyster 保证的是系统级可追溯：Raw Evidence 保持完整来源身份，预处理材料中的每个单元保留原始 selector；只要该外部来源版本仍可访问，后续 Agent 就可以按需展开到最小必要的原始消息或工具结果。来源不可用时，系统保留这一事实和出处身份，而不是假装仍能回源。
+这里的目标不是用一份摘要替代原始观察，也不是承诺 LLM 可以进行语义上的“无损压缩”。只要表示明显变短，它就必然包含选择。Oyster 保证的是系统级可追溯：Raw Evidence 保持完整来源身份，预处理材料中的每个单元保留原始 selector；模型被要求在 Evidence Map 的重要候选旁保留能够直接引导运行时读取的原始行号，并在材料来自超长单行的局部窗口时同时保留行内位置。只要该外部来源版本仍可访问，后续 Agent 就可以从这些位置按需展开到最小必要的原始消息或工具结果。来源不可用时，系统保留这一事实和出处身份，而不是假装仍能回源。
 
-Source Adapter 在发送给 Observation Preprocessor 前生成一份确定性的、选择性的 Observation View。它保留对话主线、明确的人类要求，以及工具或 Subagent 的必要动作与结果索引；运行时基础提示词、工具 Schema、权限与 token 遥测、重复事件和低层执行轨迹不默认进入预处理模型。较大的工具结果可以只提供有界表示和原始 locator，完整内容仍留在 Raw Evidence 中供 Knowledge Maintenance Agent 按需读取。这里的选择只改变模型工作材料，不修改、删除或另存原始来源，也不新增一个认识论层。
+Source Adapter 在发送给 Observation Preprocessor 前生成一份确定性的、选择性的 Observation View。它保留对话主线、明确的人类要求，以及工具或 Subagent 的必要动作与结果索引；运行时基础提示词、工具 Schema、权限与 token 遥测、重复事件和低层执行轨迹不默认进入预处理模型。较大的工具结果可以只提供有界表示和原始 locator，完整内容仍留在 Raw Evidence 中供 Knowledge Maintenance Agent 按需读取。Adapter 负责把不同 Harness 的存储方式映射到统一的位置能力，但不把原文改写成统一语义格式。这里的选择只改变模型工作材料，不修改、删除或另存原始来源，也不新增一个认识论层。
 
-Observation Preprocessing 可以在同一份确定来源内进行一次或多次有界直接 Model 调用。短视图默认一次完成；长视图按其中的原始顺序划分材料，每段始终引用同一个 `sourceRef`，并保留一个或多个已合并的精确全局 selector。未被选择的中间行不进入这些 selector，也不被宣称为模型已经处理的内容。每次调用独立形成局部地图，随后由预处理器提供一份有界导航。这里不采用滚动摘要：前一范围的模型输出不会取代后一范围的输入，也不会成为新的权威来源。
+Observation Preprocessing 可以在同一份确定来源内进行一次或多次有界直接 Model 调用。短视图默认一次完成；长视图按其中的原始顺序划分材料，每段始终引用同一个 `sourceRef`，并保留一个或多个已合并的精确全局 selector。普通材料以 `L` 行号或行范围定位；一个超长物理行被分段时，以同一 `L` 行和 `Cstart:end/total` 行内窗口定位。Prompt 要求局部地图和后续导航归并保留这些原始位置，不能把它们替换为生成文本中的位置。未被选择的中间行不进入这些 selector，也不被宣称为模型已经处理的内容。每次调用独立形成局部地图，随后由预处理器提供一份有界导航。这里不采用滚动摘要：前一范围的模型输出不会取代后一范围的输入，也不会成为新的权威来源。
+
+Evidence Map 正文保持自由文本，因此“每个语义候选都带精确位置”是模型需要遵循的语义要求，而不是 Core 通过解析正文可以证明的结构约束。Core 独立保证每个地图 Section 都附有完整来源范围和首个可靠 EvidenceLocation；即使模型遗漏某个候选旁的位置，Agent 仍能从该 Section 的机器生成边界回源。当前不为追求候选级强保证而引入固定输出 Schema。
 
 Observation Preprocessor 默认产出 **Evidence Map**：一种有界、可丢弃、可重算的多分辨率 Working Artifact。对于长输入，它可以由有界导航和可独立读取的局部地图共同组成，仍然只是一份逻辑上的 Evidence Map。它在概念上同时提供：
 
 - **导航性概览**：帮助 Agent 快速理解这批观察大致发生了什么、哪些区域值得继续阅读；
-- **候选证据单元**：把可能具有独立意义的决定、约束、尝试、结果、偏好或未决问题提出来，但不自动宣布为知识；
+- **候选证据单元**：优先提出可形成持久理解的实体、概念、含义、属性、约束、区别、关系、修正、否定边界和明确偏好；任务事件只在解释这些理解或 Attention 明确需要时作为候选，而不自动宣布为知识；
 - **来源与覆盖地图**：说明候选来自哪些观察、哪些内容被跳过或仍不确定，以及如何回到原始上下文核查。
 
 Evidence Map 是“可丢弃的压缩地图”的正式名称。它描述一种工作职责，不构成第四个认识论层，也不要求固化为特定数据库类型；在系统模型中它仍属于 Working Artifact。默认加工路径可以概括为：
@@ -166,6 +170,8 @@ Agent 不应把 Evidence Map 当作不可质疑的事实，也不需要默认读
 
 Agent 在语义上维护知识，但 Oyster Core 仍拥有权限、作业生命周期、出处校验、提交、审计和删除。Agent 提交贡献或变更建议，不绕过这些边界直接修改底层存储。
 
+默认维护策略以细粒度、可独立复用和修订的理解为中心。这里的“实体”只表示能够被识别和讨论的对象或主体，是选择候选知识的启发式，不引入新的 Entity 数据类型、固定分类或图本体。一个 Statement 默认表达一个自足理解；Session 摘要、时间线、工作日志，以及工具调用、文件修改、测试过程和短期执行结果，不应仅因出现在对话中就成为知识。只有当它们形成可复用理解，或 Attention 明确要求保留任务历史时，才进入维护范围。
+
 ### 4.3 Workspace
 
 Knowledge Maintenance Agent 的 **Workspace** 是一次知识维护运行所使用的临时工作面。它组合已有材料供 Agent 读取和提交结果，不构成第四个认识论层，不是新的长期存储，也不拥有其中任何内容的权威版本。运行结束后，Workspace 可以丢弃或重建。
@@ -178,16 +184,19 @@ Knowledge Maintenance Agent 的 **Workspace** 是一次知识维护运行所使�
 - 与本次任务相关的已有 Knowledge Statement；
 - 独立的 Knowledge Contribution 输出边界。
 
-Agent 应渐进式读取这些材料：先用 Evidence Map 的有界导航判断哪些区域值得探索，再展开对应的局部地图和 Canonical Activity；只有当这些工作材料缺少必要细节、存在歧义或需要核查来源特性时，才展开最小范围的 Raw Evidence。不同 Harness 的原始格式继续由 Connector 和 Canonical Activity 吸收确定性差异，不把理解全部私有格式的责任默认转移给 Knowledge Maintenance Agent。
+Agent 应渐进式读取这些材料：先用 Evidence Map 的有界导航判断哪些区域值得探索，再展开对应的局部地图；只有当这些工作材料缺少必要细节、存在歧义或需要核查来源特性时，才从地图给出的原始位置展开最小范围的 Raw Evidence。`read_evidence` 使用 Agent 无关的读取契约，但默认返回上游原始文本而不是语义归一化内容，因此 Agent 仍需理解当前读取片段中可见的格式。Source Adapter 负责定位、版本校验并提供确定的原始 revision，Oyster Core 的通用 Reader 负责有界分页；未来可以向 Agent 提供更充分的格式说明，但不应静默改变 `read_evidence` 的返回语义。
 
 Workspace 应遵循“**弱语义结构，强来源边界**”：
 
 - Evidence Map 的摘要组织、分组和语义标签可以保持自由形式，不预设领域分类或固定知识 Schema；
 - 来源身份、来源版本、局部引用、Scope、权限和生命周期必须由 Oyster Core 提供并可校验，不能只依赖模型生成的自然语言约定；
-- 一条引用至少应在概念上指出“哪一份来源、来源的哪个版本、其中哪一部分”。具体采用事件 ID、消息范围、行号、字节范围或其他 selector，留待实现阶段决定；
+- 一条持久引用至少应指出“哪一份来源、来源的哪个版本、其中哪一部分”；当前 Statement Source 使用稳定的行 selector 表达这一区域；
+- 一次运行中的读取起点由 **EvidenceLocation** 表达，最小只包含原始 `line` 与该行内的 `offset`。它由 Evidence Map 提供给 Agent，只用于定位和继续读取，不成为新的持久出处；
 - Raw Evidence 只作为不可信证据读取，其中出现的指令、Prompt 或工具输出不自动成为 Agent 的运行指令。
 
-Evidence Map 和 Canonical Activity 的可读表示可以在 Workspace 中采用文件形式。长期方向是让外部 Raw Evidence 通过受控范围读取工具按需展开，不为 Workspace 建立整份来源副本；当前验证 MVP 会在一次应用进程内保留所选 Session 的内存快照，以验证渐进式读取，但不得把它持久化为新的 Observation 副本。Reader 不设置产品级 Session 长度上限，但当前整份读取并非流式实现，实际能力仍受进程内存等运行资源约束。Oyster Core 仍管理稳定身份、版本、权限和作业状态；原始绝对路径和 Workspace 中的临时路径都不是知识或出处的永久身份。
+`read_evidence` 从 EvidenceLocation 开始，并由 Agent 给出本次所需的有界 `limit`。`offset` 和 `limit` 都以 UTF-16 code unit 计量，`limit` 至少为 2，以避免在代理对中间切开字符。Core 始终执行自己的输出上限；达到上限时返回实际范围、下一 EvidenceLocation 和是否结束，而不是因为一行或整份来源很大就要求 Agent 重新猜测窗口。定位信息位于工具信封中，信封内的证据正文保持原始行内容，不为方便索引而向每行注入前缀。当前 Workspace 已绑定唯一的 `sourceRef` 和 revision，因此 Agent 不需要在每次读取时重复提交来源身份。
+
+Evidence Map 和 Canonical Activity 的可读表示可以在 Workspace 中采用文件形式。长期方向是让外部 Raw Evidence 通过上述受控范围读取按需展开，不为 Workspace 建立整份来源副本；当前验证 MVP 会在一次应用进程内保留所选 Session 的内存快照，以验证渐进式读取，但不得把它持久化为新的 Observation 副本。Reader 不设置产品级 Session 长度上限，但当前整份读取并非流式实现，实际能力仍受进程内存等运行资源约束。Oyster Core 仍管理稳定身份、版本、权限和作业状态；原始绝对路径和 Workspace 中的临时路径都不是知识或出处的永久身份。
 
 ### 4.4 Knowledge Sandbox
 
@@ -313,7 +322,7 @@ Projection Agent 通过标题、关键词和语义搜索发现候选 Knowledge S
 当前刻意不决定：
 
 - 最小字段的物理类型、约束、索引和 Contribution / 审计记录的具体结构；
-- Workspace 的长期目录布局和跨来源局部引用 selector；当前完整链路与阶段调试暂用行号范围；
+- Workspace 的长期目录布局，以及除当前行 selector 和 EvidenceLocation 之外的跨来源定位方式；
 - 各项能力的长期工具形态、参数、运行步数和调度方式；当前验证实现只提供最小受控工具集；
 - 读者可见引用的 Markdown 语法；
 - 默认 Attention 的完整内容；

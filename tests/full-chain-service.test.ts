@@ -385,12 +385,25 @@ describe('KnowledgeFullChainService', () => {
     }
     const fullChain = harness.createFullChain(() => new StaticAgent(async (input) => {
       expect(input.evidenceMap).toContain('ROOT NAVIGATION')
+      expect(input.evidenceMap).toContain('Source ranges and reliable read starts are attached to the immediate child sections.')
+      expect(input.evidenceMap).not.toContain('First bounded read call:')
       expect(input.evidenceMapSections).toEqual([
-        { id: 'M000001', selectors: ['L000001-L000002'], content: 'LEAF A' },
-        { id: 'M000002', selectors: ['L000003-L000004'], content: 'LEAF B' },
+        {
+          id: 'M000001',
+          selectors: ['L000001-L000002'],
+          readLocation: { line: 1, offset: 0 },
+          content: 'LEAF A'
+        },
+        {
+          id: 'M000002',
+          selectors: ['L000003-L000004'],
+          readLocation: { line: 3, offset: 0 },
+          content: 'LEAF B'
+        },
         {
           id: 'M000003',
           selectors: ['L000001-L000004'],
+          readLocation: { line: 1, offset: 0 },
           content: 'ROOT NAVIGATION',
           children: ['M000001', 'M000002']
         }

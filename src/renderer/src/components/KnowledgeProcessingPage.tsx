@@ -398,9 +398,40 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
   )
 }
 
+type DebugWorkspace = 'input' | 'configuration' | 'process' | 'output'
+
+function DebugWorkspaceTabs(props: {
+  stageId: string
+  selected: DebugWorkspace
+  onSelect(tab: DebugWorkspace): void
+}) {
+  const tabs: Array<{ id: DebugWorkspace; label: string }> = [
+    { id: 'input', label: '运行输入' },
+    { id: 'configuration', label: '模型与提示词' },
+    { id: 'process', label: '调用过程' },
+    { id: 'output', label: '输出结果' }
+  ]
+  return (
+    <div class="processing-workspace-tabs" role="tablist" aria-label="阶段调试工作区">
+      <For each={tabs}>{(tab) => (
+        <button
+          type="button"
+          role="tab"
+          aria-selected={props.selected === tab.id}
+          aria-controls={`${props.stageId}-panel-${tab.id}`}
+          data-testid={`${props.stageId}-tab-${tab.id}`}
+          onClick={() => props.onSelect(tab.id)}
+        >{tab.label}</button>
+      )}</For>
+    </div>
+  )
+}
+
 export function KnowledgeProcessingPage() {
   const controller = createKnowledgeProcessingController()
   const [view, setView] = createSignal<'full_chain' | 'stage_debug'>('full_chain')
+  const [debugStage, setDebugStage] = createSignal<'preprocessor' | 'maintainer'>('preprocessor')
+  const [debugWorkspace, setDebugWorkspace] = createSignal<DebugWorkspace>('input')
   const [selectedSessionId, setSelectedSessionId] = createSignal<string>()
   const [fullChainAttention, setFullChainAttention] = createSignal('')
   const [preprocessorInputSource, setPreprocessorInputSource] = createSignal<'session' | 'manual'>('session')
@@ -518,6 +549,15 @@ export function KnowledgeProcessingPage() {
       previousMaintenanceInstructions = instructions
       setMaintenancePrompt(instructions)
     }
+  })
+
+  let previousDebugStage: string | undefined
+  createEffect(() => {
+    const stageId = stageDebugTrace()?.currentStageId
+    if (!stageId || stageId === previousDebugStage) return
+    previousDebugStage = stageId
+    setDebugStage(stageId === 'knowledge_maintenance_agent' ? 'maintainer' : 'preprocessor')
+    setDebugWorkspace('process')
   })
 
   function storedInstructions(stage: ProcessingStageView): string | null {
@@ -668,7 +708,11 @@ export function KnowledgeProcessingPage() {
         >阶段调试</button>
       </div>
 
-      <Show when={view() === 'full_chain'}>
+      <div
+        class="processing-page-panel processing-tab-panel"
+        role="tabpanel"
+        hidden={view() !== 'full_chain'}
+      >
         <FullChainWorkspace
           sessions={controller.availableSessions()}
           sessionsLoading={controller.sessionsLoading()}
@@ -716,20 +760,51 @@ export function KnowledgeProcessingPage() {
             if (result) void controller.discardSandbox(result.sandbox.id)
           }}
         />
-      </Show>
+      </div>
 
-      <Show when={view() === 'stage_debug'}>
+      <div
+        class="processing-page-panel processing-tab-panel"
+        role="tabpanel"
+        hidden={view() !== 'stage_debug'}
+      >
         <div class="processing-notice">
           <Icon name="warning" />
           <span>这是显式阶段调试工作面。运行时会把当前材料发送到所选 Connection；两个阶段不会自动串联。</span>
+        </div>
+
+        <div class="processing-stage-switch" role="tablist" aria-label="调试阶段">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={debugStage() === 'preprocessor'}
+            aria-controls="processing-stage-observation_preprocessor"
+            data-testid="processing-stage-tab-observation_preprocessor"
+            onClick={() => setDebugStage('preprocessor')}
+          >
+            <span>1</span>
+            <div><strong>观察预处理</strong><small>{currentPreprocessingResult() ? '已有输出' : '生成 Evidence Map'}</small></div>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={debugStage() === 'maintainer'}
+            aria-controls="processing-stage-knowledge_maintenance_agent"
+            data-testid="processing-stage-tab-knowledge_maintenance_agent"
+            onClick={() => setDebugStage('maintainer')}
+          >
+            <span>2</span>
+            <div><strong>知识维护</strong><small>{currentPreprocessingResult() ? '输入已准备' : '等待 Evidence Map'}</small></div>
+          </button>
         </div>
 
         <section class="processing-list" aria-label="知识加工阶段">
         <Show when={preprocessor()}>
           {(stage) => (
             <article
+              id="processing-stage-observation_preprocessor"
               class="processing-stage"
               data-testid="processing-stage-observation_preprocessor"
+              hidden={debugStage() !== 'preprocessor'}
             >
               <div class="processing-stage__header">
                 <span class="processing-stage__index">1</span>
@@ -743,26 +818,45 @@ export function KnowledgeProcessingPage() {
                 <For each={stage().capabilities}>{(capability) => <span>{capability}</span>}</For>
               </div>
 
-              <ConnectionConfiguration
-                stage={stage()}
-                connections={controller.snapshot().connections}
-                selected={selectedConnection(stage())}
-                saving={controller.isSaving(stage().id)}
-                locked={anyStageRunning()}
-                onChange={(connectionId) => saveConnection(stage(), connectionId)}
-                onModelChange={(modelId) => saveModel(stage(), modelId)}
-                onReasoningEffortChange={(effort) => saveReasoningEffort(stage(), effort)}
-              />
-              <PromptConfiguration
-                stage={stage()}
-                draft={preprocessorPrompt()}
-                saving={controller.isSaving(stage().id)}
-                locked={anyStageRunning()}
-                onInput={setPreprocessorPrompt}
-                onSave={() => savePrompt(stage(), preprocessorPrompt())}
-                onRestore={() => void restorePrompt(stage(), setPreprocessorPrompt)}
+              <DebugWorkspaceTabs
+                stageId="observation-preprocessor"
+                selected={debugWorkspace()}
+                onSelect={setDebugWorkspace}
               />
 
+              <div
+                id="observation-preprocessor-panel-configuration"
+                class="processing-workspace-panel processing-tab-panel"
+                role="tabpanel"
+                hidden={debugWorkspace() !== 'configuration'}
+              >
+                <ConnectionConfiguration
+                  stage={stage()}
+                  connections={controller.snapshot().connections}
+                  selected={selectedConnection(stage())}
+                  saving={controller.isSaving(stage().id)}
+                  locked={anyStageRunning()}
+                  onChange={(connectionId) => saveConnection(stage(), connectionId)}
+                  onModelChange={(modelId) => saveModel(stage(), modelId)}
+                  onReasoningEffortChange={(effort) => saveReasoningEffort(stage(), effort)}
+                />
+                <PromptConfiguration
+                  stage={stage()}
+                  draft={preprocessorPrompt()}
+                  saving={controller.isSaving(stage().id)}
+                  locked={anyStageRunning()}
+                  onInput={setPreprocessorPrompt}
+                  onSave={() => savePrompt(stage(), preprocessorPrompt())}
+                  onRestore={() => void restorePrompt(stage(), setPreprocessorPrompt)}
+                />
+              </div>
+
+              <div
+                id="observation-preprocessor-panel-input"
+                class="processing-workspace-panel processing-tab-panel"
+                role="tabpanel"
+                hidden={debugWorkspace() !== 'input'}
+              >
               <section class="processing-input" aria-label="观察预处理输入">
                 <div class="processing-input__heading">
                   <h3>{stage().inputDescription}</h3>
@@ -877,6 +971,7 @@ export function KnowledgeProcessingPage() {
                           const session = selectedSession()
                           if (preprocessorInputSource() === 'session') {
                             if (!session) return
+                            setDebugWorkspace('process')
                             void controller.runSessionPreprocessor({
                               artifactId: session.artifactId,
                               expectedRevision: session.revision,
@@ -884,6 +979,7 @@ export function KnowledgeProcessingPage() {
                             })
                             return
                           }
+                          setDebugWorkspace('process')
                           void controller.runObservationPreprocessor({
                             observation: observation(),
                             attention: runAttention()
@@ -901,22 +997,52 @@ export function KnowledgeProcessingPage() {
                   </Show>
                 </div>
               </section>
+              </div>
 
-              <Show when={stageDebugTrace()?.preprocessing ? stageDebugTrace() : undefined}>
-                {(trace) => (
-                  <ProcessingDebugTracePanel
-                    trace={trace()}
-                    showMaintenance={false}
-                    title="预处理调用调试"
-                  />
-                )}
-              </Show>
+              <div
+                id="observation-preprocessor-panel-process"
+                class="processing-workspace-panel processing-tab-panel"
+                role="tabpanel"
+                hidden={debugWorkspace() !== 'process'}
+              >
+                <Show
+                  when={stageDebugTrace()?.preprocessing ? stageDebugTrace() : undefined}
+                  fallback={<div class="processing-workspace-empty">运行预处理后，这里会逐段展示模型调用、进度和局部 Evidence Map 输出。</div>}
+                >
+                  {(trace) => (
+                    <ProcessingDebugTracePanel
+                      trace={trace()}
+                      showMaintenance={false}
+                      title="预处理调用调试"
+                    />
+                  )}
+                </Show>
+                <Show when={controller.isRunning(stage().id)}>
+                  <div class="processing-workspace-running-actions">
+                    <span>预处理正在运行，可以继续查看逐段输出。</span>
+                    <Button
+                      variant="danger"
+                      icon="stop"
+                      data-testid="cancel-preprocessor-process"
+                      onClick={() => void controller.cancelRun(stage().id)}
+                    >停止预处理</Button>
+                  </div>
+                </Show>
+              </div>
 
-              <Show when={!controller.isRunning(stage().id)}>
-                <Show when={currentPreprocessingResult()}>
+              <div
+                id="observation-preprocessor-panel-output"
+                class="processing-workspace-panel processing-tab-panel"
+                role="tabpanel"
+                hidden={debugWorkspace() !== 'output'}
+              >
+                <Show
+                  when={!controller.isRunning(stage().id) ? currentPreprocessingResult() : undefined}
+                  fallback={<div class="processing-workspace-empty">完成预处理后，这里会展示完整 Evidence Map 与本次执行配置。</div>}
+                >
                   {(result) => <PreprocessingResult result={result()} />}
                 </Show>
-              </Show>
+              </div>
             </article>
           )}
         </Show>
@@ -924,8 +1050,10 @@ export function KnowledgeProcessingPage() {
         <Show when={maintainer()}>
           {(stage) => (
             <article
+              id="processing-stage-knowledge_maintenance_agent"
               class="processing-stage"
               data-testid="processing-stage-knowledge_maintenance_agent"
+              hidden={debugStage() !== 'maintainer'}
             >
               <div class="processing-stage__header">
                 <span class="processing-stage__index">2</span>
@@ -939,26 +1067,45 @@ export function KnowledgeProcessingPage() {
                 <For each={stage().capabilities}>{(capability) => <span>{capability}</span>}</For>
               </div>
 
-              <ConnectionConfiguration
-                stage={stage()}
-                connections={controller.snapshot().connections}
-                selected={selectedConnection(stage())}
-                saving={controller.isSaving(stage().id)}
-                locked={anyStageRunning()}
-                onChange={(connectionId) => saveConnection(stage(), connectionId)}
-                onModelChange={(modelId) => saveModel(stage(), modelId)}
-                onReasoningEffortChange={(effort) => saveReasoningEffort(stage(), effort)}
-              />
-              <PromptConfiguration
-                stage={stage()}
-                draft={maintenancePrompt()}
-                saving={controller.isSaving(stage().id)}
-                locked={anyStageRunning()}
-                onInput={setMaintenancePrompt}
-                onSave={() => savePrompt(stage(), maintenancePrompt())}
-                onRestore={() => void restorePrompt(stage(), setMaintenancePrompt)}
+              <DebugWorkspaceTabs
+                stageId="knowledge-maintainer"
+                selected={debugWorkspace()}
+                onSelect={setDebugWorkspace}
               />
 
+              <div
+                id="knowledge-maintainer-panel-configuration"
+                class="processing-workspace-panel processing-tab-panel"
+                role="tabpanel"
+                hidden={debugWorkspace() !== 'configuration'}
+              >
+                <ConnectionConfiguration
+                  stage={stage()}
+                  connections={controller.snapshot().connections}
+                  selected={selectedConnection(stage())}
+                  saving={controller.isSaving(stage().id)}
+                  locked={anyStageRunning()}
+                  onChange={(connectionId) => saveConnection(stage(), connectionId)}
+                  onModelChange={(modelId) => saveModel(stage(), modelId)}
+                  onReasoningEffortChange={(effort) => saveReasoningEffort(stage(), effort)}
+                />
+                <PromptConfiguration
+                  stage={stage()}
+                  draft={maintenancePrompt()}
+                  saving={controller.isSaving(stage().id)}
+                  locked={anyStageRunning()}
+                  onInput={setMaintenancePrompt}
+                  onSave={() => savePrompt(stage(), maintenancePrompt())}
+                  onRestore={() => void restorePrompt(stage(), setMaintenancePrompt)}
+                />
+              </div>
+
+              <div
+                id="knowledge-maintainer-panel-input"
+                class="processing-workspace-panel processing-tab-panel"
+                role="tabpanel"
+                hidden={debugWorkspace() !== 'input'}
+              >
               <section class="processing-dependency" aria-label="知识维护输入">
                 <div>
                   <h3>{stage().inputDescription}</h3>
@@ -997,6 +1144,7 @@ export function KnowledgeProcessingPage() {
                       onClick={() => {
                         const result = currentPreprocessingResult()
                         if (!result) return
+                        setDebugWorkspace('process')
                         void controller.runKnowledgeMaintenance({
                           preprocessingRunId: result.runId,
                           attention: runAttention()
@@ -1011,29 +1159,66 @@ export function KnowledgeProcessingPage() {
                     data-testid="cancel-maintainer"
                     onClick={() => void controller.cancelRun(stage().id)}
                   >停止知识维护</Button>
-                </Show>
+                  </Show>
+                </div>
               </div>
 
-              <Show when={stageDebugTrace()?.maintenance ? stageDebugTrace() : undefined}>
-                {(trace) => (
-                  <ProcessingDebugTracePanel
-                    trace={trace()}
-                    showPreprocessing={false}
-                    title="知识维护 Agent 调试"
-                  />
-                )}
-              </Show>
+              <div
+                id="knowledge-maintainer-panel-process"
+                class="processing-workspace-panel processing-tab-panel"
+                role="tabpanel"
+                hidden={debugWorkspace() !== 'process'}
+              >
+                <Show
+                  when={stageDebugTrace()?.maintenance ? stageDebugTrace() : undefined}
+                  fallback={<div class="processing-workspace-empty">运行知识维护后，这里会展示模型轮次和 Agent 的工具活动。</div>}
+                >
+                  {(trace) => (
+                    <ProcessingDebugTracePanel
+                      trace={trace()}
+                      showPreprocessing={false}
+                      title="知识维护 Agent 调试"
+                    />
+                  )}
+                </Show>
+                <Show when={controller.isRunning(stage().id)}>
+                  <div class="processing-workspace-running-actions">
+                    <span>知识维护正在运行，可以继续查看模型与工具活动。</span>
+                    <Button
+                      variant="danger"
+                      icon="stop"
+                      data-testid="cancel-maintainer-process"
+                      onClick={() => void controller.cancelRun(stage().id)}
+                    >停止知识维护</Button>
+                  </div>
+                </Show>
+                <p class="processing-workspace-disclosure">
+                  调试记录不会展示完整模型上下文；模型输出可能复述原始材料，请按原始证据的敏感级别查看。
+                </p>
+              </div>
 
-              <Show when={!controller.isRunning(stage().id) && !controller.isRunning('observation_preprocessor')}>
-                <Show when={currentMaintenanceResult()}>
+              <div
+                id="knowledge-maintainer-panel-output"
+                class="processing-workspace-panel processing-tab-panel"
+                role="tabpanel"
+                hidden={debugWorkspace() !== 'output'}
+              >
+                <Show
+                  when={
+                    !controller.isRunning(stage().id) && !controller.isRunning('observation_preprocessor')
+                      ? currentMaintenanceResult()
+                      : undefined
+                  }
+                  fallback={<div class="processing-workspace-empty">完成知识维护后，这里会以 Statement 列表和详情展示候选 Knowledge Contribution。</div>}
+                >
                   {(result) => <MaintenanceResult result={result()} />}
                 </Show>
-              </Show>
+              </div>
             </article>
           )}
         </Show>
         </section>
-      </Show>
+      </div>
     </>
   )
 }
