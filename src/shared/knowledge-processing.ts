@@ -74,7 +74,8 @@ export interface PreprocessingModelCallTrace {
   sequence: number
   kind: 'segment_map' | 'navigation_merge'
   status: ProcessingDebugStatus
-  selector: string
+  /** Exact, sorted and coalesced raw source ranges represented by this call. */
+  selectors: string[]
   sectionIds: string[]
   startedAt: string
   completedAt?: string
@@ -88,6 +89,15 @@ export interface ObservationPreprocessingDebugTrace {
   phase: 'preparing' | 'mapping' | 'assembling' | 'completed'
   completedSegments: number
   totalSegments?: number
+  view?: {
+    formatVersion: string
+    sourceLineCount: number
+    sourceBytes: number
+    selectedLineCount: number
+    selectedUnitCount: number
+    selectedSourceBytes: number
+    modelMaterialBytes: number
+  }
   calls: PreprocessingModelCallTrace[]
 }
 

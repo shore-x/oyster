@@ -36,12 +36,6 @@ describe('agent history adapters', () => {
       formatVersion: 'pi-jsonl-v2',
       context: 'Pi · record=message · role=assistant',
       record: { type: 'message', message: { role: 'assistant', content: `Pi ${'😀'.repeat(6_000)}` } }
-    },
-    {
-      adapter: new CodexHistoryAdapter(),
-      formatVersion: 'codex-jsonl-v2',
-      context: 'Codex · record=response_item · payload=function_call_output',
-      record: { type: 'response_item', payload: { type: 'function_call_output', output: `Codex ${'😀'.repeat(6_000)}` } }
     }
   ])('lets the $formatVersion adapter deterministically frame a long JSONL record', ({
     adapter,
@@ -97,6 +91,120 @@ describe('agent history adapters', () => {
     expect(view.units.every((unit) => (
       unit.recordContext === 'Codex · record=response_item · payload=message · role=user · blocks=input_text'
     ))).toBe(true)
+  })
+
+  it('creates a selective Codex preprocessing view while retaining complete raw evidence', () => {
+    const records = [
+      { type: 'session_meta', payload: { base_instructions: `runtime ${'x'.repeat(8_000)}` } },
+      { type: 'turn_context', payload: { collaboration_mode: 'default' } },
+      { type: 'response_item', payload: { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'runtime instructions' }] } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Keep the rejection and its reason.' }] } },
+      { type: 'event_msg', payload: { type: 'user_message', message: 'duplicate user representation' } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'I will preserve it.' }] } },
+      { type: 'event_msg', payload: { type: 'agent_message', message: 'duplicate assistant representation' } },
+      { type: 'response_item', payload: { type: 'reasoning', summary: ['private reasoning'] } },
+      { type: 'response_item', payload: { type: 'custom_tool_call', name: 'exec', call_id: 'call-1', input: JSON.stringify({ cmd: `rg ${'q'.repeat(4_000)}` }) } },
+      { type: 'response_item', payload: { type: 'custom_tool_call_output', call_id: 'call-1', output: [{ type: 'input_text', text: 'exit_code=0' }, { type: 'input_text', text: `begin ${'z'.repeat(12_000)} end` }] } },
+      { type: 'response_item', payload: { type: 'agent_message', author: '/root/researcher', recipient: '/root', content: [{ type: 'input_text', text: 'The delegated research found the relevant decision.' }, { type: 'encrypted_content', data: 'not-for-preprocessing' }] } },
+      { type: 'event_msg', payload: { type: 'sub_agent_activity', kind: 'interacted', agent_path: '/root/researcher' } },
+      { type: 'event_msg', payload: { type: 'turn_aborted', turn_id: 'turn-1', reason: 'interrupted by the user' } },
+      { type: 'future_record', payload: { type: 'new_event', opaque: `detail ${'y'.repeat(5_000)}` } },
+      { type: 'compacted', payload: { message: 'duplicate compacted history' } },
+      { type: 'world_state', payload: { full: true, state: 'runtime state' } }
+    ]
+    const rawLines = records.map((record) => JSON.stringify(record))
+    const view = new CodexHistoryAdapter().createObservationView(rawLines.join('\n'))
+
+    expect(view.formatVersion).toBe('codex-jsonl-v3')
+    expect(view.rawLines).toEqual(rawLines)
+    expect([...new Set(view.units.map((unit) => unit.lineNumber))]).toEqual([4, 6, 9, 10, 11, 13, 14])
+
+    const user = view.units.find((unit) => unit.lineNumber === 4)!
+    expect(user.modelContent).toBeUndefined()
+    expect(user.content).toBe(rawLines[3])
+    expect(user.recordContext).toBe('Codex · record=response_item · payload=message · role=user · blocks=input_text')
+
+    const call = view.units.find((unit) => unit.lineNumber === 9)!
+    const callMaterial = JSON.parse(call.modelContent!)
+    expect(call.content).toBe(rawLines[8])
+    expect(callMaterial).toMatchObject({
+      kind: 'tool_call',
+      tool: 'exec',
+      callId: 'call-1',
+      rawDetailAvailable: true
+    })
+    expect(Buffer.byteLength(call.modelContent!, 'utf8')).toBeLessThan(2_000)
+
+    const result = view.units.find((unit) => unit.lineNumber === 10)!
+    const resultMaterial = JSON.parse(result.modelContent!)
+    expect(result.content).toBe(rawLines[9])
+    expect(resultMaterial).toMatchObject({
+      kind: 'tool_result',
+      tool: 'exec',
+      callId: 'call-1',
+      rawDetailAvailable: true
+    })
+    expect(resultMaterial.outputBytes).toBeGreaterThan(12_000)
+    expect(Buffer.byteLength(result.modelContent!, 'utf8')).toBeLessThan(2_000)
+
+    const subagent = JSON.parse(view.units.find((unit) => unit.lineNumber === 11)!.modelContent!)
+    expect(subagent).toMatchObject({
+      kind: 'subagent_message',
+      author: '/root/researcher',
+      recipient: '/root',
+      message: 'The delegated research found the relevant decision.',
+      rawDetailAvailable: true
+    })
+    expect(view.units.find((unit) => unit.lineNumber === 11)!.modelContent).not.toContain('not-for-preprocessing')
+
+    expect(JSON.parse(view.units.find((unit) => unit.lineNumber === 13)!.modelContent!)).toMatchObject({
+      kind: 'turn_aborted',
+      reason: 'interrupted by the user'
+    })
+    expect(JSON.parse(view.units.find((unit) => unit.lineNumber === 14)!.modelContent!)).toEqual({
+      kind: 'unrecognized_codex_record',
+      recordType: 'future_record',
+      payloadType: 'new_event',
+      payloadKeys: ['opaque', 'type'],
+      rawDetailAvailable: true
+    })
+  })
+
+  it('keeps long canonical Codex messages lossless and byte-bounded', () => {
+    const rawLine = JSON.stringify({
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: `${'a'.repeat(3_050)}\\n${'😀'.repeat(4_000)}` }]
+      }
+    })
+    const view = new CodexHistoryAdapter().createObservationView(rawLine)
+
+    expect(view.formatVersion).toBe('codex-jsonl-v3')
+    expect(view.units.length).toBeGreaterThan(1)
+    expect(view.units.map((unit) => unit.content).join('')).toBe(rawLine)
+    expect(view.units.every((unit) => Buffer.byteLength(unit.content, 'utf8') <= 3 * 1_024)).toBe(true)
+    expect(view.units.every((unit) => unit.modelContent === undefined)).toBe(true)
+    expect(view.units.every((unit) => (
+      unit.recordContext === 'Codex · record=response_item · payload=message · role=user · blocks=input_text'
+    ))).toBe(true)
+  })
+
+  it('uses Codex event messages only when a canonical message channel is unavailable for that role', () => {
+    const records = [
+      { type: 'event_msg', payload: { type: 'user_message', message: 'duplicate user event' } },
+      { type: 'event_msg', payload: { type: 'agent_message', message: 'event-only assistant reply', phase: 'final_answer' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'canonical user message' }] } }
+    ]
+    const rawLines = records.map((record) => JSON.stringify(record))
+    const view = new CodexHistoryAdapter().createObservationView(rawLines.join('\n'))
+
+    expect([...new Set(view.units.map((unit) => unit.lineNumber))]).toEqual([2, 3])
+    expect(view.units.filter((unit) => unit.lineNumber === 2).map((unit) => unit.content).join(''))
+      .toBe(rawLines[1])
+    expect(view.units.filter((unit) => unit.lineNumber === 3).map((unit) => unit.content).join(''))
+      .toBe(rawLines[2])
   })
 
   it('extracts Claude sessions and counts unrecognized JSONL files', async () => {

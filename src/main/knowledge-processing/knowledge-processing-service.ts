@@ -23,7 +23,10 @@ import {
 } from '../../shared/ai-backends'
 import { ModelContextOverflowError } from '../ai-backends/model'
 import type { ObservationView } from '../observation/model'
-import { createPlainTextObservationView } from '../observation/observation-view'
+import {
+  MAX_OBSERVATION_UNIT_BYTES,
+  createPlainTextObservationView
+} from '../observation/observation-view'
 import type {
   AiBackendPort,
   EvidenceMapSection,
@@ -36,11 +39,14 @@ import type {
   StoredProcessingStage
 } from './model'
 import {
+  coalesceObservationSourceRanges,
   evidenceMapSectionId,
   evidenceMapNodeText,
   groupEvidenceMapNodes,
   numberedObservationUnits,
   observationSelector,
+  observationSourceSelectors,
+  observationSourceSelectorsText,
   planObservationSegments,
   resolveEvidenceMapPlannerOptions,
   type EvidenceMapNode,
@@ -284,11 +290,11 @@ function assertObservationView(view: ObservationView): void {
     throw new Error('Observation View 无效')
   }
 
-  const nextOffsetByLine = new Map<number, number>()
   let previousLineNumber = 0
+  let previousEndCharacter = 0
   for (const unit of view.units) {
     const line = view.rawLines[unit.lineNumber - 1]
-    const expectedOffset = nextOffsetByLine.get(unit.lineNumber) ?? 0
+    const sameLine = unit.lineNumber === previousLineNumber
     const splitsSurrogatePair = (offset: number): boolean => (
       offset > 0
       && offset < (line?.length ?? 0)
@@ -306,13 +312,23 @@ function assertObservationView(view: ObservationView): void {
       || !Number.isSafeInteger(unit.endCharacter)
       || !Number.isSafeInteger(unit.totalCharacters)
       || unit.totalCharacters !== line.length
-      || unit.startCharacter !== expectedOffset
+      || unit.startCharacter < 0
+      || (sameLine && unit.startCharacter < previousEndCharacter)
       || unit.endCharacter < unit.startCharacter
       || (line.length > 0 && unit.endCharacter === unit.startCharacter)
       || unit.endCharacter > line.length
       || splitsSurrogatePair(unit.startCharacter)
       || splitsSurrogatePair(unit.endCharacter)
       || unit.content !== line.slice(unit.startCharacter, unit.endCharacter)
+      || (
+        unit.modelContent !== undefined
+        && (
+          typeof unit.modelContent !== 'string'
+          || !unit.modelContent.trim()
+          || /[\r\n]/.test(unit.modelContent)
+          || utf8Bytes(unit.modelContent) > MAX_OBSERVATION_UNIT_BYTES
+        )
+      )
       || (
         unit.recordContext !== undefined
         && (
@@ -325,13 +341,25 @@ function assertObservationView(view: ObservationView): void {
     ) {
       throw new Error('Observation View unit 与原始证据不一致')
     }
-    nextOffsetByLine.set(unit.lineNumber, unit.endCharacter)
+    previousEndCharacter = unit.endCharacter
     previousLineNumber = unit.lineNumber
   }
-  for (let index = 0; index < view.rawLines.length; index++) {
-    if (nextOffsetByLine.get(index + 1) !== view.rawLines[index].length) {
-      throw new Error('Observation View 未完整覆盖原始证据')
-    }
+}
+
+function observationViewDebugSummary(
+  view: ObservationView
+): NonNullable<NonNullable<KnowledgeProcessingDebugTrace['preprocessing']>['view']> {
+  return {
+    formatVersion: view.formatVersion,
+    sourceLineCount: view.rawLines.length,
+    sourceBytes: view.rawLines.reduce(
+      (total, line, index) => total + utf8Bytes(line) + (index ? 1 : 0),
+      0
+    ),
+    selectedLineCount: new Set(view.units.map((unit) => unit.lineNumber)).size,
+    selectedUnitCount: view.units.length,
+    selectedSourceBytes: view.units.reduce((total, unit) => total + utf8Bytes(unit.content), 0),
+    modelMaterialBytes: utf8Bytes(numberedObservationUnits(view.units))
   }
 }
 
@@ -373,11 +401,11 @@ function segmentPrompt(
   const context = segment.contextUnits.length
     ? `\nBEGIN_ADJACENT_CONTEXT\n${numberedObservationUnits(segment.contextUnits)}\nEND_ADJACENT_CONTEXT\n`
     : ''
-  return `Create the Evidence Map material for the primary Observation range ${observationSelector(segment.startLine, segment.endLine)}. This may be one part of a longer Session. Follow the System Prompt's language policy and preserve global line references exactly.
+  return `Create the Evidence Map material for the selected Observation material within exact source ranges ${observationSourceSelectorsText(segment.sourceRanges)}. This may be one part of a longer Session. Follow the System Prompt's language policy and preserve global line references exactly. Lines between these ranges are not part of this preprocessing material; do not infer that their raw evidence does not exist.
 
 Adjacent context, when present, is provided only to resolve continuity at the boundary. Do not treat it as new coverage or repeat its candidates unless it is necessary to explain a correction or dependency in the primary range.${context}
 When a long physical line is shown in multiple Cstart:end/total character windows, those windows are transport-only fragments of the same L line. Preserve all significant details, use the character window for navigation when helpful, and cite the original L selector rather than inventing a fragment selector.
-Bracketed record context is generated by the owning source adapter from that Agent's history format and is repeated only to make split records understandable. It does not replace the raw evidence.
+The owning source adapter may replace execution detail with a deterministic, bounded representation and bracketed record context. Treat it as navigation to the cited raw line, not as a replacement for the raw evidence. Runtime configuration, telemetry, duplicate representations, and low-level execution traces may be omitted from this view intentionally.
 Operator attention:
 ${attention ?? 'No additional focus.'}
 
@@ -406,6 +434,7 @@ function completedEvidenceMap(
   root: EvidenceMapNode,
   sourceRef: string,
   lineCount: number,
+  selectedLineCount: number,
   sections: EvidenceMapSection[],
   formatVersion: string
 ): string {
@@ -415,8 +444,10 @@ function completedEvidenceMap(
     '',
     '## Coverage',
     `- Source: ${sourceRef}`,
-    `- Observation view: ${formatVersion}`,
-    `- Processed range: ${observationSelector(1, lineCount)}`,
+    `- Selective Observation view: ${formatVersion}`,
+    `- Raw source extent: ${observationSelector(1, lineCount)}`,
+    `- Source lines represented for preprocessing: ${selectedLineCount} of ${lineCount}`,
+    '- Unshown raw evidence remains available for on-demand verification.',
     `- Root map section: ${root.sectionIds[0]}`,
     '',
     '## Progressive disclosure',
@@ -434,7 +465,11 @@ function completedEvidenceMap(
 function segmentCharacterWindow(
   segment: ObservationSegment
 ): EvidenceMapSection['characterWindow'] | undefined {
-  if (segment.startLine !== segment.endLine || !segment.units.length) return undefined
+  if (
+    segment.sourceRanges.length !== 1
+    || segment.sourceRanges[0].startLine !== segment.sourceRanges[0].endLine
+    || !segment.units.length
+  ) return undefined
   const first = segment.units[0]
   const last = segment.units[segment.units.length - 1]
   if (first.startCharacter === 0 && last.endCharacter === first.totalCharacters) return undefined
@@ -448,11 +483,18 @@ function segmentCharacterWindow(
 function mergedCharacterWindow(
   nodes: EvidenceMapNode[]
 ): EvidenceMapSection['characterWindow'] | undefined {
-  if (!nodes.length || nodes.some((node) => (
-    node.startLine !== nodes[0].startLine
-    || node.endLine !== nodes[0].endLine
-    || !node.characterWindow
-  ))) {
+  const firstRange = nodes[0]?.sourceRanges[0]
+  if (
+    !firstRange
+    || nodes[0].sourceRanges.length !== 1
+    || firstRange.startLine !== firstRange.endLine
+    || nodes.some((node) => (
+      node.sourceRanges.length !== 1
+      || node.sourceRanges[0].startLine !== firstRange.startLine
+      || node.sourceRanges[0].endLine !== firstRange.endLine
+      || !node.characterWindow
+    ))
+  ) {
     return undefined
   }
   const windows = nodes.map((node) => node.characterWindow!)
@@ -892,7 +934,7 @@ export class KnowledgeProcessingService {
   private beginPreprocessingCall(
     context: ProcessingDebugTraceContext,
     kind: 'segment_map' | 'navigation_merge',
-    selector: string,
+    selectors: string[],
     sectionIds: string[]
   ): string {
     let callId = ''
@@ -904,7 +946,7 @@ export class KnowledgeProcessingService {
         sequence,
         kind,
         status: 'running',
-        selector,
+        selectors: [...selectors],
         sectionIds: [...sectionIds],
         startedAt: new Date().toISOString()
       })
@@ -1026,14 +1068,14 @@ export class KnowledgeProcessingService {
     maximumOutputBytes: number,
     call: {
       kind: 'segment_map' | 'navigation_merge'
-      selector: string
+      selectors: string[]
       sectionIds: string[]
     }
   ): Promise<string> {
     const traceCallId = this.beginPreprocessingCall(
       traceContext,
       call.kind,
-      call.selector,
+      call.selectors,
       call.sectionIds
     )
     try {
@@ -1102,9 +1144,12 @@ export class KnowledgeProcessingService {
         mergedAny = true
         const id = evidenceMapSectionId(nextSectionIndex++)
         const characterWindow = mergedCharacterWindow(group)
+        const sourceRanges = coalesceObservationSourceRanges(
+          group.flatMap((node) => node.sourceRanges)
+        )
+        const selectors = observationSourceSelectors(sourceRanges)
         const nodeShape = {
-          startLine: group[0].startLine,
-          endLine: group[group.length - 1].endLine,
+          sourceRanges,
           sectionIds: [id],
           ...(characterWindow ? { characterWindow } : {})
         }
@@ -1118,15 +1163,14 @@ export class KnowledgeProcessingService {
           maximumNodeContentBytes(nodeShape, budget.planner.mergeBytes),
           {
             kind: 'navigation_merge',
-            selector: observationSelector(group[0].startLine, group[group.length - 1].endLine),
+            selectors,
             sectionIds: group.flatMap((node) => node.sectionIds)
           }
         )
-        const selector = observationSelector(group[0].startLine, group[group.length - 1].endLine)
         const children = group.flatMap((node) => node.sectionIds)
         sections.push({
           id,
-          selector,
+          selectors,
           content,
           children,
           ...(characterWindow ? { characterWindow } : {})
@@ -1185,6 +1229,9 @@ export class KnowledgeProcessingService {
     const observationLines = observationView.rawLines
     const controller = this.beginRun(stageId, options.lease)
     this.beginPreprocessingDebugTrace(debugTrace)
+    this.updatePreprocessingDebug(debugTrace, (trace) => {
+      trace.view = observationViewDebugSummary(observationView)
+    })
 
     try {
       this.updatePreprocessingProgress({
@@ -1234,9 +1281,9 @@ export class KnowledgeProcessingService {
           for (const segment of segments) {
             controller.signal.throwIfAborted()
             const characterWindow = segmentCharacterWindow(segment)
+            const selectors = observationSourceSelectors(segment.sourceRanges)
             const leafShape = {
-              startLine: segment.startLine,
-              endLine: segment.endLine,
+              sourceRanges: segment.sourceRanges,
               sectionIds: [segment.id],
               ...(characterWindow ? { characterWindow } : {})
             }
@@ -1253,14 +1300,13 @@ export class KnowledgeProcessingService {
               maximumOutputBytes,
               {
                 kind: 'segment_map',
-                selector: observationSelector(segment.startLine, segment.endLine),
+                selectors,
                 sectionIds: [segment.id]
               }
             )
-            const selector = observationSelector(segment.startLine, segment.endLine)
             sections.push({
               id: segment.id,
-              selector,
+              selectors,
               content,
               ...(characterWindow ? { characterWindow } : {})
             })
@@ -1304,6 +1350,7 @@ export class KnowledgeProcessingService {
               root,
               sourceRef,
               observationLines.length,
+              new Set(observationView.units.map((unit) => unit.lineNumber)).size,
               sections,
               observationView.formatVersion
             )
@@ -1399,7 +1446,11 @@ export class KnowledgeProcessingService {
           runtime,
           systemPrompt: stage.instructions,
           evidenceMap: workspace.evidenceMap,
-          evidenceMapSections: workspace.evidenceMapSections.map((section) => ({ ...section })),
+          evidenceMapSections: workspace.evidenceMapSections.map((section) => ({
+            ...section,
+            selectors: [...section.selectors],
+            ...(section.children ? { children: [...section.children] } : {})
+          })),
           observationLines: [...workspace.observationLines],
           observationFormatVersion: workspace.observationFormatVersion,
           sourceRef: workspace.sourceRef,

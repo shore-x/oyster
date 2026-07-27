@@ -409,6 +409,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
         const section = textContent(lastToolResult(context))
         expect(section).toContain('M000002')
         expect(section).toContain('L000002-L000002')
+        expect(section).toContain('L000004-L000004')
         expect(section).toContain('LEAF_B_SECRET')
         expect(section).not.toContain('LEAF_A_SECRET')
         return fauxAssistantMessage(fauxToolCall('read_evidence', {
@@ -437,10 +438,14 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       runtime: runtime.runtime,
       evidenceMap: 'ROOT NAVIGATION\nImmediate child sections: M000001, M000002',
       evidenceMapSections: [
-        { id: 'M000001', selector: 'L000001-L000001', content: 'LEAF_A_SECRET' },
-        { id: 'M000002', selector: 'L000002-L000002', content: 'LEAF_B_SECRET' }
+        { id: 'M000001', selectors: ['L000001-L000001'], content: 'LEAF_A_SECRET' },
+        {
+          id: 'M000002',
+          selectors: ['L000002-L000002', 'L000004-L000004'],
+          content: 'LEAF_B_SECRET'
+        }
       ],
-      observationLines: ['RAW_A_SECRET', 'RAW_B_SECRET']
+      observationLines: ['RAW_A_SECRET', 'RAW_B_SECRET', 'UNSELECTED', 'OTHER_SELECTED']
     }))
 
     expect(result).toMatchObject({
@@ -455,6 +460,21 @@ describe('PiKnowledgeMaintenanceAgent', () => {
         'submit_knowledge_contribution'
       ]
     })
+  })
+
+  it('requires Evidence Map section source ranges to be ordered and coalesced', async () => {
+    const runtime = fauxRuntime([])
+    const agent = new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader())
+
+    await expect(agent.run(runInput({
+      runtime: runtime.runtime,
+      evidenceMapSections: [{
+        id: 'M000001',
+        selectors: ['L000001-L000001', 'L000002-L000002'],
+        content: 'INVALID UNCOALESCED SECTION'
+      }]
+    }))).rejects.toThrow('必须按顺序且已合并')
+    expect(runtime.callCount()).toBe(0)
   })
 
   it('allows only the exact workspace sourceRef and six-digit selectors of at most 200 lines', async () => {

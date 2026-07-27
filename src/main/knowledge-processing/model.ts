@@ -86,7 +86,8 @@ export type KnowledgeAgentTraceEvent =
 
 export interface EvidenceMapSection {
   id: string
-  selector: string
+  /** Exact, sorted and coalesced raw source ranges represented by this section. */
+  selectors: string[]
   content: string
   /** Immediate child sections for progressive disclosure; descendants are never flattened. */
   children?: string[]

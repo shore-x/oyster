@@ -12,6 +12,12 @@ function formatDuration(durationMs?: number): string {
   return `${(durationMs / 1_000).toFixed(1)} s`
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1_024) return `${bytes} B`
+  if (bytes < 1_024 * 1_024) return `${(bytes / 1_024).toFixed(1)} KiB`
+  return `${(bytes / (1_024 * 1_024)).toFixed(1)} MiB`
+}
+
 function statusLabel(status: ProcessingDebugStatus): string {
   if (status === 'running') return '运行中'
   if (status === 'completed') return '已完成'
@@ -27,9 +33,10 @@ function phaseLabel(phase: NonNullable<KnowledgeProcessingDebugTrace['preprocess
 }
 
 function callLabel(call: PreprocessingModelCallTrace): string {
+  const ranges = call.selectors.join(', ')
   return call.kind === 'segment_map'
-    ? `分段映射 · ${call.selector}`
-    : `导航归并 · ${call.selector}`
+    ? `分段映射 · ${ranges}`
+    : `导航归并 · ${ranges}`
 }
 
 function callSections(call: PreprocessingModelCallTrace): string {
@@ -55,6 +62,23 @@ function PreprocessingCalls(props: {
         </div>
         <span>{completedCalls()} / {props.preprocessing.calls.length} 次调用完成</span>
       </div>
+
+      <Show when={props.preprocessing.view}>
+        {(view) => (
+          <div class="processing-debug__progress" data-testid="preprocessing-view-summary">
+            <div>
+              <span>选择性预处理视图</span>
+              <strong>{view().selectedLineCount} / {view().sourceLineCount} 行</strong>
+            </div>
+            <p>
+              {view().formatVersion} · 原始约 {formatBytes(view().sourceBytes)} ·
+              {' '}{view().selectedUnitCount} 个单元 ·
+              {' '}{formatBytes(view().modelMaterialBytes)} 模型材料 ·
+              {' '}{formatBytes(view().selectedSourceBytes)} 选中范围原文
+            </p>
+          </div>
+        )}
+      </Show>
 
       <div class="processing-debug__progress">
         <div>

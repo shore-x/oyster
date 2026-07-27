@@ -4,19 +4,25 @@ export const DEFAULT_OBSERVATION_SEGMENT_BYTES = 120_000
 export const DEFAULT_ADJACENT_CONTEXT_BYTES = 4_096
 export const DEFAULT_MAP_MERGE_BYTES = 120_000
 
-export interface ObservationSegment {
-  id: string
+export interface ObservationSourceRange {
   startLine: number
   endLine: number
+}
+
+export interface ObservationSegment {
+  id: string
+  /** Exact, sorted and coalesced raw source lines represented by this segment. */
+  sourceRanges: ObservationSourceRange[]
   units: ObservationUnit[]
-  contextStartLine?: number
+  /** Exact raw source lines supplied only as adjacent context. */
+  contextSourceRanges: ObservationSourceRange[]
   contextUnits: ObservationUnit[]
 }
 
 export interface EvidenceMapNode {
   content: string
-  startLine: number
-  endLine: number
+  /** Exact, sorted and coalesced raw source lines represented by this node. */
+  sourceRanges: ObservationSourceRange[]
   sectionIds: string[]
   characterWindow?: ObservationCharacterWindow
 }
@@ -73,6 +79,55 @@ export function observationSelector(startLine: number, endLine: number): string 
   return `${observationLineNumber(startLine)}-${observationLineNumber(endLine)}`
 }
 
+/**
+ * Produces the exact union of already source-ordered ranges. Overlapping ranges
+ * occur when consecutive segments contain different fragments of one raw line.
+ */
+export function coalesceObservationSourceRanges(
+  ranges: ObservationSourceRange[]
+): ObservationSourceRange[] {
+  const coalesced: ObservationSourceRange[] = []
+  for (const range of ranges) {
+    if (
+      !Number.isSafeInteger(range.startLine)
+      || !Number.isSafeInteger(range.endLine)
+      || range.startLine < 1
+      || range.endLine < range.startLine
+    ) {
+      throw new Error('Observation source range 无效')
+    }
+    const previous = coalesced.at(-1)
+    if (!previous) {
+      coalesced.push({ ...range })
+      continue
+    }
+    if (range.startLine < previous.startLine) {
+      throw new Error('Observation source ranges 必须按原始证据顺序排列')
+    }
+    if (range.startLine <= previous.endLine + 1) {
+      previous.endLine = Math.max(previous.endLine, range.endLine)
+      continue
+    }
+    coalesced.push({ ...range })
+  }
+  return coalesced
+}
+
+export function observationSourceRanges(units: ObservationUnit[]): ObservationSourceRange[] {
+  return coalesceObservationSourceRanges(units.map((unit) => ({
+    startLine: unit.lineNumber,
+    endLine: unit.lineNumber
+  })))
+}
+
+export function observationSourceSelectors(ranges: ObservationSourceRange[]): string[] {
+  return ranges.map((range) => observationSelector(range.startLine, range.endLine))
+}
+
+export function observationSourceSelectorsText(ranges: ObservationSourceRange[]): string {
+  return observationSourceSelectors(ranges).join(', ')
+}
+
 export function evidenceMapSectionId(index: number): string {
   return `M${String(index + 1).padStart(6, '0')}`
 }
@@ -90,7 +145,7 @@ function serializedObservationUnit(unit: ObservationUnit): string {
     ? observationLineNumber(unit.lineNumber)
     : `${observationLineNumber(unit.lineNumber)} C${unit.startCharacter}:${unit.endCharacter}/${unit.totalCharacters}`
   const recordContext = unit.recordContext ? ` [${unit.recordContext}]` : ''
-  return `${prefix}${recordContext} | ${unit.content}`
+  return `${prefix}${recordContext} | ${unit.modelContent ?? unit.content}`
 }
 
 /** Serializes adapter-owned units without changing their original raw line numbers. */
@@ -106,7 +161,7 @@ function adjacentContext(
   units: ObservationUnit[],
   startIndex: number,
   maximumBytes: number
-): { startLine?: number; units: ObservationUnit[] } {
+): { sourceRanges: ObservationSourceRange[]; units: ObservationUnit[] } {
   const selected: ObservationUnit[] = []
   let bytes = 0
   for (let index = startIndex - 1; index >= 0; index--) {
@@ -115,9 +170,7 @@ function adjacentContext(
     selected.unshift(units[index])
     bytes += weight
   }
-  return selected.length
-    ? { startLine: selected[0].lineNumber, units: selected }
-    : { units: [] }
+  return { sourceRanges: observationSourceRanges(selected), units: selected }
 }
 
 /**
@@ -136,17 +189,6 @@ export function planObservationSegments(
     let index = startIndex
     while (index < units.length) {
       const nextUnit = units[index]
-      const nextIsFragment = !isWholeLine(nextUnit)
-      const segmentIsFragment = segmentUnits.some((unit) => !isWholeLine(unit))
-      if (
-        segmentUnits.length
-        && (
-          (segmentIsFragment && nextUnit.lineNumber !== segmentUnits[0].lineNumber)
-          || (!segmentIsFragment && nextIsFragment)
-        )
-      ) {
-        break
-      }
       const serializedBytes = utf8Bytes(serializedObservationUnit(nextUnit))
       if (serializedBytes > options.segmentBytes) {
         throw new Error(
@@ -162,10 +204,9 @@ export function planObservationSegments(
     const context = adjacentContext(units, startIndex, options.adjacentContextBytes)
     segments.push({
       id: evidenceMapSectionId(segments.length),
-      startLine: segmentUnits[0].lineNumber,
-      endLine: segmentUnits[segmentUnits.length - 1].lineNumber,
+      sourceRanges: observationSourceRanges(segmentUnits),
       units: segmentUnits,
-      contextStartLine: context.startLine,
+      contextSourceRanges: context.sourceRanges,
       contextUnits: context.units
     })
     startIndex = index
@@ -175,7 +216,7 @@ export function planObservationSegments(
 
 export function evidenceMapNodeText(node: EvidenceMapNode): string {
   return [
-    `Covered range: ${observationSelector(node.startLine, node.endLine)}`,
+    `Selected source ranges: ${observationSourceSelectorsText(node.sourceRanges)}`,
     ...(node.characterWindow
       ? [`Character window: C${node.characterWindow.startCharacter}:${node.characterWindow.endCharacter}/${node.characterWindow.totalCharacters}`]
       : []),

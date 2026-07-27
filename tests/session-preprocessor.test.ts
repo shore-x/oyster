@@ -144,7 +144,7 @@ describe('SessionPreprocessor', () => {
       expectedRevision: harness.availableSession.revision
     })
     expect(harness.runObservationPreprocessorView).toHaveBeenCalledWith(
-      expect.objectContaining({ formatVersion: 'codex-jsonl-v2' }),
+      expect.objectContaining({ formatVersion: 'codex-jsonl-v3' }),
       attention,
       undefined,
       {
@@ -191,7 +191,7 @@ describe('SessionPreprocessor', () => {
 
     expect(harness.readAvailableSession).toHaveBeenCalledWith(expect.any(Object))
     expect(harness.runObservationPreprocessorView).toHaveBeenCalledWith(
-      expect.objectContaining({ formatVersion: 'codex-jsonl-v2' }),
+      expect.objectContaining({ formatVersion: 'codex-jsonl-v3' }),
       undefined,
       undefined,
       expect.objectContaining({ sourceRef: expect.stringMatching(/^raw:/) })
@@ -209,7 +209,7 @@ describe('SessionPreprocessor', () => {
 
     expect(harness.readAvailableSession).toHaveBeenCalledWith(expect.any(Object))
     expect(harness.runObservationPreprocessorView).toHaveBeenCalledWith(
-      expect.objectContaining({ formatVersion: 'codex-jsonl-v2' }),
+      expect.objectContaining({ formatVersion: 'codex-jsonl-v3' }),
       undefined,
       undefined,
       expect.objectContaining({ sourceRef: expect.stringMatching(/^raw:/) })

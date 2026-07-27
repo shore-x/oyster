@@ -179,10 +179,14 @@ function safeTraceDetails(toolName: string, result: unknown, isError: boolean): 
     const sectionId = typeof record.sectionId === 'string' && /^M\d{6,}$/.test(record.sectionId)
       ? record.sectionId
       : undefined
-    const selector = typeof record.selector === 'string' && /^L\d{6,}-L\d{6,}$/.test(record.selector)
-      ? record.selector
-      : undefined
-    return [sectionId, selector].filter(Boolean).join(' · ') || undefined
+    const selectors = Array.isArray(record.selectors)
+      ? record.selectors.filter((selector): selector is string => (
+          typeof selector === 'string' && /^L\d{6,}-L\d{6,}$/.test(selector)
+        ))
+      : []
+    return [sectionId, selectors.length ? selectors.join(', ') : undefined]
+      .filter(Boolean)
+      .join(' · ') || undefined
   }
   if (toolName === 'read_evidence') {
     const selector = typeof record.selector === 'string' && /^L\d{6,}-L\d{6,}$/.test(record.selector)
@@ -285,31 +289,44 @@ function validateRunInput(input: KnowledgeAgentRunInput): void {
   if (!Array.isArray(input.evidenceMapSections)) throw new Error('Evidence Map 局部材料无效')
   const sectionIds = new Set<string>()
   for (const section of input.evidenceMapSections) {
-    const selector = section && typeof section.selector === 'string'
-      ? SOURCE_SELECTOR.exec(section.selector)
-      : undefined
     if (
       !section
       || !/^M\d{6,}$/.test(section.id)
-      || !selector
+      || !Array.isArray(section.selectors)
+      || !section.selectors.length
       || !section.content.trim()
       || section.content.length > MAX_EVIDENCE_MAP_SECTION_OUTPUT_CHARS
       || sectionIds.has(section.id)
     ) {
       throw new Error('Evidence Map 局部材料无效')
     }
-    const start = Number(selector[1])
-    const end = Number(selector[2])
-    if (start < 1 || end < start || end > input.observationLines.length) {
-      throw new Error('Evidence Map 局部材料超出当前 Observation 范围')
+    let previousEnd = 0
+    const parsedSelectors = section.selectors.map((value) => {
+      const selector = typeof value === 'string' ? SOURCE_SELECTOR.exec(value) : undefined
+      if (!selector) throw new Error('Evidence Map 局部材料无效')
+      const start = Number(selector[1])
+      const end = Number(selector[2])
+      if (start < 1 || end < start || end > input.observationLines.length) {
+        throw new Error('Evidence Map 局部材料超出当前 Observation 范围')
+      }
+      if (start <= previousEnd + (previousEnd ? 1 : 0)) {
+        throw new Error('Evidence Map source ranges 必须按顺序且已合并')
+      }
+      previousEnd = end
+      return { start, end }
+    })
+    if (!parsedSelectors.length) {
+      throw new Error('Evidence Map 局部材料无效')
     }
     if (section.children?.some((child) => !/^M\d{6,}$/.test(child))) {
       throw new Error('Evidence Map 子节点引用无效')
     }
     if (section.characterWindow) {
       const { startCharacter, endCharacter, totalCharacters } = section.characterWindow
+      const [{ start, end }] = parsedSelectors
       if (
-        start !== end
+        parsedSelectors.length !== 1
+        || start !== end
         || !Number.isSafeInteger(startCharacter)
         || !Number.isSafeInteger(endCharacter)
         || !Number.isSafeInteger(totalCharacters)
@@ -514,7 +531,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
           }
           const text = truncateWithNotice([
             `Section: ${section.id}`,
-            `Observation range: ${section.selector}`,
+            `Selected source ranges: ${section.selectors.join(', ')}`,
             section.characterWindow
               ? `Character window: [${section.characterWindow.startCharacter}, ${section.characterWindow.endCharacter}) of ${section.characterWindow.totalCharacters}`
               : undefined,
@@ -527,7 +544,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
           completedEvidenceMapSections.add(sectionId)
           return {
             content: [{ type: 'text' as const, text }],
-            details: { sectionId: section.id, selector: section.selector }
+            details: { sectionId: section.id, selectors: [...section.selectors] }
           }
         }
       } as AgentTool<typeof readEvidenceMapSectionParameters>] : []),

@@ -2,11 +2,16 @@
 export interface ObservationUnit {
   /** One-based line in the unchanged raw Session file. */
   lineNumber: number
-  /** Raw source text for this bounded unit. */
+  /** Exact raw source text selected by this unit's character range. */
   content: string
   startCharacter: number
   endCharacter: number
   totalCharacters: number
+  /**
+   * Optional deterministic, bounded representation shown to the preprocessor.
+   * The raw content and locator remain available to the Knowledge Maintenance Agent.
+   */
+  modelContent?: string
   /** Adapter-derived context that makes a split record understandable without defining a canonical schema. */
   recordContext?: string
 }
@@ -18,8 +23,10 @@ export interface ObservationCharacterWindow {
 }
 
 /**
- * An Agent-format-specific view of one raw Session revision.
- * Unit boundaries are deterministic for the format version and never depend on the selected model.
+ * An Agent-format-specific, deterministic preprocessing view of one raw Session revision.
+ * `rawLines` retains the complete revision for later evidence reads; `units` may select
+ * or compact only the material useful for building an Evidence Map.
+ * Unit boundaries and representations never depend on the selected model.
  */
 export interface ObservationView {
   formatVersion: string

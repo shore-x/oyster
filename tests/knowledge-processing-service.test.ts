@@ -6,6 +6,7 @@ import type {
   ModelRuntime
 } from '../src/main/ai-backends/model'
 import { ModelContextOverflowError } from '../src/main/ai-backends/model'
+import type { ObservationView } from '../src/main/observation/model'
 import {
   KnowledgeProcessingService,
   type KnowledgeProcessingServiceOptions
@@ -498,8 +499,8 @@ describe('KnowledgeProcessingService', () => {
     backend.generationHandler = async (_connectionId, _modelId, request) => {
       const prompt = request.prompt
       if (prompt.includes('BEGIN_EVIDENCE_MAP_MATERIALS')) return { text: 'ROOT NAVIGATION' }
-      if (prompt.includes('primary Observation range L000001-L000002')) return { text: 'LEAF A' }
-      if (prompt.includes('primary Observation range L000003-L000004')) return { text: 'LEAF B' }
+      if (prompt.includes('source ranges L000001-L000002')) return { text: 'LEAF A' }
+      if (prompt.includes('source ranges L000003-L000004')) return { text: 'LEAF B' }
       throw new Error('unexpected preprocessing prompt')
     }
 
@@ -541,9 +542,9 @@ describe('KnowledgeProcessingService', () => {
         completedSegments: 2,
         totalSegments: 2,
         calls: [
-          { sequence: 1, kind: 'segment_map', selector: 'L000001-L000002', status: 'completed', output: 'LEAF A' },
-          { sequence: 2, kind: 'segment_map', selector: 'L000003-L000004', status: 'completed', output: 'LEAF B' },
-          { sequence: 3, kind: 'navigation_merge', selector: 'L000001-L000004', status: 'completed', output: 'ROOT NAVIGATION' }
+          { sequence: 1, kind: 'segment_map', selectors: ['L000001-L000002'], status: 'completed', output: 'LEAF A' },
+          { sequence: 2, kind: 'segment_map', selectors: ['L000003-L000004'], status: 'completed', output: 'LEAF B' },
+          { sequence: 3, kind: 'navigation_merge', selectors: ['L000001-L000004'], status: 'completed', output: 'ROOT NAVIGATION' }
         ]
       }
     })
@@ -554,11 +555,11 @@ describe('KnowledgeProcessingService', () => {
     await service.runKnowledgeMaintenance({ preprocessingRunId: result.runId })
     expect(agent.calls[0].evidenceMap).toBe(result.evidenceMap)
     expect(agent.calls[0].evidenceMapSections).toEqual([
-      { id: 'M000001', selector: 'L000001-L000002', content: 'LEAF A' },
-      { id: 'M000002', selector: 'L000003-L000004', content: 'LEAF B' },
+      { id: 'M000001', selectors: ['L000001-L000002'], content: 'LEAF A' },
+      { id: 'M000002', selectors: ['L000003-L000004'], content: 'LEAF B' },
       {
         id: 'M000003',
-        selector: 'L000001-L000004',
+        selectors: ['L000001-L000004'],
         content: 'ROOT NAVIGATION',
         children: ['M000001', 'M000002']
       }
@@ -752,6 +753,68 @@ describe('KnowledgeProcessingService', () => {
     expect(backend.generationCalls).toHaveLength(result.execution.modelCallCount)
     expect(backend.generationCalls[0].request.prompt).toContain('L000001 C0:')
     expect(service.snapshot().runningStageIds).toEqual([])
+  })
+
+  it('preprocesses a selective view while keeping the complete raw revision for Agent evidence reads', async () => {
+    const { service, backend, agent } = createService()
+    await service.initialize()
+    await configure(service, 'observation_preprocessor')
+    await configure(service, 'knowledge_maintenance_agent')
+    const rawLines = [
+      '{"type":"session_meta","payload":{"base_instructions":"runtime-only"}}',
+      '{"type":"response_item","payload":{"type":"message","role":"user","content":"Keep the explicit rejection."}}',
+      '{"type":"turn_context","payload":{"runtime_only":true}}',
+      `{"type":"response_item","payload":{"type":"function_call_output","output":"${'DO_NOT_SEND_FULL_TOOL_OUTPUT'.repeat(500)}"}}`
+    ]
+    const view: ObservationView = {
+      formatVersion: 'codex-jsonl-v3-test',
+      rawLines,
+      units: [
+        {
+          lineNumber: 2,
+          content: rawLines[1],
+          startCharacter: 0,
+          endCharacter: rawLines[1].length,
+          totalCharacters: rawLines[1].length,
+          recordContext: 'Codex · record=message · role=user'
+        },
+        {
+          lineNumber: 4,
+          content: rawLines[3],
+          startCharacter: 0,
+          endCharacter: rawLines[3].length,
+          totalCharacters: rawLines[3].length,
+          modelContent: '{"kind":"tool_result","outcome":"success","rawDetailAvailable":true}',
+          recordContext: 'Codex · record=tool_result'
+        }
+      ]
+    }
+
+    const result = await service.runObservationPreprocessorView(view)
+    const modelPrompt = backend.generationCalls[0].request.prompt
+
+    expect(modelPrompt).toContain('L000002')
+    expect(modelPrompt).toContain('exact source ranges L000002-L000002, L000004-L000004')
+    expect(modelPrompt).not.toContain('exact source ranges L000002-L000004')
+    expect(modelPrompt).toContain('Keep the explicit rejection.')
+    expect(modelPrompt).toContain('rawDetailAvailable')
+    expect(modelPrompt).not.toContain('base_instructions')
+    expect(modelPrompt).not.toContain('DO_NOT_SEND_FULL_TOOL_OUTPUT')
+    expect(result.debugTrace.preprocessing?.view).toMatchObject({
+      formatVersion: 'codex-jsonl-v3-test',
+      sourceLineCount: 4,
+      selectedLineCount: 2,
+      selectedUnitCount: 2
+    })
+    expect(result.debugTrace.preprocessing?.view?.modelMaterialBytes)
+      .toBeLessThan(result.debugTrace.preprocessing!.view!.selectedSourceBytes)
+    expect(result.debugTrace.preprocessing?.calls[0].selectors).toEqual([
+      'L000002-L000002',
+      'L000004-L000004'
+    ])
+
+    await service.runKnowledgeMaintenance({ preprocessingRunId: result.runId })
+    expect(agent.calls[0].observationLines).toEqual(rawLines)
   })
 
   it('losslessly splits one oversized physical line before model calls', async () => {

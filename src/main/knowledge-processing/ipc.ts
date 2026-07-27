@@ -114,7 +114,7 @@ export function registerKnowledgeProcessingIpc(
         `思考强度：${maintainerBinding.reasoningEffort ?? '模型默认'}`,
         `目的地：${maintainerConnection.destination}`,
         '',
-        '所选 Session 会在运行时从 Agent 的原始目录读取并发送给预处理模型；系统会按所选模型的上下文预算自动分段，超长的单条记录也会无损分片。分段数和预处理调用数随 Session 长度增长，不设置固定运行上限，可在运行中取消。维护 Agent 会收到分层 Evidence Map，并可按需展开局部地图、读取本次原始证据和 Sandbox 中的已有知识。模型调用可能消耗额度或产生费用；失败或取消前已经发起的调用也可能计费。',
+        '所选 Session 会在运行时从 Agent 的原始目录读取；Source Adapter 会选择对话主线并折叠可回源的执行详情，再按所选模型的上下文预算发送给预处理模型。运行配置、遥测和重复事件不会默认发送。分段数和预处理调用数随选择后的材料增长，不设置固定运行上限，可在运行中取消。维护 Agent 会收到分层 Evidence Map，并可按需展开局部地图、读取本次原始证据和 Sandbox 中的已有知识。模型调用可能消耗额度或产生费用；失败或取消前已经发起的调用也可能计费。',
         '所有 Knowledge Statement 只会写入一次性 Knowledge Sandbox，不影响正式知识库。'
       ].join('\n'),
       buttons: ['取消', '运行'],
@@ -160,7 +160,7 @@ export function registerKnowledgeProcessingIpc(
       validateSessionSelection(input)
       const binding = await confirmRun(
         'observation_preprocessor',
-        '这会从 Agent 的原始目录读取所选 Session，并把当前 System Prompt、原始 Observation 和 Attention 发送给所选模型；系统会按模型上下文预算自动分段，超长的单条记录也会无损分片。分段数和调用数随 Session 长度增长，不设置固定运行上限，可在运行中取消。模型调用可能消耗额度或产生费用；失败或取消前已经发起的调用也可能计费。',
+        '这会从 Agent 的原始目录读取所选 Session，并把当前 System Prompt、Attention 和 Source Adapter 生成的选择性 Observation 视图发送给所选模型；运行配置、遥测、重复事件和低层执行详情不会默认发送，完整原文仍可由维护 Agent 按需读取。系统会按模型上下文预算自动分段，分段数和调用数不设置固定运行上限，可在运行中取消。模型调用可能消耗额度或产生费用；失败或取消前已经发起的调用也可能计费。',
         '输出只是可丢弃的 Evidence Map，不会写入知识层。'
       )
       return binding ? sessionPreprocessor.run(input, binding) : undefined

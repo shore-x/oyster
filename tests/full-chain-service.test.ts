@@ -386,11 +386,11 @@ describe('KnowledgeFullChainService', () => {
     const fullChain = harness.createFullChain(() => new StaticAgent(async (input) => {
       expect(input.evidenceMap).toContain('ROOT NAVIGATION')
       expect(input.evidenceMapSections).toEqual([
-        { id: 'M000001', selector: 'L000001-L000002', content: 'LEAF A' },
-        { id: 'M000002', selector: 'L000003-L000004', content: 'LEAF B' },
+        { id: 'M000001', selectors: ['L000001-L000002'], content: 'LEAF A' },
+        { id: 'M000002', selectors: ['L000003-L000004'], content: 'LEAF B' },
         {
           id: 'M000003',
-          selector: 'L000001-L000004',
+          selectors: ['L000001-L000004'],
           content: 'ROOT NAVIGATION',
           children: ['M000001', 'M000002']
         }
