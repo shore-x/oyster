@@ -10,10 +10,6 @@ import type {
 const api: DiscoveryApi = {
   getSnapshot: () => ipcRenderer.invoke(discoveryChannels.getSnapshot),
   listAvailableSessions: () => ipcRenderer.invoke(discoveryChannels.listAvailableSessions),
-  inspectAvailableSession: (input) => ipcRenderer.invoke(
-    discoveryChannels.inspectAvailableSession,
-    input
-  ),
   detectAgents: () => ipcRenderer.invoke(discoveryChannels.detectAgents),
   scanSource: (sourceId) => ipcRenderer.invoke(discoveryChannels.scanSource, sourceId),
   cancelRun: (runId) => ipcRenderer.invoke(discoveryChannels.cancelRun, runId),

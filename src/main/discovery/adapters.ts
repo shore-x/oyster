@@ -15,10 +15,6 @@ import {
   createCodexObservationView,
   createPiObservationView
 } from './agent-observation-views'
-import {
-  SessionInspector,
-  type MessageEvent
-} from './session-inspection'
 
 const HEAD_LIMIT_BYTES = 96 * 1024
 
@@ -35,48 +31,6 @@ function isoValue(...values: unknown[]): string | undefined {
   if (typeof value !== 'string' && typeof value !== 'number') return undefined
   const date = new Date(value)
   return Number.isNaN(date.valueOf()) ? undefined : date.toISOString()
-}
-
-function messageRole(value: unknown): MessageEvent['role'] | undefined {
-  return value === 'user' || value === 'assistant' ? value : undefined
-}
-
-function isClaudeToolResultOnly(message?: Record<string, unknown>): boolean {
-  if (!Array.isArray(message?.content) || message.content.length === 0) return false
-  return message.content.every((item) => asRecord(item)?.type === 'tool_result')
-}
-
-function claudeMessageEvent(record: Record<string, unknown>): MessageEvent | undefined {
-  const message = asRecord(record.message)
-  const role = messageRole(record.type) ?? messageRole(message?.role)
-  if (!role || (record.type !== 'user' && record.type !== 'assistant')) return undefined
-  if (role === 'user' && isClaudeToolResultOnly(message)) return undefined
-  return {
-    role,
-    timestamp: isoValue(record.timestamp, message?.timestamp, record.createdAt)
-  }
-}
-
-function piMessageEvent(record: Record<string, unknown>): MessageEvent | undefined {
-  if (record.type !== 'message') return undefined
-  const message = asRecord(record.message)
-  const role = messageRole(record.role) ?? messageRole(message?.role)
-  if (!role) return undefined
-  return {
-    role,
-    timestamp: isoValue(record.timestamp, message?.timestamp, record.createdAt)
-  }
-}
-
-function codexMessageEvent(record: Record<string, unknown>): MessageEvent | undefined {
-  if (record.type !== 'response_item') return undefined
-  const payload = asRecord(record.payload)
-  const role = messageRole(payload?.role)
-  if (!payload || !role || (payload.type !== undefined && payload.type !== 'message')) return undefined
-  return {
-    role,
-    timestamp: isoValue(record.timestamp, payload.timestamp, payload.createdAt)
-  }
 }
 
 function contentText(value: unknown): string | undefined {
@@ -400,10 +354,6 @@ export class ClaudeHistoryAdapter implements AgentHistoryAdapter {
     return resolveArtifactPath(rootPath, artifact)
   }
 
-  createSessionInspector(): SessionInspector {
-    return new SessionInspector(claudeMessageEvent)
-  }
-
   createObservationView(rawContent: string): ObservationView {
     return createClaudeObservationView(rawContent)
   }
@@ -523,10 +473,6 @@ export class PiHistoryAdapter implements AgentHistoryAdapter {
     return resolveArtifactPath(rootPath, artifact)
   }
 
-  createSessionInspector(): SessionInspector {
-    return new SessionInspector(piMessageEvent)
-  }
-
   createObservationView(rawContent: string): ObservationView {
     return createPiObservationView(rawContent)
   }
@@ -611,10 +557,6 @@ export class CodexHistoryAdapter implements AgentHistoryAdapter {
 
   resolveArtifactPath(rootPath: string, artifact: HistoryArtifact): string {
     return resolveArtifactPath(rootPath, artifact)
-  }
-
-  createSessionInspector(): SessionInspector {
-    return new SessionInspector(codexMessageEvent)
   }
 
   createObservationView(rawContent: string): ObservationView {

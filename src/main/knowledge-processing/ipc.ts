@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import { knowledgeProcessingChannels } from '../../shared/channels'
 import type {
   ProcessingStageId,
@@ -32,11 +32,7 @@ export function registerKnowledgeProcessingIpc(
     }
   }
 
-  const confirmRun = async (
-    stageId: ProcessingStageId,
-    message: string,
-    detailPrefix: string
-  ): Promise<ProcessingStageRunBinding | undefined> => {
+  const resolveRunBinding = (stageId: ProcessingStageId): ProcessingStageRunBinding => {
     if (fullChain.isRunning()) throw new Error('完整链路正在运行，不能启动独立阶段')
     const snapshot = service.snapshot()
     const binding = service.runBinding(stageId)
@@ -46,37 +42,13 @@ export function registerKnowledgeProcessingIpc(
     if (!stage?.connectionId || !connection || !model) {
       throw new Error('请先为该阶段选择并保存 Connection 与 Model')
     }
-    const billingSource = connection.backendKind === 'coding_plan'
-      ? 'ChatGPT/Codex Coding Plan'
-      : connection.providerId === 'openai'
-        ? 'OpenAI API 账户'
-        : '由该自定义端点的运营方决定'
-    const owner = BrowserWindow.getFocusedWindow() || getMainWindow()
-    if (!owner) return undefined
-    const result = await dialog.showMessageBox(owner, {
-      type: 'warning',
-      title: `运行${stage.displayName}`,
-      message,
-      detail: [
-        detailPrefix,
-        `Connection：${connection.displayName}`,
-        `Backend：${connection.backendKind === 'coding_plan' ? 'Coding Plan' : 'Model API'}`,
-        `Model：${model.displayName} (${model.id})`,
-        `思考强度：${binding.reasoningEffort ?? '模型默认'}`,
-        `数据目的地：${connection.destination}`,
-        `计费/额度来源：${billingSource}`
-      ].join('\n'),
-      buttons: ['取消', '运行'],
-      defaultId: 1,
-      cancelId: 0
-    })
-    return result.response === 1 ? binding : undefined
+    return binding
   }
 
-  const confirmFullChain = async (): Promise<{
+  const resolveFullChainBindings = (): {
     preprocessor: ProcessingStageRunBinding
     maintainer: ProcessingStageRunBinding
-  } | undefined> => {
+  } => {
     if (fullChain.isRunning()) throw new Error('完整链路正在运行')
     const snapshot = service.snapshot()
     const preprocessorBinding = service.runBinding('observation_preprocessor')
@@ -98,30 +70,6 @@ export function registerKnowledgeProcessingIpc(
     if (!preprocessorConnection || !maintainerConnection || !preprocessorModel || !maintainerModel) {
       throw new Error('请先为两个知识加工阶段选择并保存 Connection 与 Model')
     }
-    const owner = BrowserWindow.getFocusedWindow() || getMainWindow()
-    if (!owner) return undefined
-    const result = await dialog.showMessageBox(owner, {
-      type: 'warning',
-      title: '运行完整知识加工链路',
-      message: '这会处理所选 Session，并调用两个已配置的模型阶段。',
-      detail: [
-        `Observation Preprocessor：${preprocessorConnection.displayName}`,
-        `Model：${preprocessorModel.displayName} (${preprocessorModel.id})`,
-        `思考强度：${preprocessorBinding.reasoningEffort ?? '模型默认'}`,
-        `目的地：${preprocessorConnection.destination}`,
-        `Knowledge Maintenance Agent：${maintainerConnection.displayName}`,
-        `Model：${maintainerModel.displayName} (${maintainerModel.id})`,
-        `思考强度：${maintainerBinding.reasoningEffort ?? '模型默认'}`,
-        `目的地：${maintainerConnection.destination}`,
-        '',
-        '所选 Session 会在运行时从 Agent 的原始目录读取；Source Adapter 会选择对话主线并折叠可回源的执行详情，再按所选模型的上下文预算发送给预处理模型。运行配置、遥测和重复事件不会默认发送。分段数和预处理调用数随选择后的材料增长，不设置固定运行上限，可在运行中取消。维护 Agent 会收到分层 Evidence Map，并可按需展开局部地图、读取本次原始证据和 Sandbox 中的已有知识。模型调用可能消耗额度或产生费用；失败或取消前已经发起的调用也可能计费。',
-        '所有 Knowledge Statement 只会写入一次性 Knowledge Sandbox，不影响正式知识库。'
-      ].join('\n'),
-      buttons: ['取消', '运行'],
-      defaultId: 1,
-      cancelId: 0
-    })
-    if (result.response !== 1) return undefined
     return {
       preprocessor: preprocessorBinding,
       maintainer: maintainerBinding
@@ -143,14 +91,8 @@ export function registerKnowledgeProcessingIpc(
     knowledgeProcessingChannels.runObservationPreprocessor,
     async (event, input: RunObservationPreprocessorInput) => {
       assertTrustedSender(event)
-      const binding = await confirmRun(
-        'observation_preprocessor',
-        '这会把当前 System Prompt、Observation 和 Attention 发送给所选模型，并可能消耗额度或产生费用。',
-        '输出只是可丢弃的 Evidence Map，不会写入知识层。'
-      )
-      return binding
-        ? service.runObservationPreprocessor(input, undefined, { binding })
-        : undefined
+      const binding = resolveRunBinding('observation_preprocessor')
+      return service.runObservationPreprocessor(input, undefined, { binding })
     }
   )
   ipcMain.handle(
@@ -158,34 +100,23 @@ export function registerKnowledgeProcessingIpc(
     async (event, input: RunSessionPreprocessorInput) => {
       assertTrustedSender(event)
       validateSessionSelection(input)
-      const binding = await confirmRun(
-        'observation_preprocessor',
-        '这会从 Agent 的原始目录读取所选 Session，并把当前 System Prompt、Attention 和 Source Adapter 生成的选择性 Observation 视图发送给所选模型；运行配置、遥测、重复事件和低层执行详情不会默认发送，完整原文仍可由维护 Agent 按需读取。系统会按模型上下文预算自动分段，分段数和调用数不设置固定运行上限，可在运行中取消。模型调用可能消耗额度或产生费用；失败或取消前已经发起的调用也可能计费。',
-        '输出只是可丢弃的 Evidence Map，不会写入知识层。'
-      )
-      return binding ? sessionPreprocessor.run(input, binding) : undefined
+      const binding = resolveRunBinding('observation_preprocessor')
+      return sessionPreprocessor.run(input, binding)
     }
   )
   ipcMain.handle(
     knowledgeProcessingChannels.runKnowledgeMaintenance,
     async (event, input: RunKnowledgeMaintenanceInput) => {
       assertTrustedSender(event)
-      const binding = await confirmRun(
-        'knowledge_maintenance_agent',
-        '这会把当前 System Prompt 和 Evidence Map 发送给所选模型；Agent 还可以按需读取并发送相关 Knowledge Statement 与本次授权的原始 Observation。',
-        '输出只是候选 Knowledge Contribution，不会写入权威知识层。'
-      )
-      return binding
-        ? service.runKnowledgeMaintenance(input, undefined, { binding })
-        : undefined
+      const binding = resolveRunBinding('knowledge_maintenance_agent')
+      return service.runKnowledgeMaintenance(input, undefined, { binding })
     }
   )
   ipcMain.handle(
     knowledgeProcessingChannels.runFullChain,
     async (event, input: RunKnowledgeFullChainInput) => {
       assertTrustedSender(event)
-      const bindings = await confirmFullChain()
-      return bindings ? fullChain.run(input, bindings) : undefined
+      return fullChain.run(input, resolveFullChainBindings())
     }
   )
   ipcMain.handle(knowledgeProcessingChannels.cancelFullChain, (event) => {

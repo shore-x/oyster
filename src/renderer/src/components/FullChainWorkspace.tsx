@@ -57,8 +57,6 @@ export interface FullChainWorkspaceProps {
   sessions: AvailableSessionSummary[]
   sessionsLoading: boolean
   selectedSessionId?: string
-  selectedSessionInspecting: boolean
-  selectedSessionInspectionError?: string
   attention: string
   preprocessor?: ProcessingStageView
   preprocessorConnection?: ProcessingConnectionView
@@ -168,7 +166,6 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
   const disabledReason = createMemo(() => {
     if (props.locked) return '已有知识加工任务正在运行。'
     if (!selectedSession()) return '请先选择一个 Session。'
-    if (props.selectedSessionInspectionError) return '所选 Session 无法读取，请重新扫描或选择其他 Session。'
     if (!props.preprocessor?.connectionId) return '请先为 Observation Preprocessor 选择 Connection。'
     if (!props.preprocessorConnection) return `Observation Preprocessor 已保存的 Connection 当前不可用：${props.preprocessor.connectionId}。`
     if (!props.preprocessor?.modelId) return '请先为 Observation Preprocessor 选择 Model。'
@@ -290,8 +287,6 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
                 session={session()}
                 class="full-chain-session-meta"
                 testId="full-chain-session-meta"
-                loading={props.selectedSessionInspecting}
-                error={props.selectedSessionInspectionError}
               />
             )}
           </Show>
@@ -377,6 +372,12 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
         hidden={workspace() !== 'process'}
         aria-label="完整链路调用过程"
       >
+        <Show when={props.running}>
+          <div class="processing-notice" data-testid="full-chain-running-impact">
+            <Icon name="warning" />
+            <span>链路已直接开始：所选 Session 的处理材料正在发送到页面中显示的两个 Connection，模型调用可能消耗额度；本页会持续展示分段、Agent 工具活动、错误和最终结果。</span>
+          </div>
+        </Show>
         <Show
           when={visibleDebugTrace()}
           fallback={(

@@ -142,14 +142,14 @@ function ConnectionConfiguration(props: {
             disabled={props.saving || props.locked}
             onChange={(event) => props.onChange(event.currentTarget.value || null)}
           >
-            <option value="">选择已配置的 Connection</option>
+            <option value="" selected={!props.stage.connectionId}>选择已配置的 Connection</option>
             <Show when={unavailableConnectionId()}>{(connectionId) => (
-              <option value={connectionId()} disabled>
+              <option value={connectionId()} disabled selected>
                 已保存但当前不可用 · {connectionId()}
               </option>
             )}</Show>
             <For each={props.connections}>{(connection) => (
-              <option value={connection.id}>
+              <option value={connection.id} selected={connection.id === props.stage.connectionId}>
                 {connection.displayName} · {backendLabel(connection.backendKind)} · {connectionStatusLabel(connection.status)}
               </option>
             )}</For>
@@ -163,14 +163,14 @@ function ConnectionConfiguration(props: {
             disabled={!props.selected || props.saving || props.locked}
             onChange={(event) => props.onModelChange(event.currentTarget.value)}
           >
-            <option value="">选择 Model</option>
+            <option value="" selected={!props.stage.modelId}>选择 Model</option>
             <Show when={unavailableModelId()}>{(modelId) => (
-              <option value={modelId()} disabled>
+              <option value={modelId()} disabled selected>
                 已保存但当前不可用 · {modelId()}
               </option>
             )}</Show>
             <For each={props.selected?.models ?? []}>{(model) => (
-              <option value={model.id}>
+              <option value={model.id} selected={model.id === props.stage.modelId}>
                 {model.displayName === model.id ? model.id : `${model.displayName} · ${model.id}`}
               </option>
             )}</For>
@@ -508,9 +508,6 @@ export function KnowledgeProcessingPage() {
     if (!controller.availableSessions().length) return '暂无可用 Session，请先在“数据来源”中完成扫描。'
     const session = selectedSession()
     if (!session) return '请先选择一个 Session。'
-    if (controller.sessionInspectionError(session.artifactId)) {
-      return '所选 Session 无法读取，请重新扫描或选择其他 Session。'
-    }
     return undefined
   })
 
@@ -635,10 +632,6 @@ export function KnowledgeProcessingPage() {
     const artifactId = value || undefined
     setSelectedSessionId(artifactId)
     controller.invalidateInputResults()
-    const session = controller.availableSessions().find(
-      (candidate) => candidate.artifactId === artifactId
-    )
-    if (session) void controller.inspectAvailableSession(session)
   }
 
   function updateAttention(value: string): void {
@@ -697,12 +690,6 @@ export function KnowledgeProcessingPage() {
           sessions={controller.availableSessions()}
           sessionsLoading={controller.sessionsLoading()}
           selectedSessionId={selectedSessionId()}
-          selectedSessionInspecting={controller.isInspectingSession(
-            selectedSession()?.artifactId || ''
-          )}
-          selectedSessionInspectionError={controller.sessionInspectionError(
-            selectedSession()?.artifactId || ''
-          )}
           attention={fullChainAttention()}
           preprocessor={preprocessor()}
           preprocessorConnection={selectedConnection(preprocessor())}
@@ -749,7 +736,7 @@ export function KnowledgeProcessingPage() {
       >
         <div class="processing-notice">
           <Icon name="warning" />
-          <span>这是显式阶段调试工作面。运行时会把当前材料发送到所选 Connection；两个阶段不会自动串联。</span>
+          <span>这是显式阶段调试工作面。点击运行后会直接调用所选 Connection，可能消耗额度；发送范围、实时进度、错误和结果都在当前页面展示。两个阶段不会自动串联。</span>
         </div>
 
         <div class="processing-stage-switch" role="tablist" aria-label="调试阶段">
@@ -916,8 +903,6 @@ export function KnowledgeProcessingPage() {
                         session={session()}
                         class="processing-session-summary"
                         testId="preprocessor-session-meta"
-                        loading={controller.isInspectingSession(session().artifactId)}
-                        error={controller.sessionInspectionError(session().artifactId)}
                       />
                     )}
                   </Show>

@@ -195,7 +195,7 @@ function ApiConnectionCard(props: {
         </label>
       </div>
       <p class="path" data-testid="api-connection-test-configuration">
-        测试将使用 {modelLabel(selectedModel())}
+        点击后将直接发起一条不含项目数据的测试调用，可能消耗 Provider API 额度；状态与结果会显示在本页。将使用 {modelLabel(selectedModel())}
         {selectedReasoningEffort() ? ` · ${selectedReasoningEffort()}` : ' · 模型默认思考强度'}
       </p>
       <Show when={props.connection.errorMessage}>
@@ -444,7 +444,7 @@ export function AiBackendsPage() {
                 </label>
               </div>
               <p class="path" data-testid="coding-plan-test-configuration">
-                测试将使用 {modelLabel(selectedCodingPlanModel(), '尚无可用模型')}
+                点击后将直接发起一条不含项目数据的测试调用，可能消耗 Coding Plan 额度；状态与结果会显示在本页。将使用 {modelLabel(selectedCodingPlanModel(), '尚无可用模型')}
                 {selectedCodingPlanReasoningEffort()
                   ? ` · ${selectedCodingPlanReasoningEffort()}`
                   : ' · 模型默认思考强度'}

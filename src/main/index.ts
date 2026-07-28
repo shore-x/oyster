@@ -104,10 +104,6 @@ function createKnowledgeProcessingService(
 function registerIpc(service: DiscoveryService): void {
   ipcMain.handle(discoveryChannels.getSnapshot, () => service.snapshot())
   ipcMain.handle(discoveryChannels.listAvailableSessions, () => service.listAvailableSessions())
-  ipcMain.handle(
-    discoveryChannels.inspectAvailableSession,
-    (_event, input) => service.inspectAvailableSession(input)
-  )
   ipcMain.handle(discoveryChannels.detectAgents, () => service.detectAgents())
   ipcMain.handle(discoveryChannels.scanSource, (_event, sourceId: string) => service.scanSource(sourceId))
   ipcMain.handle(discoveryChannels.cancelRun, (_event, runId: string) => service.cancelRun(runId))
@@ -186,12 +182,26 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       selectedSessionDetails: {
         title: page.querySelector('[data-testid="full-chain-session-meta-title"]')?.textContent?.trim(),
         timeRange: page.querySelector('[data-testid="full-chain-session-meta-time-range"]')?.textContent?.trim(),
-        messageCount: page.querySelector('[data-testid="full-chain-session-meta-message-count"]')?.textContent?.trim(),
+        size: page.querySelector('[data-testid="full-chain-session-meta-size"]')?.textContent?.trim(),
         project: page.querySelector('[data-testid="full-chain-session-meta-project"]')?.textContent?.trim()
       },
       fullChainButtonEnabledAfterSelection: page.querySelector('[data-testid="run-full-chain"]')?.disabled === false,
       readyReason: page.querySelector('[data-testid="full-chain-disabled-reason"]')?.textContent?.trim()
     })))
+  })()`)
+  const fullChainRunSemantics = await window.webContents.executeJavaScript(`(async () => {
+    const page = document.querySelector('[data-testid="page-knowledge-processing"]')
+    page.querySelector('[data-testid="run-full-chain"]')?.click()
+    const deadline = Date.now() + 5_000
+    let impactVisible = false
+    while (Date.now() < deadline) {
+      impactVisible ||= Boolean(page.querySelector('[data-testid="full-chain-running-impact"]'))
+      const completed = Boolean(page.querySelector('[data-testid="full-chain-run-result"]'))
+      const error = page.querySelector('.page-error')?.textContent?.trim()
+      if (completed || error) return { completed, impactVisible, error }
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    return { completed: false, impactVisible, error: 'Timed out waiting for full-chain result' }
   })()`)
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="processing-view-stage-debug"]').click()`)
   await new Promise((resolve) => setTimeout(resolve, 120))
@@ -231,6 +241,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       sharedButtonCount: page.querySelectorAll('.ui-button').length,
       tabButtonCount: page.querySelectorAll('button[role="tab"]').length,
       sourceSwitchButtonCount: page.querySelectorAll('.processing-input-source button').length,
+      statementButtonCount: page.querySelectorAll('.sandbox-statement').length,
       buttonIconCount: buttons.filter((button) => button.querySelector('.ui-button__icon .ui-icon')?.childElementCount > 0).length,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
       bodyText: page.innerText
@@ -265,14 +276,15 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   await new Promise((resolve) => setTimeout(resolve, 120))
   const traceSemantics = await window.webContents.executeJavaScript(`(() => {
     const page = document.querySelector('[data-testid="page-knowledge-processing"]')
-    const calls = Array.from(page.querySelectorAll('[data-testid^="preprocessing-call-"]'))
+    const stageTraces = Array.from(page.querySelectorAll('.processing-stage [data-testid="processing-debug-trace"]'))
+    const calls = Array.from(page.querySelectorAll('.processing-stage [data-testid^="preprocessing-call-"]'))
     if (calls[0]) calls[0].open = true
     calls[0]?.scrollIntoView({ block: 'center' })
     return {
-      panelCount: page.querySelectorAll('[data-testid="processing-debug-trace"]').length,
+      panelCount: stageTraces.length,
       preprocessingCallCount: calls.length,
       preprocessingOutput: calls[0]?.querySelector('pre')?.textContent,
-      maintenanceEventCount: page.querySelectorAll('[data-testid^="maintenance-event-"]').length,
+      maintenanceEventCount: page.querySelectorAll('.processing-stage [data-testid^="maintenance-event-"]').length,
       bodyText: page.innerText,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
     }
@@ -283,7 +295,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     join(dirname(capturePath), 'knowledge-processing-trace-preprocessing.png'),
     preprocessingTraceImage.toPNG()
   )
-  await window.webContents.executeJavaScript(`document.querySelectorAll('[data-testid="processing-debug-trace"]')[1]?.scrollIntoView({ block: 'center' })`)
+  await window.webContents.executeJavaScript(`document.querySelectorAll('.processing-stage [data-testid="processing-debug-trace"]')[1]?.scrollIntoView({ block: 'center' })`)
   await new Promise((resolve) => setTimeout(resolve, 80))
   const maintenanceTraceImage = await window.webContents.capturePage()
   await writeFile(
@@ -294,6 +306,18 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   await new Promise((resolve) => setTimeout(resolve, 120))
   const aiImage = await window.webContents.capturePage()
   await writeFile(join(dirname(capturePath), 'ai-backends.png'), aiImage.toPNG())
+  const aiDirectTestSemantics = await window.webContents.executeJavaScript(`(async () => {
+    const page = document.querySelector('[data-testid="page-ai-backends"]')
+    page.querySelector('[data-testid="coding-plan-test-button"]')?.click()
+    const deadline = Date.now() + 5_000
+    while (Date.now() < deadline) {
+      const completed = Boolean(page.querySelector('[data-testid="connection-test-result"]'))
+      const error = page.querySelector('.page-error')?.textContent?.trim()
+      if (completed || error) return { completed, error }
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    return { completed: false, error: 'Timed out waiting for connection test result' }
+  })()`)
   const aiSemantics = await window.webContents.executeJavaScript(`(() => {
     const page = document.querySelector('[data-testid="page-ai-backends"]')
     const agent = {
@@ -338,9 +362,10 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     `${capturePath}.json`,
     `${JSON.stringify({
       ...semantics,
-      ai: aiSemantics,
+      ai: { ...aiSemantics, directTest: aiDirectTestSemantics },
       processing: {
         fullChain: fullChainSemantics,
+        fullChainRun: fullChainRunSemantics,
         ...processingSemantics,
         promptRestore: promptRestoreSemantics,
         trace: traceSemantics,

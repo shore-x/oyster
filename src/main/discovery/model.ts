@@ -39,7 +39,6 @@ export interface ArtifactCandidate {
   startedAt?: string
   endedAt?: string
   updatedAt?: string
-  messageCount?: number
   sizeBytes: number
   modifiedAt: string
 }
@@ -48,17 +47,6 @@ export type ScanEntry =
   | { kind: 'artifact'; candidate: ArtifactCandidate }
   | { kind: 'invalid'; relativePath: string; sizeBytes: number }
 
-export interface SessionInspectionResult {
-  messageCount: number
-  startedAt?: string
-  endedAt?: string
-}
-
-export interface SessionLineInspector {
-  visitLine(line: string): void
-  result(): SessionInspectionResult
-}
-
 export interface AgentHistoryAdapter {
   readonly agentType: AgentType
   readonly displayName: string
@@ -66,7 +54,6 @@ export interface AgentHistoryAdapter {
   detect(context: DetectionContext, rootOverride?: string): Promise<DetectionResult>
   scan(rootPath: string, signal: AbortSignal, context?: DetectionContext): AsyncGenerator<ScanEntry>
   resolveArtifactPath(rootPath: string, artifact: HistoryArtifact): string
-  createSessionInspector(): SessionLineInspector
   /** Builds the deterministic, format-specific model view while preserving raw-line provenance. */
   createObservationView(rawContent: string): ObservationView
 }

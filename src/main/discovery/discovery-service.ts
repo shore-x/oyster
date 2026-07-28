@@ -7,7 +7,6 @@ import type {
   AvailableSessionSummary,
   DiscoverySnapshot,
   HistoryArtifact,
-  InspectAvailableSessionInput,
   ScanRun
 } from '../../shared/discovery'
 import { AGENT_TYPES } from '../../shared/discovery'
@@ -89,13 +88,12 @@ function sessionSummary(
     startedAt: artifact.startedAt,
     endedAt: artifact.endedAt,
     updatedAt: artifact.updatedAt,
-    messageCount: artifact.messageCount,
     sizeBytes: artifact.sizeBytes,
     revision: artifact.fingerprint
   }
 }
 
-function assertSessionReference(input: InspectAvailableSessionInput): void {
+function assertSessionReference(input: { artifactId: string; expectedRevision: string }): void {
   if (typeof input.artifactId !== 'string' || input.artifactId.length === 0 || input.artifactId.length > 256) {
     throw new Error('Invalid Session artifact ID')
   }
@@ -187,46 +185,6 @@ export class DiscoveryService {
         return rightDate.localeCompare(leftDate) || left.artifactId.localeCompare(right.artifactId)
       })
       .map((session) => clone(session))
-  }
-
-  async inspectAvailableSession(
-    input: InspectAvailableSessionInput
-  ): Promise<AvailableSessionSummary> {
-    assertSessionReference(input)
-    const artifact = this.state.artifacts.find((candidate) => candidate.id === input.artifactId)
-    if (!artifact || artifact.kind !== 'conversation') {
-      throw new Error('The source Session is no longer available')
-    }
-    if (artifact.fingerprint !== input.expectedRevision) {
-      throw new Error('The source Session revision has changed')
-    }
-    const source = this.state.sources.find((candidate) => candidate.id === artifact.sourceId)
-    if (!source || source.discoveryState !== 'found') {
-      throw new Error('The source Session is no longer available')
-    }
-    if (artifact.messageCount !== undefined) {
-      return clone(sessionSummary(artifact, source))
-    }
-
-    const adapter = this.requireAdapter(source.agentType)
-    const inspector = adapter.createSessionInspector()
-    await this.sourceEvidenceReader.scanLines({
-      artifactId: artifact.id,
-      absolutePath: adapter.resolveArtifactPath(source.rootPath, artifact),
-      expectedSizeBytes: artifact.sizeBytes,
-      expectedModifiedAt: artifact.modifiedAt
-    }, (line) => inspector.visitLine(line))
-
-    const current = this.state.artifacts.find((candidate) => candidate.id === input.artifactId)
-    if (!current || current.fingerprint !== input.expectedRevision) {
-      throw new Error('The source Session revision changed while it was being inspected')
-    }
-    const inspection = inspector.result()
-    current.messageCount = inspection.messageCount
-    current.startedAt ??= inspection.startedAt
-    current.endedAt = inspection.endedAt
-    await this.persist()
-    return clone(sessionSummary(current, source))
   }
 
   async readAvailableSession(
@@ -407,8 +365,6 @@ export class DiscoveryService {
             endedAt: candidate.endedAt
               ?? (existing?.fingerprint === nextFingerprint ? existing.endedAt : undefined),
             updatedAt: candidate.updatedAt,
-            messageCount: candidate.messageCount
-              ?? (existing?.fingerprint === nextFingerprint ? existing.messageCount : undefined),
             sizeBytes: candidate.sizeBytes,
             modifiedAt: candidate.modifiedAt,
             fingerprint: nextFingerprint

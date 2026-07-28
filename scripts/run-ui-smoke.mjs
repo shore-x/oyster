@@ -55,6 +55,9 @@ for (const requiredCopy of ['Oyster 独立 OAuth', '本机 Codex 账号（仅发
   }
 }
 if (semantics.ai.agent.overflowX) throw new Error('AI backend page has unexpected horizontal overflow')
+if (!semantics.ai.directTest?.completed) {
+  throw new Error(`AI connection test did not complete without a native confirmation dialog: ${semantics.ai.directTest?.error || 'unknown error'}`)
+}
 if (semantics.ai.model.backendKind !== 'api') throw new Error('API backend choice did not update the form')
 if (semantics.ai.model.provider !== 'openai') throw new Error('OpenAI is not the default Model provider')
 if (semantics.ai.model.passwordFields !== 1) throw new Error('API Key password field is missing')
@@ -88,8 +91,8 @@ if (selectedSessionDetails?.title !== '知识加工 Sandbox 设计讨论') {
 if (!selectedSessionDetails?.timeRange?.includes('→')) {
   throw new Error('The selected Session time range is not visible in the full-chain details')
 }
-if (selectedSessionDetails?.messageCount !== '3 条') {
-  throw new Error(`Expected 3 fixture messages, got ${selectedSessionDetails?.messageCount || 'no value'}`)
+if (!selectedSessionDetails?.size?.match(/\d+(\.\d+)? (B|KB|MB|GB)/)) {
+  throw new Error(`Expected readable fixture Session size, got ${selectedSessionDetails?.size || 'no value'}`)
 }
 if (selectedSessionDetails?.project !== '/Users/demo/projects/oyster') {
   throw new Error('The selected Session project is not visible in the full-chain details')
@@ -111,6 +114,9 @@ if (!processing.fullChain.bodyText.includes('Knowledge Sandbox')) {
 }
 if (!processing.fullChain.bodyText.includes('运行时从 Agent 的原始位置读取内容')) {
   throw new Error('Full-chain view does not explain on-demand Session reading')
+}
+if (!processing.fullChainRun?.impactVisible || !processing.fullChainRun?.completed) {
+  throw new Error(`Full-chain run did not complete without a native confirmation dialog: ${processing.fullChainRun?.error || 'unknown error'}`)
 }
 if (processing.fullChain.bodyText.includes('已导入 Session')) {
   throw new Error('Full-chain view still exposes the removed import model')
@@ -156,6 +162,9 @@ for (const requiredCopy of ['API', 'OpenAI-compatible', 'fixture-model', '模型
 if (processing.preprocessorSessionSourceSelected !== 'true' || processing.manualObservationVisible) {
   throw new Error('Stage debugging must default to an available Session instead of manual paste')
 }
+if (!processing.bodyText.includes('点击运行后会直接调用所选 Connection')) {
+  throw new Error('Stage debugging does not explain direct model execution in the page')
+}
 if (processing.preprocessorSessionOptionCount !== 2) {
   throw new Error(`Expected one available fixture Session in stage debugging, got ${processing.preprocessorSessionOptionCount - 1}`)
 }
@@ -176,7 +185,7 @@ if (!processing.maintainerButtonExists || processing.maintainerDisabled !== true
 }
 if (processing.resultCount !== 0) throw new Error('Knowledge processing produced a candidate without an explicit run')
 if (processing.overflowX) throw new Error('Knowledge processing page has unexpected horizontal overflow')
-if (processing.buttonCount !== processing.sharedButtonCount + processing.tabButtonCount + processing.sourceSwitchButtonCount) {
+if (processing.buttonCount !== processing.sharedButtonCount + processing.tabButtonCount + processing.sourceSwitchButtonCount + processing.statementButtonCount) {
   throw new Error('A knowledge processing action button bypasses the shared UI component')
 }
 if (processing.buttonIconCount !== processing.sharedButtonCount) {

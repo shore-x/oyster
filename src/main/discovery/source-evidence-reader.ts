@@ -21,10 +21,6 @@ export interface SourceEvidenceReadResult {
 
 export interface SourceEvidenceReader {
   read(input: SourceEvidenceReadInput): Promise<SourceEvidenceReadResult>
-  scanLines(
-    input: SourceEvidenceRevisionInput,
-    visitLine: (line: string) => void
-  ): Promise<{ sizeBytes: number }>
 }
 
 function assertReadLimit(maxBytes: number | undefined): void {
@@ -117,69 +113,6 @@ export class FileSourceEvidenceReader implements SourceEvidenceReader {
     }
   }
 
-  async scanLines(
-    input: SourceEvidenceRevisionInput,
-    visitLine: (line: string) => void
-  ): Promise<{ sizeBytes: number }> {
-    let pathMetadata
-    try {
-      pathMetadata = await lstat(input.absolutePath)
-    } catch (error) {
-      throw sourceAccessError(error) ?? error
-    }
-    if (!pathMetadata.isFile() || pathMetadata.isSymbolicLink()) {
-      throw new Error('The source Session is not a readable regular file')
-    }
-    if (!matchesExpectedRevision(pathMetadata, input)) {
-      throw new Error('The source Session revision has changed')
-    }
-
-    const handle = await open(input.absolutePath, 'r').catch((error: unknown) => {
-      throw sourceAccessError(error) ?? error
-    })
-    try {
-      const before = await handle.stat()
-      if (
-        !before.isFile()
-        || before.dev !== pathMetadata.dev
-        || before.ino !== pathMetadata.ino
-        || !matchesExpectedRevision(before, input)
-      ) {
-        throw new Error('The source Session revision changed before it could be read')
-      }
-
-      const decoder = new TextDecoder('utf-8', { fatal: true })
-      const buffer = Buffer.alloc(64 * 1024)
-      let remainder = ''
-      let offset = 0
-      while (offset < before.size) {
-        const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset)
-        if (bytesRead === 0) throw new Error('The source Session changed while it was being read')
-        offset += bytesRead
-        const text = remainder + decoder.decode(buffer.subarray(0, bytesRead), { stream: true })
-        const lines = text.split('\n')
-        remainder = lines.pop() ?? ''
-        for (const line of lines) visitLine(line.endsWith('\r') ? line.slice(0, -1) : line)
-      }
-      remainder += decoder.decode()
-      if (remainder.length > 0) {
-        visitLine(remainder.endsWith('\r') ? remainder.slice(0, -1) : remainder)
-      }
-
-      const after = await handle.stat()
-      if (
-        after.dev !== before.dev
-        || after.ino !== before.ino
-        || after.size !== before.size
-        || after.mtimeMs !== before.mtimeMs
-      ) {
-        throw new Error('The source Session changed while it was being read')
-      }
-      return { sizeBytes: before.size }
-    } finally {
-      await handle.close()
-    }
-  }
 }
 
 /** In-memory source used only by deterministic app fixtures and unit tests. */
@@ -213,17 +146,4 @@ export class MemorySourceEvidenceReader implements SourceEvidenceReader {
     }
   }
 
-  async scanLines(
-    input: SourceEvidenceRevisionInput,
-    visitLine: (line: string) => void
-  ): Promise<{ sizeBytes: number }> {
-    const stored = this.records.get(input.artifactId)
-    if (!stored) throw new Error('The source Session is no longer available')
-    if (stored.length !== input.expectedSizeBytes) {
-      throw new Error('The source Session revision has changed')
-    }
-    const content = new TextDecoder('utf-8', { fatal: true }).decode(stored)
-    for (const line of content.split(/\r?\n/)) visitLine(line)
-    return { sizeBytes: stored.length }
-  }
 }

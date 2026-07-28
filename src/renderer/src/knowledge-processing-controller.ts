@@ -43,13 +43,10 @@ export function createKnowledgeProcessingController() {
   const [maintenanceResult, setMaintenanceResult] = createSignal<KnowledgeMaintenanceResult>()
   const [availableSessions, setAvailableSessions] = createSignal<AvailableSessionSummary[]>([])
   const [sessionsLoading, setSessionsLoading] = createSignal(true)
-  const [inspectingSessionIds, setInspectingSessionIds] = createSignal<string[]>([])
-  const [sessionInspectionErrors, setSessionInspectionErrors] = createSignal<Record<string, string>>({})
   const [fullChainPending, setFullChainPending] = createSignal(false)
   const [fullChainResult, setFullChainResult] = createSignal<KnowledgeFullChainResult>()
   const [discardingSandboxId, setDiscardingSandboxId] = createSignal<string>()
   const [hiddenStageDebugTraceId, setHiddenStageDebugTraceId] = createSignal<string>()
-  const sessionInspectionTasks = new Map<string, Promise<void>>()
   let sessionLoadRevision = 0
 
   function errorMessage(cause: unknown): string {
@@ -140,51 +137,6 @@ export function createKnowledgeProcessingController() {
     } finally {
       if (revision === sessionLoadRevision) setSessionsLoading(false)
     }
-  }
-
-  function inspectAvailableSession(session: AvailableSessionSummary): Promise<void> {
-    const knownSession = availableSessions().find((candidate) => (
-      candidate.artifactId === session.artifactId && candidate.revision === session.revision
-    ))
-    if ((knownSession ?? session).messageCount !== undefined) return Promise.resolve()
-    const key = `${session.artifactId}:${session.revision}`
-    const currentTask = sessionInspectionTasks.get(key)
-    if (currentTask) return currentTask
-
-    const task = (async () => {
-      try {
-        setInspectingSessionIds((current) => current.includes(session.artifactId)
-          ? current
-          : [...current, session.artifactId])
-        setSessionInspectionErrors((current) => {
-          const next = { ...current }
-          delete next[session.artifactId]
-          return next
-        })
-        const inspected = await window.oyster.discovery.inspectAvailableSession({
-          artifactId: session.artifactId,
-          expectedRevision: session.revision
-        })
-        setAvailableSessions((current) => current.map((candidate) => (
-          candidate.artifactId === inspected.artifactId
-          && candidate.revision === inspected.revision
-            ? inspected
-            : candidate
-        )))
-      } catch (cause) {
-        setSessionInspectionErrors((current) => ({
-          ...current,
-          [session.artifactId]: errorMessage(cause)
-        }))
-      } finally {
-        sessionInspectionTasks.delete(key)
-        setInspectingSessionIds((current) => current.filter(
-          (artifactId) => artifactId !== session.artifactId
-        ))
-      }
-    })()
-    sessionInspectionTasks.set(key, task)
-    return task
   }
 
   async function saveStage(input: SaveProcessingStageInput): Promise<boolean> {
@@ -300,8 +252,6 @@ export function createKnowledgeProcessingController() {
     maintenanceResult,
     availableSessions,
     sessionsLoading,
-    isInspectingSession: (artifactId: string) => inspectingSessionIds().includes(artifactId),
-    sessionInspectionError: (artifactId: string) => sessionInspectionErrors()[artifactId],
     fullChainResult,
     debugTrace,
     isFullChainRunning: fullChainPending,
@@ -314,7 +264,6 @@ export function createKnowledgeProcessingController() {
     runKnowledgeMaintenance,
     cancelRun,
     loadAvailableSessions,
-    inspectAvailableSession,
     runFullChain,
     cancelFullChain,
     discardSandbox
