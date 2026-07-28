@@ -263,27 +263,16 @@ describe('KnowledgeProcessingService', () => {
     }
 
     expect(OBSERVATION_PREPROCESSOR_PROMPT).toContain('Output only the Evidence Map as Markdown.')
-    expect(OBSERVATION_PREPROCESSOR_PROMPT).toContain('Preserve enough compact discussion context')
-    expect(OBSERVATION_PREPROCESSOR_PROMPT).toContain('names and context-bound expressions')
-    expect(OBSERVATION_PREPROCESSOR_PROMPT).toContain('preserve its exact wording, what it denotes')
-    expect(OBSERVATION_PREPROCESSOR_PROMPT).toContain('Do not extract every noun')
-    expect(OBSERVATION_PREPROCESSOR_PROMPT).toContain('what a name refers to')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('submit_knowledge_contribution')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('locally meaningful names and referents')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('does not need to be globally unique')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('project, repository, product, subsystem, and role context')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('reader who has never seen the Session')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('observed wording, useful aliases, and distinguishing context as separate queries')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('same semantic focus')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('a coherent, mutually explanatory whole')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('include the necessary supporting Statement or Statements')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('There is no preset quota on searches, reads, tool calls')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('make all relevant changes that materially improve the knowledge layer')
+    expect(OBSERVATION_PREPROCESSOR_PROMPT).toMatch(/navigation for locally meaningful names and referents/i)
+    expect(OBSERVATION_PREPROCESSOR_PROMPT).toMatch(/not a Session summary/i)
+    expect(OBSERVATION_PREPROCESSOR_PROMPT).toMatch(/exact source location/i)
+
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/not a Session digest/i)
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/one resolved referent or one context-specific meaning/i)
     expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('[[canonical title]]')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('existing title replaces its current content')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('Statement titles and content')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('These references resolve dynamically')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('a new title creates a Statement')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('submit_knowledge_contribution')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/new title creates a Statement/i)
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/existing title replaces its current content/i)
   })
 
   it('passes the entity-oriented default prompts through both processing runtimes', async () => {
@@ -309,10 +298,10 @@ describe('KnowledgeProcessingService', () => {
     )).toBe(true)
     expect(backend.generationCalls.filter(
       (call) => !call.request.prompt.includes('BEGIN_EVIDENCE_MAP_MATERIALS')
-    ).every((call) => call.request.prompt.includes('resolve continuity, names, aliases'))).toBe(true)
+    ).every((call) => call.request.prompt.includes('Create name-centered Evidence Map'))).toBe(true)
     expect(backend.generationCalls.find(
       (call) => call.request.prompt.includes('BEGIN_EVIDENCE_MAP_MATERIALS')
-    )?.request.prompt).toContain('concrete subject names and compact discussion context')
+    )?.request.prompt).toContain('name-centered navigation map')
 
     await service.runKnowledgeMaintenance({ preprocessingRunId: preprocessing.runId })
 
@@ -974,15 +963,24 @@ describe('KnowledgeProcessingService', () => {
     await configure(service, 'observation_preprocessor')
     await configure(service, 'knowledge_maintenance_agent')
     const rawLines = [
-      '{"type":"session_meta","payload":{"base_instructions":"runtime-only"}}',
-      '{"type":"response_item","payload":{"type":"message","role":"user","content":"Keep the explicit rejection."}}',
-      '{"type":"turn_context","payload":{"runtime_only":true}}',
+      '{"type":"session_meta","payload":{"cwd":"/work/oyster","base_instructions":"runtime-only"}}',
+      '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Keep the explicit rejection."}]}}',
+      '{"type":"turn_context","payload":{"cwd":"/work/oyster","runtime_only":true}}',
       `{"type":"response_item","payload":{"type":"function_call_output","output":"${'DO_NOT_SEND_FULL_TOOL_OUTPUT'.repeat(500)}"}}`
     ]
     const view: ObservationView = {
-      formatVersion: 'codex-jsonl-v3-test',
+      formatVersion: 'codex-jsonl-v4-test',
       rawLines,
       units: [
+        {
+          lineNumber: 1,
+          content: rawLines[0],
+          startCharacter: 0,
+          endCharacter: rawLines[0].length,
+          totalCharacters: rawLines[0].length,
+          modelContent: '{"kind":"session_context","workingDirectory":"/work/oyster"}',
+          recordContext: 'Codex · record=session_context'
+        },
         {
           lineNumber: 2,
           content: rawLines[1],
@@ -990,15 +988,6 @@ describe('KnowledgeProcessingService', () => {
           endCharacter: rawLines[1].length,
           totalCharacters: rawLines[1].length,
           recordContext: 'Codex · record=message · role=user'
-        },
-        {
-          lineNumber: 4,
-          content: rawLines[3],
-          startCharacter: 0,
-          endCharacter: rawLines[3].length,
-          totalCharacters: rawLines[3].length,
-          modelContent: '{"kind":"tool_result","outcome":"success","rawDetailAvailable":true}',
-          recordContext: 'Codex · record=tool_result'
         }
       ]
     }
@@ -1006,24 +995,23 @@ describe('KnowledgeProcessingService', () => {
     const result = await service.runObservationPreprocessorView(view)
     const modelPrompt = backend.generationCalls[0].request.prompt
 
-    expect(modelPrompt).toContain('L000002')
-    expect(modelPrompt).toContain('exact source ranges L000002-L000002, L000004-L000004')
-    expect(modelPrompt).not.toContain('exact source ranges L000002-L000004')
+    expect(modelPrompt).toContain('L000001')
+    expect(modelPrompt).toContain('exact source ranges L000001-L000002')
     expect(modelPrompt).toContain('Keep the explicit rejection.')
-    expect(modelPrompt).toContain('rawDetailAvailable')
+    expect(modelPrompt).toContain('workingDirectory')
     expect(modelPrompt).not.toContain('base_instructions')
+    expect(modelPrompt).not.toContain('runtime_only')
     expect(modelPrompt).not.toContain('DO_NOT_SEND_FULL_TOOL_OUTPUT')
     expect(result.debugTrace.preprocessing?.view).toMatchObject({
-      formatVersion: 'codex-jsonl-v3-test',
+      formatVersion: 'codex-jsonl-v4-test',
       sourceLineCount: 4,
       selectedLineCount: 2,
       selectedUnitCount: 2
     })
     expect(result.debugTrace.preprocessing?.view?.modelMaterialBytes)
-      .toBeLessThan(result.debugTrace.preprocessing!.view!.selectedSourceBytes)
+      .toBeLessThan(result.debugTrace.preprocessing!.view!.sourceBytes)
     expect(result.debugTrace.preprocessing?.calls[0].selectors).toEqual([
-      'L000002-L000002',
-      'L000004-L000004'
+      'L000001-L000002'
     ])
 
     await service.runKnowledgeMaintenance({ preprocessingRunId: result.runId })

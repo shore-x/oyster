@@ -95,9 +95,11 @@ describe('agent history adapters', () => {
 
   it('creates a selective Codex preprocessing view while retaining complete raw evidence', () => {
     const records = [
-      { type: 'session_meta', payload: { base_instructions: `runtime ${'x'.repeat(8_000)}` } },
-      { type: 'turn_context', payload: { collaboration_mode: 'default' } },
+      { type: 'session_meta', payload: { cwd: '/work/oyster', base_instructions: `runtime ${'x'.repeat(8_000)}` } },
+      { type: 'turn_context', payload: { cwd: '/work/oyster', collaboration_mode: 'default' } },
       { type: 'response_item', payload: { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'runtime instructions' }] } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '# AGENTS.md instructions for /work/oyster\n\n<INSTRUCTIONS>\nRuntime rules\n</INSTRUCTIONS>' }] } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '<environment_context>\n  <cwd>/work/oyster</cwd>\n</environment_context>' }] } },
       { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Keep the rejection and its reason.' }] } },
       { type: 'event_msg', payload: { type: 'user_message', message: 'duplicate user representation' } },
       { type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'I will preserve it.' }] } },
@@ -106,68 +108,49 @@ describe('agent history adapters', () => {
       { type: 'response_item', payload: { type: 'custom_tool_call', name: 'exec', call_id: 'call-1', input: JSON.stringify({ cmd: `rg ${'q'.repeat(4_000)}` }) } },
       { type: 'response_item', payload: { type: 'custom_tool_call_output', call_id: 'call-1', output: [{ type: 'input_text', text: 'exit_code=0' }, { type: 'input_text', text: `begin ${'z'.repeat(12_000)} end` }] } },
       { type: 'response_item', payload: { type: 'agent_message', author: '/root/researcher', recipient: '/root', content: [{ type: 'input_text', text: 'The delegated research found the relevant decision.' }, { type: 'encrypted_content', data: 'not-for-preprocessing' }] } },
+      { type: 'response_item', payload: { type: 'web_search_call', query: 'routine lookup' } },
       { type: 'event_msg', payload: { type: 'sub_agent_activity', kind: 'interacted', agent_path: '/root/researcher' } },
       { type: 'event_msg', payload: { type: 'turn_aborted', turn_id: 'turn-1', reason: 'interrupted by the user' } },
       { type: 'future_record', payload: { type: 'new_event', opaque: `detail ${'y'.repeat(5_000)}` } },
+      { type: 'turn_context', payload: { cwd: '/work/oyster/service', approval_policy: 'never', summary: `runtime ${'s'.repeat(8_000)}` } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'The service directory changes the meaning of Ledger.' }] } },
       { type: 'compacted', payload: { message: 'duplicate compacted history' } },
       { type: 'world_state', payload: { full: true, state: 'runtime state' } }
     ]
     const rawLines = records.map((record) => JSON.stringify(record))
     const view = new CodexHistoryAdapter().createObservationView(rawLines.join('\n'))
 
-    expect(view.formatVersion).toBe('codex-jsonl-v3')
+    expect(view.formatVersion).toBe('codex-jsonl-v4')
     expect(view.rawLines).toEqual(rawLines)
-    expect([...new Set(view.units.map((unit) => unit.lineNumber))]).toEqual([4, 6, 9, 10, 11, 13, 14])
+    expect([...new Set(view.units.map((unit) => unit.lineNumber))]).toEqual([1, 6, 8, 18, 19])
 
-    const user = view.units.find((unit) => unit.lineNumber === 4)!
+    const initialContext = view.units.find((unit) => unit.lineNumber === 1)!
+    expect(JSON.parse(initialContext.modelContent!)).toEqual({
+      kind: 'session_context',
+      workingDirectory: '/work/oyster'
+    })
+    expect(initialContext.modelContent).not.toContain('base_instructions')
+
+    const user = view.units.find((unit) => unit.lineNumber === 6)!
     expect(user.modelContent).toBeUndefined()
-    expect(user.content).toBe(rawLines[3])
+    expect(user.content).toBe(rawLines[5])
     expect(user.recordContext).toBe('Codex · record=response_item · payload=message · role=user · blocks=input_text')
 
-    const call = view.units.find((unit) => unit.lineNumber === 9)!
-    const callMaterial = JSON.parse(call.modelContent!)
-    expect(call.content).toBe(rawLines[8])
-    expect(callMaterial).toMatchObject({
-      kind: 'tool_call',
-      tool: 'exec',
-      callId: 'call-1',
-      rawDetailAvailable: true
+    const changedContext = view.units.find((unit) => unit.lineNumber === 18)!
+    expect(JSON.parse(changedContext.modelContent!)).toEqual({
+      kind: 'session_context',
+      workingDirectory: '/work/oyster/service'
     })
-    expect(Buffer.byteLength(call.modelContent!, 'utf8')).toBeLessThan(2_000)
+    expect(changedContext.modelContent).not.toContain('approval_policy')
+    expect(changedContext.modelContent).not.toContain('summary')
 
-    const result = view.units.find((unit) => unit.lineNumber === 10)!
-    const resultMaterial = JSON.parse(result.modelContent!)
-    expect(result.content).toBe(rawLines[9])
-    expect(resultMaterial).toMatchObject({
-      kind: 'tool_result',
-      tool: 'exec',
-      callId: 'call-1',
-      rawDetailAvailable: true
-    })
-    expect(resultMaterial.outputBytes).toBeGreaterThan(12_000)
-    expect(Buffer.byteLength(result.modelContent!, 'utf8')).toBeLessThan(2_000)
-
-    const subagent = JSON.parse(view.units.find((unit) => unit.lineNumber === 11)!.modelContent!)
-    expect(subagent).toMatchObject({
-      kind: 'subagent_message',
-      author: '/root/researcher',
-      recipient: '/root',
-      message: 'The delegated research found the relevant decision.',
-      rawDetailAvailable: true
-    })
-    expect(view.units.find((unit) => unit.lineNumber === 11)!.modelContent).not.toContain('not-for-preprocessing')
-
-    expect(JSON.parse(view.units.find((unit) => unit.lineNumber === 13)!.modelContent!)).toMatchObject({
-      kind: 'turn_aborted',
-      reason: 'interrupted by the user'
-    })
-    expect(JSON.parse(view.units.find((unit) => unit.lineNumber === 14)!.modelContent!)).toEqual({
-      kind: 'unrecognized_codex_record',
-      recordType: 'future_record',
-      payloadType: 'new_event',
-      payloadKeys: ['opaque', 'type'],
-      rawDetailAvailable: true
-    })
+    expect(view.units.find((unit) => unit.lineNumber === 19)?.content).toBe(rawLines[18])
+    expect(view.units.some((unit) => unit.content.includes('Runtime rules'))).toBe(false)
+    expect(view.units.some((unit) => unit.content.includes('<environment_context>'))).toBe(false)
+    expect(view.units.some((unit) => unit.content.includes('tool_call'))).toBe(false)
+    expect(view.units.some((unit) => unit.content.includes('subagent_message'))).toBe(false)
+    expect(view.units.some((unit) => unit.content.includes('web_search_call'))).toBe(false)
+    expect(view.units.some((unit) => unit.content.includes('turn_aborted'))).toBe(false)
   })
 
   it('keeps long canonical Codex messages lossless and byte-bounded', () => {
@@ -181,7 +164,7 @@ describe('agent history adapters', () => {
     })
     const view = new CodexHistoryAdapter().createObservationView(rawLine)
 
-    expect(view.formatVersion).toBe('codex-jsonl-v3')
+    expect(view.formatVersion).toBe('codex-jsonl-v4')
     expect(view.units.length).toBeGreaterThan(1)
     expect(view.units.map((unit) => unit.content).join('')).toBe(rawLine)
     expect(view.units.every((unit) => Buffer.byteLength(unit.content, 'utf8') <= 3 * 1_024)).toBe(true)
