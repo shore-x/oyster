@@ -4,7 +4,7 @@
 >
 > 日期：2026-07-28
 >
-> 范围：定义观察、知识、投影、Attention、Observation Preprocessing 和 Agent 维护之间的责任边界；确定各层的权威载体、最小持久格式与依赖原则，但不把具体数据库产品、字段物理类型、索引实现、固定本体或某个 Agent Runtime 固化为长期架构要求。当前验证实现的具体选择另见《知识加工验证 MVP》。
+> 范围：定义观察、知识、投影、Attention、Observation Preprocessing 和 Agent 维护之间的稳定语义与责任边界；治理机制只保留必要预期，不在本页固定知识层存储介质、字段、索引、工具协议或 Agent Runtime。当前验证实现另见《知识加工验证 MVP》。
 
 ## 1. 结论
 
@@ -24,7 +24,7 @@ Oyster 保留三个认识论层次：
 
 > **状态分离，策略耦合。**
 
-Knowledge Statement 以语义丰富的自然语言正文及其中对其他 Statement 的显式名称引用作为权威内容，持久投影以本地 Markdown 文档作为权威内容。Projection Agent 通过语义探索选择知识，Oyster Core 则在投影修订上保留已经确认的 Statement 依赖。
+Knowledge Statement 以语义丰富的自然语言正文及其中对其他 Statement 的显式名称引用作为权威内容，持久投影以本地 Markdown 文档作为权威内容。Projection Agent 通过语义探索选择知识；如果实际的变更同步需要稳定依赖，Oyster Core 可以在治理层另行维护，具体形式不属于核心模型。
 
 Observation Preprocessor、Knowledge Maintenance Agent 和 Projection Agent 不是互相竞争的整套架构，而是承担不同责任的处理器。越靠近观察层，流程越固定、来源约束越强；越靠近知识维护和投影，越需要 Agent 根据 Attention 探索现有状态并进行多步判断。
 
@@ -41,21 +41,23 @@ Observation Preprocessor、Knowledge Maintenance Agent 和 Projection Agent 不�
 
 Canonical Activity 是可重建的公共活动语义，不是 LLM 对内容的解释。“assistant 输出了 X”是观察事实，但 X 不因此成为关于世界的真相；系统也不能把模型推断出的因果、冲突或重要性写回观察层。
 
-对于本地外部 Agent 历史，Oyster 只持久化来源身份、内部 locator 和版本指纹，不复制原始正文。来源版本在被使用时确定；正式加工与测试均由同一个 Source Adapter 原地读取。上游记录可能变化、移动、消失或变得无权访问，因此 Raw Evidence 的身份可以长期保留，而正文的可用性不作永久保证。来源失效后，已有知识仍保留当时的出处身份；再次展开失败必须明确暴露，不能用相似记录静默替换。这里不要求额外持久化一份记录级“可用状态”。
+对于具有稳定原始位置的本地 Agent 历史，Oyster 当前只登记来源与版本并按需原地读取，不复制原始正文。上游记录可能变化、移动、消失或变得无权访问；再次展开失败必须明确暴露，不能用相似记录静默替换。未来来源是否需要由 Oyster 托管正文取决于该来源的生命周期，不由本地历史的当前策略预先限制。
 
 ### 2.2 知识层
 
 知识层包含规则、Pipeline、Agent 或用户从观察及已有知识形成的理解。一条 Knowledge Statement 可以依赖多条观察或已有 Knowledge Statement，同一组证据也可以支持多个并存的理解。
 
+**当前知识视图**是一次读取时系统视为当前知识的 Statement 集合，canonical title 在该集合内唯一。哪些 Statement 进入这一集合属于生命周期治理问题，不在此处规定。
+
 知识层的基本语义单位称为 **Knowledge Statement**：一份可以被独立理解、明确引用、核查、修订并关联出处的自足理解。Statement 是知识层唯一的权威语义单位；它既可以解释一个对象、名词或概念，也可以在自由文本中显式引用任意多个已有 Statement，从而表达参与者、语境、条件、例外和不确定性共同构成的关系。它不等同于已经证实的事实，也不预设三元组、节点类型、独立 Relation 实体或固定领域 Schema。
 
-Statement 之间的领域语义关系以引用者的完整正文为 Source of Truth。正文采用 `[[canonical title]]` 显式引用目标 Statement；需要让句子更自然时，可以写成 `[[canonical title|local display text]]`。竖线左侧始终是目标在当前知识视图中的完整 canonical title，右侧只是在该处显示的局部措辞，不声明全局别名，也不参与目标选择。引用负责指出语义目标和提供导航，关系中的角色、方向、范围与含义继续由自然语言表达。一个包含多个引用的 Statement 可以自然表达多元关系；同一组参与者之间的不同关系分别由不同 Statement 表达，关系本身需要被补充或质疑时也直接引用该 Statement。系统可以从这些显式名称引用派生出站引用、反向引用、邻接、图或超图等索引和视图，但派生结果不得成为第二份权威关系。
+Statement 之间的领域语义关系以引用者的完整正文为 Source of Truth。正文采用 `[[canonical title]]` 显式引用当前知识视图中拥有该名称的 Statement；需要让句子更自然时，可以写成 `[[canonical title|local display text]]`。竖线左侧始终是完整 canonical title，右侧只是在该处显示的局部措辞，不声明全局别名，也不参与目标选择。无论正文何时写入，包括读取历史正文时，名称引用都在读取时动态解析，不永久绑定正文写作时的某条存储记录。引用只指出语义目标和提供导航，关系中的角色、方向、范围与含义继续由自然语言表达。一个包含多个引用的 Statement 可以自然表达多元关系；同一组参与者之间的不同关系分别由不同 Statement 表达。系统可以从正文派生出站引用、反向引用、邻接、图或超图等视图，但派生结果不得成为第二份权威关系。
 
 每个当前语义焦点都应使用在当前知识视图中唯一且能够说明范围的 canonical title，例如“数据库系统的一般概念”与“Oyster 当前验证实现使用的 SQLite 数据库”，而不是 `数据库 1`、`数据库 2`。title、正文以及任何供人或模型使用的关键词都必须是具有实际含义的自然语言，不使用无语义枚举值或机械规则代替知识。title 服务于阅读、搜索和选择，不承担稳定身份职责。
 
-普通 Statement 也可以解释一个词语在不同语境下可能指向哪些具体 Statement。例如标题为“数据库”的 Statement 可以通过自由文本和显式名称引用说明一般技术语境与特定项目语境中的不同含义。这类内容只用于外部使用时的解释和消歧，不构成新的 Statement 类型、机械路由规则或具体知识的代理；当内部语义已经确定时，引用者必须使用具体 Statement 的 canonical title，而不是经过消歧 Statement 或依赖局部显示文本猜测目标。
+普通 Statement 也可以解释一个词语在不同语境下可能指向哪些具体 Statement。例如标题为“数据库”的 Statement 可以通过自由文本和显式名称引用说明一般技术语境与特定项目语境中的不同含义。这类内容只用于外部使用时的解释和消歧，不构成新的 Statement 类型、机械路由规则或具体知识的代理；当含义已经确定时，引用者应使用具体 Statement 的 canonical title，而不是依赖局部显示文本猜测目标。
 
-Knowledge Statement 的权威语义内容由 canonical title 与 Markdown 兼容的自由文本正文共同构成；它们可以由普通数据库、本地文件或其他能够原样保存这些内容的介质承载，物理介质不属于 Statement 的核心定义。每条记录本身就是一个不可变的确定版本：提交后的标题和正文不原地修改，任何变化都创建新的 Knowledge Statement，并通过生命周期元信息关联旧 Statement。承载层只需管理少量生命周期信息和必要的出处结构，不要求 Statement 采用固定领域 Schema，也不要求知识层首先成为图数据库。全文、向量、关键词、引用邻域及其他用于检索的语义或图索引都可以派生重建；出处和修订等影响完整性的系统结构仍由 Oyster Core 明确维护，但不表示 Statement 之间的领域语义。
+Knowledge Statement 的权威语义内容由 canonical title 与 Markdown 兼容的自由文本正文共同构成；它们可以由数据库、本地文件或其他能够原样保存这些内容的介质承载，物理介质不属于 Statement 的核心定义。已提交 Statement 的标题和正文不原地修改，变化通过新的 Statement 表达。系统可以在治理层识别当前知识和版本延续，但其具体结构不属于领域语义。知识层不预设固定领域 Schema，也不要求首先成为图数据库。
 
 **Knowledge Contribution** 是处理器提交的一次知识变更提案。一次 Contribution 可以创建一条或多条新的 Knowledge Statement，并让它们的正文通过 canonical title 引用已有 Statement 或同一 Contribution 中的新 Statement，从而表达补充、限定、修订或关联；它不是知识层最终保存的语义单位。`Node`、`Edge` 和 `Relation` 只在具体图实现、派生索引或视图确有需要时使用，不作为当前核心语义概念。
 
@@ -66,9 +68,7 @@ Knowledge Statement 的权威语义内容由 canonical title 与 Markdown 兼容
 - 更高层知识复用较低层知识，而不必每次重新读取全部原始消息；
 - Decision、Problem、Attempt、Outcome、Preference 等视角由处理策略定义，而不是固化为全局本体。
 
-无论 Knowledge Statement 由 Knowledge Maintenance Agent、经授权的 Pipeline 还是用户发起，都进入同一个知识层并服从相同的出处、权限、修订和删除规则。
-
-“使用同一个模型”不等于擦除差异。系统仍需知道某个知识由哪个处理器、在什么 Attention 下、依据哪些输入形成，以便解释重叠、重新加工和级联删除。
+无论 Knowledge Statement 由 Knowledge Maintenance Agent、经授权的 Pipeline 还是用户发起，都进入同一个知识层并服从相同的治理边界。
 
 ### 2.3 投影层
 
@@ -77,35 +77,23 @@ Knowledge Statement 的权威语义内容由 canonical title 与 Markdown 兼容
 - **持久协作文档**：Markdown Wiki、项目概览、决策脉络、失败经验等；
 - **临时消费视图**：为一次查询或 Agent 运行生成的 Context Packet。
 
-持久投影拥有独立修订历史。当前和历史正文由文档侧的版本机制保存，Oyster Core 只记录修订身份、来源和依赖，不复制正文。首次文档可以由知识和 Attention 初始化；后续更新必须读取当前文档，保留仍然有效的用户和 Agent 编辑，而不是从最新知识全量重建并覆盖。
+持久投影拥有独立修订历史，其正文与修订由文档侧管理。首次文档可以由知识和 Attention 初始化；后续更新必须读取当前文档，保留仍然有效的用户和 Agent 编辑，而不是从最新知识全量重建并覆盖。如果需要变更同步，Core 可以维护必要的来源或依赖信息，但不在核心模型中规定其结构。
 
 持久投影以本地 Markdown 文件为主要载体。正文可以在确有读者价值时显式提及 Knowledge Statement 的标题，但不要求把所有系统依赖暴露给读者，标题也不承担稳定身份职责。
 
 投影不是新的世界事实来源。当前 Markdown 内容不能因为被模型生成或用户编辑，就自动成为知识层真相。
 
-### 2.4 最小逻辑格式与治理信息
+### 2.4 核心内容与治理边界
 
-知识层的领域语义只由 Knowledge Statement 承载；下表描述必须保存的逻辑信息，不规定它们是数据库字段、文件元信息还是其他物理表示：
+Statement 的核心内容只有：
 
-| 记录 | 最小信息 | 作用 |
-| --- | --- | --- |
-| Knowledge Statement | `title`、`content`；另有承载层中的记录定位、`origin_ref` 和 `created_at` | 保存一个不可变的自由文本理解及正文中的显式名称引用；记录定位只服务治理，不进入正文引用格式 |
-| Statement Revision Link | 新 Statement 与旧 Statement 的记录引用 | 保存版本延续关系；它是生命周期元信息，不表达领域语义 |
-| Statement Source | Statement 的记录引用、`source_ref`、`selector` | 指向特定版本的观察来源及其中可选的局部范围 |
+- 在当前知识视图中唯一、语义丰富的 canonical title；
+- Markdown 兼容的自由文本正文；
+- 正文中采用 `[[canonical title|optional local display text]]` 表达的动态名称引用。
 
-`title` 是在当前知识视图中唯一、语义丰富且可区分的 canonical name，而不是稳定身份；`content` 是 Markdown 兼容的自由文本，并使用 `[[canonical title]]` 或 `[[canonical title|local display text]]` 引用其他 Statement。只有左侧 canonical title 表示目标，右侧局部显示文本不能单独作为引用。名称解析到存储记录、稳定 ID 或其他内部 locator 的绑定属于可派生的治理信息，不属于 Statement 的领域语义，也不是当前阶段的实现要求。Statement 的输入依赖由 Contribution 与出处治理记录，版本延续固定采用“新 Statement 指向旧 Statement”的方向。一条旧知识被拆分为多条，或多条旧知识被合并为一条，都可以通过多条 Revision Link 表达；这些系统结构不取代正文中的领域语义。
+定位、版本延续、出处、权限、删除和投影变更同步属于治理问题，而不是 Statement 的领域语义。正式知识应能够追溯到原始观察或输入知识，但具体范围、记录方式、校验方式以及当前 MVP 是否实现均尚未确定。这里不预设数据库字段、文件元信息、ID、路径或关系表。
 
-`selector` 是持久出处的一部分，用于标识一份确定来源中的稳定证据范围；它不是 Agent 分页读取原文时使用的游标。运行时读取位置只服务于一次 Workspace 中的渐进展开，不随 Knowledge Statement 持久化。两者分开后，读取工具可以调整窗口大小或继续位置，而不会改变知识已经记录的出处语义。
-
-投影正文继续只保存在 Markdown 文件中，Core 不复制文档内容，只保留三类元信息：
-
-| 记录 | 最小字段 | 作用 |
-| --- | --- | --- |
-| Projection Document | `id`、`path` | 将稳定文档身份与可变文件位置分离 |
-| Projection Revision | `id`、`projection_id`、`content_ref`、`origin_ref`、`created_at` | 指向一份由文档版本机制保存的确定 Markdown 修订，并记录其产生来源 |
-| Projection Dependency | `projection_revision_id`、`statement_id` | 记录该文档修订实际依赖的完整 Knowledge Statement |
-
-Statement 名称到内部记录身份的绑定、出站引用、反向引用、邻接视图、到投影的反向影响关系、全文、Embedding、关键词和相似关系都可以由以上权威内容与治理状态派生，不进入最小权威语义格式。第一阶段不要求实现名称到稳定 ID 的持久绑定，也不增加知识类型、领域关系类型、标签、置信度、重要度、状态或独立版本字段。
+名称到内部记录或稳定 ID 的绑定、出站和反向引用、邻接、全文、Embedding、关键词、相似关系、图或超图投影以及反向影响分析，均属于可选或可重建能力。任何内部绑定都只能辅助当次名称解析，不能把历史正文冻结到写作时的记录。是否引入以及采用何种形式，应由真实治理和检索需求决定，不能反向改变 Statement 的核心定义。
 
 ## 3. Attention 是共享的处理策略
 
@@ -126,43 +114,33 @@ Attention 可以同时指导默认和自定义处理器，但不应：
 
 ### 4.1 Observation Preprocessing
 
-**Observation Preprocessing** 是将一批观察转化为后续知识维护工作材料的过程；承担该职责的模块称为 **Observation Preprocessor**。它负责降低后续 Agent 的噪声和成本。适合在这一过程完成的工作包括：
+**Observation Preprocessing** 是将一批观察转化为后续知识维护工作材料的过程；承担该职责的模块称为 **Observation Preprocessor**。它负责解析来源、降低噪声、为长输入提供有界处理，并提出后续值得核查的候选理解。具体分段、摘要、索引和模型调用方式可以替换。
 
-- 格式解析、规范化、排序、分段和范围裁剪；
-- Secret/PII 检测与 Redaction；
-- 全文索引、Embedding 和其他可重建检索信号；
-- 对局部历史进行有界摘要，并提取主题、实体、概念及其含义、约束和关系等候选；
-- 保存版本、输入依赖、失败状态和可重跑结果。
+这里的目标不是用摘要替代原始观察，也不承诺语义上的“无损压缩”。只要表示明显变短，它就必然包含选择。预处理结果应帮助 Agent 回到相关原始区域核查，但定位编码、覆盖表达和是否持久化属于实现与治理设计。
 
-这里的目标不是用一份摘要替代原始观察，也不是承诺 LLM 可以进行语义上的“无损压缩”。只要表示明显变短，它就必然包含选择。Oyster 保证的是系统级可追溯：Raw Evidence 保持完整来源身份，预处理材料中的每个单元保留原始 selector；模型被要求在 Evidence Map 的重要候选旁保留能够直接引导运行时读取的原始行号，并在材料来自超长单行的局部窗口时同时保留行内位置。只要该外部来源版本仍可访问，后续 Agent 就可以从这些位置按需展开到最小必要的原始消息或工具结果。来源不可用时，系统保留这一事实和出处身份，而不是假装仍能回源。
+Source Adapter 可以针对不同 Harness 生成选择性的 Observation View，保留对话主线、人类要求以及必要的动作和结果线索，并弱化重复事件和低层执行噪声。选择规则属于来源适配，不改变 Raw Evidence，也不建立新的认识论层。
 
-Source Adapter 在发送给 Observation Preprocessor 前生成一份确定性的、选择性的 Observation View。它保留对话主线、明确的人类要求，以及工具或 Subagent 的必要动作与结果索引；运行时基础提示词、工具 Schema、权限与 token 遥测、重复事件和低层执行轨迹不默认进入预处理模型。较大的工具结果可以只提供有界表示和原始 locator，完整内容仍留在 Raw Evidence 中供 Knowledge Maintenance Agent 按需读取。Adapter 负责把不同 Harness 的存储方式映射到统一的位置能力，但不把原文改写成统一语义格式。这里的选择只改变模型工作材料，不修改、删除或另存原始来源，也不新增一个认识论层。
-
-Observation Preprocessing 可以在同一份确定来源内进行一次或多次有界直接 Model 调用。短视图默认一次完成；长视图按其中的原始顺序划分材料，每段始终引用同一个 `sourceRef`，并保留一个或多个已合并的精确全局 selector。分段预算同时计入模型材料和 selector 本身的实际序列化开销；当稀疏位置过多时继续分段，而不对总段数或 Session 长度设限。普通材料以 `L` 行号或行范围定位；一个超长物理行被分段时，以同一 `L` 行和 `Cstart:end/total` 行内窗口定位。Prompt 要求局部地图和后续导航归并保留这些原始位置，不能把它们替换为生成文本中的位置。未被选择的中间行不进入这些 selector，也不被宣称为模型已经处理的内容。每次调用独立形成局部地图，随后由预处理器提供一份有界导航。导航节点只展示明确标注为非精确 union 的 coverage extent 和直接子节点，精确 selector 保留在可展开的局部 Section，不在根地图或归并 Prompt 中反复平铺。这里不采用滚动摘要：前一范围的模型输出不会取代后一范围的输入，也不会成为新的权威来源。
-
-Evidence Map 正文保持自由文本，因此“每个语义候选都带精确位置”是模型需要遵循的语义要求，而不是 Core 通过解析正文可以证明的结构约束。Core 独立保证每个地图 Section 都附有完整来源范围和首个可靠 EvidenceLocation；即使模型遗漏某个候选旁的位置，Agent 仍能从该 Section 的机器生成边界回源。当前不为追求候选级强保证而引入固定输出 Schema。
-
-Observation Preprocessor 默认产出 **Evidence Map**：一种有界、可丢弃、可重算的多分辨率 Working Artifact。对于长输入，它可以由有界导航和可独立读取的局部地图共同组成，仍然只是一份逻辑上的 Evidence Map。它在概念上同时提供：
+Observation Preprocessor 默认产出 **Evidence Map**：一种有界、可丢弃、可重算的 Working Artifact。它在概念上同时提供：
 
 - **导航性概览**：帮助 Agent 快速理解这批观察大致发生了什么、哪些区域值得继续阅读；
 - **候选证据单元**：优先提出可形成持久理解的实体、概念、含义、属性、约束、区别、关系、修正、否定边界和明确偏好；任务事件只在解释这些理解或 Attention 明确需要时作为候选，而不自动宣布为知识；
 - **来源与覆盖地图**：说明候选来自哪些观察、哪些内容被跳过或仍不确定，以及如何回到原始上下文核查。
 
-Evidence Map 是“可丢弃的压缩地图”的正式名称。它描述一种工作职责，不构成第四个认识论层，也不要求固化为特定数据库类型；在系统模型中它仍属于 Working Artifact。默认加工路径可以概括为：
+Evidence Map 是“可丢弃的压缩地图”的正式名称。它描述一种工作职责，不构成第四个认识论层，也不要求固定 Schema、数据库类型或导航算法。默认加工路径可以概括为：
 
 ```text
 Observation -> Observation Preprocessing -> Evidence Map (Working Artifact)
             -> Knowledge Maintenance Agent -> Knowledge Contribution -> Knowledge Statement
 ```
 
-固定的是处理边界、输入输出责任和有界生命周期，而不是一套固定知识本体。Attention 可以改变本次预处理的关注重点和压缩密度，但不能让未被选中的来源身份或已有依赖从系统中静默消失；外部原文是否继续可用由上游生命周期决定。
+固定的是处理边界和 Working Artifact 的非权威性，而不是一套固定知识本体。Attention 可以改变本次预处理的关注重点和压缩密度；预处理不能把未处理的内容宣称为已经理解，也不能虚构无法回到的来源。
 
 责任边界不取决于是否调用 LLM，而取决于输出的权威性和生命周期：
 
 - 只供下一步使用、可随时重算且不直接对外提供的结果，是 **Working Artifact**；
-- 一旦摘要或要点需要成为可持久检索、引用或进一步推理的知识，它就必须通过 Knowledge Contribution 提交为 Knowledge Statement，并保留出处。
+- 一旦摘要或要点需要成为可持久检索、引用或进一步推理的知识，它就必须进入正常的知识形成与治理边界，成为 Knowledge Statement。
 
-默认 Observation Preprocessor 只产生 Working Artifact。它可以在 Artifact 中提出局部候选，但不直接提交长期知识。未来如果允许某类固定 Pipeline 直接产生基础 Knowledge Contribution，该 Pipeline 就是一个正式的知识生产者，必须遵循与 Agent 相同的出处、Scope、修订、审计和删除契约。
+默认 Observation Preprocessor 只产生 Working Artifact。未来若允许其他处理器直接形成正式知识，它仍应服从与 Agent 相同的知识和治理边界。
 
 ### 4.2 Knowledge Maintenance Agent
 
@@ -176,11 +154,11 @@ Observation -> Observation Preprocessing -> Evidence Map (Working Artifact)
 
 Knowledge Maintenance Agent 是一个普通、可替换的工具使用 Agent。它的角色只由本次运行的 System Prompt、Workspace、工具集合和最终提交协议定义，不需要知识维护专属的 loop、固定步骤或状态机。默认实现可以更换 Agent Runtime，也可以增加或替换工具，而不改变知识层的概念模型。
 
-系统不为一次知识维护运行预设固定的模型轮次、工具调用次数或总时长；运行可以根据材料和不确定性继续探索，并允许用户取消。Agent transcript 增长时，由通用 Agent Runtime 负责上下文整理或压缩，而不是为知识维护再引入滚动摘要等专用机制。运行时压缩只管理临时 transcript，不产生新的 Evidence Map 或 Knowledge Statement。System Prompt 与工具定义不进入被压缩的 transcript；来源授权、Workspace revision 和最终提交由 Core 与工具闭包独立校验，因此摘要遗漏不能扩大权限或绕过提交契约。模型请求遵循所选模型的上下文与单次输出边界，大体量原始证据通过分页渐进读取；这些都不限制 Agent 可以继续进行下一轮探索。
+系统不为一次知识维护运行预设固定的模型轮次、工具调用次数或总时长；运行可以根据材料和不确定性继续探索，并允许用户取消。上下文管理由可替换的 Agent Runtime 负责，但不能改变权限、来源访问范围或最终提交边界。
 
-Agent 不应把 Evidence Map 当作不可质疑的事实，也不需要默认读取全部原始观察。它从地图获得方向，再按风险和不确定性选择是否展开证据。最终 Knowledge Contribution 必须能经由 Working Artifact 或直接引用追溯到原始观察或已有 Knowledge Statement。
+Agent 不应把 Evidence Map 当作不可质疑的事实，也不需要默认读取全部原始观察。它从地图获得方向，再根据歧义和不确定性选择是否展开证据。追溯信息如何记录和校验是治理问题，不由 Agent 角色定义。
 
-Agent 在语义上维护知识，但 Oyster Core 仍拥有权限、作业生命周期、出处校验、提交、审计和删除。Agent 提交贡献或变更建议，不绕过这些边界直接修改底层存储。
+Agent 在语义上维护知识，但 Oyster Core 仍拥有权限、运行生命周期、提交和删除边界。Agent 提交贡献或变更建议，不绕过这些边界直接修改底层存储；追溯的具体机制，以及审计机制若被采用，也由治理层负责。
 
 默认维护策略以细粒度、可独立复用和修订的理解为中心。这里的“实体”只表示能够被识别和讨论的对象或主体，是选择候选知识的启发式，不引入新的 Entity 数据类型、固定分类或图本体。一个 Statement 默认表达一个自足理解；Session 摘要、时间线、工作日志，以及工具调用、文件修改、测试过程和短期执行结果，不应仅因出现在对话中就成为知识。只有当它们形成可复用理解，或 Attention 明确要求保留任务历史时，才进入维护范围。
 
@@ -196,37 +174,28 @@ Knowledge Maintenance Agent 的 **Workspace** 是一次知识维护运行所使�
 - 与本次任务相关的已有 Knowledge Statement；
 - 独立的 Knowledge Contribution 输出边界。
 
-Agent 应渐进式读取这些材料：先用 Evidence Map 的有界导航判断哪些区域值得探索，再展开对应的局部地图；只有当这些工作材料缺少必要细节、存在歧义或需要核查来源特性时，才从地图给出的原始位置展开最小范围的 Raw Evidence。`read_evidence` 使用 Agent 无关的读取契约，但默认返回上游原始文本而不是语义归一化内容，因此 Agent 仍需理解当前读取片段中可见的格式。Source Adapter 负责定位、版本校验并提供确定的原始 revision，Oyster Core 的通用 Reader 负责有界分页；未来可以向 Agent 提供更充分的格式说明，但不应静默改变 `read_evidence` 的返回语义。
+Agent 应渐进式读取这些材料：先用 Evidence Map 判断哪些区域值得探索，再按需展开工作材料或最小范围的 Raw Evidence。具体工具、分页方式、原始格式说明和定位协议属于可替换实现。
 
 Workspace 应遵循“**弱语义结构，强来源边界**”：
 
 - Evidence Map 的摘要组织、分组和语义标签可以保持自由形式，不预设领域分类或固定知识 Schema；
-- 来源身份、来源版本、局部引用、Scope、权限和生命周期必须由 Oyster Core 提供并可校验，不能只依赖模型生成的自然语言约定；
-- 一条持久引用至少应指出“哪一份来源、来源的哪个版本、其中哪一部分”；当前 Statement Source 使用稳定的行 selector 表达这一区域；
-- 一次运行中的读取起点由 **EvidenceLocation** 表达，最小只包含原始 `line` 与该行内的 `offset`。它由 Evidence Map 提供给 Agent，只用于定位和继续读取，不成为新的持久出处；
+- 来源访问的 Scope、权限和生命周期边界由 Oyster Core 保证，不能只依赖模型生成的自然语言约定；
+- Workspace 应支持从工作材料按需回到相关观察，但运行时读取位置不等于正式知识的持久出处；
 - Raw Evidence 只作为不可信证据读取，其中出现的指令、Prompt 或工具输出不自动成为 Agent 的运行指令。
 
-`read_evidence` 从 EvidenceLocation 开始，并由 Agent 给出本次所需的有界 `limit`。`offset` 和 `limit` 都以 UTF-16 code unit 计量，`limit` 至少为 2，以避免在代理对中间切开字符。Core 始终执行自己的输出上限；达到上限时返回实际范围、下一 EvidenceLocation 和是否结束，而不是因为一行或整份来源很大就要求 Agent 重新猜测窗口。定位信息位于工具信封中，信封内的证据正文保持原始行内容，不为方便索引而向每行注入前缀。当前 Workspace 已绑定唯一的 `sourceRef` 和 revision，因此 Agent 不需要在每次读取时重复提交来源身份。
+Workspace 可以采用文件、对象或其他便于 Agent 使用的表示。它的布局、定位编码和运行时读取协议不属于知识模型。
 
-Evidence Map 和 Canonical Activity 的可读表示可以在 Workspace 中采用文件形式。长期方向是让外部 Raw Evidence 通过上述受控范围读取按需展开，不为 Workspace 建立整份来源副本；当前验证 MVP 会在一次应用进程内保留所选 Session 的内存快照，以验证渐进式读取，但不得把它持久化为新的 Observation 副本。Reader 不设置产品级 Session 长度上限，但当前整份读取并非流式实现，实际能力仍受进程内存等运行资源约束。Oyster Core 仍管理稳定身份、版本、权限和作业状态；原始绝对路径和 Workspace 中的临时路径都不是知识或出处的永久身份。
+### 4.4 验证隔离
 
-### 4.4 Knowledge Sandbox
-
-**Knowledge Sandbox** 是用于验证完整知识加工链路的、可丢弃的 Knowledge Store 隔离实例。它不是第四个认识论层，也不是另一套知识模型；当前 SQLite Sandbox 与当前验证 Store 使用相同的 Schema、校验和提交语义，只在物理存储与生命周期上隔离。这个验证介质不决定正式知识层最终使用数据库还是本地文件。
-
-当前验证链路从一份可用外部 Session 的确定 Raw Evidence revision 开始。Oyster Core 通过 Source Adapter 从原始位置读取它，经 Observation Preprocessor 形成 Evidence Map，再由 Knowledge Maintenance Agent 提交可包含多条 Statement 的结构化 Knowledge Contribution。Core 在运行开始前绑定独立 SQLite Sandbox，原子写入经校验的 Contribution，并回读实际 Statement。当前实现校验来源和既有系统结构；正文中的名称引用仍作为自由文本保存，不要求在提交时绑定稳定 ID。Agent 只能使用 Core 为当前角色提供的工具，不能自行选择或切换正式库与 Sandbox。
-
-测试写入不影响当前验证 Store 的基线，也不隐含 promote 或 merge。失败和取消应丢弃未完成的 Sandbox；成功结果可以显式丢弃或从同一验证基线重新运行。Sandbox 因此只改变验证运行的存储目标，不改变 Observation、Working Artifact、Knowledge Statement 和 Projection 的边界。
+测试运行应使用可丢弃且与用户正式知识隔离的空间，并尽量复用正常的处理与提交路径，避免形成测试专用知识模型。隔离空间的介质、Schema、生命周期和回读方式只属于验证实现。
 
 ### 4.5 默认与自定义处理器
 
 Oyster 可以提供默认 Observation Preprocessor 和默认 Knowledge Maintenance Agent；用户也可以针对不同 Attention 增加自定义 Pipeline 或 Agent。
 
-当前验证实现用一次或多次有界直接 Model 调用承担 Observation Preprocessing，并用通用 Agent Runtime 驱动 Knowledge Maintenance Agent；该 Runtime 当前由 Pi Agent Core 实现。Runtime 负责普通的模型—工具循环和上下文生命周期，Oyster 只定义角色 Prompt、Workspace、授权工具和最终提交协议。短 Session 仍只需一次预处理调用。默认完整链路在 Knowledge Sandbox 中提交和回读结果，同时保留不提交结果的阶段调试。这是对上述职责边界的首个可替换实现，不意味着知识模型依赖 Pi，也不把预处理器升级为 Agent。
+Observation Preprocessor、Knowledge Maintenance Agent 及其 Runtime 都可以替换，只要继续遵守各自的输入、输出和权限边界。当前模型调用、Runtime、调试轨迹与隔离实现见《知识加工验证 MVP》，不构成长期知识模型。
 
-为了观察这些处理器的行为，应用可以提供可丢弃的运行轨迹，并限制每个轨迹条目携带的内容。运行轨迹只是执行诊断：它可以展示阶段、调用和工具活动，但不构成新的认识论层、知识来源或长期审计记录，也不能以暴露模型内部推理或绕过原始证据权限为代价换取可视化。
-
-只要某个处理器要产生或维护 Knowledge Statement，它就必须使用统一的 Knowledge Contribution 契约。核心不需要为“默认知识”“Agent 知识”或某个自定义视角建立不同的知识类型。
+只要某个处理器要产生或维护 Knowledge Statement，它就必须进入统一的知识形成与治理边界。核心不需要为“默认知识”“Agent 知识”或某个自定义视角建立不同的知识类型；当前 Contribution 协议只是这一边界的实现形式。
 
 处理器产生相似内容时，不要求立即合并为唯一陈述。它们可以：
 
@@ -235,7 +204,7 @@ Oyster 可以提供默认 Observation Preprocessor 和默认 Knowledge Maintenan
 - 通过新的 Statement 正文显式引用相关知识，形成补充、限定、修订或候选等价理解；
 - 在证据不足时保持并存。
 
-系统结构只需表达出处、处理输入、延续和修订等治理信息。因果、冲突、相似、支持、概括以及其他用于解释世界的关系必须继续作为正文中带有显式名称引用、可引用且可反驳的 Knowledge Statement，而不是独立 Relation 实体或不可质疑的系统边。为搜索或可视化建立的关系索引只能从 Statement 正文和名称治理状态派生。
+治理层应使正式 Statement 能够追溯到原始观察或输入知识，但具体结构暂不决定；处理输入、延续、审计等其他信息是否额外保存也按实际需要确定。因果、冲突、相似、支持、概括以及其他用于解释世界的关系必须继续作为正文中带有显式名称引用、可引用且可反驳的 Knowledge Statement，而不是独立 Relation 实体或不可质疑的系统边。
 
 ## 5. 知识与投影的受控反馈
 
@@ -243,18 +212,9 @@ Oyster 可以提供默认 Observation Preprocessor 和默认 Knowledge Maintenan
 
 观察、知识和投影的层次区分，不要求在每两层之间再引入一套独立的接口层。Oyster Core 可以统一提供底层的存储、检索、出处和提交能力，再根据 Agent 当前承担的角色，向它开放不同的工具集合。工具集合决定 Agent 能看到什么、能够向哪一层提交结果；边界属于一次运行所承担的角色，而不绑定某个模型或常驻进程。
 
-工具应屏蔽物理表结构、派生索引、文件布局和引用编码，但不屏蔽完成任务所需的语义结果。Projection Agent 需要发现相关知识、读取某个不可变 Statement 的确切内容，并按需展开它通过名称引用或引用它的相关 Statement、后续变化和来源；它不需要通过通用图查询理解 Revision Link 等系统结构如何存储。Knowledge Maintenance Agent 在这些知识读取能力之外，还可以渐进式搜索观察、读取 Canonical Activity，并在必要时展开最小范围的 Raw Evidence。观察层不需要为此增加一个维护 Agent。
+工具应屏蔽物理表结构、派生索引、文件布局和引用编码，但不屏蔽完成任务所需的语义结果。读取某条历史记录的确切版本，与按正文名称引用解析当前知识焦点，是两种不同能力；工具不应把动态名称引用静默冻结为内部 ID。
 
-第一阶段的角色能力边界保持如下：
-
-| 能力 | Projection Agent | Knowledge Maintenance Agent |
-| --- | --- | --- |
-| 语义发现、精确读取和上下文展开 Knowledge Statement | 可以 | 可以 |
-| 按需读取获得授权的观察细节 | 默认不开放 | 可以 |
-| 提交 Knowledge Need | 可以 | 不需要 |
-| 提交 Knowledge Contribution | 不可以 | 可以 |
-| 生成 Projection Revision | 可以 | 不可以 |
-| 直接修改底层存储 | 不可以 | 不可以 |
+Projection Agent 主要读取知识并维护投影；Knowledge Maintenance Agent 还可以在授权范围内探索观察并提出知识变更。具体工具名称、参数和角色矩阵属于运行配置，而不是层与层之间的新接口模型。
 
 Projection Agent 发现知识缺失、冲突或疑似错误时，默认提交 Knowledge Need，由 Knowledge Maintenance Agent 核查知识和观察后形成 Knowledge Contribution。两种角色可以由同一个 Agent Runtime 在不同阶段承担，但切换角色时仍使用各自的工具和提交边界；共用模型不意味着合并权限。
 
@@ -283,14 +243,14 @@ flowchart LR
 知识与投影通过三种方式耦合：
 
 1. **共享 Attention**：同一个用户目标影响知识维护和最终表达；
-2. **修订输入依赖**：投影修订保存已经确认的 Knowledge Statement 依赖，以便在知识变化时定位需要复核的投影；
+2. **修订输入依赖**：投影可以记录实际使用过的 Knowledge Statement，以便在知识变化时定位需要复核的内容；
 3. **Knowledge Need**：Projection Agent 发现现有知识不足时，可以请求 Knowledge Maintenance Agent 针对某个问题继续探索。
 
-Projection Agent 通过标题、关键词和语义搜索发现候选 Knowledge Statement，再判断哪些内容实际支撑本次文档修订。Prompt 和代码匹配可以辅助这一过程，但不能独自宣布引用成立。Agent 不需要在 Markdown 中写入内部 ID；Oyster Core 将 Agent 确认的目标解析为不可变 Statement 的稳定身份，并保存到对应投影修订的元信息中。这是投影变更同步所需的治理依赖，与 Statement 正文中的名称引用彼此独立，也不要求在 Statement 正文中绑定 ID。
+Projection Agent 通过标题、关键词和语义搜索发现候选 Knowledge Statement，再判断哪些内容实际支撑本次文档修订。Prompt 和代码匹配可以辅助这一过程，但不能独自宣布依赖成立。当变更同步需要稳定依赖时，Core 可以在治理层记录 Agent 确认的 Statement；其身份表示和持久化方式留待治理设计。这类依赖与 Statement 正文中的动态名称引用彼此独立。
 
-第一阶段采用文档级依赖：以整个投影文档修订为主体，关联一条或多条完整的 Knowledge Statement；暂不建立段落、句子或 Statement 内部片段之间的精细映射。Statement 到受影响投影的反向关系可以从这些依赖派生。
+当前优先考虑文档级依赖，而不预设段落、句子或 Statement 内部片段之间的精细映射。是否实现以及采用何种表示，由实际变更同步需求决定。
 
-读者可见引用与系统依赖彼此独立。Agent 只在认为引用本身对读者有价值时，在正文中使用标题等语义化表达；系统依赖无论是否显示，都以投影修订元信息为准。知识发生修订、拆分、合并或删除时，依赖关系用于确定受影响范围，标题和语义匹配用于帮助 Agent 重新判断，不自动把旧依赖替换为最相似的新知识。
+读者可见引用与系统治理依赖彼此独立。Agent 只在认为引用本身对读者有价值时，在正文中使用标题等语义化表达；若系统保存了依赖，它只用于发现可能受影响的投影，不能自动把旧知识替换为语义上最相似的新知识。
 
 它们不通过“把当前投影当作知识”耦合。否则会形成模型生成投影、投影回流为知识、模型再次引用自身输出的无来源循环。
 
@@ -306,44 +266,55 @@ Projection Agent 通过标题、关键词和语义搜索发现候选 Knowledge S
 
 | 所有者 | 负责 | 不负责 |
 | --- | --- | --- |
-| Source Adapter / Observation Pipeline | 发现、定位、版本校验、按需读取、Raw Evidence、Canonical Activity | 复制外部历史、LLM 解释、最终知识、投影编辑 |
+| Source Adapter / Observation Pipeline | 发现、定位、版本校验、读取、Raw Evidence、Canonical Activity | LLM 解释、最终知识、投影编辑 |
 | Observation Preprocessor | 有界转换、Evidence Map，以及其中不具权威性的局部候选 | 直接提交长期知识、全局知识维护、静默覆盖旧知识 |
-| Knowledge Maintenance Agent | 通过工具渐进探索知识与观察，并提出 Knowledge Contribution | 直接修改知识存储或绕过 Scope、出处和删除规则提交 |
-| Oyster Core | 按角色提供能力、校验并持久化贡献、维护出处、修订历史、稳定依赖和级联删除 | 预设所有领域语义和文档结构 |
-| Projection Agent | 通过只读知识工具选择依据，生成投影修订和依赖，并在必要时提出 Knowledge Need | 直接修改知识、默认读取原始观察，或用正文标题代替系统依赖 |
+| Knowledge Maintenance Agent | 通过工具渐进探索知识与观察，并提出知识变更 | 直接修改知识载体或绕过 Scope、权限和提交边界 |
+| Oyster Core | 按角色提供能力并执行权限、生命周期和提交治理 | 预设领域语义和文档结构 |
+| Projection Agent | 选择知识依据并维护投影，在必要时提出 Knowledge Need | 直接修改知识或默认读取原始观察 |
 
-## 7. 当前最小不变量
+## 7. 按稳定性划分设计
 
-1. 观察、知识和投影始终可以清楚区分；
-2. Working Artifact 只是运行中间物，不伪装成观察或无需出处的知识；
-3. 每个 Knowledge Statement 都能追溯到观察或已有 Knowledge Statement，并保留处理器与 Attention 信息；
-4. 默认和自定义处理器产生的知识服从同一治理契约；
-5. Knowledge Statement 提交后不可原地修改；任何变化都创建新 Statement 并显式关联旧版本，多个解释和 Attention 可以并存；
-6. 共享知识可以被多个处理器和投影复用，不按投影复制真相；
-7. Attention 影响知识选择和投影表达，但不改写观察；
-8. Knowledge Maintenance Agent 可以按需到达全部获得授权的观察细节，但不默认把全部原始观察载入上下文；
-9. 外部 Raw Evidence 不复制到 Oyster；来源失效后保留出处身份，并明确暴露再次展开失败；
-10. Agent 对各层的可见性和提交权限由当前角色的工具集合决定，共用底层实现或模型不合并角色权限；
-11. Knowledge Maintenance Agent 不由固定轮次、工具次数或总时长定义；通用 Runtime 可以压缩临时 transcript，权限、出处和提交契约则由 Core 独立维持；
-12. Agent 的最终提交仍由 Oyster Core 校验并写入权威载体；
-13. 持久投影更新始终以当前文档为输入；
-14. 投影修订保留已经确认的完整 Knowledge Statement 依赖，正文中的可读引用不取代该依赖；
-15. 投影不会自动回流为知识，用户删除权始终高于追加式加工。
-16. Statement 是知识层领域语义的唯一 Source of Truth；多元关系由自由文本正文及其中 `[[canonical title|optional local display text]]` 形式的显式名称引用表达，额外关系表示只能派生重建；
-17. Statement 的 canonical title 和正文使用具有实际含义的自然语言，不使用无语义枚举、机械编号或固定关系词表代替知识；
-18. 用于解释“词语—语境—具体含义”的 Statement 只承担外部消歧；内部含义确定后必须直接引用具体 Statement，而不经过代理节点。
+### 7.1 核心语义原则
+
+1. 观察、知识和投影保持清楚区分；Working Artifact 不成为第四层。
+2. Knowledge Statement 是知识层唯一的领域语义单位，其权威内容只有 canonical title 与自由文本正文。
+3. Statement 之间的领域关系由正文及其中的动态名称引用表达，不增加固定 Relation 实体、关系词表或领域 Schema。
+4. `[[canonical title]]` 无论出现于当前还是历史正文，都在读取时指向当前知识视图中拥有该名称的 Statement；`[[canonical title|local display text]]` 的右侧只服务局部表达。
+5. canonical title 与正文使用有实际含义的自然语言，不以机械编号或枚举代替语义。
+6. 已提交 Statement 不原地修改；变化通过新的 Statement 表达，多个解释可以并存。
+7. Attention 影响处理和表达，但不改写观察，也不把共享知识拆成互相隔离的真相。
+8. 投影不是新的世界事实，不能自动回流为知识；持久投影更新以当前文档为输入。
+
+### 7.2 治理预期
+
+- 正式 Knowledge Statement 应能追溯到原始观察或输入知识；具体如何记录、校验，以及当前 MVP 是否实现，尚未决定。
+- Oyster Core 负责权限、Scope、提交、生命周期和删除边界，但这些职责不规定数据库表、文件布局或 ID 形式。
+- Agent 的能力由当前角色和工具集合决定；共用模型或 Runtime 不合并角色权限。
+- Knowledge Maintenance Agent 是普通、可扩展的 Agent，不由固定模型轮次、工具次数或总时长定义。
+- 对具有稳定原始位置的本地 Agent 历史，当前默认原地读取；其他来源是否由 Oyster 托管取决于来源生命周期。
+- 投影变更同步可以按需要记录治理依赖，但它与 Statement 正文的动态名称引用不是同一机制。
+
+### 7.3 可替换实现与派生能力
+
+以下内容不属于核心原则：
+
+- 知识层使用数据库、本地文件或其他介质；
+- 记录 ID、路径、来源 selector、运行时游标、Contribution 和审计结构；
+- 名称到稳定身份的绑定、出站和反向引用、全文、Embedding、相似度、图或超图索引；
+- 预处理分段、Evidence Map 导航、Workspace 布局和原始证据读取协议；
+- 模型、Agent Runtime、上下文压缩、工具参数、调试轨迹和调度方式；
+- Sandbox 的介质、Schema、生命周期和结果展示。
 
 ## 8. 暂不决定
 
 当前刻意不决定：
 
-- 最小字段的物理类型、约束、索引和 Contribution / 审计记录的具体结构；
-- Workspace 的长期目录布局，以及除当前行 selector 和 EvidenceLocation 之外的跨来源定位方式；
-- 各项能力的长期工具形态、物理参数、运行时压缩策略和调度方式；当前验证实现只提供最小受控工具集；
-- 知识搜索默认暴露当前版本还是修订历史，以及来源和关系的长期展开工具；
-- 默认 Attention 的完整内容；
-- 自定义处理器的安装和权限协议；
-- 知识合并、canonical title 的重命名与复用规则，以及名称到稳定身份的可选派生绑定；
-- 全文、向量、正文引用关系索引和图投影的具体实现，以及投影模板。
+- 知识层的长期存储介质及物理 Schema；
+- canonical title 的变更、复用与迁移治理；
+- 可追溯信息的具体范围、持久方式、校验方式及 MVP 实现范围；
+- 是否引入名称到稳定身份的绑定，以及其他派生索引的形式；
+- Knowledge Contribution、审计、投影依赖和版本治理的长期结构；
+- 知识搜索暴露当前知识还是历史版本，以及工具的长期形态；
+- 默认 Attention、自定义处理器、运行时压缩和调度策略。
 
-这些细节应在真实脱敏会话上验证 Observation Preprocessing 能减少多少噪声、Knowledge Maintenance Agent 需要怎样的探索深度、不同 Attention 会产生多少重叠知识之后再确定。
+这些问题应在真实知识维护与检索需求出现后再决定，不能预先反向扩张 Statement 的核心模型。

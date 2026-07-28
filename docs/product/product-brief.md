@@ -64,14 +64,14 @@ Oyster 必须把三个认识论层次分开，避免把模型总结覆盖到原�
 | 层次 | 内容 | 规则 |
 | --- | --- | --- |
 | 观察层 | 由来源与版本身份指向的 Raw Evidence，以及可重建的 Session、Message、Tool Call/Result 等 Canonical Activity | 外部原文按需读取，确定性视图可重建；不得把模型解释伪装成来源事实 |
-| 知识层 | 从观察或已有知识形成的 Knowledge Statement；Statement 正文可以通过 canonical title 显式引用其他 Statement 并表达任意多元关系 | Statement 是领域语义的 Source of Truth；允许多个解释和多级抽象，不预设独立 Relation、Decision、Problem 等全局类型 |
+| 知识层 | 从观察或已有知识形成的 Knowledge Statement；Statement 正文可以通过 canonical title 显式引用其他 Statement 并表达任意多元关系 | Statement 是领域语义的 Source of Truth；名称引用在读取时动态指向当前知识视图中的同名 Statement；不预设独立 Relation、Decision、Problem 等全局类型 |
 | 投影层 | 持久 Markdown 协作文档，以及按需生成的临时 Context Packet | 持久文档由知识和 Attention 初始化，再由用户与 Agent 共同维护；更新必须基于当前文档，不得全量重建并覆盖人工编辑。临时消费视图不要求持久化 |
 
-Observation Preprocessing 产生的 Evidence Map 不构成第四个认识论层次。它是一种只供后续运行、可随时重算且不直接对外提供的 Working Artifact；如果某个处理器要把其中内容变为可持久检索、引用或进一步推理的知识，必须通过 Knowledge Contribution 提交为 Knowledge Statement，并保留出处、接受统一治理。
+Observation Preprocessing 产生的 Evidence Map 不构成第四个认识论层次。它是一种只供后续运行、可随时重算且不直接对外提供的 Working Artifact；其中的理解只有经过统一知识提交边界成为 Knowledge Statement，才进入知识层。正式知识应能够追溯到原始观察或输入知识，但追溯结构及其 MVP 实现范围尚未确定。
 
 三层在状态和所有权上分离，但知识加工与投影通过共享 Attention 耦合。同一个 Attention 可以指导 Observation Preprocessor、Knowledge Maintenance Agent 和 Projection Agent；不同 Attention 产生的知识进入共享知识层并可以重叠、复用或相互修订，不按投影复制成独立真相。
 
-外部 Agent 拥有原始记录的生命周期。记录变化、消失或权限被收回时，Oyster 保留已使用来源与版本的身份；再次展开失败必须明确暴露，已有知识不能因此假装仍可核查，也不能静默改用相似来源。这个语义不要求额外持久化记录级可用性字段。用户仍可删除 Oyster 持有的 catalog、索引、知识和其他派生数据。
+外部 Agent 拥有原始记录的生命周期。记录变化、消失或权限被收回时，再次展开必须明确失败，不能静默改用相似来源。当前本地来源访问保留已使用的来源与版本身份；正式知识长期采用何种追溯结构留给治理设计。用户仍可删除 Oyster 持有的 catalog、索引、知识和其他派生数据。
 
 层间与知识间关系的最小原则见[《知识加工与协作式投影》](../architecture/knowledge-model-and-projection.md)。
 
@@ -113,26 +113,26 @@ MVP 的“实时”定义为 **turn 级近实时**，不是 token streaming。�
 
 开始加工前，用户选择一个已配置且能力匹配的 AI Connection。数据来源与执行连接相互独立：从某个 Agent Harness 读取观察，不要求使用同一 Provider 进行知识加工。
 
-1. 默认或自定义 Observation Preprocessor 对观察进行分段、裁剪、Redaction、索引和有界摘要，生成保留原始定位、可丢弃、可重算且可回源的 Evidence Map；
+1. 默认或自定义 Observation Preprocessor 将观察转化为可丢弃、可重算且便于回到原文核查的 Evidence Map；
 2. 默认或自定义 Knowledge Maintenance Agent 以 Evidence Map 和相关已有 Knowledge Statement 为起点，多次搜索和比较，必要时从地图给出的位置渐进读取最小原始证据；默认策略优先维护细粒度、持久且可复用的对象、概念及其关系理解，而不是生成 Session 总结或工作日志；
-3. Agent 通过 Knowledge Contribution 提出对一条或多条 Knowledge Statement 的创建、补充、限定、修订或并列保留；Statement 使用当前知识视图中唯一且语义丰富的 canonical title 和自由文本正文，并在关系含义确定时以 `[[canonical title]]` 或 `[[canonical title|local display text]]` 直接引用具体 Statement；
-4. Oyster Core 统一执行 Scope、出处、审计、持久化和删除规则；
-5. 用户可以检查来源，接受、修改、拒绝、固定、删除或重新加工派生知识。
+3. Agent 通过统一提交边界提出一条或多条 Knowledge Statement；Statement 使用当前知识视图中唯一且语义丰富的 canonical title 和自由文本正文，以 `[[canonical title]]` 或 `[[canonical title|local display text]]` 表达关系，并在读取时动态解析到当前同名 Statement；
+4. Oyster Core 统一执行权限、提交和生命周期边界；
+5. 用户可以审查、纠正、删除或重新加工派生知识；如何向用户呈现其追溯关系随治理设计确定。
 
 Knowledge Maintenance Agent 是一个普通、可替换的工具使用 Agent：角色差异来自 System Prompt、Workspace、授权工具和最终 Knowledge Contribution 协议，而不是专用状态机或固定运行步骤。系统不预设模型轮次、工具次数或总时长；通用 Agent Runtime 在上下文增长时负责压缩临时 transcript。模型的实际上下文、单次请求、分页读取和持久化完整性仍有各自的边界，最终结果仍由 Oyster Core 校验和提交；这些边界不变成整次 Agent 的行为配额。
 
-任何默认或自定义处理器一旦产生 Knowledge Contribution，就没有不同的本体身份，但必须保留处理器、Attention、输入依赖和版本。模型、Prompt、策略或 Agent 升级时可以重新加工派生的 Knowledge Statement，不重写 Raw Evidence。
+任何默认或自定义处理器产生的正式知识都没有不同的本体身份。系统应能解释其如何由观察或输入知识形成，但具体需要保存哪些运行元信息、如何持久化以及 MVP 覆盖到什么程度，留给后续验证。模型、Prompt、策略或 Agent 升级时可以重新加工知识，不重写 Raw Evidence。
 
 持久投影文档允许用户直接编辑，也允许 Projection Agent 基于当前文档、共享知识和 Attention 形成新修订。Projection Agent 发现知识不足时可以提出 Knowledge Need，交由 Knowledge Maintenance Agent 继续探索；它不能把当前 Markdown 自动回流为世界事实。临时 Context Packet 不需要持久文档的协作生命周期。
 
 ### 6.5 检索和供给上下文
 
-对外检索保持只读优先，并从以下最小能力逐步开放：
+对外检索保持只读优先，并从以下最小能力逐步开放；具体工具名和协议形态可以替换：
 
-- `search_knowledge`：按 query 分页发现当前 Knowledge Statement；
-- `get_knowledge`：读取一条不可变 Statement、出处，以及可由正文名称引用派生发现的相关 Statement；
-- `get_evidence`：在权限允许时读取最小必要的原始证据；
-- `build_context`：按目标、Scope 和 Token Budget 生成带引用的 Context Packet。
+- 按语义发现当前 Knowledge Statement；
+- 读取一条 Statement，并按需探索正文名称引用形成的邻域；
+- 在权限允许时回到必要的原始证据；
+- 按当前目标构建有界的消费上下文。
 
 默认采用 Agent 主动查询的 Pull 模式。自动 Push 注入属于后续能力：它需要可解释的选择理由、严格的项目/身份 Scope、敏感信息过滤和用户可见的注入记录。
 
@@ -148,12 +148,14 @@ Knowledge Maintenance Agent 是一个普通、可替换的工具使用 Agent：�
 - 可重复的 catalog 扫描，以及来源变化、移动、删除和权限失效的确定行为；
 - 项目/会话 catalog 浏览、基础筛选和出处可用性展示；
 - 提供至少一个可替换的默认 Attention、Observation Preprocessor 和受控 Knowledge Maintenance Agent，优先维护细粒度、持久且可复用的对象与概念理解；任务事件只在形成这类理解或 Attention 明确要求时保留，且不将其固化为核心本体；
-- 默认和自定义知识处理器遵循统一的 Knowledge Contribution、出处、Scope 和审计契约；
+- 默认和自定义知识处理器遵循统一的知识提交与权限边界；
 - 用户审查、纠正、删除和重新加工；
 - 可替换的 AI Connection；首个实现支持 Codex Coding Plan 与 OpenAI-compatible API，并允许每个加工阶段独立选择 Connection、Model 和思考强度；
 - Oyster 接收的 API Key 与主动完成 OAuth 后获得的 Coding Plan 凭据进入系统 Keychain；不扫描、读取或复制其他 Agent Runtime 的凭据；
 - 本地 MCP Server 提供检索与有预算的 Context Packet；
-- 发现、读取、加工、检索、供给和删除的审计记录。
+- 当前验证所需的用户可见运行与结果信息。
+
+正式知识可追溯是一项产品原则，但其持久形式、校验方式和 MVP 验收范围尚未确定；在形成独立决策前，不把它展开为固定字段或流程要求。
 
 ### 明确不做
 
@@ -203,7 +205,7 @@ LLM 适合承担：
 - 驱动 Projection Agent 基于当前文档做局部修订；
 - 为一次查询构建带引用的 Context Packet。
 
-LLM 和 Agent 都不拥有事实真相。每个加工 Job 必须保存输入 Evidence/Knowledge ID、Attention、处理器与算法版本、Prompt 版本、所使用的 Backend/Connection、时间和输出，并在可获得时记录实际 Provider、Runtime 与模型信息；模型输出默认为候选或推断，只有用户明确内容或用户审查后的内容才可提高状态。
+LLM 和 Agent 都不拥有事实真相，其输出在进入知识层前必须经过统一提交边界。正式知识应能够追溯到原始观察或输入知识；加工运行需要保存哪些元信息、采用何种状态模型，以及当前 MVP 覆盖到什么程度，尚未决定。
 
 基础发现、catalog 浏览、来源读取、删除和导出不得依赖在线 LLM 才能工作。
 
@@ -215,13 +217,13 @@ LLM 和 Agent 都不拥有事实真相。每个加工 Job 必须保存输入 Evi
 - API 密钥只由主进程从系统钥匙串读取，不返回 Renderer，不进入数据库、日志、Workspace 或模型输入；
 - 首次读取正文前预览目录、范围和风险，不后台读取全部聊天正文后再征求同意；
 - 原始聊天可能包含源码、凭证、个人信息和工具输出，按高敏数据处理；
-- 日志仅记录 ID、状态和脱敏诊断，不记录正文、Prompt 或凭证；
+- 日志只保留必要的非正文诊断，不记录正文、Prompt 或凭证；
 - 远程加工前执行 Secret/PII 检测与可见的 Redaction；
-- 数据库、对象和索引遵守最小文件权限；静态加密方案必须在实现前通过 Spike 确认；
+- 持久化数据、缓存和派生索引遵守最小文件权限；静态加密方案必须在实现前通过验证；
 - 搜索、MCP 和 Context Packet 都执行相同的 Scope 与敏感级别策略；
 - Connector 读取权限和 Context Consumer 读取权限分开管理；
 - 用户可查看某条知识何时被哪个 Agent 查询或注入；
-- 用户解除来源后，Oyster 删除自身持有的 locator、索引、缓存和待执行 Job，不修改外部 Agent 的原始文件；知识出处保留当时的来源身份并在无法展开时明确失败，或随用户明确删除知识而移除。
+- 用户解除来源后，Oyster 删除适用删除策略覆盖的内部状态，不修改外部 Agent 的原始文件；追溯信息与知识的保留或删除由同一治理策略明确处理。
 
 ## 11. 产品指标
 
@@ -231,8 +233,8 @@ LLM 和 Agent 都不拥有事实真相。每个加工 Job 必须保存输入 Evi
 - 来源读取正确性：Fixture 中选中的记录按确定版本读取，且 Oyster 不建立正文副本；
 - 变化处理：文件追加、截断、移动、删除和权限失效都有确定行为，不静默切换版本；
 - 实时延迟：完成 turn 后正常路径数秒内可检索，离线后可补采；
-- 知识质量：用户接受/轻微编辑率、错误 Claim 率和出处完整率可量化；
-- 知识维护：Agent 能复用相关已有知识，重叠知识、无来源自我引用和不必要重写可量化；
+- 知识质量：用户接受/轻微编辑率和错误 Claim 率可量化；追溯指标在治理方案确定后定义；
+- 知识维护：Agent 能复用相关已有知识，重叠知识和不必要重写可量化；
 - 检索质量：在真实跨 Agent 问题集上测 Recall@k、引用正确率和 Token 成本；
 - 用户价值：减少重新解释背景的次数和耗时，减少重复失败尝试；
 - 隐私：Fixture 中的测试凭证不进入日志、远程请求或未授权 Context Packet。

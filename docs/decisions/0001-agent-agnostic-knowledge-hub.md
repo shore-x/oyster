@@ -7,7 +7,7 @@
 - 修订：2026-07-26，明确本地外部 Agent 历史原地按需读取，不复制到 Oyster
 - 修订：2026-07-27，明确 Knowledge Maintenance Agent 使用通用 Agent Runtime，不由固定轮次、工具次数或总时长定义
 - 修订：2026-07-28，明确 Statement 是领域语义的 Source of Truth，多元关系由自由文本正文中的显式 Statement 名称引用表达
-- 修订：2026-07-28，确定正文采用 canonical title 与可选局部显示文本引用；稳定 ID 绑定属于可选治理能力
+- 修订：2026-07-28，确定正文采用读取时动态解析的 canonical title 引用；存储绑定与追溯结构留给治理设计
 - 关联文档：[Product Brief](../product/product-brief.md)、[本地 Agent 发现与外部证据访问](../product/local-agent-discovery-mvp.md)、[AI Backend MVP](../product/ai-backends-mvp.md)、[知识加工验证 MVP](../product/knowledge-processing-mvp.md)、[知识加工与协作式投影](../architecture/knowledge-model-and-projection.md)
 
 ## Context
@@ -23,25 +23,27 @@ Oyster 的主要产品身份是：本地优先、跨 Agent、跨项目的知识�
 系统采用三个认识论层次：
 
 1. 观察层：Raw Evidence 以来源和版本身份引用 Harness 原始 transcript 与人类指令，并由 Source Adapter 在原始位置按需读取；Canonical Activity 确定性标准化 Session、Turn、Message、Tool 和 Artifact 等活动；
-2. 知识层：受控 Knowledge Maintenance Agent、经授权的知识生产 Pipeline 和用户从观察或已有知识形成可引用、可修订的 Knowledge Statement；Statement 以语义丰富的自然语言正文及其中对具体 Statement canonical title 的显式引用表达对象、概念与任意多元关系，不建立独立的领域 Relation 实体；
+2. 知识层：受控 Knowledge Maintenance Agent、经授权的知识生产 Pipeline 和用户从观察或已有知识形成可引用、可修订的 Knowledge Statement；Statement 以语义丰富的自然语言正文及其中对 canonical title 的显式引用表达对象、概念与任意多元关系，不建立独立的领域 Relation 实体；
 3. 投影层：由共享知识和 Attention 初始化、由用户与 Projection Agent 基于当前版本共同维护的持久文档，以及临时 Context Packet。
 
-三层保持不同的数据所有权，但知识加工与投影通过共享 Attention 耦合。Observation Preprocessor 负责解析、降噪、索引和有界局部理解，只产生称为 Evidence Map 的可丢弃、可重算、可回源 Working Artifact；Knowledge Maintenance Agent 负责多步探索现有知识，并通过 Knowledge Contribution 提出对一条或多条 Knowledge Statement 的创建、补充、限定、修订或关联；Oyster Core 统一拥有 Scope、出处校验、审计、提交和删除。任何 Pipeline 若被授权直接产生 Knowledge Contribution，就成为正式知识生产者并服从同一治理契约，不按处理器或投影建立不同的真相存储。
+三层保持不同的数据所有权，但知识加工与投影通过共享 Attention 耦合。Observation Preprocessor 负责降低观察噪声，只产生称为 Evidence Map 的可丢弃、可重算 Working Artifact；Knowledge Maintenance Agent 负责探索现有知识并提出知识变更；Oyster Core 统一执行权限与提交边界。无论知识由 Agent、经授权的 Pipeline 还是用户产生，都进入同一个知识层，不按处理器或投影建立不同的真相存储。
 
-Knowledge Statement 是知识层领域语义的 Source of Truth。正文使用 `[[canonical title]]`，或在需要局部措辞时使用 `[[canonical title|local display text]]`，同时引用多个 Statement，并以自然语言保留参与者、语境、条件、例外和不确定性；局部显示文本不参与目标选择。出站引用、反向引用、名称到内部身份的绑定、图或超图等关系表示只能作为可重建的治理信息或索引。canonical title 与正文都应具有实际语义，不以机械编号、枚举关系或路由规则代替知识。普通 Statement 可以解释一个词语在不同语境下可能指向哪些具体 Statement，但它只服务外部消歧；内部含义已经确定时必须直接使用具体 Statement 的 canonical title。
+Knowledge Statement 是知识层领域语义的 Source of Truth。正文使用 `[[canonical title]]`，或在需要局部措辞时使用 `[[canonical title|local display text]]`，同时引用多个 Statement，并以自然语言保留参与者、语境、条件、例外和不确定性；局部显示文本不参与目标选择。名称引用在读取时动态指向当前知识视图中拥有该 canonical title 的 Statement，不永久绑定正文写作时的存储记录。出站引用、反向引用、名称到内部身份的绑定、图或超图等表示只能作为派生能力。canonical title 与正文都应具有实际语义，不以机械编号、枚举关系或路由规则代替知识。普通 Statement 可以解释一个词语在不同语境下可能指向哪些具体 Statement，但它只服务外部消歧；内部含义已经确定时应直接使用具体 Statement 的 canonical title。
 
-Knowledge Maintenance Agent 是普通、可替换的工具使用 Agent，其角色由 System Prompt、Workspace、工具权限和最终 Contribution 协议定义，不引入专用状态机或固定运行步骤。一次运行不预设模型轮次、工具调用次数或总时长；通用 Agent Runtime 负责模型—工具循环与 transcript 压缩。模型的实际上下文、单次请求、分页读取和持久化完整性仍有各自的边界，但这些边界不限制 Agent 的总探索轮次；最终 Contribution 仍由 Core 校验和提交。
+正式 Knowledge Statement 应能够追溯到原始观察或输入知识；具体记录和校验方式，以及当前 MVP 是否完整实现，不由本 ADR 决定。
+
+Knowledge Maintenance Agent 是普通、可替换的工具使用 Agent，其角色由 System Prompt、Workspace、工具权限和提交边界定义，不引入专用状态机或任意的总轮次、工具次数和时长配额。具体 Runtime、上下文管理和工具协议属于可替换实现。
 
 投影文档不是新的世界事实，也不是可由下层覆盖式重建的纯派生物。后续更新必须基于当前文档版本；Projection Agent 可以提出 Knowledge Need，但不能把当前 Markdown 自动回流为知识。
 
 本地历史和未来实时来源进入同一观察处理边界。输出侧优先通过 MCP 和本地 API 提供 Pull-based Search/Context。自动上下文注入、内置 Agent、浏览器和执行能力延后，在不改变知识所有权与安全边界的前提下增加。
 
-本地历史遵循以下策略：
+当前对具有稳定原始位置的本地历史采用以下访问策略；它不预先决定未来其他来源是否由 Oyster 托管正文：
 
 - Conversation transcript 与人类编写的 Agent 指令是当前支持的两类外部 Raw Evidence；
 - Oyster 只保存稳定来源身份、内部 locator 和轻量版本指纹，不复制每个 Harness 的 JSONL、Markdown 或其他原始正文；
 - 轻量 header/metadata 解析只用于 catalog、统计和变化判断。使用证据时，Source Adapter 校验并读取用户选择的确定版本；完整标准化与 LLM 理解发生在后续可重建层；
-- 外部记录可以变化或消失。知识出处继续保留当时使用的来源与版本身份；再次展开失败必须明确暴露，不能静默改用另一个版本；
+- 外部记录可以变化或消失。当前加工运行记录所使用的来源与版本；再次展开失败必须明确暴露，不能静默改用另一个版本。正式知识采用何种追溯结构留给治理设计；
 - Agent 自动生成的 memory 不作为来源。它属于外部 Agent 的派生结果，而且扫描时的当前版本不能证明某个历史 turn 实际看到的版本。
 
 ## Consequences

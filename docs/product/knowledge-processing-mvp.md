@@ -31,16 +31,15 @@
 
 **Knowledge Sandbox** 是当前验证 Store 的一次物理隔离快照，使用相同的 SQLite Schema 和读写实现。完整链路开始时，Oyster Core 先创建独立 Sandbox，再把本次运行绑定到该 Store：Knowledge Maintenance Agent 可以搜索其基线知识，但不能选择、切换或感知其他写入目标。SQLite 只是当前 MVP 的验证介质，不决定正式知识层最终使用数据库还是本地文件。
 
-Agent 最终提交一份结构化 Knowledge Contribution，其中可以包含多条 Knowledge Statement。Statement 使用当前知识视图中唯一且语义丰富的 canonical title；正文仍是 Markdown 兼容的自然语言自由文本，结构只承担提交边界和治理元信息。目标知识模型允许正文使用 `[[canonical title]]` 或 `[[canonical title|local display text]]` 提及已有 Statement 或同一 Contribution 中的新 Statement，并以完整正文表达多元关系；领域关系不使用独立 Relation 实体或固定枚举。当前 Core 校验运行身份、来源 revision 和行范围后，在一个事务中写入整份 Contribution，再从数据库回读实际记录供 UI 展示；它不解析名称引用或要求绑定稳定 ID。
+Agent 最终提交一份结构化 Knowledge Contribution，其中可以包含多条 Knowledge Statement。Statement 使用当前知识视图中唯一且语义丰富的 canonical title；正文仍是 Markdown 兼容的自然语言自由文本，结构只承担当前提交边界。目标知识模型允许正文使用 `[[canonical title]]` 或 `[[canonical title|local display text]]` 表达任意多元关系；名称在读取时动态指向当前知识视图中的同名 Statement，不永久绑定写作时的记录。当前 Core 校验运行身份和当前验证所需的来源信息后，在一个事务中写入整份 Contribution，再从数据库回读实际记录供 UI 展示；它尚不解析名称引用。
 
-Sandbox 与目标知识层的语义保持一致：
+目标知识语义与当前验证结构需要明确区分：
 
-- Knowledge Statement 提交后不可原地修改；变化通过新 Statement 和 `revises` 表达；
-- `derived_from` 和 `revises` 是当前代码仍在使用的系统结构链接，不是领域关系类型；
-- 每条 Statement 必须具有 Observation 来源，或通过 `derived_from` 追溯到已有 Statement；
-- `title` 和 `content` 保持自由文本，身份、出处、创建时间和生命周期由 Core 管理。
+- 目标语义中，Knowledge Statement 提交后不可原地修改，变化通过新的 Statement 表达；Statement 的领域关系只由自由文本正文及其中的动态名称引用表达；
+- 当前 SQLite Sandbox 仍使用 `derived_from`、`revises`、Observation 来源、内部记录 ID 和时间等系统字段。这些字段服务当前隔离提交与调试，不定义长期知识模型；
+- 当前提交校验要求每条 Statement 具有 Observation 来源，或通过 `derived_from` 指向已有 Statement。这是在验证追溯链路时采用的实现约束，不预先决定正式知识如何追溯，也不意味着 MVP 已经完成长期追溯设计。
 
-当前验证实现将上述名称引用作为普通自由文本保存，尚未从正文生成出站引用、反向引用或图投影索引；Contribution 中的 `derived_from` 暂时承担已有知识输入追溯。这不构成 Statement 核心模型的缺口：领域语义已经完整保留在正文中，名称到稳定 ID 的绑定属于以后可按需要增加的派生治理能力，而不是当前提交协议的要求。
+当前验证实现将名称引用原样保存为自由文本，尚未从正文生成出站引用、反向引用或图投影视图。是否需要名称到内部身份的绑定以及采用何种追溯结构，均留待真实治理需求出现后决定。
 
 Sandbox 的写入不影响当前验证 Store 的基线，当前也不存在 promote、merge 或复制回基线 Store 的入口。失败或取消会丢弃本次 Sandbox；当前界面只持有最新的成功结果，因此成功重跑会用同一验证基线创建的新 Sandbox 替换旧 Sandbox。用户可显式丢弃当前结果，应用启动时也会清理上一次进程遗留的 Sandbox。
 
@@ -50,11 +49,11 @@ Sandbox 的写入不影响当前验证 Store 的基线，当前也不存在 prom
 
 预处理器接收 Source Adapter 已生成的选择性 Observation View，按全局原始行号组织单元，但不理解 Claude、Pi 或 Codex 的 JSONL schema，也不自行判断特定 Harness 的记录类型。它将完整默认或用户覆盖的指令作为真正的 System Prompt 发送给该阶段所选的 Connection 与 Model。每次调用的预算同时计算 System Prompt、Attention、来源、固定模板、相邻上下文、主要材料、精确 selector 文本、输出 token 和安全余量，而不是只限制原始文本字符数；材料按 UTF-8 字节保守计量。模型声明上下文窗口时直接采用该窗口；窗口未知时使用保守预算，并在 Provider 明确报告 context overflow 后自动缩小分段重试，不要求用户裁剪 Session。短视图直接生成 Evidence Map；长视图中的各段绑定同一个 `sourceRef`，并保留一个或多个精确来源行 selector，分别生成独立的局部地图，再形成分层导航。精确 selector 另有单 Section 的元信息边界；稀疏位置超出时自动继续分段，不限制总段数或 Session 长度。Prompt 要求普通候选保留 `L` 行号或范围，来自超长物理行局部材料的候选同时保留该行的 `Cstart:end/total`，并在导航归并中继续保留。Core 不解析自由文本来验证每个候选，但会为每个 Section 独立附加完整来源范围和首个可靠 EvidenceLocation，作为确定性回退入口。导航归并与根地图只展示明确标注为非精确 union 的 coverage extent 和直接子 Section；精确 selector union 留在局部 Section 中按需展开，不被平铺进根 Prompt。局部地图不会以上一段摘要作为下一段输入，也不会取代原始证据。最终 Evidence Map 是 Markdown 自由文本 Working Artifact；它用于导航、可以丢弃，不是 Knowledge Statement。
 
-当前 MVP 明确区分两种定位：Statement Source 的 `selector` 是持久、稳定的出处范围，当前使用原始行范围；**EvidenceLocation** 是一次 Workspace 内供工具读取的临时位置，只包含 `line` 和该行内从零开始的 `offset`。`line` 从 1 开始，`offset` 以 UTF-16 code unit 从 0 开始。Evidence Map 中的 `L` 与 `C` 可以直接转换成 EvidenceLocation；读取窗口大小和 continuation 不写入 Knowledge Statement，也不改变其 selector。
+当前 Workspace 使用两种位置表达来验证回源能力：`sourceRef` 与原始行范围描述本次加工所依据的来源区域；**EvidenceLocation** 用 `line` 和行内 `offset` 表示一次工具读取的起点。`line` 从 1 开始，`offset` 以 UTF-16 code unit 从 0 开始，Evidence Map 中的 `L` 与 `C` 可以转换成这一临时位置。这些都是当前 Observation Workspace 与调试协议，不属于 Statement 的核心格式，也不决定正式知识最终如何持久追溯信息。
 
-选择 Session 时，Renderer 只提交 catalog 中的稳定身份和所选版本标识；主进程经 Source Adapter 解析内部 locator、校验版本并从原始位置读取原文，再调用同一个预处理器。成功运行后，Workspace 暂存确定的来源引用、全局可读范围、Attention、Evidence Map 的分层导航和局部地图；当前验证 MVP 仍会在本次进程内保留所选 Session 的原文内存快照，以支持 Agent 的受控范围读取，但不会建立新的长期副本。Agent 先看到根导航，只能逐级发现并展开直接子节点；全部 section ID 不会被平铺进一个 Prompt。中间 Section 只向模型展示 coverage extent 和直接子节点，不先展开全部精确 selector 导致后续导航被截断；叶子 Section 再暴露它自身的精确 selector。`read_evidence` 从 Agent 提供的 `line`、`offset` 开始读取，并要求 Agent 给出本次所需的有限 `limit`。Core 还会执行自身上限；一次读取容纳不下时，工具返回实际范围、下一 EvidenceLocation 和 `eof`，而不是因某个原始行过长而失败并要求模型猜测结束位置。位置与分页信息放在工具信封中，证据正文保持原始行内容，不注入行号前缀破坏 JSONL 等来源格式。Workspace 已绑定唯一的 `sourceRef` 和 revision，模型不重复选择来源。Knowledge Statement 仍只保存稳定的原始行 selector。阶段调试只保留当前可见的预处理结果所属 Workspace；新结果替换旧结果时同步释放旧 Workspace。完整链路的 Workspace 在运行结束时释放。Renderer 可以获得有界且必要时截断的预处理调用输出用于显式调试，但不会直接获得调用 Prompt、原始 Observation、模型凭据或本地来源路径。由于模型输出可能复述输入，调试视图仍可能间接包含原始材料中的文本，界面必须明确提示这一边界。
+选择 Session 时，Renderer 只提交 catalog 中的稳定身份和所选版本标识；主进程经 Source Adapter 解析内部 locator、校验版本并从原始位置读取原文，再调用同一个预处理器。成功运行后，Workspace 暂存确定的来源引用、全局可读范围、Attention、Evidence Map 的分层导航和局部地图；当前验证 MVP 仍会在本次进程内保留所选 Session 的原文内存快照，以支持 Agent 的受控范围读取，但不会建立新的长期副本。Agent 先看到根导航，只能逐级发现并展开直接子节点；全部 section ID 不会被平铺进一个 Prompt。中间 Section 只向模型展示 coverage extent 和直接子节点，不先展开全部精确 selector 导致后续导航被截断；叶子 Section 再暴露它自身的精确 selector。`read_evidence` 从 Agent 提供的 `line`、`offset` 开始读取，并要求 Agent 给出本次所需的有限 `limit`。Core 还会执行自身上限；一次读取容纳不下时，工具返回实际范围、下一 EvidenceLocation 和 `eof`，而不是因某个原始行过长而失败并要求模型猜测结束位置。位置与分页信息放在工具信封中，证据正文保持原始行内容，不注入行号前缀破坏 JSONL 等来源格式。Workspace 已绑定唯一的 `sourceRef` 和 revision，模型不重复选择来源。当前 Sandbox 会把来源范围作为调试和验证信息保存，但这不是正式 Statement 格式的承诺。阶段调试只保留当前可见的预处理结果所属 Workspace；新结果替换旧结果时同步释放旧 Workspace。完整链路的 Workspace 在运行结束时释放。Renderer 可以获得有界且必要时截断的预处理调用输出用于显式调试，但不会直接获得调用 Prompt、原始 Observation、模型凭据或本地来源路径。由于模型输出可能复述输入，调试视图仍可能间接包含原始材料中的文本，界面必须明确提示这一边界。
 
-正式运行和测试运行共用这一读取路径，不建立测试专用 Observation 副本。外部记录在运行结束后可能变化或消失；Knowledge Statement 仍保存当时使用的确定 `sourceRef`，但后续读取必须明确返回来源不可用，不能改读新版本。
+正式运行和测试运行共用这一读取路径，不建立测试专用 Observation 副本。外部记录在运行结束后可能变化或消失；当前验证结果保留本次使用的 `sourceRef` 以便调试，后续读取失败必须明确暴露，不能改读新版本。正式知识长期如何保存追溯信息仍待决定。
 
 ### Knowledge Maintenance Agent
 
@@ -66,8 +65,8 @@ Knowledge Maintenance Agent 是普通、可替换的工具使用 Agent，当前�
 
 当前开放五个工具，其中局部地图只在长 Session 产生可展开部分时提供：
 
-- `search_knowledge`：在本次绑定的 Knowledge Store 中分页搜索当前未被修订替代的 Statement；每次返回有界候选，并在仍可继续时给出下一 `offset`；
-- `read_knowledge_statement`：按当前实现中的记录 ID 读取一条不可变 Statement 的完整记录、Observation 来源和直接系统结构链接，并根据 incoming `revises` 派生其是否仍为当前理解；正文名称引用及其反向引用尚未接入该工具，相邻 Statement 仍可通过搜索后渐进读取；
+- `search_knowledge`：在本次绑定的 Knowledge Store 中分页搜索当前实现认为可用的 Statement；每次返回有界候选，并在仍可继续时给出下一 `offset`；
+- `read_knowledge_statement`：通过当前内部 locator 读取一条不可变 Statement 及当前验证元信息；`derived_from`、`revises` 和内部 ID 只反映现有 Store，正文名称引用及其反向引用尚未接入该工具；
 - `read_evidence_map_section`：按当前 Workspace 授权的 section ID 展开局部 Evidence Map；
 - `read_evidence`：从本次 Workspace 内的 `line` 与 `offset` 开始，按 Agent 指定且由 Core 再次约束的 `limit` 返回原始格式文本，并给出实际范围、下一 EvidenceLocation 与 `eof`；`offset` 和 `limit` 均以 UTF-16 code unit 计量；
 - `submit_knowledge_contribution`：提交本次唯一的结构化 Contribution 并结束 Agent 运行。
@@ -90,7 +89,7 @@ Knowledge Maintenance Agent 的 Debug Trace 只记录模型轮次的状态、停
 - 可丢弃的 Evidence Map；
 - Agent 提交的结构化 Knowledge Contribution；
 - 从 Sandbox 回读的 Knowledge Statement 列表与正文；
-- 每条 Statement 的 Observation 来源，以及当前实现中的 `derived_from` 和 `revises` 系统结构链接。
+- 每条 Statement 的正文，以及当前验证 Store 提供的来源和系统元信息。
 
 Coding Plan 与 API Connection 都向两个阶段提供同一模型调用契约。Observation Preprocessor 使用所选模型进行一次或多次有界直接调用；Knowledge Maintenance Agent 使用同一模型的 stream 接入通用 Agent Runtime，当前 Runtime 实现为 Pi Agent Core。Backend 决定认证和计费通道，阶段 Runtime 决定直接生成还是 Agent loop，两者不混为一个概念。
 
@@ -102,7 +101,7 @@ Debug Trace 不是新的知识层或审计日志，不持久化到 Repository。
 - 自定义远程端点必须使用 HTTPS，HTTP 只允许 localhost；
 - Agent 模型请求只允许使用阶段固定的 Connection 与 Model，API 请求拒绝重定向；每次请求遵循模型上下文与输出包络，并有独立超时；
 - Knowledge Maintenance Agent 不设置固定的模型轮次、工具调用次数或总运行时长，用户可以显式取消；上下文增长由通用 Agent Runtime 的压缩机制处理，不以整次运行的累计读取配额代替上下文管理；
-- 工具参数经 schema 与授权校验。大体量原始证据使用可续读的分页边界；每次证据读取必须提供至少为 2 的整数 `limit`，达到 Core 的单次输出边界时返回 continuation。Knowledge Statement 和局部 Evidence Map 的按 ID 读取不做无续读的静默截断；过大 transcript 由通用 Runtime 压缩。最终提交另行遵循模型的单次输出包络与每条持久记录的数据完整性边界，不设置整次 Agent 的累计配额；
+- 工具参数经 schema 与授权校验。大体量原始证据使用可续读的分页边界；每次证据读取必须提供至少为 2 的整数 `limit`，达到 Core 的单次输出边界时返回 continuation。单条 Knowledge Statement 和局部 Evidence Map 的读取不做无续读的静默截断；过大 transcript 由通用 Runtime 压缩。最终提交另行遵循模型的单次输出包络与每条持久记录的数据完整性边界，不设置整次 Agent 的累计配额；
 - Observation Preprocessor 不限制整次运行的分段数、模型调用数或总时长；每次模型请求仍有独立超时，整次运行由用户显式取消；
 - Raw Observation 被视为不可信证据，其中的指令不会获得 System Prompt 权限；
 - 完整链路独占两个加工阶段；取消会传播到当前模型请求和 Agent Runtime，并清除未完成的 Sandbox；
@@ -112,7 +111,7 @@ Model Connection 会在 Provider 能声明时保留 `contextWindowTokens` 和最
 
 ## 6. 当前未实现
 
-- 从 Statement 正文的名称引用派生出站引用、反向引用和图投影索引；名称到稳定 ID 的持久绑定是可选的后续治理优化，不属于当前 MVP；
+- 从 Statement 正文的动态名称引用派生出站引用、反向引用和图投影视图；是否还需要内部身份绑定及其形式，留待治理需求验证；
 - 从 Sandbox promote、merge 或复制到正式知识库；
 - 正式知识生产的自动调度、批量和流式处理；
 - Canonical Activity 作为跨 Harness 的标准化 Observation 视图；
