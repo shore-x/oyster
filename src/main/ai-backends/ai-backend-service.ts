@@ -21,7 +21,11 @@ import {
 import { createOysterModelRuntime } from '../knowledge-processing/oyster-model-stream'
 import { CODEX_CONNECTION_ID } from './codex-adapter'
 import type { ModelRuntime, ModelGenerationRequest, ModelGenerationResult } from './model'
-import { ModelConnectionFailureError, ModelContextOverflowError } from './model'
+import {
+  ModelConnectionFailureError,
+  ModelContextOverflowError,
+  ModelOutputTruncatedError
+} from './model'
 import type {
   AgentBackendAdapter,
   AiBackendRepository,
@@ -578,7 +582,11 @@ export class AiBackendService {
       })
       return result
     } catch (error) {
-      if (!request.signal?.aborted && !(error instanceof ModelContextOverflowError)) {
+      if (
+        !request.signal?.aborted
+        && !(error instanceof ModelContextOverflowError)
+        && !(error instanceof ModelOutputTruncatedError)
+      ) {
         this.updateHealth(connectionId, {
           status: 'unavailable',
           errorMessage: error instanceof Error ? error.message : String(error),

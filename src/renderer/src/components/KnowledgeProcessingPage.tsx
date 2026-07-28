@@ -24,6 +24,7 @@ import { Button, Icon } from '../ui'
 import { FullChainWorkspace, type FullChainResultView } from './FullChainWorkspace'
 import { ProcessingDebugTracePanel } from './ProcessingDebugTracePanel'
 import { SessionMetadata, sessionOptionLabel } from './SessionMetadata'
+import { StatementCandidateList } from './StatementCandidateList'
 
 function formatDuration(durationMs: number): string {
   if (durationMs < 1_000) return `${durationMs} ms`
@@ -50,7 +51,7 @@ function fullChainResultView(result: KnowledgeFullChainResult): FullChainResultV
     baselineCreatedAt: result.sandbox.baselineCreatedAt,
     completedAt: result.completedAt,
     durationMs: result.durationMs,
-    evidenceMap: result.preprocessing.evidenceMap,
+    statementCandidates: result.maintenance.statementCandidates,
     debugTrace: result.maintenance.debugTrace,
     steps: [
       {
@@ -292,10 +293,13 @@ function PreprocessingResult(props: { result: ObservationPreprocessingResult }) 
   return (
     <section class="processing-result" data-testid="processing-result-observation_preprocessor">
       <div class="processing-result__heading">
-        <div><Icon name="check" /><h3>Evidence Map</h3></div>
-        <span>{props.result.segmentCount} 个分段 · 可丢弃工作材料</span>
+        <div><Icon name="check" /><h3>Statement Candidates</h3></div>
+        <span>{props.result.segmentCount} 个分段 · {props.result.statementCandidates.length} 个待裁决问题</span>
       </div>
-      <pre>{props.result.evidenceMap}</pre>
+      <p class="processing-result__description">
+        这是预处理器发现的开放候选清单，不是知识结论；知识维护 Agent 会结合原始证据逐项裁决。
+      </p>
+      <StatementCandidateList candidates={props.result.statementCandidates} />
       <div class="processing-result__reference">
         <span>Run ID</span><code>{props.result.runId}</code>
         <span>来源</span><code>{props.result.sourceRef}</code>
@@ -321,11 +325,15 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
     setSelectedTitle(contribution.statements[0]?.title)
   })
 
+  const resolvedCandidates = createMemo(() => props.result.statementCandidates.filter(
+    (candidate) => candidate.status === 'resolved'
+  ).length)
+
   return (
     <section class="processing-result" data-testid="processing-result-knowledge_maintenance_agent">
       <div class="processing-result__heading">
         <div><Icon name="check" /><h3>Knowledge Contribution</h3></div>
-        <span>候选，尚未写入知识层</span>
+        <span>{resolvedCandidates()} / {props.result.statementCandidates.length} 个候选已裁决 · 尚未写入知识层</span>
       </div>
       <Show
         when={props.result.contribution.statements.length}
@@ -362,8 +370,21 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
           </Show>
         </div>
       </Show>
+      <section class="processing-candidate-agenda" aria-label="Statement Candidate Agenda">
+        <div class="processing-candidate-agenda__heading">
+          <div>
+            <h4>Statement Candidate Agenda</h4>
+            <p>查看每个名称或指代问题的最终裁决及其原始证据位置。</p>
+          </div>
+          <strong>{resolvedCandidates()} / {props.result.statementCandidates.length}</strong>
+        </div>
+        <StatementCandidateList
+          candidates={props.result.statementCandidates}
+          emptyText="本次预处理没有发现需要裁决的 Statement 候选。"
+        />
+      </section>
       <div class="processing-result__reference">
-        <span>Evidence Map Run</span><code>{props.result.preprocessingRunId}</code>
+        <span>Preprocessing Run</span><code>{props.result.preprocessingRunId}</code>
       </div>
       <ExecutionDetails
         execution={props.result.execution}
@@ -749,7 +770,7 @@ export function KnowledgeProcessingPage() {
             onClick={() => setDebugStage('preprocessor')}
           >
             <span>1</span>
-            <div><strong>观察预处理</strong><small>{currentPreprocessingResult() ? '已有输出' : '生成 Evidence Map'}</small></div>
+            <div><strong>观察预处理</strong><small>{currentPreprocessingResult() ? '候选清单已生成' : '发现 Statement 候选'}</small></div>
           </button>
           <button
             type="button"
@@ -760,7 +781,7 @@ export function KnowledgeProcessingPage() {
             onClick={() => setDebugStage('maintainer')}
           >
             <span>2</span>
-            <div><strong>知识维护</strong><small>{currentPreprocessingResult() ? '输入已准备' : '等待 Evidence Map'}</small></div>
+            <div><strong>知识维护</strong><small>{currentPreprocessingResult() ? '候选议程已准备' : '等待候选清单'}</small></div>
           </button>
         </div>
 
@@ -972,7 +993,7 @@ export function KnowledgeProcessingPage() {
               >
                 <Show
                   when={stageDebugTrace()?.preprocessing ? stageDebugTrace() : undefined}
-                  fallback={<div class="processing-workspace-empty">运行预处理后，这里会逐段展示模型调用、进度和局部 Evidence Map 输出。</div>}
+                  fallback={<div class="processing-workspace-empty">运行预处理后，这里会逐段展示模型调用、进度和 Statement 候选输出。</div>}
                 >
                   {(trace) => (
                     <ProcessingDebugTracePanel
@@ -1003,7 +1024,7 @@ export function KnowledgeProcessingPage() {
               >
                 <Show
                   when={!controller.isRunning(stage().id) ? currentPreprocessingResult() : undefined}
-                  fallback={<div class="processing-workspace-empty">完成预处理后，这里会展示完整 Evidence Map 与本次执行配置。</div>}
+                  fallback={<div class="processing-workspace-empty">完成预处理后，这里会展示 Statement 候选清单与本次执行配置。</div>}
                 >
                   {(result) => <PreprocessingResult result={result()} />}
                 </Show>
@@ -1079,7 +1100,7 @@ export function KnowledgeProcessingPage() {
                     fallback={<p>等待一次成功的观察预处理运行。</p>}
                   >
                     {(result) => (
-                      <p>将使用 Evidence Map Run <code>{result().runId}</code>，并按需回溯其观察材料。</p>
+                      <p>将使用 Preprocessing Run <code>{result().runId}</code> 的 {result().statementCandidates.length} 个开放候选，并按需回溯原始观察材料。</p>
                     )}
                   </Show>
                 </div>

@@ -1,5 +1,6 @@
 import {
   Agent,
+  type AgentMessage,
   type AgentTool,
   type StreamFn
 } from '@earendil-works/pi-agent-core'
@@ -19,7 +20,6 @@ import {
   PiContextWindowError
 } from '../agent-runtime/pi-context-compactor'
 import {
-  evidenceReadCallHint,
   formatEvidenceLocation,
   formatEvidenceReadPage,
   MAX_EVIDENCE_READ_LIMIT,
@@ -29,6 +29,7 @@ import {
 } from '../observation/evidence-location'
 import {
   MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH,
+  MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH,
   type KnowledgeContributionDraft,
   type KnowledgeStatement,
   type KnowledgeStatementDraft
@@ -41,20 +42,33 @@ import type {
   KnowledgeReader,
   KnowledgeStatementRecord
 } from './model'
+import {
+  InMemoryStatementCandidateAgenda,
+  MAX_STATEMENT_CANDIDATE_EXPRESSION_CHARACTERS,
+  MAX_STATEMENT_CANDIDATE_QUESTION_CHARACTERS,
+  type StatementCandidateInput
+} from './statement-candidate-agenda'
+import { KnowledgeContributionWorkspace } from './knowledge-contribution-workspace'
 
 const MAX_EVIDENCE_OUTPUT_CHARS = 64 * 1_024
 const MAX_SEARCH_RESULTS = 20
+const MAX_WORKSPACE_LIST_RESULTS = 100
+const WORKSPACE_STATUS_CONTEXT_TOKENS = 2_048
 const UNKNOWN_TRACE_TOOL_NAME = '未知工具'
 
 const TRACEABLE_TOOL_NAMES = new Set([
   'search_knowledge',
   'read_knowledge_statement',
-  'read_evidence_map_section',
+  'list_statement_candidates',
+  'add_statement_candidates',
+  'resolve_statement_candidates',
+  'upsert_contribution_statement',
+  'read_contribution_statement',
+  'list_contribution_statements',
+  'remove_contribution_statement',
   'read_evidence',
   'submit_knowledge_contribution'
 ])
-
-const SOURCE_SELECTOR = /^L(\d{6,})-L(\d{6,})$/
 
 const searchKnowledgeParameters = Type.Object({
   query: Type.String({ minLength: 1, maxLength: 1_024 }),
@@ -63,7 +77,7 @@ const searchKnowledgeParameters = Type.Object({
 }, { additionalProperties: false })
 
 const readKnowledgeParameters = Type.Object({
-  title: Type.String({ minLength: 1, maxLength: 2_048 })
+  title: Type.String({ minLength: 1, maxLength: MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH })
 }, { additionalProperties: false })
 
 const readEvidenceParameters = Type.Object({
@@ -72,17 +86,51 @@ const readEvidenceParameters = Type.Object({
   limit: Type.Integer({ minimum: 2 })
 }, { additionalProperties: false })
 
-const readEvidenceMapSectionParameters = Type.Object({
-  sectionId: Type.String({ minLength: 1, maxLength: 64 })
+const listStatementCandidatesParameters = Type.Object({
+  status: Type.Optional(Type.Union([Type.Literal('open'), Type.Literal('resolved')])),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_WORKSPACE_LIST_RESULTS })),
+  offset: Type.Optional(Type.Integer({ minimum: 0 }))
+}, { additionalProperties: false })
+
+const candidateLocationParameters = Type.Object({
+  line: Type.Integer({ minimum: 1 }),
+  offset: Type.Integer({ minimum: 0 })
+}, { additionalProperties: false })
+
+const addStatementCandidatesParameters = Type.Object({
+  candidates: Type.Array(Type.Object({
+    expression: Type.String({ minLength: 1, maxLength: MAX_STATEMENT_CANDIDATE_EXPRESSION_CHARACTERS }),
+    question: Type.String({ minLength: 1, maxLength: MAX_STATEMENT_CANDIDATE_QUESTION_CHARACTERS }),
+    locations: Type.Optional(Type.Array(candidateLocationParameters))
+  }, { additionalProperties: false }))
+}, { additionalProperties: false })
+
+const resolveStatementCandidatesParameters = Type.Object({
+  resolutions: Type.Array(Type.Object({
+    ref: Type.String({ minLength: 1, maxLength: 64 }),
+    resolution: Type.String({ minLength: 1, maxLength: 16 * 1_024 })
+  }, { additionalProperties: false }))
 }, { additionalProperties: false })
 
 const contributionStatementParameters = Type.Object({
-  title: Type.String({ minLength: 1, maxLength: 2_048 }),
+  title: Type.String({ minLength: 1, maxLength: MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH }),
   content: Type.String({ minLength: 1, maxLength: MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH })
 }, { additionalProperties: false })
 
+const readContributionStatementParameters = Type.Object({
+  title: Type.String({ minLength: 1, maxLength: MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH })
+}, { additionalProperties: false })
+
+const listContributionStatementsParameters = Type.Object({
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_WORKSPACE_LIST_RESULTS })),
+  offset: Type.Optional(Type.Integer({ minimum: 0 }))
+}, { additionalProperties: false })
+
+const removeContributionStatementParameters = Type.Object({
+  title: Type.String({ minLength: 1, maxLength: MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH })
+}, { additionalProperties: false })
+
 const submitContributionParameters = Type.Object({
-  statements: Type.Array(contributionStatementParameters)
 }, { additionalProperties: false })
 
 function emptyUsage(): Usage {
@@ -170,18 +218,26 @@ function safeTraceDetails(toolName: string, result: unknown, isError: boolean): 
   if (toolName === 'read_knowledge_statement') {
     return typeof record.found === 'boolean' ? (record.found ? '已找到 Statement' : '未找到 Statement') : undefined
   }
-  if (toolName === 'read_evidence_map_section') {
-    const sectionId = typeof record.sectionId === 'string' && /^M\d{6,}$/.test(record.sectionId)
-      ? record.sectionId
-      : undefined
-    const selectors = Array.isArray(record.selectors)
-      ? record.selectors.filter((selector): selector is string => (
-          typeof selector === 'string' && /^L\d{6,}-L\d{6,}$/.test(selector)
-        ))
-      : []
-    return [sectionId, selectors.length ? selectors.join(', ') : undefined]
-      .filter(Boolean)
-      .join(' · ') || undefined
+  if (
+    toolName === 'list_statement_candidates'
+    || toolName === 'add_statement_candidates'
+    || toolName === 'resolve_statement_candidates'
+  ) {
+    const open = safeTraceInteger(record.open)
+    const resolved = safeTraceInteger(record.resolved)
+    const total = safeTraceInteger(record.total)
+    return open === undefined || resolved === undefined || total === undefined
+      ? undefined
+      : `候选 ${resolved}/${total} 已处置 · ${open} 个待处理`
+  }
+  if (
+    toolName === 'upsert_contribution_statement'
+    || toolName === 'read_contribution_statement'
+    || toolName === 'list_contribution_statements'
+    || toolName === 'remove_contribution_statement'
+  ) {
+    const draftStatementCount = safeTraceInteger(record.draftStatementCount)
+    return draftStatementCount === undefined ? undefined : `Contribution 草稿 ${draftStatementCount} 条`
   }
   if (toolName === 'read_evidence') {
     const start = typeof record.start === 'string' && /^L\d{6,}:C\d+$/.test(record.start)
@@ -204,7 +260,10 @@ function safeTraceDetails(toolName: string, result: unknown, isError: boolean): 
   }
   if (toolName === 'submit_knowledge_contribution') {
     const statementCount = safeTraceInteger(record.statementCount)
-    return statementCount === undefined ? undefined : `捕获 ${statementCount} 条候选 Statement`
+    const accepted = record.accepted === true
+    const open = safeTraceInteger(record.open)
+    if (!accepted && open !== undefined) return `仍有 ${open} 个候选待处理`
+    return statementCount === undefined ? undefined : `提交 ${statementCount} 条 Statement 草稿`
   }
   return undefined
 }
@@ -248,7 +307,6 @@ function statementResultText(statement: KnowledgeStatement): string {
 
 function validateRunInput(input: KnowledgeAgentRunInput): void {
   if (!input.systemPrompt.trim()) throw new Error('Knowledge Maintenance Agent 的 System Prompt 不能为空')
-  if (!input.evidenceMap.trim()) throw new Error('Evidence Map 不能为空')
   if (!input.sourceRef.trim() || input.sourceRef.length > 512) throw new Error('Observation sourceRef 无效')
   if (!input.contributionRunRef.trim() || input.contributionRunRef.length > 1_024) {
     throw new Error('Knowledge Contribution runRef 无效')
@@ -267,91 +325,119 @@ function validateRunInput(input: KnowledgeAgentRunInput): void {
   if (input.observationLines.some((line) => typeof line !== 'string' || /[\r\n]/.test(line))) {
     throw new Error('Observation 必须按单行数组提供')
   }
-  if (!Array.isArray(input.evidenceMapSections)) throw new Error('Evidence Map 局部材料无效')
-  const sectionIds = new Set<string>()
-  for (const section of input.evidenceMapSections) {
+  if (!Array.isArray(input.statementCandidates)) throw new Error('Statement 候选清单无效')
+  for (const [candidateIndex, candidate] of input.statementCandidates.entries()) {
     if (
-      !section
-      || !/^M\d{6,}$/.test(section.id)
-      || !Array.isArray(section.selectors)
-      || !section.selectors.length
-      || !section.content.trim()
-      || sectionIds.has(section.id)
+      !candidate
+      || typeof candidate.expression !== 'string'
+      || !candidate.expression.trim()
+      || candidate.expression.trim().length > MAX_STATEMENT_CANDIDATE_EXPRESSION_CHARACTERS
+      || typeof candidate.question !== 'string'
+      || !candidate.question.trim()
+      || !Array.isArray(candidate.locations)
+      || !candidate.locations.length
     ) {
-      throw new Error('Evidence Map 局部材料无效')
+      throw new Error(`Statement 候选 ${candidateIndex + 1} 无效`)
     }
-    let previousEnd = 0
-    const parsedSelectors = section.selectors.map((value) => {
-      const selector = typeof value === 'string' ? SOURCE_SELECTOR.exec(value) : undefined
-      if (!selector) throw new Error('Evidence Map 局部材料无效')
-      const start = Number(selector[1])
-      const end = Number(selector[2])
-      if (start < 1 || end < start || end > input.observationLines.length) {
-        throw new Error('Evidence Map 局部材料超出当前 Observation 范围')
-      }
-      if (start <= previousEnd + (previousEnd ? 1 : 0)) {
-        throw new Error('Evidence Map source ranges 必须按顺序且已合并')
-      }
-      previousEnd = end
-      return { start, end }
-    })
-    if (!parsedSelectors.length) {
-      throw new Error('Evidence Map 局部材料无效')
-    }
-    const { line, offset } = section.readLocation ?? {}
-    const readLine = typeof line === 'number' ? input.observationLines[line - 1] : undefined
-    if (
-      !Number.isSafeInteger(line)
-      || !Number.isSafeInteger(offset)
-      || line < 1
-      || offset < 0
-      || readLine === undefined
-      || offset > readLine.length
-      || splitsSurrogatePair(readLine, offset)
-      || !parsedSelectors.some((range) => line >= range.start && line <= range.end)
-    ) {
-      throw new Error('Evidence Map 读取位置无效')
-    }
-    if (section.children?.some((child) => !/^M\d{6,}$/.test(child))) {
-      throw new Error('Evidence Map 子节点引用无效')
-    }
-    if (section.characterWindow) {
-      const { startCharacter, endCharacter, totalCharacters } = section.characterWindow
-      const [{ start, end }] = parsedSelectors
+    for (const location of candidate.locations) {
+      const line = Number(location?.line)
+      const offset = Number(location?.offset)
+      const sourceLine = Number.isSafeInteger(line) ? input.observationLines[line - 1] : undefined
       if (
-        parsedSelectors.length !== 1
-        || start !== end
-        || !Number.isSafeInteger(startCharacter)
-        || !Number.isSafeInteger(endCharacter)
-        || !Number.isSafeInteger(totalCharacters)
-        || startCharacter < 0
-        || endCharacter <= startCharacter
-        || endCharacter > totalCharacters
-        || totalCharacters !== input.observationLines[start - 1].length
-        || line !== start
-        || offset !== startCharacter
+        !Number.isSafeInteger(line)
+        || !Number.isSafeInteger(offset)
+        || line < 1
+        || offset < 0
+        || sourceLine === undefined
+        || offset > sourceLine.length
+        || splitsSurrogatePair(sourceLine, offset)
       ) {
-        throw new Error('Evidence Map 字符窗口无效')
+        throw new Error(`Statement 候选 ${candidateIndex + 1} 的证据位置无效`)
       }
-    }
-    sectionIds.add(section.id)
-  }
-  for (const section of input.evidenceMapSections) {
-    if (section.children?.some((child) => !sectionIds.has(child))) {
-      throw new Error('Evidence Map 子节点不属于当前工作区')
     }
   }
   input.signal.throwIfAborted()
 }
 
-function contributionFromSubmission(
+function workspaceEvidenceLocation(
   input: KnowledgeAgentRunInput,
-  statements: KnowledgeStatementDraft[]
-): KnowledgeContributionDraft {
-  return {
-    runRef: input.contributionRunRef,
-    statements: structuredClone(statements)
+  location: { line: number; offset: number }
+): string {
+  const sourceLine = input.observationLines[location.line - 1]
+  if (
+    !Number.isSafeInteger(location.line)
+    || !Number.isSafeInteger(location.offset)
+    || location.line < 1
+    || location.offset < 0
+    || sourceLine === undefined
+    || location.offset > sourceLine.length
+    || splitsSurrogatePair(sourceLine, location.offset)
+  ) {
+    throw new Error('候选证据位置不属于当前 Observation Workspace')
   }
+  return formatEvidenceLocation(location)
+}
+
+function agendaSeed(input: KnowledgeAgentRunInput): StatementCandidateInput[] {
+  return input.statementCandidates.map((candidate) => ({
+    expression: candidate.expression,
+    question: candidate.question,
+    evidenceLocations: candidate.locations.map((location) => workspaceEvidenceLocation(input, location))
+  }))
+}
+
+function candidateCountsDetails(counts: { total: number; open: number; resolved: number }) {
+  return { total: counts.total, open: counts.open, resolved: counts.resolved }
+}
+
+function candidatePageText(page: ReturnType<InMemoryStatementCandidateAgenda['list']>): string {
+  const items = page.items.map((candidate) => [
+    `- ${candidate.ref} [${candidate.status}] ${compactInline(candidate.expression, 512)}`,
+    `  Question: ${compactInline(candidate.question, MAX_STATEMENT_CANDIDATE_QUESTION_CHARACTERS)}`,
+    candidate.evidenceLocations.length
+      ? `  Evidence: ${candidate.evidenceLocations.join(', ')}`
+      : '  Evidence: not yet attached',
+    candidate.resolution ? `  Resolution: ${compactInline(candidate.resolution, 2_048)}` : undefined
+  ].filter((part): part is string => Boolean(part)).join('\n'))
+  return [
+    `Agenda: ${page.counts.resolved}/${page.counts.total} resolved; ${page.counts.open} open.`,
+    ...items,
+    `Next offset: ${page.nextOffset ?? 'none'}`
+  ].join('\n')
+}
+
+function contributionDraftPageText(page: ReturnType<KnowledgeContributionWorkspace['list']>): string {
+  const lines = page.statements.map((statement) => [
+    `- Title: ${compactInline(statement.title, 512)}`,
+    `  Content preview: ${compactInline(statement.content, 1_024)}`
+  ].join('\n'))
+  return [
+    `Contribution Draft: ${page.total} Statements.`,
+    ...lines,
+    `Next offset: ${page.nextOffset ?? 'none'}`
+  ].join('\n')
+}
+
+function workspaceStatusText(
+  agenda: InMemoryStatementCandidateAgenda,
+  draft: KnowledgeContributionWorkspace
+): string {
+  const snapshot = agenda.snapshot(3)
+  const preview = snapshot.openPreview.map((candidate) => (
+    `- ${candidate.ref}: ${compactInline(candidate.expression, 128)} — ${compactInline(candidate.question, 256)}`
+  ))
+  return [
+    '<knowledge-maintenance-workspace-status>',
+    'This is fresh Host-owned run state, not a new user request and not knowledge evidence.',
+    `Candidates: ${snapshot.counts.total} total; ${snapshot.counts.open} open; ${snapshot.counts.resolved} resolved.`,
+    `Contribution Draft: ${draft.size} Statements.`,
+    ...(preview.length ? ['Next open candidates:', ...preview] : ['No open candidates remain.']),
+    snapshot.remainingOpen ? `Additional open candidates not shown: ${snapshot.remainingOpen}.` : undefined,
+    snapshot.counts.open
+      ? 'Continue investigating and explicitly resolve open candidates. Use list_statement_candidates for the complete agenda.'
+      : 'The agenda is closed. Review the Contribution Draft and call submit_knowledge_contribution when it is ready.',
+    '</knowledge-maintenance-workspace-status>'
+  ].filter((part): part is string => Boolean(part)).join('\n')
 }
 
 function taskPrompt(input: KnowledgeAgentRunInput): string {
@@ -360,16 +446,12 @@ function taskPrompt(input: KnowledgeAgentRunInput): string {
     ? `${observationLineAddress(1)}-${observationLineAddress(lastLine)}`
     : 'No readable lines'
   return [
-    'Maintain the knowledge in this authorized workspace. The Evidence Map is navigation only; use tools to verify details when necessary. Follow the System Prompt\'s language policy and write Statements in the primary language of the original observation.',
+    'Maintain knowledge in this authorized workspace. The Host owns an open Statement-candidate agenda and a run-local Contribution Draft. Use the provided tools to inspect and update both. Follow the System Prompt language policy.',
     `Observation sourceRef: ${input.sourceRef}`,
     `Observation view format: ${input.observationFormatVersion}`,
-    `Range available to read_evidence: ${readableRange}. Evidence Map locations use one-based line and zero-based UTF-16 offset; limit is also measured in UTF-16 code units and must be at least 2 (maximum applied limit ${MAX_EVIDENCE_READ_LIMIT}). Always set a bounded limit and copy the returned Next location when more detail is needed.`,
+    `Range available to read_evidence: ${readableRange}. Candidate locations use one-based line and zero-based UTF-16 offset; limit is also measured in UTF-16 code units and must be at least 2 (maximum applied limit ${MAX_EVIDENCE_READ_LIMIT}). Always set a bounded limit and copy the returned Next location when more detail is needed.`,
     'Tool calls may be repeated when useful. Keep each read bounded and use returned continuation locations to inspect more material progressively.',
-    input.evidenceMapSections.length
-      ? 'Expandable map section IDs and their immediate children are disclosed progressively inside the Evidence Map. Use read_evidence_map_section only for IDs you discover there.'
-      : undefined,
-    input.attention?.trim() ? `Attention:\n${input.attention.trim()}` : undefined,
-    `Evidence Map:\n${input.evidenceMap.trim()}`
+    input.attention?.trim() ? `Attention:\n${input.attention.trim()}` : undefined
   ].filter((part): part is string => Boolean(part)).join('\n\n')
 }
 
@@ -379,6 +461,8 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
   async run(input: KnowledgeAgentRunInput): Promise<KnowledgeAgentRunResult> {
     validateRunInput(input)
     const runtime: ModelRuntime = input.runtime
+    const agenda = new InMemoryStatementCandidateAgenda(agendaSeed(input))
+    const contributionDraft = new KnowledgeContributionWorkspace()
     let modelCallCount = 0
     const toolCalls: string[] = []
     let contribution: KnowledgeContributionDraft | undefined
@@ -394,6 +478,16 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         // Diagnostics must not change Agent execution.
       }
     }
+
+    const reportWorkspaceStatus = (): void => {
+      reportTrace({
+        type: 'workspace_status',
+        candidates: candidateCountsDetails(agenda.snapshot(0).counts),
+        draftStatementCount: contributionDraft.size
+      })
+    }
+
+    reportWorkspaceStatus()
 
     const guardedStreamFn: StreamFn = (model, context, options) => {
       modelCallCount++
@@ -463,44 +557,161 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
           }
         }
       } as AgentTool<typeof readKnowledgeParameters>,
-      ...(input.evidenceMapSections.length ? [{
-        name: 'read_evidence_map_section',
-        label: '展开 Evidence Map',
-        description: '按当前工作区提供的 section ID 展开一段局部 Evidence Map；内容仍需通过原始 Observation 核查。',
-        parameters: readEvidenceMapSectionParameters,
-        executionMode: 'sequential' as const,
+      {
+        name: 'list_statement_candidates',
+        label: '查看 Statement 候选',
+        description: '分页读取 Host 持有的开放调查清单。候选不是拟定的 canonical title，也不与 Statement 一一对应。',
+        parameters: listStatementCandidatesParameters,
+        executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
           signal?.throwIfAborted()
-          const sectionId = parameters.sectionId.trim()
-          const section = input.evidenceMapSections.find((candidate) => candidate.id === sectionId)
-          if (!section) throw new Error('Evidence Map section 不属于当前授权工作区')
-          const hasChildren = Boolean(section.children?.length)
-          const sourceDisclosure = hasChildren
-            ? `Source coverage extent (navigation only; not exact selectors): ${section.selectors[0].split('-')[0]}-${section.selectors[section.selectors.length - 1].split('-')[1]}`
-            : `Selected source ranges: ${section.selectors.join(', ')}`
-          const text = [
-            `Section: ${section.id}`,
-            sourceDisclosure,
-            hasChildren
-              ? `Immediate child sections: ${section.children?.join(', ')}`
-              : 'Immediate child sections: none',
-            `First evidence read location: ${formatEvidenceLocation(section.readLocation)}`,
-            `First bounded read call: ${evidenceReadCallHint(section.readLocation)}`,
-            section.characterWindow
-              ? `Character window: [${section.characterWindow.startCharacter}, ${section.characterWindow.endCharacter}) of ${section.characterWindow.totalCharacters}`
-              : undefined,
-            section.content
-          ].filter((part): part is string => Boolean(part)).join('\n')
+          const page = agenda.list({
+            status: parameters.status,
+            limit: parameters.limit,
+            offset: parameters.offset
+          })
           return {
-            content: [{ type: 'text' as const, text }],
-            details: { sectionId: section.id, selectors: [...section.selectors] }
+            content: [{ type: 'text', text: candidatePageText(page) }],
+            details: {
+              ...candidateCountsDetails(page.counts),
+              count: page.items.length,
+              offset: page.offset,
+              nextOffset: page.nextOffset
+            }
           }
         }
-      } as AgentTool<typeof readEvidenceMapSectionParameters>] : []),
+      } as AgentTool<typeof listStatementCandidatesParameters>,
+      {
+        name: 'add_statement_candidates',
+        label: '补充 Statement 候选',
+        description: '把调查中新发现的名称、指代或必要背景问题加入开放清单；这不会创建 Knowledge Statement。',
+        parameters: addStatementCandidatesParameters,
+        executionMode: 'sequential',
+        execute: async (_toolCallId, parameters, signal) => {
+          signal?.throwIfAborted()
+          const added = agenda.add(parameters.candidates.map((candidate) => ({
+            expression: candidate.expression,
+            question: candidate.question,
+            evidenceLocations: candidate.locations?.map((location) => (
+              workspaceEvidenceLocation(input, location)
+            ))
+          })))
+          reportWorkspaceStatus()
+          const counts = agenda.snapshot(0).counts
+          return {
+            content: [{
+              type: 'text',
+              text: [
+                `Added ${added.length} open Statement candidates.`,
+                ...added.map((candidate) => `- ${candidate.ref}: ${candidate.expression}`),
+                `Agenda now has ${counts.open} open and ${counts.resolved} resolved candidates.`
+              ].join('\n')
+            }],
+            details: { ...candidateCountsDetails(counts), added: added.length }
+          }
+        }
+      } as AgentTool<typeof addStatementCandidatesParameters>,
+      {
+        name: 'resolve_statement_candidates',
+        label: '处置 Statement 候选',
+        description: '批量记录候选已经过调查及其自由文本处置结论；它不自动写入或更新 Statement。',
+        parameters: resolveStatementCandidatesParameters,
+        executionMode: 'sequential',
+        execute: async (_toolCallId, parameters, signal) => {
+          signal?.throwIfAborted()
+          const resolved = agenda.resolve(parameters.resolutions)
+          reportWorkspaceStatus()
+          const counts = agenda.snapshot(0).counts
+          return {
+            content: [{
+              type: 'text',
+              text: [
+                `Resolved ${resolved.length} Statement candidates.`,
+                ...resolved.map((candidate) => `- ${candidate.ref}: ${candidate.resolution}`),
+                `Agenda now has ${counts.open} open and ${counts.resolved} resolved candidates.`
+              ].join('\n')
+            }],
+            details: { ...candidateCountsDetails(counts), addressed: resolved.length }
+          }
+        }
+      } as AgentTool<typeof resolveStatementCandidatesParameters>,
+      {
+        name: 'upsert_contribution_statement',
+        label: '暂存 Statement 草稿',
+        description: '按 canonical title 在本次运行的 Contribution Draft 中新增或替换一条自由文本 Statement；尚不写入知识库。',
+        parameters: contributionStatementParameters,
+        executionMode: 'sequential',
+        execute: async (_toolCallId, parameters, signal) => {
+          signal?.throwIfAborted()
+          const statement = contributionDraft.upsert(parameters as KnowledgeStatementDraft)
+          reportWorkspaceStatus()
+          return {
+            content: [{ type: 'text', text: `Staged Statement draft: ${statement.title}` }],
+            details: { title: statement.title, draftStatementCount: contributionDraft.size }
+          }
+        }
+      } as AgentTool<typeof contributionStatementParameters>,
+      {
+        name: 'read_contribution_statement',
+        label: '读取 Statement 草稿',
+        description: '按 canonical title 读取本次运行中已经暂存的完整 Statement 草稿。',
+        parameters: readContributionStatementParameters,
+        executionMode: 'sequential',
+        execute: async (_toolCallId, parameters, signal) => {
+          signal?.throwIfAborted()
+          const statement = contributionDraft.read(parameters.title)
+          return {
+            content: [{
+              type: 'text',
+              text: statement ? statementResultText(statement) : '未找到该 Contribution Statement 草稿。'
+            }],
+            details: { found: Boolean(statement), draftStatementCount: contributionDraft.size }
+          }
+        }
+      } as AgentTool<typeof readContributionStatementParameters>,
+      {
+        name: 'list_contribution_statements',
+        label: '查看 Contribution 草稿',
+        description: '分页查看本次运行已经暂存的 Statement 标题和正文预览。',
+        parameters: listContributionStatementsParameters,
+        executionMode: 'sequential',
+        execute: async (_toolCallId, parameters, signal) => {
+          signal?.throwIfAborted()
+          const page = contributionDraft.list(parameters.limit, parameters.offset)
+          return {
+            content: [{ type: 'text', text: contributionDraftPageText(page) }],
+            details: {
+              draftStatementCount: contributionDraft.size,
+              count: page.statements.length,
+              offset: page.offset,
+              nextOffset: page.nextOffset ?? null
+            }
+          }
+        }
+      } as AgentTool<typeof listContributionStatementsParameters>,
+      {
+        name: 'remove_contribution_statement',
+        label: '移除 Statement 草稿',
+        description: '从本次运行的 Contribution Draft 移除一条尚未提交的 Statement。',
+        parameters: removeContributionStatementParameters,
+        executionMode: 'sequential',
+        execute: async (_toolCallId, parameters, signal) => {
+          signal?.throwIfAborted()
+          const removed = contributionDraft.remove(parameters.title)
+          reportWorkspaceStatus()
+          return {
+            content: [{
+              type: 'text',
+              text: removed ? `Removed Statement draft: ${parameters.title.trim()}` : '未找到该 Statement 草稿。'
+            }],
+            details: { removed, draftStatementCount: contributionDraft.size }
+          }
+        }
+      } as AgentTool<typeof removeContributionStatementParameters>,
       {
         name: 'read_evidence',
         label: '读取观察证据',
-        description: '从 Evidence Map 给出的原始行与行内 offset 开始读取有界 Observation；offset 和 limit 使用 UTF-16 code unit，limit 至少为 2，并在需要时直接使用返回的 Next 位置续读。',
+        description: '从候选提供的原始行与行内 offset 开始读取有界 Observation；offset 和 limit 使用 UTF-16 code unit，limit 至少为 2，并在需要时直接使用返回的 Next 位置续读。',
         parameters: readEvidenceParameters,
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
@@ -532,18 +743,37 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
       {
         name: 'submit_knowledge_contribution',
         label: '提交 Knowledge Contribution',
-        description: '提交本次运行唯一的原子 Contribution。每条 Statement 只有 canonical title 与自由文本正文；同名 title 更新当前正文，新 title 创建 Statement；没有变更时提交空 statements。',
+        description: '在所有 Statement 候选均已明确处置后，原子提交当前 Contribution Draft；开放候选仍存在时不会结束 Agent。',
         parameters: submitContributionParameters,
         executionMode: 'sequential',
-        execute: async (_toolCallId, parameters, signal) => {
+        execute: async (_toolCallId, _parameters, signal) => {
           signal?.throwIfAborted()
-          contribution = contributionFromSubmission(
-            input,
-            parameters.statements as KnowledgeStatementDraft[]
-          )
+          const snapshot = agenda.snapshot(5)
+          if (snapshot.counts.open) {
+            return {
+              content: [{
+                type: 'text',
+                text: [
+                  `Submission was not accepted because ${snapshot.counts.open} Statement candidates remain open.`,
+                  ...snapshot.openPreview.map((candidate) => `- ${candidate.ref}: ${candidate.expression}`),
+                  snapshot.remainingOpen ? `- ...and ${snapshot.remainingOpen} more. Use list_statement_candidates.` : undefined
+                ].filter((part): part is string => Boolean(part)).join('\n')
+              }],
+              details: {
+                accepted: false,
+                ...candidateCountsDetails(snapshot.counts),
+                statementCount: contributionDraft.size
+              }
+            }
+          }
+          contribution = contributionDraft.contribution(input.contributionRunRef)
           return {
             content: [{ type: 'text', text: 'The Knowledge Contribution has been captured for host validation and commit.' }],
-            details: { captured: true, statementCount: contribution.statements.length },
+            details: {
+              accepted: true,
+              ...candidateCountsDetails(snapshot.counts),
+              statementCount: contribution.statements.length
+            },
             terminate: true
           }
         }
@@ -557,6 +787,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
       systemPrompt: input.systemPrompt,
       tools,
       thinkingLevel,
+      reservedContextTokens: WORKSPACE_STATUS_CONTEXT_TOKENS,
       onModelCall: (event) => {
         if (event.type === 'started') {
           modelCallCount++
@@ -592,7 +823,13 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
       signal?: AbortSignal
     ): ReturnType<typeof compactContext> => {
       try {
-        return await compactContext(messages, signal)
+        const compacted = await compactContext(messages, signal)
+        const statusMessage: AgentMessage = {
+          role: 'user',
+          content: [{ type: 'text', text: workspaceStatusText(agenda, contributionDraft) }],
+          timestamp: Date.now()
+        }
+        return [...compacted, statusMessage]
       } catch (error) {
         compactionError = asError(error, 'Context compaction failed')
         throw compactionError
@@ -674,6 +911,27 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
           toolName
         })
         toolCalls.push(toolName)
+        return
+      }
+      if (
+        event.type === 'turn_end'
+        && event.toolResults.length === 0
+        && contribution === undefined
+        && event.message.role === 'assistant'
+        && event.message.stopReason !== 'error'
+        && event.message.stopReason !== 'aborted'
+      ) {
+        const counts = agenda.snapshot(0).counts
+        agent.followUp({
+          role: 'user',
+          content: [{
+            type: 'text',
+            text: counts.open
+              ? `The run is not complete: ${counts.open} Statement candidates remain open. Continue investigating and resolving the agenda; use list_statement_candidates for the complete list.`
+              : 'The agenda is closed, but the current Contribution Draft has not been submitted. Review it and call submit_knowledge_contribution when it is ready.'
+          }],
+          timestamp: Date.now()
+        })
       }
     })
 
@@ -724,6 +982,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
 
     return {
       contribution,
+      statementCandidates: agenda.all(),
       modelCallCount,
       toolCalls: [...toolCalls]
     }

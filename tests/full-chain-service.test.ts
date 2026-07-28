@@ -53,6 +53,34 @@ function sha256(content: string): string {
   return createHash('sha256').update(content).digest('hex')
 }
 
+function candidateBatch(
+  expression = 'summaries',
+  question = 'What does “summaries” refer to in this Session?',
+  line = 1,
+  offset = 0
+): string {
+  return JSON.stringify({
+    candidates: [{
+      expression,
+      question,
+      locations: [{ line, offset }]
+    }]
+  })
+}
+
+function resolvedStatementCandidates(input: KnowledgeAgentRunInput) {
+  return input.statementCandidates.map((candidate, index) => ({
+    ref: `C${String(index + 1).padStart(6, '0')}`,
+    expression: candidate.expression,
+    question: candidate.question,
+    evidenceLocations: candidate.locations.map(({ line, offset }) => (
+      `L${String(line).padStart(6, '0')}:C${offset}`
+    )),
+    status: 'resolved' as const,
+    resolution: 'Covered by the submitted Knowledge Contribution.'
+  }))
+}
+
 function modelConnection(id: string): AiConnection {
   return {
     id,
@@ -117,7 +145,7 @@ class FakeAiBackend implements AiBackendPort {
     this.generationCalls.push({ connectionId, modelId, request })
     request.signal?.throwIfAborted()
     if (this.generationHandler) return this.generationHandler(connectionId, modelId, request)
-    return { text: '# Evidence Map\n\n- Explicit preference at L000001-L000002.' }
+    return { text: candidateBatch() }
   }
 
   async withModelRuntime<T>(
@@ -211,6 +239,7 @@ function normalAgentFactory(options: {
           }
         ]
       },
+      statementCandidates: resolvedStatementCandidates(input),
       modelCallCount: 2,
       toolCalls: ['search_knowledge', 'submit_knowledge_contribution']
     }
@@ -336,6 +365,21 @@ describe('KnowledgeFullChainService', () => {
         content: expect.stringContaining('[[Current summary preference]]')
       })
     ]))
+    expect(result.preprocessing.statementCandidates).toEqual([
+      {
+        expression: 'summaries',
+        question: 'What does “summaries” refer to in this Session?',
+        locations: [{ line: 1, offset: 0 }]
+      }
+    ])
+    expect(result.maintenance.statementCandidates).toEqual([
+      expect.objectContaining({
+        ref: 'C000001',
+        expression: 'summaries',
+        evidenceLocations: ['L000001:C0'],
+        status: 'resolved'
+      })
+    ])
 
     const sandbox = await harness.manager.openSandbox(result.sandbox.id)
     expect(sandbox.listStatements().map((item) => item.title)).toEqual(
@@ -368,6 +412,7 @@ describe('KnowledgeFullChainService', () => {
           content: 'The current understanding references [[Oyster architecture]].'
         }]
       },
+      statementCandidates: resolvedStatementCandidates(input),
       modelCallCount: 1,
       toolCalls: [
         'search_knowledge',
@@ -391,48 +436,36 @@ describe('KnowledgeFullChainService', () => {
       .toBe('The earlier understanding.')
   })
 
-  it('keeps global Evidence Map locations through segmented preprocessing and Sandbox commit', async () => {
+  it('keeps global candidate locations through segmented discovery, Agent agenda, and Sandbox commit', async () => {
     const discovery = fakeDiscovery({
       content: 'line-one\nline-two\nline-three\nline-four'
     })
     const harness = await createHarness(discovery, {
-      evidenceMapPlanner: {
+      observationSegmentPlanner: {
         segmentBytes: 80,
-        adjacentContextBytes: 32,
-        mergeBytes: 1_000
+        adjacentContextBytes: 32
       }
     })
     harness.backend.generationHandler = async (_connectionId, _modelId, request) => {
-      if (request.prompt.includes('BEGIN_EVIDENCE_MAP_MATERIALS')) {
-        return { text: 'ROOT NAVIGATION' }
+      if (request.prompt.includes('L000001-L000002')) {
+        return { text: candidateBatch('line-one', 'What does line-one denote?', 1) }
       }
-      if (request.prompt.includes('L000001-L000002')) return { text: 'LEAF A' }
-      if (request.prompt.includes('L000003-L000004')) return { text: 'LEAF B' }
+      if (request.prompt.includes('L000003-L000004')) {
+        return { text: candidateBatch('line-four', 'What does line-four denote?', 4) }
+      }
       throw new Error('unexpected preprocessing prompt')
     }
     const fullChain = harness.createFullChain(() => new StaticAgent(async (input) => {
-      expect(input.evidenceMap).toContain('ROOT NAVIGATION')
-      expect(input.evidenceMap).toContain('Exact selected ranges remain attached to map sections')
-      expect(input.evidenceMap).not.toContain('First bounded read call:')
-      expect(input.evidenceMapSections).toEqual([
+      expect(input.statementCandidates).toEqual([
         {
-          id: 'M000001',
-          selectors: ['L000001-L000002'],
-          readLocation: { line: 1, offset: 0 },
-          content: 'LEAF A'
+          expression: 'line-one',
+          question: 'What does line-one denote?',
+          locations: [{ line: 1, offset: 0 }]
         },
         {
-          id: 'M000002',
-          selectors: ['L000003-L000004'],
-          readLocation: { line: 3, offset: 0 },
-          content: 'LEAF B'
-        },
-        {
-          id: 'M000003',
-          selectors: ['L000001-L000004'],
-          readLocation: { line: 1, offset: 0 },
-          content: 'ROOT NAVIGATION',
-          children: ['M000001', 'M000002']
+          expression: 'line-four',
+          question: 'What does line-four denote?',
+          locations: [{ line: 4, offset: 0 }]
         }
       ])
       return {
@@ -443,6 +476,7 @@ describe('KnowledgeFullChainService', () => {
             content: 'Knowledge grounded in the final global range.'
           }]
         },
+        statementCandidates: resolvedStatementCandidates(input),
         modelCallCount: 1,
         toolCalls: ['submit_knowledge_contribution']
       }
@@ -457,7 +491,11 @@ describe('KnowledgeFullChainService', () => {
 
     expect(result.preprocessing).toMatchObject({
       segmentCount: 2,
-      execution: { modelCallCount: 3 }
+      statementCandidates: [
+        { expression: 'line-one', locations: [{ line: 1, offset: 0 }] },
+        { expression: 'line-four', locations: [{ line: 4, offset: 0 }] }
+      ],
+      execution: { modelCallCount: 2 }
     })
     expect(result.maintenance.debugTrace).toMatchObject({
       id: result.runId,
@@ -466,9 +504,18 @@ describe('KnowledgeFullChainService', () => {
       preprocessing: {
         totalSegments: 2,
         calls: [
-          { kind: 'segment_map', output: 'LEAF A' },
-          { kind: 'segment_map', output: 'LEAF B' },
-          { kind: 'navigation_merge', output: 'ROOT NAVIGATION' }
+          {
+            kind: 'candidate_discovery',
+            selectors: ['L000001-L000002'],
+            readLocation: { line: 1, offset: 0 },
+            output: candidateBatch('line-one', 'What does line-one denote?', 1)
+          },
+          {
+            kind: 'candidate_discovery',
+            selectors: ['L000003-L000004'],
+            readLocation: { line: 3, offset: 0 },
+            output: candidateBatch('line-four', 'What does line-four denote?', 4)
+          }
         ]
       },
       maintenance: { modelCallCount: 1 }
@@ -477,7 +524,19 @@ describe('KnowledgeFullChainService', () => {
     const currentRunTraces = fullChainTraceSnapshots.filter((trace) => trace.id === result.runId)
     expect(currentRunTraces.at(-1)?.status).toBe('completed')
     expect(currentRunTraces.slice(0, -1).every((trace) => trace.status === 'running')).toBe(true)
-    expect(harness.backend.generationCalls).toHaveLength(3)
+    expect(harness.backend.generationCalls).toHaveLength(2)
+    expect(result.maintenance.statementCandidates).toEqual([
+      expect.objectContaining({
+        expression: 'line-one',
+        evidenceLocations: ['L000001:C0'],
+        status: 'resolved'
+      }),
+      expect.objectContaining({
+        expression: 'line-four',
+        evidenceLocations: ['L000004:C0'],
+        status: 'resolved'
+      })
+    ])
     expect(result.knowledge.statements[0]).toEqual({
       title: 'Last range knowledge',
       content: 'Knowledge grounded in the final global range.'
@@ -543,6 +602,7 @@ describe('KnowledgeFullChainService', () => {
           { title: ' Duplicate title ', content: 'Second body.' }
         ]
       },
+      statementCandidates: resolvedStatementCandidates(input),
       modelCallCount: 1,
       toolCalls: ['submit_knowledge_contribution']
     }))
@@ -596,7 +656,7 @@ describe('KnowledgeFullChainService', () => {
         releaseFullChainPreprocessing.promise,
         waitForAbort(request.signal!)
       ])
-      return { text: '# Evidence Map\n\nFull-chain evidence.' }
+      return { text: '{"candidates":[]}' }
     }
     const fullChain = harness.createFullChain()
     const fullChainRun = fullChain.run(runInput(harness.discovery.session), harness.bindings)
@@ -615,7 +675,7 @@ describe('KnowledgeFullChainService', () => {
         releaseManualPreprocessing.promise,
         waitForAbort(request.signal!)
       ])
-      return { text: '# Evidence Map\n\nManual evidence.' }
+      return { text: '{"candidates":[]}' }
     }
     const manualRun = harness.processing.runObservationPreprocessor({ observation: 'manual observation' })
     await enteredManualPreprocessing.promise
@@ -623,7 +683,7 @@ describe('KnowledgeFullChainService', () => {
     await expect(fullChain.run(runInput(harness.discovery.session), harness.bindings))
       .rejects.toThrow('已有知识加工运行正在占用工作区')
     releaseManualPreprocessing.resolve(undefined)
-    await expect(manualRun).resolves.toMatchObject({ evidenceMap: expect.stringContaining('Manual evidence') })
+    await expect(manualRun).resolves.toMatchObject({ statementCandidates: [] })
   })
 
   it('propagates cancellation, releases the lease, and discards the active Sandbox', async () => {
@@ -652,6 +712,11 @@ describe('KnowledgeFullChainService', () => {
 
     harness.backend.generationHandler = undefined
     await expect(harness.processing.runObservationPreprocessor({ observation: 'lease was released' }))
-      .resolves.toMatchObject({ evidenceMap: expect.stringContaining('Evidence Map') })
+      .resolves.toMatchObject({
+        statementCandidates: [{
+          expression: 'summaries',
+          locations: [{ line: 1, offset: 0 }]
+        }]
+      })
   })
 })

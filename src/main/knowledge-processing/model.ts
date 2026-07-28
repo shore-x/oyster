@@ -5,11 +5,12 @@ import type {
   KnowledgeContributionDraft,
   KnowledgeStatement
 } from '../../shared/knowledge'
-import type { EvidenceLocation, ObservationCharacterWindow } from '../observation/model'
 import type {
   KnowledgeProcessingSnapshot,
   ProcessingStageId
 } from '../../shared/knowledge-processing'
+import type { StatementCandidate as DiscoveredStatementCandidate } from './statement-candidate-batch'
+import type { StatementCandidate as AgendaStatementCandidate } from './statement-candidate-agenda'
 
 export interface StoredProcessingStage {
   stageId: ProcessingStageId
@@ -64,9 +65,8 @@ export interface KnowledgeReader {
 export interface KnowledgeAgentRunInput {
   runtime: ModelRuntime
   systemPrompt: string
-  evidenceMap: string
-  evidenceMapSections: EvidenceMapSection[]
-  observationLines: string[]
+  statementCandidates: DiscoveredStatementCandidate[]
+  observationLines: readonly string[]
   observationFormatVersion: string
   sourceRef: string
   contributionRunRef: string
@@ -96,22 +96,15 @@ export type KnowledgeAgentTraceEvent =
       status: 'completed' | 'failed' | 'cancelled'
       detail?: string
     }
-
-export interface EvidenceMapSection {
-  id: string
-  /** Exact, sorted and coalesced raw source ranges represented by this section. */
-  selectors: string[]
-  /** First host-derived position for this section; can be passed directly to read_evidence. */
-  readLocation: EvidenceLocation
-  content: string
-  /** Immediate child sections for progressive disclosure; descendants are never flattened. */
-  children?: string[]
-  /** Internal navigation for a fragment of one unusually long raw Observation line. */
-  characterWindow?: ObservationCharacterWindow
-}
+  | {
+      type: 'workspace_status'
+      candidates: { total: number; open: number; resolved: number }
+      draftStatementCount: number
+    }
 
 export interface KnowledgeAgentRunResult {
   contribution: KnowledgeContributionDraft
+  statementCandidates: AgendaStatementCandidate[]
   modelCallCount: number
   toolCalls: string[]
 }
@@ -123,10 +116,9 @@ export interface KnowledgeAgentRuntime {
 export interface PreprocessingWorkspace {
   runId: string
   sourceRef: string
-  observationLines: string[]
+  observationLines: readonly string[]
   observationFormatVersion: string
-  evidenceMap: string
-  evidenceMapSections: EvidenceMapSection[]
+  statementCandidates: DiscoveredStatementCandidate[]
   attention?: string
   createdAt: number
 }

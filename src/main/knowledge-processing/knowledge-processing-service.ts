@@ -21,19 +21,17 @@ import {
   type AvailableModel,
   type ReasoningEffort
 } from '../../shared/ai-backends'
-import { ModelContextOverflowError } from '../ai-backends/model'
-import type { EvidenceLocation, ObservationView } from '../observation/model'
 import {
-  evidenceReadCallHint,
-  formatEvidenceLocation
-} from '../observation/evidence-location'
+  ModelContextOverflowError,
+  ModelOutputTruncatedError
+} from '../ai-backends/model'
+import type { EvidenceLocation, ObservationView } from '../observation/model'
 import {
   MAX_OBSERVATION_UNIT_BYTES,
   createPlainTextObservationView
 } from '../observation/observation-view'
 import type {
   AiBackendPort,
-  EvidenceMapSection,
   KnowledgeAgentTraceEvent,
   KnowledgeAgentRuntime,
   KnowledgeProcessingRepository,
@@ -43,26 +41,23 @@ import type {
   StoredProcessingStage
 } from './model'
 import {
-  coalesceObservationSourceRanges,
-  evidenceMapSectionId,
-  evidenceMapNodeText,
-  groupEvidenceMapNodes,
   numberedObservationUnits,
-  observationSelector,
   observationSourceSelectors,
   observationSourceSelectorsText,
   observationUnitsMaterialBytes,
   planObservationSegments,
-  resolveEvidenceMapPlannerOptions,
-  type EvidenceMapNode,
-  type EvidenceMapPlannerOptions,
+  resolveObservationSegmentPlannerOptions,
   type ObservationSegment,
-  type ResolvedEvidenceMapPlannerOptions
-} from './evidence-map-planner'
+  type ObservationSegmentPlannerOptions,
+  type ResolvedObservationSegmentPlannerOptions
+} from './observation-segment-planner'
 import { PROCESSING_STAGE_DEFINITIONS, stageDefinition } from './prompts'
+import {
+  parseStatementCandidateBatch,
+  type StatementCandidate
+} from './statement-candidate-batch'
 
 const MAX_SOURCE_REF_CHARACTERS = 512
-const MAX_EVIDENCE_MAP_SECTION_BYTES = 24 * 1_024
 const MAX_DEBUG_TRACE_ERROR_CHARACTERS = 2 * 1_024
 const MAX_DEBUG_TRACE_DETAIL_CHARACTERS = 1 * 1_024
 const MAX_DEBUG_TRACE_PREPROCESSOR_OUTPUT_CHARACTERS = 8 * 1_024
@@ -75,7 +70,7 @@ const PREPROCESSOR_PROMPT_ENVELOPE_BYTES = 2 * 1_024
 interface PreprocessorContextBudget {
   maxInputBytes: number
   maxOutputTokens: number
-  planner: ResolvedEvidenceMapPlannerOptions
+  planner: ResolvedObservationSegmentPlannerOptions
 }
 
 class PreprocessorInputBudgetError extends Error {}
@@ -112,7 +107,7 @@ export interface KnowledgeMaintenanceRunOptions {
 }
 
 export interface KnowledgeProcessingServiceOptions {
-  evidenceMapPlanner?: EvidenceMapPlannerOptions
+  observationSegmentPlanner?: ObservationSegmentPlannerOptions
 }
 
 function errorText(error: unknown): string {
@@ -131,28 +126,12 @@ function utf8Bytes(value: string): number {
   return Buffer.byteLength(value, 'utf8')
 }
 
-function maximumMergeNodeBytes(mergeBytes: number): number {
-  return Math.floor((mergeBytes - utf8Bytes('\n\n---\n\n')) / 2)
-}
-
-function maximumNodeContentBytes(
-  node: Omit<EvidenceMapNode, 'content'>,
-  mergeBytes: number
-): number {
-  const metadataBytes = utf8Bytes(evidenceMapNodeText({ ...node, content: '' }))
-  const maximum = maximumMergeNodeBytes(mergeBytes) - metadataBytes
-  if (maximum < 1) {
-    throw new Error('所选模型的上下文不足以生成可归并的 Evidence Map 导航节点')
-  }
-  return Math.min(MAX_EVIDENCE_MAP_SECTION_BYTES, maximum)
-}
-
 function preprocessorContextBudget(
   model: AvailableModel,
   stage: ProcessingStageRunBinding,
   sourceRef: string,
   attention: string | undefined,
-  configuredPlanner: ResolvedEvidenceMapPlannerOptions,
+  configuredPlanner: ResolvedObservationSegmentPlannerOptions,
   divisor = 1
 ): PreprocessorContextBudget {
   const contextWindow = model.contextWindowTokens ?? UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS
@@ -177,14 +156,7 @@ function preprocessorContextBudget(
     configuredPlanner.segmentBytes,
     availableMaterialBytes - adjacentContextBytes
   )
-  const mergeBytes = Math.min(
-    configuredPlanner.mergeBytes,
-    availableMaterialBytes
-  )
-  if (
-    segmentBytes < MIN_PREPROCESSOR_MATERIAL_BYTES
-    || mergeBytes < MIN_PREPROCESSOR_MATERIAL_BYTES
-  ) {
+  if (segmentBytes < MIN_PREPROCESSOR_MATERIAL_BYTES) {
     throw new Error('所选模型的上下文不足以容纳 Observation 预处理材料')
   }
   return {
@@ -193,14 +165,15 @@ function preprocessorContextBudget(
     planner: {
       ...configuredPlanner,
       segmentBytes,
-      adjacentContextBytes,
-      mergeBytes
+      adjacentContextBytes
     }
   }
 }
 
-function retryableContextOverflow(error: unknown): boolean {
-  return error instanceof ModelContextOverflowError || error instanceof PreprocessorInputBudgetError
+function retryablePreprocessorEnvelopeError(error: unknown): boolean {
+  return error instanceof ModelContextOverflowError
+    || error instanceof ModelOutputTruncatedError
+    || error instanceof PreprocessorInputBudgetError
 }
 
 function traceTerminalStatus(signal: AbortSignal): 'failed' | 'cancelled' {
@@ -210,7 +183,13 @@ function traceTerminalStatus(signal: AbortSignal): 'failed' | 'cancelled' {
 const KNOWLEDGE_TOOL_LABELS: Record<string, string> = {
   search_knowledge: '搜索已有知识',
   read_knowledge_statement: '读取 Knowledge Statement',
-  read_evidence_map_section: '展开局部 Evidence Map',
+  list_statement_candidates: '查看 Statement 候选',
+  add_statement_candidates: '补充 Statement 候选',
+  resolve_statement_candidates: '裁决 Statement 候选',
+  upsert_contribution_statement: '写入 Contribution 草稿',
+  read_contribution_statement: '读取 Contribution 草稿',
+  list_contribution_statements: '查看 Contribution 草稿',
+  remove_contribution_statement: '移除 Contribution 草稿',
   read_evidence: '读取原始观察证据',
   submit_knowledge_contribution: '提交 Knowledge Contribution'
 }
@@ -401,12 +380,12 @@ function segmentPrompt(
   const context = segment.contextUnits.length
     ? `\nBEGIN_ADJACENT_CONTEXT\n${numberedObservationUnits(segment.contextUnits)}\nEND_ADJACENT_CONTEXT\n`
     : ''
-  return `Create name-centered Evidence Map material for the selected Observation material within exact source ranges ${observationSourceSelectorsText(segment.sourceRanges)}. This may be one part of a longer Session. Follow the System Prompt's language policy and preserve global line references exactly. Lines between these ranges are not part of this preprocessing material; do not infer that their raw evidence does not exist.
+  return `Discover Statement candidates in the primary Observation material within exact source ranges ${observationSourceSelectorsText(segment.sourceRanges)}. This is one independently processed part of a potentially longer Session. Follow the System Prompt's language and strict JSON output contract. Preserve global one-based L line numbers and zero-based UTF-16 C offsets exactly. Lines between the listed ranges are not primary material for this call; do not infer that their raw evidence does not exist.
 
-Start from serious local names and context-bound expressions in the primary range. Preserve each useful navigation chain—original wording, what it denotes, distinguishing scope or boundary, and exact L/C location—before adding the shortest discussion frame needed for interpretation. Do not replace multiple concrete names with one broad topic summary.
-Adjacent context, when present, is provided only to resolve continuity, names, aliases, and implicit references at the boundary. Do not treat it as new coverage or repeat its candidates unless it is necessary to explain a correction, dependency, or referent in the primary range.${context}
-When a long physical line is shown in multiple Cstart:end/total character windows, those windows are transport-only fragments of the same L line. Preserve the shown L and C location beside every relevant navigation item so the downstream Agent can use it as the read_evidence starting point. The original L selector remains the raw-evidence address for this run.
-The owning source adapter may replace execution detail with a deterministic, bounded representation and bracketed record context. Treat it as navigation to the cited raw line, not as a replacement for the raw evidence. Runtime configuration, telemetry, duplicate representations, and low-level execution traces may be omitted from this view intentionally.
+Start from serious local names, aliases, overloaded expressions, and context-bound implicit references in the primary material. Each candidate is an investigation question, not a fact, title, draft Statement, topic summary, or Session summary. Keep distinct uses distinct when their identity is uncertain.
+Adjacent context, when present, is provided only to resolve continuity, names, aliases, and implicit references at the boundary. Do not emit a candidate found only in adjacent context.${context}
+When a long physical line is shown in multiple Cstart:end/total character windows, those windows are transport-only fragments of the same L line. Every candidate location must point into a primary window, so the downstream Agent can begin a bounded read_evidence call there.
+The owning source adapter may replace routine execution detail with a deterministic, bounded representation and bracketed record context. Treat that representation as navigation to the cited raw line, not as a replacement for Raw Evidence. Runtime configuration, telemetry, duplicate representations, and low-level execution traces may be omitted intentionally.
 Operator attention:
 ${attention ?? 'No additional focus.'}
 
@@ -416,113 +395,23 @@ ${numberedObservationUnits(segment.units)}
 END_AUTHORIZED_OBSERVATION`
 }
 
-function mergePrompt(nodes: EvidenceMapNode[], attention?: string): string {
-  return `Assemble the Evidence Map materials below into one concise, name-centered navigation map for a downstream Knowledge Maintenance Agent. Follow the System Prompt's language policy.
-
-For every serious local name that remains useful at this level, preserve the chain from its original wording to what it denotes, its distinguishing scope, boundary, or unresolved ambiguity, and its exact global L/C location or child section. Keep enough concrete name clues for the downstream Agent to choose what to expand. Use only the shortest discussion frame needed to disambiguate them. Never replace several concrete names with a broad topic, theme, or Session summary merely to make the map shorter. Do not collapse distinct uses of an overloaded expression or guess an unresolved identity.
-
-Preserve expandable map section IDs and surface cross-range corrections, rejections, dependencies, conflicts, uncertainty, and areas that require consulting the original evidence. Do not turn candidates into facts, invent missing evidence, or replace source locations with references to this generated map.
-
-Operator attention:
-${attention ?? 'No additional focus.'}
-
-BEGIN_EVIDENCE_MAP_MATERIALS
-${nodes.map((node) => evidenceMapNodeText(node)).join('\n\n---\n\n')}
-END_EVIDENCE_MAP_MATERIALS
-
-Output only the assembled navigation map as Markdown.`
-}
-
-function completedEvidenceMap(
-  root: EvidenceMapNode,
-  sourceRef: string,
-  lineCount: number,
-  selectedLineCount: number,
-  sections: EvidenceMapSection[],
-  formatVersion: string
-): string {
-  const rootSection = sections.find((section) => section.id === root.sectionIds[0])
-  const expandable = Boolean(rootSection?.children?.length)
-  return [
-    '# Evidence Map',
-    '',
-    '## Coverage',
-    `- Source: ${sourceRef}`,
-    `- Selective Observation view: ${formatVersion}`,
-    `- Raw source extent: ${observationSelector(1, lineCount)}`,
-    `- Source lines represented for preprocessing: ${selectedLineCount} of ${lineCount}`,
-    '- Unshown raw evidence remains available for on-demand verification.',
-    `- Root map section: ${root.sectionIds[0]}`,
-    ...(expandable
-      ? ['- Exact selected ranges remain attached to map sections and are disclosed progressively instead of being flattened into this root view.']
-      : [
-          `- Selected source ranges: ${observationSourceSelectorsText(root.sourceRanges)}`,
-          `- First evidence read location: ${formatEvidenceLocation(root.readLocation)}`,
-          `- First bounded read call: ${evidenceReadCallHint(root.readLocation)}`
-        ]),
-    '',
-    '## Progressive disclosure',
-    expandable
-      ? `- Expand the root section ${root.sectionIds[0]} to discover only its immediate child sections.`
-      : '- The complete preprocessed map material is included in this root view.',
-    expandable
-      ? `- Immediate child sections: ${rootSection?.children?.join(', ')}`
-      : '- Immediate child sections: none.',
-    expandable
-      ? '- Descendant section IDs are intentionally not flattened into this root prompt.'
-      : '- Use the selected source ranges and first read location above to verify the original material when necessary.',
-    '',
-    '## Navigation',
-    root.content
-  ].join('\n')
-}
-
-function segmentCharacterWindow(
+function assertCandidateLocationsBelongToSegment(
+  candidates: readonly StatementCandidate[],
   segment: ObservationSegment
-): EvidenceMapSection['characterWindow'] | undefined {
-  if (
-    segment.sourceRanges.length !== 1
-    || segment.sourceRanges[0].startLine !== segment.sourceRanges[0].endLine
-    || !segment.units.length
-  ) return undefined
-  const first = segment.units[0]
-  const last = segment.units[segment.units.length - 1]
-  if (first.startCharacter === 0 && last.endCharacter === first.totalCharacters) return undefined
-  return {
-    startCharacter: first.startCharacter,
-    endCharacter: last.endCharacter,
-    totalCharacters: first.totalCharacters
-  }
-}
-
-function mergedCharacterWindow(
-  nodes: EvidenceMapNode[]
-): EvidenceMapSection['characterWindow'] | undefined {
-  const firstRange = nodes[0]?.sourceRanges[0]
-  if (
-    !firstRange
-    || nodes[0].sourceRanges.length !== 1
-    || firstRange.startLine !== firstRange.endLine
-    || nodes.some((node) => (
-      node.sourceRanges.length !== 1
-      || node.sourceRanges[0].startLine !== firstRange.startLine
-      || node.sourceRanges[0].endLine !== firstRange.endLine
-      || !node.characterWindow
-    ))
-  ) {
-    return undefined
-  }
-  const windows = nodes.map((node) => node.characterWindow!)
-  if (windows.some((window, index) => (
-    window.totalCharacters !== windows[0].totalCharacters
-    || (index > 0 && window.startCharacter !== windows[index - 1].endCharacter)
-  ))) {
-    return undefined
-  }
-  return {
-    startCharacter: windows[0].startCharacter,
-    endCharacter: windows[windows.length - 1].endCharacter,
-    totalCharacters: windows[0].totalCharacters
+): void {
+  for (const candidate of candidates) {
+    for (const location of candidate.locations) {
+      const belongsToPrimaryMaterial = segment.units.some((unit) => (
+        unit.lineNumber === location.line
+        && location.offset >= unit.startCharacter
+        && location.offset < unit.endCharacter
+      ))
+      if (!belongsToPrimaryMaterial) {
+        throw new Error(
+          `Statement candidate “${candidate.expression}” 的证据位置不属于当前分段的主要 Observation 材料`
+        )
+      }
+    }
   }
 }
 
@@ -542,7 +431,7 @@ export class KnowledgeProcessingService {
   private preprocessingProgress?: ObservationPreprocessingProgress
   private exclusiveLease?: ProcessingRunLease
   private readonly unsubscribeAiBackend: () => void
-  private readonly evidenceMapPlanner: ResolvedEvidenceMapPlannerOptions
+  private readonly observationSegmentPlanner: ResolvedObservationSegmentPlannerOptions
 
   constructor(
     private readonly repository: KnowledgeProcessingRepository,
@@ -550,7 +439,9 @@ export class KnowledgeProcessingService {
     private readonly knowledgeAgent: KnowledgeAgentRuntime,
     options: KnowledgeProcessingServiceOptions = {}
   ) {
-    this.evidenceMapPlanner = resolveEvidenceMapPlannerOptions(options.evidenceMapPlanner)
+    this.observationSegmentPlanner = resolveObservationSegmentPlannerOptions(
+      options.observationSegmentPlanner
+    )
     this.unsubscribeAiBackend = aiBackend.subscribe(() => this.emit())
   }
 
@@ -940,10 +831,8 @@ export class KnowledgeProcessingService {
 
   private beginPreprocessingCall(
     context: ProcessingDebugTraceContext,
-    kind: 'segment_map' | 'navigation_merge',
     selectors: string[],
-    readLocation: EvidenceLocation,
-    sectionIds: string[]
+    readLocation: EvidenceLocation
   ): string {
     let callId = ''
     this.updatePreprocessingDebug(context, (trace) => {
@@ -952,11 +841,10 @@ export class KnowledgeProcessingService {
       trace.calls.push({
         id: callId,
         sequence,
-        kind,
+        kind: 'candidate_discovery',
         status: 'running',
         selectors: [...selectors],
         readLocation: { ...readLocation },
-        sectionIds: [...sectionIds],
         startedAt: new Date().toISOString()
       })
     })
@@ -1020,6 +908,13 @@ export class KnowledgeProcessingService {
         }
         return
       }
+      if (event.type === 'workspace_status') {
+        maintenance.workspace = {
+          candidates: { ...event.candidates },
+          draftStatementCount: event.draftStatementCount
+        }
+        return
+      }
 
       const toolName = safeKnowledgeToolName(event.toolName)
       const traceToolName = toolName ?? 'unknown_tool'
@@ -1078,42 +973,36 @@ export class KnowledgeProcessingService {
     this.workspaces.delete(runId)
   }
 
-  private async generateEvidenceMapMaterial(
+  private async discoverStatementCandidates(
     stage: ProcessingStageRunBinding,
     prompt: string,
     budget: PreprocessorContextBudget,
     signal: AbortSignal,
     modelCallCount: { value: number },
     traceContext: ProcessingDebugTraceContext,
-    maximumOutputBytes: number,
     call: {
-      kind: 'segment_map' | 'navigation_merge'
       selectors: string[]
       readLocation: EvidenceLocation
-      sectionIds: string[]
-    }
-  ): Promise<string> {
+    },
+    observationLines: readonly string[],
+    segment: ObservationSegment
+  ): Promise<StatementCandidate[]> {
     const traceCallId = this.beginPreprocessingCall(
       traceContext,
-      call.kind,
       call.selectors,
-      call.readLocation,
-      call.sectionIds
+      call.readLocation
     )
+    let generatedOutput: string | undefined
     try {
       if (!stage.instructions.trim()) throw new Error('Observation Preprocessor System Prompt 不能为空')
-      const boundedPrompt = `${prompt}\n\nHard output limit: return no more than ${maximumOutputBytes} UTF-8 bytes.`
-      if (utf8Bytes(stage.instructions) + utf8Bytes(boundedPrompt) > budget.maxInputBytes) {
+      if (utf8Bytes(stage.instructions) + utf8Bytes(prompt) > budget.maxInputBytes) {
         throw new PreprocessorInputBudgetError('模型输入预算不足，正在自动缩小预处理分段')
       }
       modelCallCount.value++
       const generated = await this.aiBackend.generateWithModel(stage.connectionId, stage.modelId, {
         systemPrompt: stage.instructions,
-        prompt: boundedPrompt,
-        maxOutputTokens: Math.min(
-          budget.maxOutputTokens,
-          Math.max(1, Math.floor(maximumOutputBytes / 4))
-        ),
+        prompt,
+        maxOutputTokens: budget.maxOutputTokens,
         timeoutMs: 5 * 60_000,
         maxResponseBytes: 8 * 1_024 * 1_024,
         reasoningEffort: stage.reasoningEffort,
@@ -1121,91 +1010,22 @@ export class KnowledgeProcessingService {
       })
       signal.throwIfAborted()
       const content = generated.text.trim()
-      if (!content) throw new Error('观察预处理器未返回 Evidence Map')
-      if (utf8Bytes(content) > maximumOutputBytes) {
-        throw new Error('观察预处理器返回的 Evidence Map 超过本层导航预算')
-      }
+      generatedOutput = content
+      if (!content) throw new Error('观察预处理器未返回 Statement candidate batch')
+      const batch = parseStatementCandidateBatch(content, observationLines)
+      assertCandidateLocationsBelongToSegment(batch.candidates, segment)
       this.finishPreprocessingCall(traceContext, traceCallId, 'completed', content)
-      return content
+      return batch.candidates
     } catch (error) {
       const terminalStatus = traceTerminalStatus(signal)
       this.finishPreprocessingCall(
         traceContext,
         traceCallId,
-        terminalStatus
+        terminalStatus,
+        generatedOutput
       )
       throw error
     }
-  }
-
-  private async assembleEvidenceMapNavigation(
-    stage: ProcessingStageRunBinding,
-    leafNodes: EvidenceMapNode[],
-    sections: EvidenceMapSection[],
-    attention: string | undefined,
-    budget: PreprocessorContextBudget,
-    signal: AbortSignal,
-    modelCallCount: { value: number },
-    traceContext: ProcessingDebugTraceContext
-  ): Promise<EvidenceMapNode> {
-    let nodes = leafNodes
-    let nextSectionIndex = sections.length
-    while (nodes.length > 1) {
-      const groups = groupEvidenceMapNodes(nodes, budget.planner.mergeBytes)
-      const next: EvidenceMapNode[] = []
-      let mergedAny = false
-      for (const group of groups) {
-        signal.throwIfAborted()
-        if (group.length === 1) {
-          next.push(group[0])
-          continue
-        }
-        mergedAny = true
-        const id = evidenceMapSectionId(nextSectionIndex++)
-        const characterWindow = mergedCharacterWindow(group)
-        const sourceRanges = coalesceObservationSourceRanges(
-          group.flatMap((node) => node.sourceRanges)
-        )
-        const selectors = observationSourceSelectors(sourceRanges)
-        const nodeShape = {
-          sourceRanges,
-          sectionIds: [id],
-          readLocation: { ...group[0].readLocation },
-          ...(characterWindow ? { characterWindow } : {})
-        }
-        const content = await this.generateEvidenceMapMaterial(
-          stage,
-          mergePrompt(group, attention),
-          budget,
-          signal,
-          modelCallCount,
-          traceContext,
-          maximumNodeContentBytes(nodeShape, budget.planner.mergeBytes),
-          {
-            kind: 'navigation_merge',
-            selectors,
-            readLocation: { ...nodeShape.readLocation },
-            sectionIds: group.flatMap((node) => node.sectionIds)
-          }
-        )
-        const children = group.flatMap((node) => node.sectionIds)
-        sections.push({
-          id,
-          selectors,
-          readLocation: { ...nodeShape.readLocation },
-          content,
-          children,
-          ...(characterWindow ? { characterWindow } : {})
-        })
-        next.push({
-          content,
-          ...nodeShape
-        })
-      }
-      if (!mergedAny) throw new Error('局部 Evidence Map 无法在当前输入预算内完成导航归并')
-      nodes = next
-    }
-    return nodes[0]
   }
 
   async runObservationPreprocessor(
@@ -1263,8 +1083,7 @@ export class KnowledgeProcessingService {
       const modelCallCount = { value: 0 }
       let divisor = 1
       let segments: ObservationSegment[] = []
-      let evidenceMap = ''
-      let workspaceSections: EvidenceMapSection[] = []
+      let statementCandidates: StatementCandidate[] = []
       for (;;) {
         controller.signal.throwIfAborted()
         const budget = preprocessorContextBudget(
@@ -1272,7 +1091,7 @@ export class KnowledgeProcessingService {
           stage,
           sourceRef,
           attention,
-          this.evidenceMapPlanner,
+          this.observationSegmentPlanner,
           divisor
         )
         try {
@@ -1280,118 +1099,58 @@ export class KnowledgeProcessingService {
         } catch (error) {
           if (
             divisor > 1
-            || budget.planner.segmentBytes < this.evidenceMapPlanner.segmentBytes
+            || budget.planner.segmentBytes < this.observationSegmentPlanner.segmentBytes
           ) {
             throw new Error('所选模型的上下文不足以容纳 Observation Preprocessor 的固定指令与最小证据片段')
           }
           throw error
         }
         this.updatePreprocessingProgress({
-          phase: 'mapping',
+          phase: 'discovering',
           completedSegments: 0,
           totalSegments: segments.length
         })
         this.updatePreprocessingDebug(debugTrace, (trace) => {
-          trace.phase = 'mapping'
+          trace.phase = 'discovering'
           trace.completedSegments = 0
           trace.totalSegments = segments.length
         })
 
-        const sections: EvidenceMapSection[] = []
-        const leafNodes: EvidenceMapNode[] = []
+        const discovered: StatementCandidate[] = []
         try {
+          let completedSegments = 0
           for (const segment of segments) {
             controller.signal.throwIfAborted()
-            const characterWindow = segmentCharacterWindow(segment)
             const selectors = observationSourceSelectors(segment.sourceRanges)
-            const leafShape = {
-              sourceRanges: segment.sourceRanges,
-              sectionIds: [segment.id],
-              readLocation: { ...segment.readLocation },
-              ...(characterWindow ? { characterWindow } : {})
-            }
-            const maximumOutputBytes = segments.length === 1
-              ? MAX_EVIDENCE_MAP_SECTION_BYTES
-              : maximumNodeContentBytes(leafShape, budget.planner.mergeBytes)
-            const content = await this.generateEvidenceMapMaterial(
+            const candidates = await this.discoverStatementCandidates(
               stage,
               segmentPrompt(segment, sourceRef, attention),
               budget,
               controller.signal,
               modelCallCount,
               debugTrace,
-              maximumOutputBytes,
               {
-                kind: 'segment_map',
                 selectors,
-                readLocation: { ...segment.readLocation },
-                sectionIds: [segment.id]
-              }
+                readLocation: { ...segment.readLocation }
+              },
+              observationLines,
+              segment
             )
-            sections.push({
-              id: segment.id,
-              selectors,
-              readLocation: { ...segment.readLocation },
-              content,
-              ...(characterWindow ? { characterWindow } : {})
-            })
-            leafNodes.push({
-              content,
-              ...leafShape
-            })
+            discovered.push(...candidates)
+            completedSegments++
             this.updatePreprocessingProgress({
-              phase: 'mapping',
-              completedSegments: leafNodes.length,
+              phase: 'discovering',
+              completedSegments,
               totalSegments: segments.length
             })
             this.updatePreprocessingDebug(debugTrace, (trace) => {
-              trace.completedSegments = leafNodes.length
+              trace.completedSegments = completedSegments
             })
           }
-
-          if (segments.length === 1) {
-            const root = leafNodes[0]
-            evidenceMap = completedEvidenceMap(
-              root,
-              sourceRef,
-              observationLines.length,
-              new Set(observationView.units.map((unit) => unit.lineNumber)).size,
-              sections,
-              observationView.formatVersion
-            )
-            workspaceSections = []
-          } else {
-            this.updatePreprocessingProgress({
-              phase: 'assembling',
-              completedSegments: segments.length,
-              totalSegments: segments.length
-            })
-            this.updatePreprocessingDebug(debugTrace, (trace) => {
-              trace.phase = 'assembling'
-            })
-            const root = await this.assembleEvidenceMapNavigation(
-              stage,
-              leafNodes,
-              sections,
-              attention,
-              budget,
-              controller.signal,
-              modelCallCount,
-              debugTrace
-            )
-            evidenceMap = completedEvidenceMap(
-              root,
-              sourceRef,
-              observationLines.length,
-              new Set(observationView.units.map((unit) => unit.lineNumber)).size,
-              sections,
-              observationView.formatVersion
-            )
-            workspaceSections = sections
-          }
+          statementCandidates = discovered
           break
         } catch (error) {
-          if (!retryableContextOverflow(error) || controller.signal.aborted) throw error
+          if (!retryablePreprocessorEnvelopeError(error) || controller.signal.aborted) throw error
           divisor *= 2
           if (!Number.isSafeInteger(divisor)) {
             throw new Error('所选模型的上下文不足以容纳 Observation 预处理指令')
@@ -1409,8 +1168,7 @@ export class KnowledgeProcessingService {
         sourceRef,
         observationLines,
         observationFormatVersion: observationView.formatVersion,
-        evidenceMap,
-        evidenceMapSections: workspaceSections,
+        statementCandidates,
         attention,
         createdAt: Date.now()
       }, debugTrace.origin)
@@ -1419,7 +1177,7 @@ export class KnowledgeProcessingService {
       return {
         stageId,
         runId,
-        evidenceMap,
+        statementCandidates,
         sourceRef,
         segmentCount: segments.length,
         debugTrace: completedDebugTrace,
@@ -1476,14 +1234,11 @@ export class KnowledgeProcessingService {
         (runtime) => (options.knowledgeAgent ?? this.knowledgeAgent).run({
           runtime,
           systemPrompt: stage.instructions,
-          evidenceMap: workspace.evidenceMap,
-          evidenceMapSections: workspace.evidenceMapSections.map((section) => ({
-            ...section,
-            selectors: [...section.selectors],
-            readLocation: { ...section.readLocation },
-            ...(section.children ? { children: [...section.children] } : {})
+          statementCandidates: workspace.statementCandidates.map((candidate) => ({
+            ...candidate,
+            locations: candidate.locations.map((location) => ({ ...location }))
           })),
-          observationLines: [...workspace.observationLines],
+          observationLines: workspace.observationLines,
           observationFormatVersion: workspace.observationFormatVersion,
           sourceRef: workspace.sourceRef,
           contributionRunRef: options.contributionRunRef ?? `manual:${randomUUID()}`,
@@ -1511,6 +1266,10 @@ export class KnowledgeProcessingService {
         stageId,
         preprocessingRunId: workspace.runId,
         contribution: result.contribution,
+        statementCandidates: result.statementCandidates.map((candidate) => ({
+          ...candidate,
+          evidenceLocations: [...candidate.evidenceLocations]
+        })),
         debugTrace: completedDebugTrace,
         durationMs: Date.now() - startedAt,
         completedAt: new Date().toISOString(),

@@ -63,7 +63,11 @@ function preprocessingResult(runId = 'preprocess-1'): ObservationPreprocessingRe
   return {
     stageId: 'observation_preprocessor',
     runId,
-    evidenceMap: '# Evidence Map',
+    statementCandidates: [{
+      expression: 'Candidate',
+      question: 'What does Candidate mean in this context?',
+      locations: [{ line: 1, offset: 0 }]
+    }],
     sourceRef: `workspace:${runId}:observation`,
     segmentCount: 1,
     debugTrace: debugTrace(runId, 'observation_preprocessor'),
@@ -93,6 +97,14 @@ function maintenanceResult(): KnowledgeMaintenanceResult {
         content: 'Candidate content'
       }]
     },
+    statementCandidates: [{
+      ref: 'C000001',
+      expression: 'Candidate',
+      question: 'What does Candidate mean in this context?',
+      evidenceLocations: ['L000001:C0'],
+      status: 'resolved',
+      resolution: 'Represented by [[Candidate]].'
+    }],
     debugTrace: debugTrace('preprocess-1', 'knowledge_maintenance_agent'),
     durationMs: 20,
     completedAt: '2026-07-26T00:00:01.000Z',

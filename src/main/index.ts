@@ -198,7 +198,14 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       impactVisible ||= Boolean(page.querySelector('[data-testid="full-chain-running-impact"]'))
       const completed = Boolean(page.querySelector('[data-testid="full-chain-run-result"]'))
       const error = page.querySelector('.page-error')?.textContent?.trim()
-      if (completed || error) return { completed, impactVisible, error }
+      if (completed || error) return {
+        completed,
+        impactVisible,
+        error,
+        candidateCount: page.querySelectorAll('#full-chain-panel-result .statement-candidate').length,
+        resolutionCount: page.querySelectorAll('#full-chain-panel-result .statement-candidate__resolution').length,
+        statementCount: page.querySelectorAll('#full-chain-panel-result .sandbox-statement').length
+      }
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
     return { completed: false, impactVisible, error: 'Timed out waiting for full-chain result' }
@@ -278,6 +285,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const page = document.querySelector('[data-testid="page-knowledge-processing"]')
     const stageTraces = Array.from(page.querySelectorAll('.processing-stage [data-testid="processing-debug-trace"]'))
     const calls = Array.from(page.querySelectorAll('.processing-stage [data-testid^="preprocessing-call-"]'))
+    const workspace = page.querySelector('.processing-stage [data-testid="maintenance-workspace-status"]')
     if (calls[0]) calls[0].open = true
     calls[0]?.scrollIntoView({ block: 'center' })
     return {
@@ -285,6 +293,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       preprocessingCallCount: calls.length,
       preprocessingOutput: calls[0]?.querySelector('pre')?.textContent,
       maintenanceEventCount: page.querySelectorAll('.processing-stage [data-testid^="maintenance-event-"]').length,
+      workspaceValues: Array.from(workspace?.querySelectorAll('strong') ?? []).map((node) => node.textContent?.trim()),
       bodyText: page.innerText,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
     }

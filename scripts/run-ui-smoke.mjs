@@ -118,6 +118,12 @@ if (!processing.fullChain.bodyText.includes('运行时从 Agent 的原始位置�
 if (!processing.fullChainRun?.impactVisible || !processing.fullChainRun?.completed) {
   throw new Error(`Full-chain run did not complete without a native confirmation dialog: ${processing.fullChainRun?.error || 'unknown error'}`)
 }
+if (processing.fullChainRun.candidateCount !== 1 || processing.fullChainRun.resolutionCount !== 1) {
+  throw new Error('Full-chain result does not expose the adjudicated Statement Candidate Agenda')
+}
+if (processing.fullChainRun.statementCount !== 1) {
+  throw new Error('Full-chain result does not expose the committed Knowledge Statement')
+}
 if (processing.fullChain.bodyText.includes('已导入 Session')) {
   throw new Error('Full-chain view still exposes the removed import model')
 }
@@ -128,7 +134,7 @@ if (processing.promptValues.some((prompt) => typeof prompt !== 'string' || !prom
   throw new Error('A processing default prompt is empty')
 }
 const [preprocessorPrompt, maintainerPrompt] = processing.promptValues
-for (const requiredCopy of ['Observation Preprocessor', 'Evidence Map', 'primary language of the original material']) {
+for (const requiredCopy of ['open investigation agenda', 'not draft Knowledge Statements', 'primary language of the original material']) {
   if (!preprocessorPrompt.includes(requiredCopy)) {
     throw new Error(`Observation Preprocessor prompt is missing its responsibility: ${requiredCopy}`)
   }
@@ -199,7 +205,10 @@ if (!processing.promptRestore.matchesOriginal || processing.promptRestore.defaul
 }
 if (processing.trace.panelCount !== 2) throw new Error('Both processing debug trace panels must be rendered')
 if (processing.trace.preprocessingCallCount !== 1) throw new Error('The fixture preprocessing call is missing')
-if (!processing.trace.preprocessingOutput?.includes('# Evidence Map')) {
+if (
+  !processing.trace.preprocessingOutput?.includes('"candidates"')
+  || !processing.trace.preprocessingOutput?.includes('知识加工链路')
+) {
   throw new Error('The preprocessing model output is not visible in the debug trace')
 }
 if (processing.trace.maintenanceEventCount !== 3) {
@@ -209,6 +218,9 @@ for (const requiredCopy of ['模型输出可能复述原始材料', '模型轮�
   if (!processing.trace.bodyText.includes(requiredCopy)) {
     throw new Error(`Knowledge processing trace is missing: ${requiredCopy}`)
   }
+}
+if (processing.trace.workspaceValues.join(',') !== '0,1,1,1') {
+  throw new Error(`Knowledge maintenance workspace status is incorrect: ${processing.trace.workspaceValues.join(',')}`)
 }
 if (processing.trace.overflowX) throw new Error('Debug trace view has unexpected horizontal overflow')
 if (processing.stateAfterNavigation.selectedSession !== processing.fullChain.selectedSession) {

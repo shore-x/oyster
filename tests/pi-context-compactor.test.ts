@@ -129,6 +129,25 @@ describe('Pi context compactor', () => {
     expect(JSON.stringify(compacted)).toContain('<context-summary>')
   })
 
+  it('reserves room for fresh external context appended after compaction', async () => {
+    const model = { ...fauxProvider().getModel(), contextWindow: 8_000, maxTokens: 512 }
+    let calls = 0
+    const transform = createPiContextCompactor({
+      model,
+      streamFn: (() => {
+        calls++
+        return completedStream(fauxAssistantMessage('compact checkpoint'))
+      }) as StreamFn,
+      systemPrompt: 'Continue the task.',
+      reservedContextTokens: 3_000
+    })
+
+    const compacted = await transform([userMessage('x'.repeat(18_000))])
+
+    expect(calls).toBeGreaterThan(0)
+    expect(JSON.stringify(compacted)).toContain('<context-summary>')
+  })
+
   it('fails locally when fixed Agent context cannot fit the declared window', () => {
     const model = { ...fauxProvider().getModel(), contextWindow: 3_000, maxTokens: 512 }
     let calls = 0

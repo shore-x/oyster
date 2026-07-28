@@ -1,5 +1,6 @@
 /** Per-Statement persistence boundary shared by producers and the Store. */
 export const MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH = 1_024 * 1_024
+export const MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH = 2_048
 
 /** Runtime envelope metadata. It is not part of Statement semantics. */
 export interface KnowledgeContributionRecord {

@@ -18,7 +18,7 @@ import {
   PiCodingPlanAdapter,
   type PiCodingPlanModels
 } from '../src/main/ai-backends/pi-coding-plan-adapter'
-import { ModelContextOverflowError } from '../src/main/ai-backends/model'
+import { ModelContextOverflowError, ModelOutputTruncatedError } from '../src/main/ai-backends/model'
 import type { CodingPlanAuthentication } from '../src/shared/ai-backends'
 
 const MODEL: Model<Api> = {
@@ -426,8 +426,7 @@ describe('PiCodingPlanAdapter', () => {
     } catch (error) {
       outputError = error
     }
-    expect(outputError).toBeInstanceOf(Error)
-    expect(outputError).not.toBeInstanceOf(ModelContextOverflowError)
+    expect(outputError).toBeInstanceOf(ModelOutputTruncatedError)
     expect((outputError as Error).message).toContain('不完整')
   })
 

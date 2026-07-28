@@ -7,7 +7,10 @@ import type {
   KnowledgeStatementDraft,
   ListKnowledgeStatementsOptions
 } from './model'
-import { MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH } from './model'
+import {
+  MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH,
+  MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH
+} from './model'
 import type {
   KnowledgeReader,
   KnowledgeStatementRecord
@@ -15,7 +18,6 @@ import type {
 
 const SCHEMA_VERSION = 3
 const MAX_RUN_REF_LENGTH = 1_024
-const MAX_TITLE_LENGTH = 2_048
 const MAX_LIST_LIMIT = 1_000
 const MAX_SEARCH_LIMIT = 100
 
@@ -68,7 +70,11 @@ function normalizeDraft(draft: KnowledgeContributionDraft): NormalizedContributi
   const titles = new Set<string>()
   const statements = draft.statements.map((statement: KnowledgeStatementDraft, index): KnowledgeStatement => {
     if (!statement || typeof statement !== 'object') throw new Error(`Statement ${index + 1} 格式无效`)
-    const title = requiredTrimmed(statement.title, `Statement ${index + 1} title`, MAX_TITLE_LENGTH)
+    const title = requiredTrimmed(
+      statement.title,
+      `Statement ${index + 1} title`,
+      MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH
+    )
     if (titles.has(title)) throw new Error(`同一 Knowledge Contribution 中 canonical title 重复：${title}`)
     titles.add(title)
     if (typeof statement.content !== 'string' || !statement.content.trim()) {
@@ -339,7 +345,11 @@ export class SqliteKnowledgeStore implements KnowledgeReader {
 
   getStatement(title: string): KnowledgeStatement | undefined {
     this.assertOpen()
-    const normalizedTitle = requiredTrimmed(title, 'title', MAX_TITLE_LENGTH)
+    const normalizedTitle = requiredTrimmed(
+      title,
+      'title',
+      MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH
+    )
     const row = this.database.prepare(`
       SELECT title, content
       FROM knowledge_statements

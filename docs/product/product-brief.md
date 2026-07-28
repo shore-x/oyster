@@ -34,7 +34,7 @@ Oyster 向用户提供四个核心能力：
 
 1. **发现与接入**：发现本机 Agent 的可执行程序、应用、配置和数据目录，明确展示每个来源支持历史访问、实时通知或上下文输出中的哪些能力。
 2. **保真访问**：为聊天 transcript 与人类编写的 Agent 指令建立轻量 catalog，并在需要时由 Source Adapter 从原始位置读取确定版本；不同 Harness 的原始格式不因统一模型而丢失，Agent 自动生成的 memory 不作为历史来源。
-3. **知识加工**：用 Observation Preprocessing 降低原始活动噪声，再由受控 Knowledge Maintenance Agent 在用户 Attention 下探索现有知识、形成带出处且可修订的理解；默认和自定义处理器使用同一 Knowledge Contribution 契约。
+3. **知识加工**：用 Observation Preprocessing 从原始活动中发现值得调查的问题，再由受控 Knowledge Maintenance Agent 在用户 Attention 下核查现有知识与 Raw Evidence、形成可复用的理解；默认和自定义处理器使用同一 Knowledge Contribution 契约。
 4. **安全供给**：通过本地 API 和 MCP 等开放边界向第三方 Agent 提供检索；未来可在用户授权、Scope 和 Token Budget 内生成并注入 Context Packet。
 
 ## 4. 产品身份与边界
@@ -67,7 +67,7 @@ Oyster 必须把三个认识论层次分开，避免把模型总结覆盖到原�
 | 知识层 | 从观察或已有知识形成的 Knowledge Statement；Statement 正文可以通过 canonical title 显式引用其他 Statement 并表达任意多元关系 | Statement 是领域语义的 Source of Truth；名称引用在读取时动态指向当前知识视图中的同名 Statement；不预设独立 Relation、Decision、Problem 等全局类型 |
 | 投影层 | 持久 Markdown 协作文档，以及按需生成的临时 Context Packet | 持久文档由知识和 Attention 初始化，再由用户与 Agent 共同维护；更新必须基于当前文档，不得全量重建并覆盖人工编辑。临时消费视图不要求持久化 |
 
-Observation Preprocessing 产生的 Evidence Map 不构成第四个认识论层次。它是一种只供后续运行、可随时重算且不直接对外提供的 Working Artifact；其中的理解只有经过统一知识提交边界成为 Knowledge Statement，才进入知识层。正式知识应能够追溯到原始观察或输入知识，但追溯结构及其 MVP 实现范围尚未确定。
+Observation Preprocessing 发现的 Candidate 是带回源线索的待调查问题，不是事实、Statement 或知识变更决定。它们进入一次运行的开放调查清单，由 Knowledge Maintenance Agent 依据当前知识和 Raw Evidence 补充、合并、拆分或判定无需变更；Candidate 与 Statement 不要求一一对应。开放清单与 Contribution Draft 都是可丢弃的 Working Artifact，不构成第四个认识论层次。只有经过统一知识提交边界成为 Knowledge Statement 的内容才进入知识层。正式知识应能够追溯到原始观察或输入知识，但追溯结构及其 MVP 实现范围尚未确定。
 
 三层在状态和所有权上分离，但知识加工与投影通过共享 Attention 耦合。同一个 Attention 可以指导 Observation Preprocessor、Knowledge Maintenance Agent 和 Projection Agent；不同 Attention 产生的知识进入共享知识层并可以重叠、复用或相互修订，不按投影复制成独立真相。
 
@@ -113,9 +113,9 @@ MVP 的“实时”定义为 **turn 级近实时**，不是 token streaming。�
 
 开始加工前，用户选择一个已配置且能力匹配的 AI Connection。数据来源与执行连接相互独立：从某个 Agent Harness 读取观察，不要求使用同一 Provider 进行知识加工。
 
-1. 默认或自定义 Observation Preprocessor 将观察转化为可丢弃、可重算且便于回到原文核查的 Evidence Map；
-2. 默认或自定义 Knowledge Maintenance Agent 以 Evidence Map 和相关已有 Knowledge Statement 为起点，多次搜索和比较，必要时从地图给出的位置渐进读取最小原始证据；默认策略优先维护细粒度、持久且可复用的对象、概念及其关系理解，而不是生成 Session 总结或工作日志；
-3. Agent 通过统一提交边界提出一条或多条 Knowledge Statement；Statement 使用当前知识视图中唯一且语义丰富的 canonical title 和自由文本正文，以 `[[canonical title]]` 或 `[[canonical title|local display text]]` 表达关系，并在读取时动态解析到当前同名 Statement；
+1. 默认或自定义 Observation Preprocessor 从观察中发现带回源线索的 Candidate 问题，作为开放调查清单的初始内容，而不是生成 Session 摘要或拟定 Statement；
+2. 默认或自定义 Knowledge Maintenance Agent 以开放清单和相关已有 Knowledge Statement 为起点，按需读取 Raw Evidence，补充并裁决问题；默认策略优先维护细粒度、持久且可复用的对象、概念及其关系理解，而不是生成 Session 总结或工作日志；
+3. Agent 独立维护 Contribution Draft，并通过统一提交边界提出一条或多条 Knowledge Statement；Statement 使用当前知识视图中唯一且语义丰富的 canonical title 和自由文本正文，以 `[[canonical title]]` 或 `[[canonical title|local display text]]` 表达关系，并在读取时动态解析到当前同名 Statement；
 4. Oyster Core 统一执行权限、提交和生命周期边界；
 5. 用户可以审查、纠正、删除或重新加工派生知识；如何向用户呈现其追溯关系随治理设计确定。
 
@@ -200,7 +200,7 @@ Oyster 把认证和计费通道与处理 Runtime 分开：
 
 LLM 适合承担：
 
-- 在 Observation Preprocessor 中承担语义分段、局部摘要、实体和关系候选；
+- 在 Observation Preprocessor 中有界发现需要回到 Raw Evidence 调查的名称和指代问题；
 - 驱动受控 Knowledge Maintenance Agent 多步搜索、核查、复用和维护共享知识；
 - 驱动 Projection Agent 基于当前文档做局部修订；
 - 为一次查询构建带引用的 Context Packet。

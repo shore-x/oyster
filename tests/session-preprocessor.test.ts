@@ -38,7 +38,11 @@ function preprocessingResult(sourceRef: string): ObservationPreprocessingResult 
   return {
     stageId: 'observation_preprocessor',
     runId: 'preprocessing-run-1',
-    evidenceMap: '# Evidence Map\n\n- Concise summaries are preferred.',
+    statementCandidates: [{
+      expression: 'summaries',
+      question: 'What does “summaries” refer to in this Session?',
+      locations: [{ line: 1, offset: 0 }]
+    }],
     sourceRef,
     segmentCount: 1,
     debugTrace: {
@@ -121,7 +125,7 @@ function createHarness(options: {
 const binding: ProcessingStageRunBinding = {
   connectionId: 'model:preprocessor',
   modelId: 'small-model',
-  instructions: 'Create an Evidence Map.',
+  instructions: 'Discover Statement candidates as strict JSON.',
   reasoningEffort: 'low'
 }
 
@@ -152,6 +156,11 @@ describe('SessionPreprocessor', () => {
       }
     )
     expect(result.sourceRef).toBe(sourceRef)
+    expect(result.statementCandidates).toEqual([{
+      expression: 'summaries',
+      question: 'What does “summaries” refer to in this Session?',
+      locations: [{ line: 1, offset: 0 }]
+    }])
   })
 
   it.each([

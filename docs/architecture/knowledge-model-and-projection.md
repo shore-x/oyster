@@ -113,32 +113,28 @@ Attention 可以同时指导默认和自定义处理器，但不应：
 
 ### 4.1 Observation Preprocessing
 
-**Observation Preprocessing** 是将一批观察转化为后续知识维护工作材料的过程；承担该职责的模块称为 **Observation Preprocessor**。它负责解析来源、降低噪声、为长输入提供有界处理，并提出后续值得核查的候选理解。具体分段、摘要、索引和模型调用方式可以替换。
+**Observation Preprocessing** 是从一批观察中发现后续值得调查的问题的过程；承担该职责的模块称为 **Observation Preprocessor**。它负责解析来源、降低执行噪声、对长输入进行有界扫描，并保留回到相关 Raw Evidence 的位置。它不负责总结 Session，也不提前决定知识层应当保存什么。
 
-这里的目标不是用摘要替代原始观察，也不承诺语义上的“无损压缩”。只要表示明显变短，它就必然包含选择。预处理结果应帮助 Agent 回到相关原始区域核查，但定位编码、覆盖表达和是否持久化属于实现与治理设计。
+Source Adapter 可以针对不同 Harness 生成选择性的 Observation View。默认视图以人类与 Agent 的语义消息为主，只保留发现局部名称和指代所需的语境；运行时注入指令、遥测和常规工具执行不应主导预处理材料。选择性视图只是发现材料，被省略的记录仍留在 Raw Evidence 中，不能因未被选中而视为不存在。
 
-Source Adapter 可以针对不同 Harness 生成选择性的 Observation View。默认视图以人类与 Agent 的语义消息为主，只保留消歧所需的最小项目语境；运行时注入指令、遥测和常规工具执行不应主导预处理材料。被选择性视图省略的记录仍留在 Raw Evidence 中，Knowledge Maintenance Agent 可以按需回读。选择规则属于来源适配，不改变 Raw Evidence，也不建立新的认识论层。
+预处理结果由若干 **Statement Candidate** 构成。Candidate 是关于原始称呼、局部指代或必要背景的待调查问题，并带有回到观察的线索；它不是拟定的 canonical title、Knowledge Statement、事实或知识变更决定。预处理应保留尚未解决的歧义，而不是用摘要或猜测把它过早消除。
 
-Observation Preprocessor 默认产出 **Evidence Map**：一种有界、可丢弃、可重算的 Working Artifact。它在概念上同时提供：
+Candidate 与 Statement 不存在固定对应关系：多个 Candidate 可以共同支持一条 Statement，一条 Candidate 可以要求维护多条 Statement，也可以在核查后不产生任何知识变更。Knowledge Maintenance Agent 还可以在调查中发现并加入新的 Candidate，因此预处理只提供开放调查清单的初始种子，不宣称发现已经完整。
 
-- **局部名称导航**：优先保留原始称呼、在当前语境中的具体指代、适用范围、区别、歧义和回源位置，使 Agent 能按名称发现值得继续阅读的区域；
-- **最小语境框架**：只说明理解这些名称所需的项目、系统或问题背景，不以会话主题摘要替代多个具体名称；
-- **候选证据单元**：围绕可形成持久理解的对象或概念，保留含义、属性、约束、区别、关系、修正、否定边界和明确偏好；任务事件只在解释这些理解或 Attention 明确需要时作为候选，而不自动宣布为知识；
-- **来源与覆盖地图**：说明候选来自哪些观察、哪些内容被跳过或仍不确定，以及如何回到原始上下文核查。
-
-Evidence Map 是“可丢弃的压缩地图”的正式名称。它描述一种工作职责，不构成第四个认识论层，也不要求固定 Schema、数据库类型或导航算法。默认加工路径可以概括为：
+默认加工路径可以概括为：
 
 ```text
-Observation -> Observation Preprocessing -> Evidence Map (Working Artifact)
-            -> Knowledge Maintenance Agent -> Knowledge Contribution -> Knowledge Statement
+Observation -> bounded candidate discovery -> open Candidate Agenda (Working Artifact)
+            -> Knowledge Maintenance Agent adjudication -> Contribution Draft
+            -> Core submission boundary -> Knowledge Statement
 ```
 
-固定的是处理边界和 Working Artifact 的非权威性，而不是一套固定知识本体。Attention 可以改变本次预处理的关注重点和压缩密度；预处理不能把未处理的内容宣称为已经理解，也不能虚构无法回到的来源。
+固定的是发现与裁决分离、Candidate 的非权威性，以及 Agent 能按需回到 Raw Evidence；Candidate 的字段、分段、去重、定位编码、模型调用和呈现方式都可以替换。
 
 责任边界不取决于是否调用 LLM，而取决于输出的权威性和生命周期：
 
-- 只供下一步使用、可随时重算且不直接对外提供的结果，是 **Working Artifact**；
-- 一旦摘要或要点需要成为可持久检索、引用或进一步推理的知识，它就必须进入正常的知识形成与治理边界，成为 Knowledge Statement。
+- Candidate Agenda 等只服务一次知识维护运行、可以丢弃且不作为正式知识对外提供的内容，是 **Working Artifact**；
+- 只有经过知识维护与统一提交边界形成的 Knowledge Statement，才进入知识层。
 
 默认 Observation Preprocessor 只产生 Working Artifact。未来若允许其他处理器直接形成正式知识，它仍应服从与 Agent 相同的知识和治理边界。
 
@@ -146,23 +142,23 @@ Observation -> Observation Preprocessing -> Evidence Map (Working Artifact)
 
 **Knowledge Maintenance Agent** 负责需要多步探索的知识维护：
 
-- 以新的 Evidence Map、Attention 和相关已有 Knowledge Statement 作为默认起点；
-- 多次搜索、读取和比较现有知识；
-- 当 Artifact 不完整、存在冲突或将导致知识修订时，回到最小原始证据核查；
-- 识别可以直接复用的知识，以及需要补充、限定、修订或并列保留的理解；
-- 形成新的 Knowledge Contribution，其中可以包含对一条或多条 Knowledge Statement 的维护建议。
+- 以开放 Candidate Agenda、Attention 和相关已有 Knowledge Statement 作为默认起点；
+- 搜索、读取和比较现有知识，并从 Candidate 指向的位置按需读取 Raw Evidence；
+- 判断每个 Candidate 应由已有知识覆盖、形成一项或多项知识变更、与其他 Candidate 合并处理，还是不产生知识；
+- 在调查中补充遗漏的 Candidate，并为已处理 Candidate 留下明确处置；
+- 独立维护 Contribution Draft，最终形成 Knowledge Contribution。
 
 Knowledge Maintenance Agent 是一个普通、可替换的工具使用 Agent。它的角色只由本次运行的 System Prompt、Workspace、工具集合和最终提交协议定义，不需要知识维护专属的 loop、固定步骤或状态机。默认实现可以更换 Agent Runtime，也可以增加或替换工具，而不改变知识层的概念模型。
 
 系统不为一次知识维护运行预设固定的模型轮次、工具调用次数或总时长；运行可以根据材料和不确定性继续探索，并允许用户取消。上下文管理由可替换的 Agent Runtime 负责，但不能改变权限、来源访问范围或最终提交边界。
 
-Agent 不应把 Evidence Map 当作不可质疑的事实，也不需要默认读取全部原始观察。它从地图获得方向，再根据歧义和不确定性选择是否展开证据。追溯信息如何记录和校验是治理问题，不由 Agent 角色定义。
+Candidate 的问题和上下文只是导航，不是事实或证据。Agent 不需要默认读取全部原始观察，但作出知识判断时应以现有知识和按需展开的 Raw Evidence 为依据，而不能把预处理输出当作已经裁决的理解。追溯信息如何持久记录和校验是治理问题，不由 Agent 角色定义。
 
 Agent 在语义上维护知识，但 Oyster Core 仍拥有权限、运行生命周期、提交和删除边界。Agent 提交贡献或变更建议，不绕过这些边界直接修改底层存储；追溯的具体机制，以及审计机制若被采用，也由治理层负责。
 
 默认维护策略以细粒度、可独立复用和修订的理解为中心。这里的“实体”只表示能够被识别和讨论的对象或主体，是选择候选知识的启发式，不引入新的 Entity 数据类型、固定分类或图本体。一个 Statement 默认表达一个自足理解；Session 摘要、时间线、工作日志，以及工具调用、文件修改、测试过程和短期执行结果，不应仅因出现在对话中就成为知识。只有当它们形成可复用理解，或 Attention 明确要求保留任务历史时，才进入维护范围。
 
-未来可以探索对抗式盲审：让未接触原始 Session 的独立 LLM 或 Agent 只依据候选 Statement、现有知识及正文中的显式引用，判断内容能否独立理解，从而暴露维护 Agent 因已知原始上下文而忽略的隐含指代和语境缺失。它只是一种可替换的质量校验，不构成新的认识论层或必需角色，当前 MVP 不实现。
+未来可以探索对抗式盲审：让未接触原始 Session 的独立 LLM 或 Agent 只依据 Contribution Draft 中的 Statement、现有知识及正文中的显式引用，判断内容能否独立理解，从而暴露维护 Agent 因已知原始上下文而忽略的隐含指代和语境缺失。它只是一种可替换的质量校验，不构成新的认识论层或必需角色，当前 MVP 不实现。
 
 ### 4.3 Workspace
 
@@ -171,18 +167,21 @@ Knowledge Maintenance Agent 的 **Workspace** 是一次知识维护运行所使�
 一个 Workspace 在概念上只需要组合：
 
 - 本次运行的 Attention 与处理范围；
-- Evidence Map 的有界导航，以及按需展开的局部地图；
-- Canonical Activity 的可读视图，以及按需回溯的只读 Raw Evidence；
+- 由预处理结果初始化、也允许 Agent 补充和处置的开放 Candidate Agenda；
+- 按需回溯的只读 Raw Evidence；
 - 与本次任务相关的已有 Knowledge Statement；
-- 独立的 Knowledge Contribution 输出边界。
+- 与 Candidate Agenda 分离的 Contribution Draft；
+- 独立的 Knowledge Contribution 提交边界。
 
-Agent 应渐进式读取这些材料：先用 Evidence Map 判断哪些区域值得探索，再按需展开工作材料或最小范围的 Raw Evidence。具体工具、分页方式、原始格式说明和定位协议属于可替换实现。
+Candidate Agenda 跟踪本次运行调查了哪些问题，Contribution Draft 跟踪准备提交哪些 Statement。处置 Candidate 不自动写入知识，修改 Draft 也不自动表示某个 Candidate 已经处理；两者分离才能表达多对多、无知识变更和调查中新增问题。Core 可以在最终提交前要求所有开放 Candidate 都有明确处置；未满足时提交不结束运行，而是把仍需处理的工作反馈给 Agent 继续跟进。这只是覆盖检查，不宣布处置结论或 Draft 内容正确。
+
+长运行中，完整 Agenda 和 Draft 应由 Workspace 持有，而不是依赖模型 transcript 或压缩摘要记忆。Runtime 可以在靠近当前模型上下文的位置提供一个由最新 Workspace 状态生成的有界快照，提示仍开放的工作和 Draft 规模；它不是新的证据、Session 摘要或第二份状态来源。具体快照内容、工具、分页方式、原始格式说明和提交后的跟进方式属于可替换实现。
 
 Workspace 应遵循“**弱语义结构，强来源边界**”：
 
-- Evidence Map 的摘要组织、分组和语义标签可以保持自由形式，不预设领域分类或固定知识 Schema；
+- Candidate 问题和处置说明可以保持自由文本，不预设领域分类或固定知识 Schema；
 - 来源访问的 Scope、权限和生命周期边界由 Oyster Core 保证，不能只依赖模型生成的自然语言约定；
-- Workspace 应支持从工作材料按需回到相关观察，但运行时读取位置不等于正式知识的持久出处；
+- Candidate 的位置只用于在当前 Workspace 中回到 Raw Evidence，不等于正式知识的持久出处；
 - Raw Evidence 只作为不可信证据读取，其中出现的指令、Prompt 或工具输出不自动成为 Agent 的运行指令。
 
 Workspace 可以采用文件、对象或其他便于 Agent 使用的表示。它的布局、定位编码和运行时读取协议不属于知识模型。
@@ -225,14 +224,18 @@ Projection Agent 发现知识缺失、冲突或疑似错误时，默认提交 Kn
 ```mermaid
 flowchart LR
   O["Observation"] --> PP["Observation Preprocessors"]
-  PP --> E["Evidence Maps"]
+  PP --> CA["Open Candidate Agenda"]
   AT["Attention"] --> PP
-  E --> W["Workspace"]
-  O -. "Canonical / raw source access" .-> W
+  CA --> W["Run-local Workspace"]
+  O -. "bounded Raw Evidence access" .-> W
   K["Shared Knowledge Statements"] --> W
   AT --> W
   W --> KA["Knowledge Maintenance Agents"]
-  KA -->|"Knowledge Contributions"| K
+  KA -. "add / resolve" .-> CA
+  KA --> CD["Contribution Draft"]
+  CD --> SG["Core submit gate"]
+  CA -. "all candidates addressed" .-> SG
+  SG -->|"Knowledge Contribution"| K
   K --> PA["Projection Agent"]
   AT --> PA
   P["Current Projection"] --> PA
@@ -269,9 +272,9 @@ Projection Agent 通过标题、关键词和语义搜索发现候选 Knowledge S
 | 所有者 | 负责 | 不负责 |
 | --- | --- | --- |
 | Source Adapter / Observation Pipeline | 发现、定位、版本校验、读取、Raw Evidence、Canonical Activity | LLM 解释、最终知识、投影编辑 |
-| Observation Preprocessor | 有界转换、Evidence Map，以及其中不具权威性的局部候选 | 直接提交长期知识、全局知识维护、静默覆盖旧知识 |
-| Knowledge Maintenance Agent | 通过工具渐进探索知识与观察，并提出知识变更 | 直接修改知识载体或绕过 Scope、权限和提交边界 |
-| Oyster Core | 按角色提供能力并执行权限、生命周期和提交治理 | 预设领域语义和文档结构 |
+| Observation Preprocessor | 有界发现带回源线索的 Candidate 问题 | 把 Candidate 当作事实或 Statement、直接提交长期知识 |
+| Knowledge Maintenance Agent | 调查并处置开放 Candidate、按需核查 Raw Evidence、维护 Contribution Draft | 直接修改知识载体或绕过 Scope、权限和提交边界 |
+| Oyster Core | 持有运行期 Workspace、按角色提供能力并执行权限与提交边界 | 预设领域语义和文档结构 |
 | Projection Agent | 选择知识依据并维护投影，在必要时提出 Knowledge Need | 直接修改知识或默认读取原始观察 |
 
 ## 7. 按稳定性划分设计
@@ -283,8 +286,9 @@ Projection Agent 通过标题、关键词和语义搜索发现候选 Knowledge S
 3. Statement 之间的领域关系由正文及其中的动态名称引用表达，不增加固定 Relation 实体、关系词表或领域 Schema。
 4. `[[canonical title]]` 无论出现于当前还是历史正文，都在读取时指向当前知识视图中拥有该名称的 Statement；`[[canonical title|local display text]]` 的右侧只服务局部表达。
 5. canonical title 与正文使用有实际含义的自然语言，不以机械编号或枚举代替语义。
-6. Attention 影响处理和表达，但不改写观察，也不把共享知识拆成互相隔离的真相。
-7. 投影不是新的世界事实，不能自动回流为知识；持久投影更新以当前文档为输入。
+6. 预处理 Candidate 是待裁决的问题而不是知识；Raw Evidence 与已有知识才是裁决依据。
+7. Attention 影响处理和表达，但不改写观察，也不把共享知识拆成互相隔离的真相。
+8. 投影不是新的世界事实，不能自动回流为知识；持久投影更新以当前文档为输入。
 
 ### 7.2 治理预期
 
@@ -302,7 +306,7 @@ Projection Agent 通过标题、关键词和语义搜索发现候选 Knowledge S
 - 知识层使用数据库、本地文件或其他介质；
 - 路径、来源 selector、运行时游标、Contribution 和审计结构；
 - 出站和反向引用、全文、Embedding、相似度、图或超图索引；
-- 预处理分段、Evidence Map 导航、Workspace 布局和原始证据读取协议；
+- 预处理分段、Candidate 字段与组织方式、Agenda 和 Draft 的具体实现、近上下文快照以及原始证据读取协议；
 - 模型、Agent Runtime、上下文压缩、工具参数、调试轨迹和调度方式；
 - Sandbox 的介质、Schema、生命周期和结果展示。
 

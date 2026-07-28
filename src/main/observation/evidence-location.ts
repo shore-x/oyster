@@ -52,7 +52,7 @@ export function splitsSurrogatePair(value: string, offset: number): boolean {
   return left >= 0xd800 && left <= 0xdbff && right >= 0xdc00 && right <= 0xdfff
 }
 
-function assertLocation(lines: string[], location: EvidenceLocation): void {
+function assertLocation(lines: readonly string[], location: EvidenceLocation): void {
   if (
     !Number.isSafeInteger(location.line)
     || location.line < 1
@@ -72,7 +72,7 @@ function assertLocation(lines: string[], location: EvidenceLocation): void {
  * clamped and always return a continuation instead of failing for source size.
  */
 export function readEvidencePage(
-  lines: string[],
+  lines: readonly string[],
   requestedStart: EvidenceLocation,
   requestedLimit: number
 ): EvidenceReadPage {

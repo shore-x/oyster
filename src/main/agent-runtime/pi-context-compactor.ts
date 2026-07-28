@@ -30,6 +30,8 @@ export interface PiContextCompactorOptions {
   systemPrompt: string
   tools?: AgentTool[]
   thinkingLevel?: ThinkingLevel
+  /** Tokens reserved for fresh external context appended after compaction. */
+  reservedContextTokens?: number
   onModelCall?: (event: PiContextCompactionEvent) => void
 }
 
@@ -229,9 +231,15 @@ export function createPiContextCompactor(
     )
   )
   const safetyTokens = Math.max(1_024, Math.floor(contextWindow * 0.05))
+  const reservedContextTokens = options.reservedContextTokens === undefined
+    ? 0
+    : positiveInteger(options.reservedContextTokens)
+  if (reservedContextTokens === undefined) {
+    throw new PiContextWindowError('The reserved external context allowance must be a positive integer.')
+  }
   // The regular Agent call can produce up to model.maxTokens. Summary calls use their smaller,
   // separate output allowance; using that allowance here would overstate normal input capacity.
-  const modelInputLimit = contextWindow - declaredOutput - safetyTokens
+  const modelInputLimit = contextWindow - declaredOutput - safetyTokens - reservedContextTokens
   const summaryInputLimit = contextWindow - summaryMaxTokens - safetyTokens
   const toolDescription = (options.tools ?? []).map((tool) => ({
     name: tool.name,

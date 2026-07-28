@@ -2,7 +2,7 @@ import type { DiscoveryStateData } from './discovery/model'
 
 export const FIXTURE_SESSION_CONTENT = [
   '{"type":"user","message":"我希望知识加工链路保持简洁，并且每条知识都能回溯到原始证据。"}',
-  '{"type":"assistant","message":"可以使用可丢弃的 Evidence Map，再由 Agent 按需展开原始观察。"}',
+  '{"type":"assistant","message":"可以先发现待调查的名称与指代，再由 Agent 按需展开原始观察并完成裁决。"}',
   '{"type":"user","message":"测试写入必须与正式知识库隔离，且可以随时重复运行。"}'
 ].join('\n')
 

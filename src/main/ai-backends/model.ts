@@ -72,6 +72,14 @@ export class ModelContextOverflowError extends Error {
   }
 }
 
+/** A request-local failure that can be recovered by asking for less work per model call. */
+export class ModelOutputTruncatedError extends Error {
+  constructor(message = '模型输出达到长度上限') {
+    super(message)
+    this.name = 'ModelOutputTruncatedError'
+  }
+}
+
 export interface ModelBackendAdapter {
   readonly id: 'openai-compatible'
   listModels(

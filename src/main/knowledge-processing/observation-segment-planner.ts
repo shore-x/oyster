@@ -1,10 +1,6 @@
-import {
-  formatEvidenceLocation,
-  observationLineAddress
-} from '../observation/evidence-location'
+import { observationLineAddress } from '../observation/evidence-location'
 import type {
   EvidenceLocation,
-  ObservationCharacterWindow,
   ObservationUnit
 } from '../observation/model'
 
@@ -12,8 +8,7 @@ export { observationLineAddress as observationLineNumber } from '../observation/
 
 export const DEFAULT_OBSERVATION_SEGMENT_BYTES = 120_000
 export const DEFAULT_ADJACENT_CONTEXT_BYTES = 4_096
-export const DEFAULT_MAP_MERGE_BYTES = 120_000
-/** Per-section locator metadata boundary; it never limits total Session coverage. */
+/** Per-segment locator metadata boundary; it never limits total Session coverage. */
 export const MAX_OBSERVATION_SEGMENT_SELECTOR_BYTES = 24 * 1_024
 
 export interface ObservationSourceRange {
@@ -22,7 +17,6 @@ export interface ObservationSourceRange {
 }
 
 export interface ObservationSegment {
-  id: string
   /** Exact, sorted and coalesced raw source lines represented by this segment. */
   sourceRanges: ObservationSourceRange[]
   units: ObservationUnit[]
@@ -33,25 +27,14 @@ export interface ObservationSegment {
   readLocation: EvidenceLocation
 }
 
-export interface EvidenceMapNode {
-  content: string
-  /** Exact, sorted and coalesced raw source lines represented by this node. */
-  sourceRanges: ObservationSourceRange[]
-  sectionIds: string[]
-  readLocation: EvidenceLocation
-  characterWindow?: ObservationCharacterWindow
-}
-
-export interface EvidenceMapPlannerOptions {
+export interface ObservationSegmentPlannerOptions {
   segmentBytes?: number
   adjacentContextBytes?: number
-  mergeBytes?: number
 }
 
-export interface ResolvedEvidenceMapPlannerOptions {
+export interface ResolvedObservationSegmentPlannerOptions {
   segmentBytes: number
   adjacentContextBytes: number
-  mergeBytes: number
 }
 
 function positiveInteger(value: number, name: string): number {
@@ -59,22 +42,19 @@ function positiveInteger(value: number, name: string): number {
   return value
 }
 
-export function resolveEvidenceMapPlannerOptions(
-  options: EvidenceMapPlannerOptions = {}
-): ResolvedEvidenceMapPlannerOptions {
-  const segmentBytes = positiveInteger(
-    options.segmentBytes ?? DEFAULT_OBSERVATION_SEGMENT_BYTES,
-    'Observation 分段预算'
-  )
-  const adjacentContextBytes = positiveInteger(
-    options.adjacentContextBytes ?? DEFAULT_ADJACENT_CONTEXT_BYTES,
-    '相邻上下文预算'
-  )
-  const mergeBytes = positiveInteger(
-    options.mergeBytes ?? DEFAULT_MAP_MERGE_BYTES,
-    'Evidence Map 归并预算'
-  )
-  return { segmentBytes, adjacentContextBytes, mergeBytes }
+export function resolveObservationSegmentPlannerOptions(
+  options: ObservationSegmentPlannerOptions = {}
+): ResolvedObservationSegmentPlannerOptions {
+  return {
+    segmentBytes: positiveInteger(
+      options.segmentBytes ?? DEFAULT_OBSERVATION_SEGMENT_BYTES,
+      'Observation 分段预算'
+    ),
+    adjacentContextBytes: positiveInteger(
+      options.adjacentContextBytes ?? DEFAULT_ADJACENT_CONTEXT_BYTES,
+      '相邻上下文预算'
+    )
+  }
 }
 
 export function observationSelector(startLine: number, endLine: number): string {
@@ -128,17 +108,6 @@ export function observationSourceSelectors(ranges: ObservationSourceRange[]): st
 
 export function observationSourceSelectorsText(ranges: ObservationSourceRange[]): string {
   return observationSourceSelectors(ranges).join(', ')
-}
-
-function observationSourceExtent(ranges: ObservationSourceRange[]): string {
-  const first = ranges[0]
-  const last = ranges.at(-1)
-  if (!first || !last) throw new Error('Observation source ranges 不能为空')
-  return observationSelector(first.startLine, last.endLine)
-}
-
-export function evidenceMapSectionId(index: number): string {
-  return `M${String(index + 1).padStart(6, '0')}`
 }
 
 export function numberedObservation(lines: string[], startLine = 1): string {
@@ -229,7 +198,7 @@ function adjacentContext(
  */
 export function planObservationSegments(
   units: ObservationUnit[],
-  options: ResolvedEvidenceMapPlannerOptions
+  options: ResolvedObservationSegmentPlannerOptions
 ): ObservationSegment[] {
   const segments: ObservationSegment[] = []
   let startIndex = 0
@@ -275,7 +244,6 @@ export function planObservationSegments(
     }
     const context = adjacentContext(units, startIndex, options.adjacentContextBytes)
     segments.push({
-      id: evidenceMapSectionId(segments.length),
       sourceRanges,
       units: segmentUnits,
       contextSourceRanges: context.sourceRanges,
@@ -288,44 +256,4 @@ export function planObservationSegments(
     startIndex = index
   }
   return segments
-}
-
-export function evidenceMapNodeText(node: EvidenceMapNode): string {
-  return [
-    `Source coverage extent: ${observationSourceExtent(node.sourceRanges)} (not an exact selected-range union)`,
-    'Exact selected ranges remain attached to the referenced map sections and are not flattened here.',
-    `First evidence read location: ${formatEvidenceLocation(node.readLocation)}`,
-    ...(node.characterWindow
-      ? [`Character window: C${node.characterWindow.startCharacter}:${node.characterWindow.endCharacter}/${node.characterWindow.totalCharacters}`]
-      : []),
-    `Expandable map sections: ${node.sectionIds.join(', ')}`,
-    node.content
-  ].join('\n')
-}
-
-/** Groups adjacent map nodes without dropping or reordering any input. */
-export function groupEvidenceMapNodes(
-  nodes: EvidenceMapNode[],
-  maximumBytes: number
-): EvidenceMapNode[][] {
-  positiveInteger(maximumBytes, 'Evidence Map 归并预算')
-  const groups: EvidenceMapNode[][] = []
-  let group: EvidenceMapNode[] = []
-  let bytes = 0
-  for (const node of nodes) {
-    const nodeBytes = utf8Bytes(evidenceMapNodeText(node))
-    if (nodeBytes > maximumBytes) {
-      throw new Error('局部 Evidence Map 超过单次导航归并输入上限')
-    }
-    const separatorBytes = utf8Bytes('\n\n---\n\n')
-    if (group.length && bytes + separatorBytes + nodeBytes > maximumBytes) {
-      groups.push(group)
-      group = []
-      bytes = 0
-    }
-    bytes += (group.length ? separatorBytes : 0) + nodeBytes
-    group.push(node)
-  }
-  if (group.length) groups.push(group)
-  return groups
 }

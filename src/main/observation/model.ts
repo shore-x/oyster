@@ -33,7 +33,7 @@ export interface EvidenceLocation {
 /**
  * An Agent-format-specific, deterministic preprocessing view of one raw Session revision.
  * `rawLines` retains the complete revision for later evidence reads; `units` may select
- * or compact only the material useful for building an Evidence Map.
+ * or compact only the material useful for discovering Statement candidates.
  * Unit boundaries and representations never depend on the selected model.
  */
 export interface ObservationView {

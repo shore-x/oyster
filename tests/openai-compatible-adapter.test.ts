@@ -2,7 +2,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { AddressInfo } from 'node:net'
 import { OpenAiCompatibleAdapter, normalizeModelBaseUrl } from '../src/main/ai-backends/openai-compatible-adapter'
-import { ModelContextOverflowError, type StoredModelConnection } from '../src/main/ai-backends/model'
+import {
+  ModelContextOverflowError,
+  ModelOutputTruncatedError,
+  type StoredModelConnection
+} from '../src/main/ai-backends/model'
 
 const servers: Server[] = []
 
@@ -284,8 +288,7 @@ describe('OpenAiCompatibleAdapter', () => {
     } catch (error) {
       outputError = error
     }
-    expect(outputError).toBeInstanceOf(Error)
-    expect(outputError).not.toBeInstanceOf(ModelContextOverflowError)
+    expect(outputError).toBeInstanceOf(ModelOutputTruncatedError)
     expect((outputError as Error).message).toContain('max_output_tokens')
   })
 

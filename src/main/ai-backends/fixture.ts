@@ -70,7 +70,13 @@ class FixtureModelAdapter implements ModelBackendAdapter {
   ): Promise<{ text: string }> {
     if (request.systemPrompt) {
       return {
-        text: '# Evidence Map\n\n- 用户提供了一段用于验证知识加工流程的观察材料。 [L000001]\n- 需要在正式知识写入前继续核查原始证据。'
+        text: JSON.stringify({
+          candidates: [{
+            expression: '知识加工链路',
+            question: '“知识加工链路”在该项目中具体指哪些相互衔接的阶段？',
+            locations: [{ line: 1, offset: 0 }]
+          }]
+        })
       }
     }
     return { text: 'OYSTER' }

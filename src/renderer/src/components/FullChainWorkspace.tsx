@@ -4,7 +4,8 @@ import type {
   KnowledgeProcessingDebugTrace,
   ObservationPreprocessingProgress,
   ProcessingConnectionView,
-  ProcessingStageView
+  ProcessingStageView,
+  StatementCandidateView
 } from '../../../shared/knowledge-processing'
 import {
   backendLabel,
@@ -18,6 +19,7 @@ import {
 import { Button, Icon } from '../ui'
 import { ProcessingDebugTracePanel } from './ProcessingDebugTracePanel'
 import { SessionMetadata, sessionOptionLabel, sessionTitle } from './SessionMetadata'
+import { StatementCandidateList } from './StatementCandidateList'
 
 export type FullChainStepState = 'pending' | 'running' | 'completed' | 'failed'
 
@@ -46,7 +48,7 @@ export interface FullChainResultView {
   baselineCreatedAt?: string
   completedAt?: string
   durationMs?: number
-  evidenceMap?: string
+  statementCandidates: StatementCandidateView[]
   debugTrace: KnowledgeProcessingDebugTrace
   steps: FullChainStepView[]
   contributions: SandboxContributionView[]
@@ -139,15 +141,14 @@ function stepMarker(step: FullChainStepView, index: number): string {
 
 function preprocessingProgressText(progress: ObservationPreprocessingProgress): string {
   if (progress.phase === 'preparing') return '正在准备 Observation 分段…'
-  if (progress.phase === 'assembling') return '局部映射已完成，正在组装导航地图…'
   return progress.totalSegments
-    ? `正在生成局部 Evidence Map · ${progress.completedSegments} / ${progress.totalSegments} 个分段`
-    : '正在生成局部 Evidence Map…'
+    ? `正在发现 Statement 候选 · ${progress.completedSegments} / ${progress.totalSegments} 个分段`
+    : '正在发现 Statement 候选…'
 }
 
 export function FullChainWorkspace(props: FullChainWorkspaceProps) {
   const [workspace, setWorkspace] = createSignal<'input' | 'process' | 'result'>('input')
-  const [output, setOutput] = createSignal<'knowledge' | 'evidence' | 'contributions'>('knowledge')
+  const [output, setOutput] = createSignal<'knowledge' | 'candidates' | 'contributions'>('knowledge')
   const [selectedStatementTitle, setSelectedStatementTitle] = createSignal<string>()
   const selectedSession = createMemo(() => props.sessions.find(
     (session) => session.artifactId === props.selectedSessionId
@@ -417,7 +418,7 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
           when={!props.running && props.result ? props.result : undefined}
           fallback={(
             <div class="processing-workspace-empty">
-              {props.running ? '链路正在运行；可以在“调用过程”中查看当前进度。' : '完成一次隔离运行后，这里会展示 Evidence Map、Contribution 和 Knowledge Statements。'}
+              {props.running ? '链路正在运行；可以在“调用过程”中查看当前进度。' : '完成一次隔离运行后，这里会展示 Statement 候选、Contribution 和 Knowledge Statements。'}
             </div>
           )}
         >
@@ -468,23 +469,24 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
               <div class="full-chain-card__heading">
                 <div>
                   <h2>Sandbox 输出</h2>
-                  <p>查看预处理材料、Agent 的写入提交，以及本次隔离知识库的最终状态。</p>
+                  <p>查看候选议程的最终裁决、Agent 的写入提交，以及本次隔离知识库的最终状态。</p>
                 </div>
               </div>
               <div class="full-chain-output-switch" role="tablist" aria-label="输出类型">
                 <button type="button" role="tab" aria-selected={output() === 'knowledge'} onClick={() => setOutput('knowledge')}>知识 Statements</button>
-                <button type="button" role="tab" aria-selected={output() === 'evidence'} onClick={() => setOutput('evidence')}>Evidence Map</button>
+                <button type="button" role="tab" aria-selected={output() === 'candidates'} onClick={() => setOutput('candidates')}>Statement 候选</button>
                 <button type="button" role="tab" aria-selected={output() === 'contributions'} onClick={() => setOutput('contributions')}>Agent Contributions</button>
               </div>
 
               <div
                 class="full-chain-output-panel processing-tab-panel"
                 role="tabpanel"
-                hidden={output() !== 'evidence'}
+                hidden={output() !== 'candidates'}
               >
-                <Show when={result().evidenceMap} fallback={<div class="sandbox-knowledge__empty">尚未生成 Evidence Map。</div>}>
-                  <pre class="full-chain-evidence">{result().evidenceMap}</pre>
-                </Show>
+                <StatementCandidateList
+                  candidates={result().statementCandidates}
+                  emptyText="本次链路没有发现需要裁决的 Statement 候选。"
+                />
               </div>
 
               <div

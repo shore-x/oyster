@@ -27,8 +27,7 @@ function statusLabel(status: ProcessingDebugStatus): string {
 
 function phaseLabel(phase: NonNullable<KnowledgeProcessingDebugTrace['preprocessing']>['phase']): string {
   if (phase === 'preparing') return '准备分段'
-  if (phase === 'mapping') return '生成局部地图'
-  if (phase === 'assembling') return '组装导航地图'
+  if (phase === 'discovering') return '发现 Statement 候选'
   return '预处理完成'
 }
 
@@ -37,15 +36,7 @@ function callLabel(call: PreprocessingModelCallTrace): string {
     ? call.selectors.join(', ')
     : `${call.selectors.slice(0, 4).join(', ')} 等 ${call.selectors.length} 个精确范围`
   const location = `L${String(call.readLocation.line).padStart(6, '0')}:C${call.readLocation.offset}`
-  return call.kind === 'segment_map'
-    ? `分段映射 · 读取起点 ${location} · 来源范围 ${ranges}`
-    : `导航归并 · 首个读取起点 ${location} · 来源范围 ${ranges}`
-}
-
-function callSections(call: PreprocessingModelCallTrace): string {
-  if (!call.sectionIds.length) return '无局部 Section'
-  if (call.sectionIds.length <= 4) return call.sectionIds.join('、')
-  return `${call.sectionIds.slice(0, 4).join('、')} 等 ${call.sectionIds.length} 个 Section`
+  return `候选发现 · 读取起点 ${location} · 来源范围 ${ranges}`
 }
 
 function PreprocessingCalls(props: {
@@ -113,7 +104,7 @@ function PreprocessingCalls(props: {
                 <span class="processing-debug__marker" aria-hidden="true" />
                 <span class="processing-debug-call__identity">
                   <strong>Call {call.sequence} · {callLabel(call)}</strong>
-                  <small>{callSections(call)}</small>
+                  <small>从本段原始观察中发现需要知识维护 Agent 裁决的名称与指代问题</small>
                 </span>
                 <span class="processing-debug-call__meta">
                   {statusLabel(call.status)} · {formatDuration(call.durationMs)}
@@ -125,7 +116,7 @@ function PreprocessingCalls(props: {
                     <span>模型输出</span>
                     <pre>{output()}</pre>
                     <Show when={call.outputTruncated}>
-                      <p class="processing-debug-call__notice">调试副本已截断；实际 Evidence Map 处理未受影响。</p>
+                      <p class="processing-debug-call__notice">调试副本已截断；实际候选发现结果未受影响。</p>
                     </Show>
                   </div>
                 )}
@@ -160,6 +151,28 @@ function MaintenanceTimeline(props: {
         </div>
         <span>{props.maintenance.modelCallCount} 次模型 · {props.maintenance.toolCallCount} 次工具</span>
       </div>
+      <Show when={props.maintenance.workspace}>
+        {(workspace) => (
+          <div class="processing-debug-workspace" data-testid="maintenance-workspace-status">
+            <div>
+              <span>待裁决候选</span>
+              <strong>{workspace().candidates.open}</strong>
+            </div>
+            <div>
+              <span>已裁决候选</span>
+              <strong>{workspace().candidates.resolved}</strong>
+            </div>
+            <div>
+              <span>候选总数</span>
+              <strong>{workspace().candidates.total}</strong>
+            </div>
+            <div>
+              <span>Contribution Draft</span>
+              <strong>{workspace().draftStatementCount}</strong>
+            </div>
+          </div>
+        )}
+      </Show>
       <Show
         when={props.maintenance.events.length}
         fallback={<div class="processing-debug__empty">Agent 启动后，模型与工具事件会显示在这里。</div>}

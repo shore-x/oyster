@@ -9,7 +9,7 @@ import type {
   ModelGenerationResult,
   StoredModelConnection
 } from './model'
-import { ModelContextOverflowError } from './model'
+import { ModelContextOverflowError, ModelOutputTruncatedError } from './model'
 import { reasoningEffortsForModel } from './model-capabilities'
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000
@@ -273,6 +273,9 @@ function assertResponseComplete(value: unknown): void {
     ) {
       throw new ModelContextOverflowError('模型输入超过所选模型的上下文窗口')
     }
+    if (reason === 'max_output_tokens') {
+      throw new ModelOutputTruncatedError('模型输出达到 max_output_tokens 上限，结果不完整')
+    }
     throw new Error(
       typeof reason === 'string'
         ? `模型输出不完整：${reason}`
@@ -284,7 +287,7 @@ function assertResponseComplete(value: unknown): void {
   if (!Array.isArray(choices) || !choices[0] || typeof choices[0] !== 'object') return
   const finishReason = (choices[0] as Record<string, unknown>).finish_reason
   if (finishReason === 'length') {
-    throw new Error('模型输出达到长度上限，结果不完整')
+    throw new ModelOutputTruncatedError('模型输出达到长度上限，结果不完整')
   }
   if (typeof finishReason === 'string' && finishReason !== 'stop') {
     throw new Error(`模型响应未正常完成：${finishReason}`)

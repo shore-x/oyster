@@ -6,6 +6,15 @@ import { KnowledgeProcessingService } from './knowledge-processing-service'
 export class FixtureKnowledgeAgentRuntime implements KnowledgeAgentRuntime {
   async run(input: KnowledgeAgentRunInput): Promise<KnowledgeAgentRunResult> {
     input.signal.throwIfAborted()
+    input.onTrace?.({
+      type: 'workspace_status',
+      candidates: {
+        total: input.statementCandidates.length,
+        open: input.statementCandidates.length,
+        resolved: 0
+      },
+      draftStatementCount: 0
+    })
     input.onTrace?.({ type: 'model_started', callNumber: 1 })
     input.onTrace?.({
       type: 'model_completed',
@@ -33,6 +42,15 @@ export class FixtureKnowledgeAgentRuntime implements KnowledgeAgentRuntime {
       status: 'completed',
       detail: '捕获 1 条候选 Statement'
     })
+    input.onTrace?.({
+      type: 'workspace_status',
+      candidates: {
+        total: input.statementCandidates.length,
+        open: 0,
+        resolved: input.statementCandidates.length
+      },
+      draftStatementCount: 1
+    })
     return {
       contribution: {
         runRef: input.contributionRunRef,
@@ -41,6 +59,16 @@ export class FixtureKnowledgeAgentRuntime implements KnowledgeAgentRuntime {
           content: '用户希望知识加工链路保持简洁，并保留可回溯的来源。'
         }]
       },
+      statementCandidates: input.statementCandidates.map((candidate, index) => ({
+        ref: `C${String(index + 1).padStart(6, '0')}`,
+        expression: candidate.expression,
+        question: candidate.question,
+        evidenceLocations: candidate.locations.map((location) => (
+          `L${String(location.line).padStart(6, '0')}:C${location.offset}`
+        )),
+        status: 'resolved',
+        resolution: 'Fixture runtime marked this candidate as covered by its contribution.'
+      })),
       modelCallCount: 1,
       toolCalls: ['read_evidence', 'submit_knowledge_contribution']
     }

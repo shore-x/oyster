@@ -1,24 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import {
-  evidenceMapNodeText,
-  groupEvidenceMapNodes,
   numberedObservation,
   numberedObservationUnits,
   observationLineNumber,
   observationSourceSelectorsText,
   observationUnitsMaterialBytes,
   planObservationSegments,
-  resolveEvidenceMapPlannerOptions,
-  type EvidenceMapNode
-} from '../src/main/knowledge-processing/evidence-map-planner'
+  resolveObservationSegmentPlannerOptions
+} from '../src/main/knowledge-processing/observation-segment-planner'
 import { createPlainTextObservationView } from '../src/main/observation/observation-view'
 import type { ObservationUnit } from '../src/main/observation/model'
 
-function options(overrides: Parameters<typeof resolveEvidenceMapPlannerOptions>[0] = {}) {
-  return resolveEvidenceMapPlannerOptions({
+function options(
+  overrides: Parameters<typeof resolveObservationSegmentPlannerOptions>[0] = {}
+) {
+  return resolveObservationSegmentPlannerOptions({
     segmentBytes: 45,
     adjacentContextBytes: 13,
-    mergeBytes: 1_000,
     ...overrides
   })
 }
@@ -31,30 +29,26 @@ function units(content: string): ObservationUnit[] {
   return createPlainTextObservationView(content).units
 }
 
-describe('Evidence Map preprocessing planner', () => {
+describe('Observation segment planner', () => {
   it('covers every Observation line exactly once while preserving global numbering', () => {
     const segments = planObservationSegments(units('aa\nbbb\nc\ndddd'), options())
 
-    expect(segments.map(({ id, sourceRanges, readLocation, units }) => ({
-      id,
+    expect(segments.map(({ sourceRanges, readLocation, units }) => ({
       sourceRanges,
       readLocation,
       lines: units.map((unit) => unit.content)
-    })))
-      .toEqual([
-        {
-          id: 'M000001',
-          sourceRanges: [{ startLine: 1, endLine: 2 }],
-          readLocation: { line: 1, offset: 0 },
-          lines: ['aa', 'bbb']
-        },
-        {
-          id: 'M000002',
-          sourceRanges: [{ startLine: 3, endLine: 4 }],
-          readLocation: { line: 3, offset: 0 },
-          lines: ['c', 'dddd']
-        }
-      ])
+    }))).toEqual([
+      {
+        sourceRanges: [{ startLine: 1, endLine: 2 }],
+        readLocation: { line: 1, offset: 0 },
+        lines: ['aa', 'bbb']
+      },
+      {
+        sourceRanges: [{ startLine: 3, endLine: 4 }],
+        readLocation: { line: 3, offset: 0 },
+        lines: ['c', 'dddd']
+      }
+    ])
     expect(segments[1]).toMatchObject({
       contextSourceRanges: [{ startLine: 2, endLine: 2 }],
       contextUnits: [expect.objectContaining({ content: 'bbb' })]
@@ -88,7 +82,7 @@ describe('Evidence Map preprocessing planner', () => {
     )
   })
 
-  it('budgets and serializes an adapter-provided model representation without losing its raw locator', () => {
+  it('budgets an adapter-provided model representation without losing its raw locator', () => {
     const prepared: ObservationUnit[] = [{
       lineNumber: 7,
       content: 'x'.repeat(1_000),
@@ -123,14 +117,9 @@ describe('Evidence Map preprocessing planner', () => {
       { startLine: 7, endLine: 7 },
       { startLine: 9, endLine: 10 }
     ])
-    const navigationText = evidenceMapNodeText({
-      content: 'map',
-      sourceRanges: segment.sourceRanges,
-      sectionIds: [segment.id],
-      readLocation: segment.readLocation
-    })
-    expect(navigationText).toContain('Source coverage extent: L000001-L000010')
-    expect(navigationText).not.toContain('L000007-L000007')
+    expect(observationSourceSelectorsText(segment.sourceRanges)).toBe(
+      'L000001-L000002, L000007-L000007, L000009-L000010'
+    )
   })
 
   it('includes exact sparse selector text in each segment material budget', () => {
@@ -156,7 +145,7 @@ describe('Evidence Map preprocessing planner', () => {
       .toEqual(prepared.map((unit) => unit.lineNumber))
   })
 
-  it('budgets the serialized global selectors even when the Observation contains many empty lines', () => {
+  it('budgets serialized global selectors even when the Observation contains many empty lines', () => {
     const segments = planObservationSegments(
       units(Array.from({ length: 30 }, () => '').join('\n')),
       options()
@@ -237,19 +226,6 @@ describe('Evidence Map preprocessing planner', () => {
     ])
   })
 
-  it('carries exact character windows into merge materials', () => {
-    const text = evidenceMapNodeText({
-      content: 'map',
-      sourceRanges: [{ startLine: 7, endLine: 7 }],
-      sectionIds: ['M000003'],
-      readLocation: { line: 7, offset: 3_000 },
-      characterWindow: { startCharacter: 3_000, endCharacter: 6_000, totalCharacters: 9_000 }
-    })
-
-    expect(text).toContain('Character window: C3000:6000/9000')
-    expect(text).toContain('First evidence read location: L000007:C3000')
-  })
-
   it('allows more than 32 bounded segments', () => {
     const segments = planObservationSegments(
       units(Array.from({ length: 34 }, () => '12345').join('\n')),
@@ -258,70 +234,17 @@ describe('Evidence Map preprocessing planner', () => {
 
     expect(segments).toHaveLength(34)
     expect(segments.at(-1)).toMatchObject({
-      id: 'M000034',
       sourceRanges: [{ startLine: 34, endLine: 34 }]
     })
   })
 
-  it('groups adjacent map inputs without dropping or reordering them', () => {
-    const nodes: EvidenceMapNode[] = Array.from({ length: 5 }, (_, index) => ({
-      content: `map-${index + 1}`,
-      sourceRanges: [{ startLine: index + 1, endLine: index + 1 }],
-      sectionIds: [`M00000${index + 1}`],
-      readLocation: { line: index + 1, offset: 0 }
-    }))
-
-    const groups = groupEvidenceMapNodes(nodes, 500)
-
-    expect(groups.flat()).toEqual(nodes)
-    expect(groups.every((group) => group.length > 0)).toBe(true)
-    expect(groups.every((group) => group
-      .map((node) => evidenceMapNodeText(node))
-      .join('\n\n---\n\n').length <= 500)).toBe(true)
-    expect(groups.length).toBeGreaterThan(1)
-  })
-
-  it('uses UTF-8 bytes for Evidence Map merge groups', () => {
-    const nodes: EvidenceMapNode[] = [1, 2].map((line) => ({
-      content: '汉'.repeat(10),
-      sourceRanges: [{ startLine: line, endLine: line }],
-      sectionIds: [`M00000${line}`],
-      readLocation: { line, offset: 0 }
-    }))
-    const singleNodeBytes = utf8Bytes(evidenceMapNodeText(nodes[0]))
-    const groups = groupEvidenceMapNodes(nodes, singleNodeBytes + 1)
-
-    expect(groups).toHaveLength(2)
-    expect(groups.flat()).toEqual(nodes)
-  })
-
-  it('can pair adjacent CJK nodes near half of the merge byte budget', () => {
-    const maximumBytes = 1_000
-    const maximumNodeBytes = Math.floor((maximumBytes - utf8Bytes('\n\n---\n\n')) / 2)
-    const nodes: EvidenceMapNode[] = [1, 2].map((line) => {
-      const shape = {
-        content: '',
-        sourceRanges: [{ startLine: line, endLine: line }],
-        sectionIds: [`M00000${line}`],
-        readLocation: { line, offset: 0 }
-      }
-      const metadataBytes = utf8Bytes(evidenceMapNodeText(shape))
-      return { ...shape, content: '汉'.repeat(Math.floor((maximumNodeBytes - metadataBytes) / 3)) }
-    })
-
-    expect(nodes.every((node) => utf8Bytes(evidenceMapNodeText(node)) <= maximumNodeBytes)).toBe(true)
-    expect(groupEvidenceMapNodes(nodes, maximumBytes)).toEqual([nodes])
-  })
-
-  it('uses the production budgets as defaults rather than hard maximums', () => {
+  it('uses production values as defaults rather than hard maximums', () => {
     expect(options({
       segmentBytes: 120_001,
-      adjacentContextBytes: 4_097,
-      mergeBytes: 120_002
+      adjacentContextBytes: 4_097
     })).toEqual({
       segmentBytes: 120_001,
-      adjacentContextBytes: 4_097,
-      mergeBytes: 120_002
+      adjacentContextBytes: 4_097
     })
   })
 })

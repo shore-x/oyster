@@ -30,7 +30,7 @@ import type {
   ModelGenerationResult,
   ModelRuntime
 } from './model'
-import { ModelContextOverflowError } from './model'
+import { ModelContextOverflowError, ModelOutputTruncatedError } from './model'
 
 const PROVIDER_ID = 'openai-codex'
 const DEFAULT_AUTHENTICATION_TIMEOUT_MS = 15 * 60_000
@@ -359,7 +359,9 @@ export class PiCodingPlanAdapter {
       if (result.stopReason === 'error' || result.stopReason === 'aborted') {
         throw new Error(result.errorMessage || 'Coding Plan 模型调用失败')
       }
-      if (result.stopReason === 'length') throw new Error('Coding Plan 模型返回了不完整结果')
+      if (result.stopReason === 'length') {
+        throw new ModelOutputTruncatedError('Coding Plan 模型返回了不完整结果')
+      }
       const text = contentText(result.content)
       if (Buffer.byteLength(text, 'utf8') > maxResponseBytes) {
         throw new Error('Coding Plan 模型返回内容过大')

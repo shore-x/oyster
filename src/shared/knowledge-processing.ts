@@ -61,7 +61,7 @@ export interface KnowledgeProcessingSnapshot {
 }
 
 export interface ObservationPreprocessingProgress {
-  phase: 'preparing' | 'mapping' | 'assembling'
+  phase: 'preparing' | 'discovering'
   completedSegments: number
   totalSegments?: number
 }
@@ -72,13 +72,12 @@ export type ProcessingDebugStatus = 'running' | 'completed' | 'failed' | 'cancel
 export interface PreprocessingModelCallTrace {
   id: string
   sequence: number
-  kind: 'segment_map' | 'navigation_merge'
+  kind: 'candidate_discovery'
   status: ProcessingDebugStatus
   /** Exact, sorted and coalesced raw source ranges represented by this call. */
   selectors: string[]
   /** First host-derived raw position represented by this call. */
   readLocation: { line: number; offset: number }
-  sectionIds: string[]
   startedAt: string
   completedAt?: string
   durationMs?: number
@@ -88,7 +87,7 @@ export interface PreprocessingModelCallTrace {
 }
 
 export interface ObservationPreprocessingDebugTrace {
-  phase: 'preparing' | 'mapping' | 'assembling' | 'completed'
+  phase: 'preparing' | 'discovering' | 'completed'
   completedSegments: number
   totalSegments?: number
   view?: {
@@ -118,7 +117,39 @@ export interface KnowledgeMaintenanceTraceEvent {
 export interface KnowledgeMaintenanceDebugTrace {
   modelCallCount: number
   toolCallCount: number
+  workspace?: KnowledgeMaintenanceWorkspaceStatus
   events: KnowledgeMaintenanceTraceEvent[]
+}
+
+export interface StatementCandidateLocation {
+  line: number
+  offset: number
+}
+
+export interface StatementCandidateSeed {
+  expression: string
+  question: string
+  locations: StatementCandidateLocation[]
+}
+
+export interface StatementCandidateView {
+  ref: string
+  expression: string
+  question: string
+  evidenceLocations: string[]
+  status: 'open' | 'resolved'
+  resolution?: string
+}
+
+export interface StatementCandidateCounts {
+  total: number
+  open: number
+  resolved: number
+}
+
+export interface KnowledgeMaintenanceWorkspaceStatus {
+  candidates: StatementCandidateCounts
+  draftStatementCount: number
 }
 
 /** Bounded, in-memory diagnostics for the latest confirmed run in each UI origin. */
@@ -175,7 +206,7 @@ export interface ProcessingExecutionSummary {
 export interface ObservationPreprocessingResult {
   stageId: 'observation_preprocessor'
   runId: string
-  evidenceMap: string
+  statementCandidates: StatementCandidateSeed[]
   sourceRef: string
   segmentCount: number
   debugTrace: KnowledgeProcessingDebugTrace
@@ -188,6 +219,7 @@ export interface KnowledgeMaintenanceResult {
   stageId: 'knowledge_maintenance_agent'
   preprocessingRunId: string
   contribution: KnowledgeContributionDraft
+  statementCandidates: StatementCandidateView[]
   debugTrace: KnowledgeProcessingDebugTrace
   durationMs: number
   completedAt: string
