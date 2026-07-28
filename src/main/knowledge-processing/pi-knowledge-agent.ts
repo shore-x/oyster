@@ -30,9 +30,8 @@ import {
 import {
   MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH,
   type KnowledgeContributionDraft,
-  type KnowledgeStatementDetails,
-  type KnowledgeStatementDraft,
-  type KnowledgeStatementRelation
+  type KnowledgeStatement,
+  type KnowledgeStatementDraft
 } from '../../shared/knowledge'
 import { REASONING_EFFORTS } from '../../shared/ai-backends'
 import type {
@@ -64,7 +63,7 @@ const searchKnowledgeParameters = Type.Object({
 }, { additionalProperties: false })
 
 const readKnowledgeParameters = Type.Object({
-  statementId: Type.String({ minLength: 1, maxLength: 512 })
+  title: Type.String({ minLength: 1, maxLength: 2_048 })
 }, { additionalProperties: false })
 
 const readEvidenceParameters = Type.Object({
@@ -77,31 +76,9 @@ const readEvidenceMapSectionParameters = Type.Object({
   sectionId: Type.String({ minLength: 1, maxLength: 64 })
 }, { additionalProperties: false })
 
-const contributionSourceParameters = Type.Object({
-  sourceRef: Type.String({ minLength: 1, maxLength: 2_048 }),
-  selector: Type.Optional(Type.String({ pattern: '^L\\d{6,}-L\\d{6,}$' }))
-}, { additionalProperties: false })
-
-const contributionRelationParameters = Type.Object({
-  relation: Type.Union([Type.Literal('derived_from'), Type.Literal('revises')]),
-  target: Type.Union([
-    Type.Object({
-      kind: Type.Literal('statement'),
-      statementId: Type.String({ minLength: 1, maxLength: 2_048 })
-    }, { additionalProperties: false }),
-    Type.Object({
-      kind: Type.Literal('draft'),
-      localRef: Type.String({ minLength: 1, maxLength: 128 })
-    }, { additionalProperties: false })
-  ])
-}, { additionalProperties: false })
-
 const contributionStatementParameters = Type.Object({
-  localRef: Type.String({ minLength: 1, maxLength: 128 }),
   title: Type.String({ minLength: 1, maxLength: 2_048 }),
-  content: Type.String({ minLength: 1, maxLength: MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH }),
-  sources: Type.Optional(Type.Array(contributionSourceParameters)),
-  relations: Type.Optional(Type.Array(contributionRelationParameters))
+  content: Type.String({ minLength: 1, maxLength: MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH })
 }, { additionalProperties: false })
 
 const submitContributionParameters = Type.Object({
@@ -250,8 +227,7 @@ function searchResultText(
 ): string {
   if (!records.length) return '没有找到更多相关 Knowledge Statement。\nNext offset: none'
   const lines = records.map((record) => [
-    `- ID: ${compactInline(record.id, 256)}`,
-    `  标题: ${compactInline(record.title, 512)}`,
+    `- 标题: ${compactInline(record.title, 512)}`,
     `  内容预览: ${compactInline(record.content, 1_024)}`
   ].join('\n'))
   const nextOffset = hasNextPage ? offset + records.length : undefined
@@ -262,43 +238,11 @@ function searchResultText(
   ].join('\n')
 }
 
-function outgoingRelationText(relation: KnowledgeStatementRelation): string {
-  return relation.relation === 'revises'
-    ? `- This Statement revises Statement ${relation.targetStatementId}.`
-    : `- This Statement is derived from Statement ${relation.targetStatementId}.`
-}
-
-function incomingRelationText(relation: KnowledgeStatementRelation): string {
-  return relation.relation === 'revises'
-    ? `- Statement ${relation.sourceStatementId} revises this Statement.`
-    : `- Statement ${relation.sourceStatementId} is derived from this Statement.`
-}
-
-function statementResultText(details: KnowledgeStatementDetails): string {
-  const { statement, sources, outgoingRelations, incomingRelations } = details
-  const isCurrent = !incomingRelations.some((relation) => relation.relation === 'revises')
+function statementResultText(statement: KnowledgeStatement): string {
   return [
-    `ID: ${statement.id}`,
-    `Current: ${isCurrent ? 'yes' : 'no'} (derived from direct incoming revises relations)`,
-    `Created at: ${statement.createdAt}`,
-    `Origin Contribution: ${statement.originRef}`,
     `Title: ${statement.title}`,
     'Content:',
-    statement.content,
-    'Observation sources (provenance only; availability in this Workspace is not implied):',
-    sources.length
-      ? sources.map((source) => (
-          `- ${source.sourceRef}${source.selector ? ` · selector ${source.selector}` : ''}`
-        )).join('\n')
-      : '- none',
-    'Direct outgoing relations:',
-    outgoingRelations.length
-      ? outgoingRelations.map(outgoingRelationText).join('\n')
-      : '- none',
-    'Direct incoming relations:',
-    incomingRelations.length
-      ? incomingRelations.map(incomingRelationText).join('\n')
-      : '- none'
+    statement.content
   ].join('\n')
 }
 
@@ -404,26 +348,10 @@ function contributionFromSubmission(
   input: KnowledgeAgentRunInput,
   statements: KnowledgeStatementDraft[]
 ): KnowledgeContributionDraft {
-  const contribution: KnowledgeContributionDraft = {
+  return {
     runRef: input.contributionRunRef,
     statements: structuredClone(statements)
   }
-  for (const statement of contribution.statements) {
-    for (const source of statement.sources ?? []) {
-      if (source.sourceRef !== input.sourceRef) {
-        throw new Error('Statement sourceRef 必须精确指向当前授权的 Observation revision')
-      }
-      if (!source.selector) continue
-      const match = SOURCE_SELECTOR.exec(source.selector)
-      if (!match) throw new Error('Statement selector 必须使用 L000001-L000010 格式')
-      const start = Number(match[1])
-      const end = Number(match[2])
-      if (start < 1 || end < start || end > input.observationLines.length) {
-        throw new Error('Statement selector 超出当前 Observation 范围')
-      }
-    }
-  }
-  return contribution
 }
 
 function taskPrompt(input: KnowledgeAgentRunInput): string {
@@ -483,7 +411,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
       {
         name: 'search_knowledge',
         label: '搜索知识',
-        description: '按语义查询获得授权的当前 Knowledge Statement，返回有界的候选列表；结果给出 Next offset 时可用相同 query 继续读取。',
+        description: '按标题和正文文本搜索当前 Knowledge Statement，返回有界的候选列表；结果给出 Next offset 时可用相同 query 继续读取。',
         parameters: searchKnowledgeParameters,
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
@@ -515,16 +443,16 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
       {
         name: 'read_knowledge_statement',
         label: '读取知识',
-        description: '按稳定 ID 读取一条获得授权的不可变 Knowledge Statement、Observation 来源及直接关系。来源身份可见不代表其原文已在当前 Workspace 授权。',
+        description: '按完整 canonical title 精确读取当前 Knowledge Statement。正文中的 [[canonical title]] 引用可用同一工具继续展开。',
         parameters: readKnowledgeParameters,
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
           signal?.throwIfAborted()
-          const statementId = parameters.statementId.trim()
-          if (!statementId) throw new Error('Statement ID 去除空白后不能为空')
-          let record: KnowledgeStatementDetails | undefined
+          const title = parameters.title.trim()
+          if (!title) throw new Error('Statement title 去除空白后不能为空')
+          let record: KnowledgeStatement | undefined
           try {
-            record = await this.knowledgeReader.read(statementId, signal)
+            record = await this.knowledgeReader.read(title, signal)
           } catch (error) {
             throw asError(error, '读取 Knowledge Statement 失败')
           }
@@ -604,7 +532,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
       {
         name: 'submit_knowledge_contribution',
         label: '提交 Knowledge Contribution',
-        description: '提交本次运行唯一的结构化 Contribution。每条 Statement 的正文仍是自由文本；没有持久知识时提交空 statements。',
+        description: '提交本次运行唯一的原子 Contribution。每条 Statement 只有 canonical title 与自由文本正文；同名 title 更新当前正文，新 title 创建 Statement；没有变更时提交空 statements。',
         parameters: submitContributionParameters,
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {

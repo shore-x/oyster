@@ -10,7 +10,7 @@ import type { AvailableSessionSummary } from './discovery'
 import type {
   KnowledgeCommitResult,
   KnowledgeContributionDraft,
-  KnowledgeStatementDetails
+  KnowledgeStatement
 } from './knowledge'
 
 export const PROCESSING_STAGE_IDS = [
@@ -214,8 +214,8 @@ export interface KnowledgeFullChainResult {
   maintenance: KnowledgeMaintenanceResult
   commit: KnowledgeCommitResult
   knowledge: {
-    createdStatementIds: string[]
-    statements: KnowledgeStatementDetails[]
+    writtenStatementTitles: string[]
+    statements: KnowledgeStatement[]
   }
   durationMs: number
   completedAt: string

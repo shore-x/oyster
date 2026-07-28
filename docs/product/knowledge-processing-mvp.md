@@ -18,7 +18,7 @@
   -> Knowledge Maintenance Agent（通用 Agent Runtime；当前由 Pi Agent Core 实现）
   -> 包含多条自由文本 Statement 的结构化 Knowledge Contribution
   -> Oyster Core 校验并原子写入独立 SQLite Knowledge Sandbox
-  -> 从 Sandbox 回读 Statement、来源和当前系统结构链接
+  -> 从 Sandbox 按 canonical title 回读 Statement
 ```
 
 用户从 discovery catalog 选择 Session 及其当前版本。运行时，主进程通过对应 Source Adapter 从原始位置读取该记录，并以稳定 artifact 身份和实际内容哈希固定本次使用的 `sourceRef`；扫描后已经变化或失效的记录会被拒绝，不会静默切换。Reader 不为单个 Session 预设产品长度上限，也不会把记录复制进应用管理的数据目录。Claude、Pi 与 Codex Adapter 分别按自身历史格式生成带版本的 Observation View；它们负责确定性选择对话主线、折叠可按需展开的执行详情，并为每个模型可读单元保留原始全局 `L` 行号、超长单行的 `Cstart:end/total` 窗口和必要的格式语境。共享文本原语只保证 Unicode 与 UTF-8 字节边界，不理解任何 Agent 的 JSONL Schema。通用 planner 只按所选模型预算组合 Adapter 已生成的单元，不以物理 JSONL 行作为调用边界。分段数、预处理调用数和整次运行时间不设固定上限，实际工作量随选择后的材料增长，用户可以随时取消。未进入预处理视图的原文没有被截断或删除，仍可由维护 Agent 按需回源。
@@ -31,15 +31,15 @@
 
 **Knowledge Sandbox** 是当前验证 Store 的一次物理隔离快照，使用相同的 SQLite Schema 和读写实现。完整链路开始时，Oyster Core 先创建独立 Sandbox，再把本次运行绑定到该 Store：Knowledge Maintenance Agent 可以搜索其基线知识，但不能选择、切换或感知其他写入目标。SQLite 只是当前 MVP 的验证介质，不决定正式知识层最终使用数据库还是本地文件。
 
-Agent 最终提交一份结构化 Knowledge Contribution，其中可以包含多条 Knowledge Statement。Statement 使用当前知识视图中唯一且语义丰富的 canonical title；正文仍是 Markdown 兼容的自然语言自由文本，结构只承担当前提交边界。目标知识模型允许正文使用 `[[canonical title]]` 或 `[[canonical title|local display text]]` 表达任意多元关系；名称在读取时动态指向当前知识视图中的同名 Statement，不永久绑定写作时的记录。当前 Core 校验运行身份和当前验证所需的来源信息后，在一个事务中写入整份 Contribution，再从数据库回读实际记录供 UI 展示；它尚不解析名称引用。
+Agent 最终提交一份结构化 Knowledge Contribution，其中可以包含多条 Knowledge Statement。Statement 使用当前知识视图中唯一且语义丰富的 canonical title；正文仍是 Markdown 兼容的自然语言自由文本，结构只承担当前提交边界。目标知识模型允许正文使用 `[[canonical title]]` 或 `[[canonical title|local display text]]` 表达任意多元关系；名称在读取时动态指向当前知识视图中的同名 Statement，不永久绑定写作时的记录。
 
 目标知识语义与当前验证结构需要明确区分：
 
 - 目标语义中，Knowledge Statement 提交后不可原地修改，变化通过新的 Statement 表达；Statement 的领域关系只由自由文本正文及其中的动态名称引用表达；
-- 当前 SQLite Sandbox 仍使用 `derived_from`、`revises`、Observation 来源、内部记录 ID 和时间等系统字段。这些字段服务当前隔离提交与调试，不定义长期知识模型；
-- 当前提交校验要求每条 Statement 具有 Observation 来源，或通过 `derived_from` 指向已有 Statement。这是在验证追溯链路时采用的实现约束，不预先决定正式知识如何追溯，也不意味着 MVP 已经完成长期追溯设计。
+- 当前 SQLite Sandbox 将 canonical title 作为 Agent 可见的唯一读写键。一次 Contribution 内的 title 不得重复；提交时没有同名 Statement 就创建，已有同名 Statement 就原地覆盖正文；
+- 当前 Sandbox 不保存 Statement revision 或历史版本。这是验证核心读写能力的实现简化，不改变目标知识模型中已提交 Statement 不原地修改的长期原则。
 
-当前验证实现将名称引用原样保存为自由文本，尚未从正文生成出站引用、反向引用或图投影视图。是否需要名称到内部身份的绑定以及采用何种追溯结构，均留待真实治理需求出现后决定。
+Core 在一个事务中按 title 写入整份 Contribution，再回读实际 Statement 供 UI 展示。正文中的名称引用原样保存，Agent 可以使用引用中的 canonical title 继续精确读取对应 Statement；当前实现不解析引用，也不生成出站引用、反向引用或图投影视图。
 
 Sandbox 的写入不影响当前验证 Store 的基线，当前也不存在 promote、merge 或复制回基线 Store 的入口。失败或取消会丢弃本次 Sandbox；当前界面只持有最新的成功结果，因此成功重跑会用同一验证基线创建的新 Sandbox 替换旧 Sandbox。用户可显式丢弃当前结果，应用启动时也会清理上一次进程遗留的 Sandbox。
 
@@ -65,15 +65,15 @@ Knowledge Maintenance Agent 是普通、可替换的工具使用 Agent，当前�
 
 当前开放五个工具，其中局部地图只在长 Session 产生可展开部分时提供：
 
-- `search_knowledge`：在本次绑定的 Knowledge Store 中分页搜索当前实现认为可用的 Statement；每次返回有界候选，并在仍可继续时给出下一 `offset`；
-- `read_knowledge_statement`：通过当前内部 locator 读取一条不可变 Statement 及当前验证元信息；`derived_from`、`revises` 和内部 ID 只反映现有 Store，正文名称引用及其反向引用尚未接入该工具；
+- `search_knowledge`：在本次绑定的 Knowledge Store 中按文本分页搜索 Statement，返回 canonical title 和有界正文预览，并在仍可继续时给出下一 `offset`；
+- `read_knowledge_statement`：按 canonical title 精确读取当前 Statement 的完整正文；
 - `read_evidence_map_section`：按当前 Workspace 授权的 section ID 展开局部 Evidence Map；
 - `read_evidence`：从本次 Workspace 内的 `line` 与 `offset` 开始，按 Agent 指定且由 Core 再次约束的 `limit` 返回原始格式文本，并给出实际范围、下一 EvidenceLocation 与 `eof`；`offset` 和 `limit` 均以 UTF-16 code unit 计量；
-- `submit_knowledge_contribution`：提交本次唯一的结构化 Contribution 并结束 Agent 运行。
+- `submit_knowledge_contribution`：提交本次唯一的结构化 Contribution，按 canonical title 批量创建或覆盖 Statement，并结束 Agent 运行。
 
 完整链路将前两个读取工具绑定到 Sandbox。Agent 必须通过一次最终的 `submit_knowledge_contribution` 结束运行；Core 校验后原子提交整份 Contribution。阶段调试使用同一 Agent Runtime 和结束协议，但只捕获 Contribution 预览，不执行提交。
 
-`search_knowledge` 只承担当前知识的轻量发现，`read_knowledge_statement` 再提供所选 Statement 的完整语义上下文。来源身份和 selector 可见并不扩大当前 Workspace 的 Observation 权限；`read_evidence` 仍只读取本次运行已经授权的唯一来源，不会因为某条既有 Statement 指向其他来源而跨来源回读原文。
+`search_knowledge` 只承担当前知识的轻量发现，`read_knowledge_statement` 再提供所选 Statement 的完整语义上下文。知识工具不向 Agent 暴露内部 ID、Statement revision、独立关系或反向引用；正文中的 `[[canonical title]]` 本身就是继续读取相关知识的键。Observation selector 可见并不扩大当前 Workspace 的来源权限；`read_evidence` 仍只读取本次运行已经授权的唯一来源。
 
 Knowledge Maintenance Agent 的 Debug Trace 只记录模型轮次的状态、停止原因和 token 总量，以及工具名称和严格白名单化的结果摘要，例如候选数量、局部地图 selector、证据读取的起点、实际范围、continuation 或候选 Statement 数量。读取失败只展示来源失效、位置无效、预算等安全错误类别，不展示本地路径和原文。它不记录 Assistant 文本、thinking/reasoning、工具结果正文、原始证据或完整模型上下文。最终 Contribution 和 Sandbox 中的 Statement 继续由各自的结构化结果视图展示，不复制进轨迹。
 
@@ -88,8 +88,7 @@ Knowledge Maintenance Agent 的 Debug Trace 只记录模型轮次的状态、停
 - 预处理的总分段、逐次局部映射与归并输出及其原始位置，以及 Knowledge Agent 包含有界读取范围和 continuation 的安全活动时间线；
 - 可丢弃的 Evidence Map；
 - Agent 提交的结构化 Knowledge Contribution；
-- 从 Sandbox 回读的 Knowledge Statement 列表与正文；
-- 每条 Statement 的正文，以及当前验证 Store 提供的来源和系统元信息。
+- 从 Sandbox 按 canonical title 回读的 Knowledge Statement 列表与正文。
 
 Coding Plan 与 API Connection 都向两个阶段提供同一模型调用契约。Observation Preprocessor 使用所选模型进行一次或多次有界直接调用；Knowledge Maintenance Agent 使用同一模型的 stream 接入通用 Agent Runtime，当前 Runtime 实现为 Pi Agent Core。Backend 决定认证和计费通道，阶段 Runtime 决定直接生成还是 Agent loop，两者不混为一个概念。
 
@@ -112,6 +111,8 @@ Model Connection 会在 Provider 能声明时保留 `contextWindowTokens` 和最
 ## 6. 当前未实现
 
 - 从 Statement 正文的动态名称引用派生出站引用、反向引用和图投影视图；是否还需要内部身份绑定及其形式，留待治理需求验证；
+- Statement revision、历史版本以及不可变提交的长期治理实现；
+- 脱离原始 Session、只依据知识层内容及显式引用进行的 Statement 可理解性盲审或对抗式校验；
 - 从 Sandbox promote、merge 或复制到正式知识库；
 - 正式知识生产的自动调度、批量和流式处理；
 - Canonical Activity 作为跨 Harness 的标准化 Observation 视图；

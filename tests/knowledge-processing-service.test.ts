@@ -179,10 +179,8 @@ class FakeKnowledgeAgent implements KnowledgeAgentRuntime {
       contribution: {
         runRef: input.contributionRunRef,
         statements: [{
-          localRef: 'candidate-1',
           title: 'Candidate',
-          content: 'Candidate Knowledge Statement',
-          sources: [{ sourceRef: input.sourceRef, selector: 'L000001-L000001' }]
+          content: 'Candidate Knowledge Statement'
         }]
       },
       modelCallCount: 2,
@@ -266,6 +264,13 @@ describe('KnowledgeProcessingService', () => {
 
     expect(OBSERVATION_PREPROCESSOR_PROMPT).toContain('Output only the Evidence Map as Markdown.')
     expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('submit_knowledge_contribution')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('terms whose meaning is local to the conversation')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('test it counterfactually')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('[[canonical title]]')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('existing title replaces its current content')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).not.toContain('derived_from')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).not.toContain('revises')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).not.toContain('immutable')
   })
 
   it('persists prompt overrides and restores the default by removing the override', async () => {
@@ -1311,10 +1316,8 @@ describe('KnowledgeProcessingService', () => {
         contribution: {
           runRef: input.contributionRunRef,
           statements: [{
-            localRef: 'candidate',
             title: 'Candidate',
-            content: 'Candidate content',
-            sources: [{ sourceRef: input.sourceRef, selector: 'L000001-L000001' }]
+            content: 'Candidate content'
           }]
         },
         modelCallCount: 1,

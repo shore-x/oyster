@@ -28,26 +28,9 @@ export interface FullChainStepView {
   state: FullChainStepState
 }
 
-export interface SandboxStatementSourceView {
-  sourceRef: string
-  selector?: string
-}
-
-export interface SandboxStatementRelationView {
-  relation: 'derived_from' | 'revises'
-  direction: 'outgoing' | 'incoming'
-  statementId: string
-  statementTitle?: string
-}
-
 export interface SandboxStatementView {
-  id: string
   title: string
   content: string
-  originRef: string
-  createdAt: string
-  sources: SandboxStatementSourceView[]
-  relations: SandboxStatementRelationView[]
 }
 
 export interface SandboxContributionView {
@@ -167,12 +150,12 @@ function preprocessingProgressText(progress: ObservationPreprocessingProgress): 
 export function FullChainWorkspace(props: FullChainWorkspaceProps) {
   const [workspace, setWorkspace] = createSignal<'input' | 'process' | 'result'>('input')
   const [output, setOutput] = createSignal<'knowledge' | 'evidence' | 'contributions'>('knowledge')
-  const [selectedStatementId, setSelectedStatementId] = createSignal<string>()
+  const [selectedStatementTitle, setSelectedStatementTitle] = createSignal<string>()
   const selectedSession = createMemo(() => props.sessions.find(
     (session) => session.artifactId === props.selectedSessionId
   ))
   const selectedStatement = createMemo(() => props.result?.statements.find(
-    (statement) => statement.id === selectedStatementId()
+    (statement) => statement.title === selectedStatementTitle()
   ) || props.result?.statements[0])
   const preprocessorConfig = createMemo(() => stageConfiguration(
     props.preprocessor,
@@ -222,7 +205,7 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
       previousRunId = runId
       setWorkspace('result')
       setOutput('knowledge')
-      setSelectedStatementId(props.result?.statements[0]?.id)
+      setSelectedStatementTitle(props.result?.statements[0]?.title)
     }
   })
 
@@ -533,11 +516,11 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
                         <button
                           type="button"
                           class="sandbox-statement"
-                          aria-selected={selectedStatement()?.id === statement.id}
-                          onClick={() => setSelectedStatementId(statement.id)}
+                          aria-selected={selectedStatement()?.title === statement.title}
+                          onClick={() => setSelectedStatementTitle(statement.title)}
                         >
                           <strong>{statement.title}</strong>
-                          <span>{statement.id}</span>
+                          <span>canonical title</span>
                         </button>
                       )}</For>
                     </aside>
@@ -546,28 +529,9 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
                         <article class="sandbox-knowledge__detail">
                           <h3>{statement().title}</h3>
                           <div class="sandbox-knowledge__detail-meta">
-                            <span>{statement().id}</span><span>{formatTime(statement().createdAt)}</span><span>{statement().originRef}</span>
+                            <span>当前 Sandbox 正文</span>
                           </div>
                           <div class="sandbox-knowledge__content">{statement().content}</div>
-                          <Show when={statement().sources.length}>
-                            <section class="sandbox-knowledge__section">
-                              <h4>来源证据</h4>
-                              <ul><For each={statement().sources}>{(source) => (
-                                <li><code>{source.sourceRef}</code>{source.selector ? ` · ${source.selector}` : ''}</li>
-                              )}</For></ul>
-                            </section>
-                          </Show>
-                          <Show when={statement().relations.length}>
-                            <section class="sandbox-knowledge__section">
-                              <h4>知识关系</h4>
-                              <ul><For each={statement().relations}>{(relation) => (
-                                <li>
-                                  {relation.direction === 'outgoing' ? relation.relation : `被 ${relation.relation}`}
-                                  {' · '}{relation.statementTitle || relation.statementId}
-                                </li>
-                              )}</For></ul>
-                            </section>
-                          </Show>
                         </article>
                       )}
                     </Show>

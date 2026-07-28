@@ -3,7 +3,7 @@ import type { AiBackendSnapshot } from '../../shared/ai-backends'
 import type { ReasoningEffort } from '../../shared/ai-backends'
 import type {
   KnowledgeContributionDraft,
-  KnowledgeStatementDetails
+  KnowledgeStatement
 } from '../../shared/knowledge'
 import type { EvidenceLocation, ObservationCharacterWindow } from '../observation/model'
 import type {
@@ -45,21 +45,20 @@ export interface AiBackendPort {
 }
 
 export interface KnowledgeStatementRecord {
-  id: string
   title: string
   content: string
 }
 
 export interface KnowledgeReader {
-  /** Discover current Statements; historical versions remain reachable by stable ID and relations. */
+  /** Discover current Statements by text and return bounded candidates. */
   search(
     query: string,
     limit: number,
     offset?: number,
     signal?: AbortSignal
   ): Promise<KnowledgeStatementRecord[]>
-  /** Read one exact immutable Statement together with its direct provenance and relation context. */
-  read(statementId: string, signal?: AbortSignal): Promise<KnowledgeStatementDetails | undefined>
+  /** Resolve one current Statement by its exact canonical title. */
+  read(title: string, signal?: AbortSignal): Promise<KnowledgeStatement | undefined>
 }
 
 export interface KnowledgeAgentRunInput {
@@ -145,7 +144,7 @@ export class EmptyKnowledgeReader implements KnowledgeReader {
     return []
   }
 
-  async read(_statementId: string, signal?: AbortSignal): Promise<undefined> {
+  async read(_title: string, signal?: AbortSignal): Promise<undefined> {
     signal?.throwIfAborted()
     return undefined
   }

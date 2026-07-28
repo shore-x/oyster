@@ -16,13 +16,73 @@ async function temporaryPath(prefix: string): Promise<string> {
   return directory
 }
 
+function createV1Database(
+  databasePath: string,
+  statements: Array<{ id: string; title: string; content: string }>
+): void {
+  const database = new DatabaseSync(databasePath)
+  try {
+    database.exec(`
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE knowledge_contributions (
+        id TEXT PRIMARY KEY,
+        run_ref TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE knowledge_statements (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL CHECK(length(trim(title)) > 0),
+        content TEXT NOT NULL CHECK(length(trim(content)) > 0),
+        origin_ref TEXT NOT NULL REFERENCES knowledge_contributions(id) ON DELETE RESTRICT,
+        created_at TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE statement_sources (
+        statement_id TEXT NOT NULL REFERENCES knowledge_statements(id) ON DELETE RESTRICT,
+        source_ref TEXT NOT NULL,
+        selector TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (statement_id, source_ref, selector)
+      ) STRICT;
+      CREATE TABLE statement_relations (
+        source_statement_id TEXT NOT NULL REFERENCES knowledge_statements(id) ON DELETE RESTRICT,
+        relation TEXT NOT NULL CHECK(relation IN ('derived_from', 'revises')),
+        target_statement_id TEXT NOT NULL REFERENCES knowledge_statements(id) ON DELETE RESTRICT,
+        CHECK(source_statement_id <> target_statement_id),
+        PRIMARY KEY (source_statement_id, relation, target_statement_id)
+      ) STRICT;
+      CREATE TRIGGER knowledge_statements_are_immutable
+        BEFORE UPDATE ON knowledge_statements
+        BEGIN
+          SELECT RAISE(ABORT, 'Knowledge Statements are immutable');
+        END;
+      INSERT INTO knowledge_contributions (id, run_ref, created_at)
+      VALUES ('legacy-contribution', 'run:legacy', '2026-07-27T00:00:00.000Z');
+      PRAGMA user_version = 1;
+    `)
+    const insert = database.prepare(`
+      INSERT INTO knowledge_statements (id, title, content, origin_ref, created_at)
+      VALUES (?, ?, ?, 'legacy-contribution', '2026-07-27T00:00:00.000Z')
+    `)
+    for (const statement of statements) {
+      insert.run(statement.id, statement.title, statement.content)
+      database.prepare(`
+        INSERT INTO statement_sources (statement_id, source_ref, selector)
+        VALUES (?, 'raw:legacy', 'L000001-L000002')
+      `).run(statement.id)
+    }
+  } finally {
+    database.close()
+  }
+}
+
 afterEach(async () => {
   for (const closeable of closeables.splice(0)) closeable.close()
-  await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
+  await Promise.all(temporaryDirectories.splice(0).map((directory) => (
+    rm(directory, { recursive: true, force: true })
+  )))
 })
 
 describe('SqliteKnowledgeStore', () => {
-  it('records an explicit no-op contribution without inventing Statements', async () => {
+  it('records an empty runtime envelope without inventing Statements', async () => {
     const directory = await temporaryPath('oyster-knowledge-store-')
     const store = new SqliteKnowledgeStore(join(directory, 'knowledge.sqlite'))
     closeables.push(store)
@@ -30,29 +90,93 @@ describe('SqliteKnowledgeStore', () => {
     const result = store.commit({ runRef: 'run:empty', statements: [] })
 
     expect(result.statements).toEqual([])
-    expect(result.sources).toEqual([])
-    expect(result.relations).toEqual([])
-    expect(result.statementIdsByLocalRef).toEqual({})
+    expect(result.createdTitles).toEqual([])
+    expect(result.updatedTitles).toEqual([])
     expect(store.getContributionByRunRef('run:empty')).toEqual(result.contribution)
     expect(store.listStatements()).toEqual([])
     expect(() => store.commit({ runRef: 'run:empty', statements: [] })).toThrow('runRef 已提交')
   })
 
-  it('does not impose an arbitrary Statement count on one atomic Contribution', async () => {
+  it('creates and updates one Statement by its trimmed canonical title', async () => {
     const directory = await temporaryPath('oyster-knowledge-store-')
     const store = new SqliteKnowledgeStore(join(directory, 'knowledge.sqlite'))
     closeables.push(store)
-    const statements = Array.from({ length: 101 }, (_, index) => ({
-      localRef: `statement-${index}`,
-      title: `Statement ${index}`,
-      content: `Knowledge ${index}.`,
-      sources: [{ sourceRef: 'raw:large-contribution' }]
-    }))
+    const originalContent = '  Original Markdown body.\n'
 
-    const result = store.commit({ runRef: 'run:large-contribution', statements })
+    const created = store.commit({
+      runRef: 'run:create',
+      statements: [{ title: '  Oyster Knowledge Store  ', content: originalContent }]
+    })
 
-    expect(result.statements).toHaveLength(101)
-    expect(result.sources).toHaveLength(101)
+    expect(created.createdTitles).toEqual(['Oyster Knowledge Store'])
+    expect(created.updatedTitles).toEqual([])
+    expect(created.statements).toEqual([{
+      title: 'Oyster Knowledge Store',
+      content: originalContent
+    }])
+    expect(store.getStatement(' Oyster Knowledge Store ')).toEqual(created.statements[0])
+
+    const updatedContent = 'The store uses [[canonical title]] references as plain text.'
+    const updated = store.commit({
+      runRef: 'run:update',
+      statements: [{ title: 'Oyster Knowledge Store', content: updatedContent }]
+    })
+
+    expect(updated.createdTitles).toEqual([])
+    expect(updated.updatedTitles).toEqual(['Oyster Knowledge Store'])
+    expect(store.listStatements()).toEqual([{
+      title: 'Oyster Knowledge Store',
+      content: updatedContent
+    }])
+  })
+
+  it('preserves dynamic title references verbatim while their targets update independently', async () => {
+    const directory = await temporaryPath('oyster-knowledge-store-')
+    const store = new SqliteKnowledgeStore(join(directory, 'knowledge.sqlite'))
+    closeables.push(store)
+    const referencingBody = [
+      'This depends on [[Target Statement]].',
+      'It also names [[Context Statement|the current context]].'
+    ].join('\n')
+
+    store.commit({
+      runRef: 'run:references',
+      statements: [
+        { title: 'Referencing Statement', content: referencingBody },
+        { title: 'Target Statement', content: 'Old target meaning.' },
+        { title: 'Context Statement', content: 'Context meaning.' }
+      ]
+    })
+    store.commit({
+      runRef: 'run:update-target',
+      statements: [{ title: 'Target Statement', content: 'Current target meaning.' }]
+    })
+
+    expect(await store.read('Referencing Statement')).toEqual({
+      title: 'Referencing Statement',
+      content: referencingBody
+    })
+    expect(await store.read('Target Statement')).toEqual({
+      title: 'Target Statement',
+      content: 'Current target meaning.'
+    })
+  })
+
+  it('atomically rejects duplicate canonical titles in one Contribution after trimming', async () => {
+    const directory = await temporaryPath('oyster-knowledge-store-')
+    const store = new SqliteKnowledgeStore(join(directory, 'knowledge.sqlite'))
+    closeables.push(store)
+
+    expect(() => store.commit({
+      runRef: 'run:duplicate-titles',
+      statements: [
+        { title: 'Duplicate', content: 'First body.' },
+        { title: ' Duplicate ', content: 'Second body.' }
+      ]
+    })).toThrow('canonical title 重复：Duplicate')
+
+    expect(store.getContributionByRunRef('run:duplicate-titles')).toBeUndefined()
+    expect(store.listStatements()).toEqual([])
   })
 
   it('enforces the shared per-Statement content boundary', async () => {
@@ -63,242 +187,127 @@ describe('SqliteKnowledgeStore', () => {
     expect(() => store.commit({
       runRef: 'run:oversized-statement',
       statements: [{
-        localRef: 'oversized',
         title: 'Oversized Statement',
-        content: 'x'.repeat(MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH + 1),
-        sources: [{ sourceRef: 'raw:oversized' }]
+        content: 'x'.repeat(MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH + 1)
       }]
     })).toThrow(`content 超出长度上限 ${MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH}`)
 
     expect(store.getContributionByRunRef('run:oversized-statement')).toBeUndefined()
   })
 
-  it('atomically commits free-text Statements, provenance, and minimal relations', async () => {
+  it('searches title and body while exact title reads remain exact', async () => {
     const directory = await temporaryPath('oyster-knowledge-store-')
     const store = new SqliteKnowledgeStore(join(directory, 'knowledge.sqlite'))
     closeables.push(store)
-
-    const baseline = store.commit({
-      runRef: 'run:baseline',
-      statements: [{
-        localRef: 'old-preference',
-        title: 'Old editor preference',
-        content: 'The user preferred Editor A.',
-        sources: [{ sourceRef: 'raw:session-1@sha256:old', selector: 'L000001-L000004' }]
-      }]
-    })
-    const oldId = baseline.statementIdsByLocalRef['old-preference']
-
-    const result = store.commit({
-      runRef: 'run:update',
+    store.commit({
+      runRef: 'run:search',
       statements: [
-        {
-          localRef: 'current-preference',
-          title: 'Current editor preference',
-          content: 'The user now prefers **Editor B**.\n\nKeep this Markdown.',
-          sources: [{ sourceRef: 'raw:session-2@sha256:new', selector: 'L000020-L000024' }],
-          relations: [{
-            relation: 'revises',
-            target: { kind: 'statement', statementId: oldId }
-          }]
-        },
-        {
-          localRef: 'workflow-choice',
-          title: 'Workflow choice',
-          content: 'Use Editor B for the current workflow.',
-          relations: [{
-            relation: 'derived_from',
-            target: { kind: 'draft', localRef: 'current-preference' }
-          }]
-        }
+        { title: 'Database', content: 'A general storage concept.' },
+        { title: 'Oyster Database', content: 'The local SQLite knowledge store.' },
+        { title: 'Persistence boundary', content: 'The database is behind this boundary.' }
       ]
     })
 
-    expect(Object.keys(result.statementIdsByLocalRef)).toEqual([
-      'current-preference',
-      'workflow-choice'
+    const results = await store.search('Database', 2)
+    expect(results[0]).toEqual({ title: 'Database', content: 'A general storage concept.' })
+    expect(results).toHaveLength(2)
+    expect(await store.search('Database', 2, 2)).toEqual([
+      { title: 'Persistence boundary', content: 'The database is behind this boundary.' }
     ])
-    expect(result.sources).toEqual([expect.objectContaining({
-      statementId: result.statementIdsByLocalRef['current-preference'],
-      sourceRef: 'raw:session-2@sha256:new',
-      selector: 'L000020-L000024'
-    })])
-    expect(result.relations).toEqual(expect.arrayContaining([
-      {
-        sourceStatementId: result.statementIdsByLocalRef['current-preference'],
-        relation: 'revises',
-        targetStatementId: oldId
-      },
-      {
-        sourceStatementId: result.statementIdsByLocalRef['workflow-choice'],
-        relation: 'derived_from',
-        targetStatementId: result.statementIdsByLocalRef['current-preference']
-      }
-    ]))
-
-    const currentIds = store.listStatements().map((statement) => statement.id)
-    expect(currentIds).toContain(result.statementIdsByLocalRef['current-preference'])
-    expect(currentIds).toContain(result.statementIdsByLocalRef['workflow-choice'])
-    expect(currentIds).not.toContain(oldId)
-    expect(store.listStatements({ includeRevised: true }).map((statement) => statement.id)).toContain(oldId)
-
-    const oldDetails = store.getStatement(oldId)
-    expect(oldDetails?.incomingRelations).toContainEqual(expect.objectContaining({
-      relation: 'revises',
-      sourceStatementId: result.statementIdsByLocalRef['current-preference']
-    }))
-    expect(await store.search('editor preference', 10)).toEqual([
-      expect.objectContaining({ id: result.statementIdsByLocalRef['current-preference'] })
-    ])
-    const matchingEditorStatements = await store.search('Editor B', 10)
-    expect(matchingEditorStatements).toHaveLength(2)
-    expect(await store.search('Editor B', 1, 1)).toEqual([matchingEditorStatements[1]])
-    expect(await store.read(oldId)).toEqual(oldDetails)
-    expect(await store.read(result.statementIdsByLocalRef['current-preference'])).toEqual(
-      store.getStatement(result.statementIdsByLocalRef['current-preference'])
-    )
+    expect(await store.read('Database')).toEqual(results[0])
+    expect(await store.read('database')).toBeUndefined()
   })
 
-  it('rolls back the entire Contribution when any target is invalid', async () => {
-    const directory = await temporaryPath('oyster-knowledge-store-')
-    const store = new SqliteKnowledgeStore(join(directory, 'knowledge.sqlite'))
-    closeables.push(store)
-
-    expect(() => store.commit({
-      runRef: 'run:invalid',
-      statements: [{
-        localRef: 'invalid-target',
-        title: 'Would otherwise be valid',
-        content: 'This row must not survive the failed transaction.',
-        sources: [{ sourceRef: 'raw:session' }],
-        relations: [{
-          relation: 'revises',
-          target: { kind: 'statement', statementId: 'missing-statement' }
-        }]
-      }]
-    })).toThrow('不存在的 Statement')
-
-    expect(store.getContributionByRunRef('run:invalid')).toBeUndefined()
-    expect(store.listStatements({ includeRevised: true })).toEqual([])
-  })
-
-  it('rejects source-less knowledge and cyclic draft relations before writing', async () => {
-    const directory = await temporaryPath('oyster-knowledge-store-')
-    const store = new SqliteKnowledgeStore(join(directory, 'knowledge.sqlite'))
-    closeables.push(store)
-
-    expect(() => store.commit({
-      runRef: 'run:no-source',
-      statements: [{ localRef: 'orphan', title: 'Orphan', content: 'No provenance.' }]
-    })).toThrow('必须包含 Observation 来源或 derived_from 关系')
-
-    expect(() => store.commit({
-      runRef: 'run:cycle',
-      statements: [
-        {
-          localRef: 'a',
-          title: 'A',
-          content: 'A derives from B.',
-          relations: [{ relation: 'derived_from', target: { kind: 'draft', localRef: 'b' } }]
-        },
-        {
-          localRef: 'b',
-          title: 'B',
-          content: 'B derives from A.',
-          relations: [{ relation: 'derived_from', target: { kind: 'draft', localRef: 'a' } }]
-        }
-      ]
-    })).toThrow('不能形成循环')
-
-    expect(store.listStatements({ includeRevised: true })).toEqual([])
-  })
-
-  it('detects a deeply nested draft cycle without recursive stack growth', async () => {
-    const directory = await temporaryPath('oyster-knowledge-store-')
-    const store = new SqliteKnowledgeStore(join(directory, 'knowledge.sqlite'))
-    closeables.push(store)
-    const statementCount = 15_000
-    const statements = Array.from({ length: statementCount }, (_, index) => ({
-      localRef: `deep-${index}`,
-      title: `Deep ${index}`,
-      content: `Deep relation ${index}.`,
-      relations: [{
-        relation: 'derived_from' as const,
-        target: {
-          kind: 'draft' as const,
-          localRef: `deep-${(index + 1) % statementCount}`
-        }
-      }]
-    }))
-
-    expect(() => store.commit({
-      runRef: 'run:deep-cycle',
-      statements
-    })).toThrow('Knowledge Statement 的本地关系不能形成循环')
-    expect(store.getContributionByRunRef('run:deep-cycle')).toBeUndefined()
-  })
-
-  it('enforces Statement immutability at the database boundary', async () => {
-    const directory = await temporaryPath('oyster-knowledge-store-')
+  it('migrates an unambiguous v1 Store and archives all legacy structures', async () => {
+    const directory = await temporaryPath('oyster-knowledge-migration-')
     const databasePath = join(directory, 'knowledge.sqlite')
+    createV1Database(databasePath, [
+      { id: 'legacy-a', title: ' Legacy A ', content: 'Legacy A body.' },
+      { id: 'legacy-b', title: 'Legacy B', content: 'Legacy B body.' }
+    ])
+
     const store = new SqliteKnowledgeStore(databasePath)
     closeables.push(store)
-    const result = store.commit({
-      runRef: 'run:immutable',
-      statements: [{
-        localRef: 'statement',
-        title: 'Immutable',
-        content: 'Original content.',
-        sources: [{ sourceRef: 'raw:immutable' }]
-      }]
-    })
 
-    const direct = new DatabaseSync(databasePath)
-    closeables.push({ close: () => direct.close() })
-    expect(() => direct.prepare(
-      'UPDATE knowledge_statements SET content = ? WHERE id = ?'
-    ).run('Changed content.', result.statements[0].id)).toThrow('Knowledge Statements are immutable')
-    expect(store.getStatement(result.statements[0].id)?.statement.content).toBe('Original content.')
+    expect(store.listStatements()).toEqual([
+      { title: 'Legacy A', content: 'Legacy A body.' },
+      { title: 'Legacy B', content: 'Legacy B body.' }
+    ])
+    expect(store.getContributionByRunRef('run:legacy')).toBeDefined()
+
+    const database = new DatabaseSync(databasePath)
+    closeables.push({ close: () => database.close() })
+    expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(2)
+    const archivedTables = database.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE type = 'table' AND name LIKE 'legacy_v1_%'
+      ORDER BY name
+    `).all() as unknown as Array<{ name: string }>
+    expect(archivedTables.map(({ name }) => name)).toEqual([
+      'legacy_v1_knowledge_contributions',
+      'legacy_v1_knowledge_statements',
+      'legacy_v1_statement_relations',
+      'legacy_v1_statement_sources'
+    ])
+    expect((database.prepare(`
+      SELECT count(*) AS count FROM legacy_v1_statement_sources
+    `).get() as { count: number }).count).toBe(2)
+  })
+
+  it('refuses an ambiguous v1 migration without changing or hiding legacy data', async () => {
+    const directory = await temporaryPath('oyster-knowledge-migration-')
+    const databasePath = join(directory, 'knowledge.sqlite')
+    createV1Database(databasePath, [
+      { id: 'legacy-a', title: 'Duplicate title', content: 'First legacy meaning.' },
+      { id: 'legacy-b', title: 'Duplicate title', content: 'Second legacy meaning.' }
+    ])
+
+    expect(() => new SqliteKnowledgeStore(databasePath)).toThrow(
+      '包含 2 条同名 Statement（Duplicate title），无法安全迁移'
+    )
+
+    const database = new DatabaseSync(databasePath)
+    closeables.push({ close: () => database.close() })
+    expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(1)
+    expect((database.prepare(`
+      SELECT count(*) AS count FROM knowledge_statements
+    `).get() as { count: number }).count).toBe(2)
+    expect(database.prepare(`
+      SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'legacy_v1_knowledge_statements'
+    `).get()).toBeUndefined()
   })
 })
 
 describe('SqliteKnowledgeStoreManager', () => {
-  it('creates repeatable physical sandboxes without changing production knowledge', async () => {
+  it('isolates title-based updates inside disposable Sandbox snapshots', async () => {
     const directory = await temporaryPath('oyster-knowledge-manager-')
     const manager = await SqliteKnowledgeStoreManager.open(directory)
     closeables.push(manager)
-    const baseline = manager.production.commit({
+    manager.production.commit({
       runRef: 'run:production-baseline',
-      statements: [{
-        localRef: 'baseline',
-        title: 'Production baseline',
-        content: 'This Statement exists before the test.',
-        sources: [{ sourceRef: 'raw:baseline' }]
-      }]
+      statements: [{ title: 'Shared title', content: 'Production meaning.' }]
     })
 
     const first = await manager.createSandbox()
-    expect(first.store.getStatement(baseline.statements[0].id)?.statement.title).toBe('Production baseline')
-    const sandboxOnly = first.store.commit({
-      runRef: 'run:sandbox-only',
-      statements: [{
-        localRef: 'sandbox-only',
-        title: 'Sandbox-only result',
-        content: 'This must never appear in production.',
-        sources: [{ sourceRef: 'raw:test-session' }]
-      }]
+    first.store.commit({
+      runRef: 'run:sandbox-update',
+      statements: [
+        { title: 'Shared title', content: 'Sandbox meaning.' },
+        { title: 'Sandbox-only title', content: 'Only visible in this Sandbox.' }
+      ]
     })
-    expect(first.store.getStatement(sandboxOnly.statements[0].id)).toBeDefined()
-    expect(manager.production.getStatement(sandboxOnly.statements[0].id)).toBeUndefined()
+
+    expect(first.store.getStatement('Shared title')?.content).toBe('Sandbox meaning.')
+    expect(manager.production.getStatement('Shared title')?.content).toBe('Production meaning.')
+    expect(manager.production.getStatement('Sandbox-only title')).toBeUndefined()
     expect((await manager.listSandboxes()).map((sandbox) => sandbox.id)).toContain(first.id)
 
     const second = await manager.createSandbox()
-    expect(second.store.getStatement(baseline.statements[0].id)).toBeDefined()
-    expect(second.store.getStatement(sandboxOnly.statements[0].id)).toBeUndefined()
+    expect(second.store.getStatement('Shared title')?.content).toBe('Production meaning.')
+    expect(second.store.getStatement('Sandbox-only title')).toBeUndefined()
 
     await manager.discardSandbox(first.id)
     await expect(stat(first.databasePath)).rejects.toMatchObject({ code: 'ENOENT' })
-    expect(manager.production.getStatement(baseline.statements[0].id)).toBeDefined()
   })
 
   it('rejects paths that are not Core-issued Sandbox IDs', async () => {

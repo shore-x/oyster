@@ -16,7 +16,7 @@ Oyster 是一个独立于 Agent Harness 的本地知识库维护中心。当前�
 - 为知识加工的每个阶段独立选择 Connection、具体 Model 和模型支持的思考强度；
 - 从可用外部 Session 的确定 revision 运行 Observation Preprocessor，生成可回源、可丢弃的临时 Evidence Map；
 - 使用 Pi Agent Core 和受控工具提交可包含多条自由文本 Statement 的结构化 Knowledge Contribution；
-- 在独立 SQLite Knowledge Sandbox 中原子写入并回读自由文本 Statement 与当前验证元信息；
+- 在独立 SQLite Knowledge Sandbox 中按 canonical title 原子创建、覆盖并回读自由文本 Statement；
 - 默认提供完整链路测试，同时保留不提交 Knowledge Contribution 的阶段调试；
 - Electron Renderer 与文件系统业务逻辑通过 typed preload API 隔离。
 
@@ -67,7 +67,7 @@ src/main/ai-backends
 src/main/knowledge-processing
   默认 Prompt、临时 Workspace、Observation Preprocessor、Pi Agent Runtime 与完整链路编排
 src/main/knowledge-store
-  当前 SQLite Knowledge Store 验证实现、不可变 Statement 提交与隔离 Sandbox
+  当前 SQLite Knowledge Store 验证实现、按 title 读写 Statement 与隔离 Sandbox
 src/shared       Main / Preload / Renderer 共用契约
 ```
 

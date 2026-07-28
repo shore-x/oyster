@@ -37,10 +37,8 @@ export class FixtureKnowledgeAgentRuntime implements KnowledgeAgentRuntime {
       contribution: {
         runRef: input.contributionRunRef,
         statements: [{
-          localRef: 'fixture-preference',
           title: 'Fixture 中的明确偏好',
-          content: '用户希望知识加工链路保持简洁，并保留可回溯的来源。',
-          sources: [{ sourceRef: input.sourceRef, selector: 'L000001-L000001' }]
+          content: '用户希望知识加工链路保持简洁，并保留可回溯的来源。'
         }]
       },
       modelCallCount: 1,

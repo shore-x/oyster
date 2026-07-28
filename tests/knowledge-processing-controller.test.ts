@@ -89,7 +89,6 @@ function maintenanceResult(): KnowledgeMaintenanceResult {
     contribution: {
       runRef: 'maintenance-run-1',
       statements: [{
-        localRef: 'candidate-1',
         title: 'Candidate',
         content: 'Candidate content'
       }]
@@ -133,11 +132,10 @@ function fullChainResult(): KnowledgeFullChainResult {
     commit: {
       contribution: { id: 'contribution-1', runRef: 'full-chain-1', createdAt: '2026-07-26T00:00:01.000Z' },
       statements: [],
-      sources: [],
-      relations: [],
-      statementIdsByLocalRef: {}
+      createdTitles: [],
+      updatedTitles: []
     },
-    knowledge: { createdStatementIds: [], statements: [] },
+    knowledge: { writtenStatementTitles: [], statements: [] },
     durationMs: 30,
     completedAt: '2026-07-26T00:00:01.000Z'
   }

@@ -28,7 +28,7 @@ import {
 } from '../src/main/agent-runtime/pi-context-compactor'
 import {
   MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH,
-  type KnowledgeStatementDetails
+  type KnowledgeStatement
 } from '../src/shared/knowledge'
 
 const TOOL_NAMES = [
@@ -42,10 +42,7 @@ class MemoryKnowledgeReader implements KnowledgeReader {
   readonly searchCalls: Array<{ query: string; limit: number; offset?: number }> = []
   readonly readCalls: string[] = []
 
-  constructor(
-    private readonly records: KnowledgeStatementRecord[] = [],
-    private readonly details: KnowledgeStatementDetails[] = []
-  ) {}
+  constructor(private readonly records: KnowledgeStatementRecord[] = []) {}
 
   async search(
     query: string,
@@ -58,24 +55,10 @@ class MemoryKnowledgeReader implements KnowledgeReader {
     return this.records.slice(offset, offset + limit)
   }
 
-  async read(statementId: string, signal?: AbortSignal): Promise<KnowledgeStatementDetails | undefined> {
+  async read(title: string, signal?: AbortSignal): Promise<KnowledgeStatement | undefined> {
     signal?.throwIfAborted()
-    this.readCalls.push(statementId)
-    const details = this.details.find((candidate) => candidate.statement.id === statementId)
-    if (details) return details
-    const record = this.records.find((candidate) => candidate.id === statementId)
-    return record
-      ? {
-          statement: {
-            ...record,
-            originRef: 'contribution:test',
-            createdAt: '2026-07-27T00:00:00.000Z'
-          },
-          sources: [],
-          outgoingRelations: [],
-          incomingRelations: []
-        }
-      : undefined
+    this.readCalls.push(title)
+    return this.records.find((candidate) => candidate.title === title)
   }
 }
 
@@ -103,13 +86,8 @@ function runInput(overrides: Partial<KnowledgeAgentRunInput> = {}): KnowledgeAge
 function contributionSubmission(content: string) {
   return {
     statements: [{
-      localRef: 'candidate-1',
       title: 'Candidate knowledge',
-      content,
-      sources: [{
-        sourceRef: 'observation:test:1',
-        selector: 'L000001-L000001'
-      }]
+      content
     }]
   }
 }
@@ -215,7 +193,6 @@ describe('PiKnowledgeMaintenanceAgent', () => {
   it('uses a real four-turn Pi tool loop without putting raw Observation in the initial prompt', async () => {
     const hugeContent = `Known preference. ${'x'.repeat(80_000)}`
     const reader = new MemoryKnowledgeReader([{
-      id: 'statement:1',
       title: 'Output preference',
       content: hugeContent
     }])
@@ -233,9 +210,10 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       (context) => {
         const result = textContent(lastToolResult(context))
         expect(result.length).toBeLessThanOrEqual(16 * 1_024)
-        expect(result).toContain('statement:1')
+        expect(result).toContain('标题: Output preference')
+        expect(result).not.toContain('ID:')
         return fauxAssistantMessage(
-          fauxToolCall('read_knowledge_statement', { statementId: 'statement:1' }),
+          fauxToolCall('read_knowledge_statement', { title: 'Output preference' }),
           { stopReason: 'toolUse' }
         )
       },
@@ -243,8 +221,8 @@ describe('PiKnowledgeMaintenanceAgent', () => {
         const result = textContent(lastToolResult(context))
         expect(result).toContain(hugeContent)
         expect(result).not.toContain('内容因工具输出上限而截断')
-        expect(result).toContain('Current: yes (derived from direct incoming revises relations)')
-        expect(result).toContain('Observation sources (provenance only; availability in this Workspace is not implied):\n- none')
+        expect(result).toContain('Title: Output preference')
+        expect(result).toContain('Content:')
         return fauxAssistantMessage(
           fauxToolCall('read_evidence', {
             line: 1,
@@ -284,7 +262,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       toolCalls: TOOL_NAMES
     })
     expect(reader.searchCalls).toEqual([{ query: 'output preference', limit: 5 }])
-    expect(reader.readCalls).toEqual(['statement:1'])
+    expect(reader.readCalls).toEqual(['Output preference'])
     expect(traceEvents.filter((event) => event.type === 'model_started')).toHaveLength(4)
     expect(traceEvents.filter((event) => event.type === 'model_completed')).toHaveLength(4)
     expect(traceEvents.filter((event) => event.type === 'tool_started')).toHaveLength(4)
@@ -305,7 +283,6 @@ describe('PiKnowledgeMaintenanceAgent', () => {
 
   it('lets the Agent continue a bounded knowledge search from the returned offset', async () => {
     const reader = new MemoryKnowledgeReader(Array.from({ length: 5 }, (_, index) => ({
-      id: `statement:${index + 1}`,
       title: `Candidate ${index + 1}`,
       content: `Candidate knowledge ${index + 1}`
     })))
@@ -316,9 +293,9 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       }), { stopReason: 'toolUse' }),
       (context) => {
         const page = textContent(lastToolResult(context))
-        expect(page).toContain('statement:1')
-        expect(page).toContain('statement:2')
-        expect(page).not.toContain('statement:3')
+        expect(page).toContain('Candidate 1')
+        expect(page).toContain('Candidate 2')
+        expect(page).not.toContain('Candidate 3')
         expect(page).toContain('Next offset: 2')
         return fauxAssistantMessage(fauxToolCall('search_knowledge', {
           query: 'candidate',
@@ -328,8 +305,8 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       },
       (context) => {
         const page = textContent(lastToolResult(context))
-        expect(page).toContain('statement:3')
-        expect(page).toContain('statement:4')
+        expect(page).toContain('Candidate 3')
+        expect(page).toContain('Candidate 4')
         expect(page).toContain('Next offset: 4')
         return fauxAssistantMessage(fauxToolCall('search_knowledge', {
           query: 'candidate',
@@ -339,7 +316,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       },
       (context) => {
         const page = textContent(lastToolResult(context))
-        expect(page).toContain('statement:5')
+        expect(page).toContain('Candidate 5')
         expect(page).toContain('Next offset: none')
         return fauxAssistantMessage(fauxToolCall(
           'submit_knowledge_contribution',
@@ -358,64 +335,22 @@ describe('PiKnowledgeMaintenanceAgent', () => {
     ])
   })
 
-  it('reads complete Statement provenance and direct relations with semantic directions', async () => {
-    const details: KnowledgeStatementDetails = {
-      statement: {
-        id: 'statement:old',
-        title: 'Historical preference',
-        content: 'The user preferred Editor A.',
-        originRef: 'contribution:old',
-        createdAt: '2026-07-20T10:00:00.000Z'
-      },
-      sources: [{
-        statementId: 'statement:old',
-        sourceRef: 'raw:session-old@sha256:abc',
-        selector: 'L000010-L000012'
-      }],
-      outgoingRelations: [
-        {
-          sourceStatementId: 'statement:old',
-          relation: 'derived_from',
-          targetStatementId: 'statement:foundation'
-        },
-        {
-          sourceStatementId: 'statement:old',
-          relation: 'revises',
-          targetStatementId: 'statement:older'
-        }
-      ],
-      incomingRelations: [
-        {
-          sourceStatementId: 'statement:current',
-          relation: 'revises',
-          targetStatementId: 'statement:old'
-        },
-        {
-          sourceStatementId: 'statement:dependent',
-          relation: 'derived_from',
-          targetStatementId: 'statement:old'
-        }
-      ]
-    }
-    const reader = new MemoryKnowledgeReader([], [details])
+  it('reads the current Statement by exact canonical title without exposing storage metadata', async () => {
+    const reader = new MemoryKnowledgeReader([{
+      title: 'Historical preference',
+      content: 'The user preferred [[Editor A]].'
+    }])
     const runtime = fauxRuntime([
       fauxAssistantMessage(
-        fauxToolCall('read_knowledge_statement', { statementId: 'statement:old' }),
+        fauxToolCall('read_knowledge_statement', { title: 'Historical preference' }),
         { stopReason: 'toolUse' }
       ),
       (context) => {
         const result = textContent(lastToolResult(context))
-        expect(result).toContain('ID: statement:old')
-        expect(result).toContain('Current: no (derived from direct incoming revises relations)')
-        expect(result).toContain('Created at: 2026-07-20T10:00:00.000Z')
-        expect(result).toContain('Origin Contribution: contribution:old')
         expect(result).toContain('Title: Historical preference')
-        expect(result).toContain('Content:\nThe user preferred Editor A.')
-        expect(result).toContain('- raw:session-old@sha256:abc · selector L000010-L000012')
-        expect(result).toContain('- This Statement is derived from Statement statement:foundation.')
-        expect(result).toContain('- This Statement revises Statement statement:older.')
-        expect(result).toContain('- Statement statement:current revises this Statement.')
-        expect(result).toContain('- Statement statement:dependent is derived from this Statement.')
+        expect(result).toContain('Content:\nThe user preferred [[Editor A]].')
+        expect(result).not.toContain('ID:')
+        expect(result).not.toContain('Origin Contribution:')
         return fauxAssistantMessage(
           fauxToolCall('submit_knowledge_contribution', { statements: [] }),
           { stopReason: 'toolUse' }
@@ -429,7 +364,51 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       contribution: { statements: [] },
       toolCalls: ['read_knowledge_statement', 'submit_knowledge_contribution']
     })
-    expect(reader.readCalls).toEqual(['statement:old'])
+    expect(reader.readCalls).toEqual(['Historical preference'])
+  })
+
+  it('can discover, read, and submit a replacement for the same canonical title', async () => {
+    const reader = new MemoryKnowledgeReader([{
+      title: 'Oyster Knowledge Store',
+      content: 'The earlier understanding.'
+    }])
+    const runtime = fauxRuntime([
+      fauxAssistantMessage(
+        fauxToolCall('search_knowledge', { query: 'Oyster Knowledge Store' }),
+        { stopReason: 'toolUse' }
+      ),
+      (context) => {
+        expect(textContent(lastToolResult(context))).toContain('Oyster Knowledge Store')
+        return fauxAssistantMessage(
+          fauxToolCall('read_knowledge_statement', { title: 'Oyster Knowledge Store' }),
+          { stopReason: 'toolUse' }
+        )
+      },
+      (context) => {
+        expect(textContent(lastToolResult(context))).toContain('The earlier understanding.')
+        return fauxAssistantMessage(fauxToolCall('submit_knowledge_contribution', {
+          statements: [{
+            title: 'Oyster Knowledge Store',
+            content: 'The current understanding references [[Oyster architecture]].'
+          }]
+        }), { stopReason: 'toolUse' })
+      }
+    ])
+
+    const result = await new PiKnowledgeMaintenanceAgent(reader).run(runInput({
+      runtime: runtime.runtime
+    }))
+
+    expect(result.contribution.statements).toEqual([{
+      title: 'Oyster Knowledge Store',
+      content: 'The current understanding references [[Oyster architecture]].'
+    }])
+    expect(result.toolCalls).toEqual([
+      'search_knowledge',
+      'read_knowledge_statement',
+      'submit_knowledge_contribution'
+    ])
+    expect(reader.readCalls).toEqual(['Oyster Knowledge Store'])
   })
 
   it('does not let a failing debug trace callback change the Agent result', async () => {
@@ -473,7 +452,6 @@ describe('PiKnowledgeMaintenanceAgent', () => {
 
   it('uses generic context compaction when a normal tool loop outgrows the model context', async () => {
     const reader = new MemoryKnowledgeReader([{
-      id: 'statement:large',
       title: 'Large existing statement',
       content: 'detail '.repeat(4_000)
     }])
@@ -497,7 +475,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
         stream.end(normalCalls === 1
           ? fauxAssistantMessage(fauxToolCall(
               'read_knowledge_statement',
-              { statementId: 'statement:large' }
+              { title: 'Large existing statement' }
             ), { stopReason: 'toolUse' })
           : fauxAssistantMessage(fauxToolCall(
               'submit_knowledge_contribution',
@@ -525,7 +503,6 @@ describe('PiKnowledgeMaintenanceAgent', () => {
 
   it('classifies a compaction provider error without exposing it in debug traces', async () => {
     const reader = new MemoryKnowledgeReader([{
-      id: 'statement:large',
       title: 'Large existing statement',
       content: 'detail '.repeat(6_000)
     }])
@@ -553,7 +530,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
         stream.end(normalCalls === 1
           ? fauxAssistantMessage(fauxToolCall(
               'read_knowledge_statement',
-              { statementId: 'statement:large' }
+              { title: 'Large existing statement' }
             ), { stopReason: 'toolUse' })
           : fauxAssistantMessage(fauxToolCall(
               'submit_knowledge_contribution',
@@ -581,7 +558,6 @@ describe('PiKnowledgeMaintenanceAgent', () => {
 
   it('does not mark a healthy connection unavailable when a compaction summary is incomplete', async () => {
     const reader = new MemoryKnowledgeReader([{
-      id: 'statement:large',
       title: 'Large existing statement',
       content: 'detail '.repeat(6_000)
     }])
@@ -598,7 +574,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
           ? fauxAssistantMessage('partial summary', { stopReason: 'length' })
           : fauxAssistantMessage(fauxToolCall(
               'read_knowledge_statement',
-              { statementId: 'statement:large' }
+              { title: 'Large existing statement' }
             ), { stopReason: 'toolUse' }))
         return stream
       }
@@ -612,7 +588,6 @@ describe('PiKnowledgeMaintenanceAgent', () => {
 
   it('preserves a local context-window failure instead of misclassifying the backend connection', async () => {
     const reader = new MemoryKnowledgeReader([{
-      id: 'statement:large',
       title: 'Large existing statement',
       content: 'detail '.repeat(6_000)
     }])
@@ -633,7 +608,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
         normalCalls++
         stream.end(fauxAssistantMessage(fauxToolCall(
           'read_knowledge_statement',
-          { statementId: 'statement:large' }
+          { title: 'Large existing statement' }
         ), { stopReason: 'toolUse' }))
         return stream
       }
@@ -764,9 +739,14 @@ describe('PiKnowledgeMaintenanceAgent', () => {
     })
   })
 
-  it('lets the Agent inspect a semantically rejected submission and retry it', async () => {
-    const rejected = contributionSubmission('Rejected source reference.')
-    rejected.statements[0].sources[0].sourceRef = 'observation:outside-workspace'
+  it('rejects governance fields outside the minimal Statement submission and lets the Agent retry', async () => {
+    const rejected = {
+      statements: [{
+        title: 'Candidate knowledge',
+        content: 'The submission should contain only semantic content.',
+        sources: [{ sourceRef: 'observation:outside-workspace' }]
+      }]
+    }
     const runtime = fauxRuntime([
       fauxAssistantMessage(fauxToolCall(
         'submit_knowledge_contribution',
@@ -774,10 +754,9 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       ), { stopReason: 'toolUse' }),
       (context) => {
         expect(lastToolResult(context).isError).toBe(true)
-        expect(textContent(lastToolResult(context))).toContain('sourceRef')
         return fauxAssistantMessage(fauxToolCall(
           'submit_knowledge_contribution',
-          contributionSubmission('Accepted after correcting the source reference.')
+          contributionSubmission('Accepted after removing non-semantic fields.')
         ), { stopReason: 'toolUse' })
       }
     ])
@@ -786,7 +765,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       runtime: runtime.runtime
     }))).resolves.toMatchObject({
       contribution: {
-        statements: [{ content: 'Accepted after correcting the source reference.' }]
+        statements: [{ content: 'Accepted after removing non-semantic fields.' }]
       },
       modelCallCount: 2,
       toolCalls: ['submit_knowledge_contribution', 'submit_knowledge_contribution']
@@ -884,13 +863,8 @@ describe('PiKnowledgeMaintenanceAgent', () => {
         expect(textContent(lastToolResult(context))).not.toContain('L000002 RAW_B_SECRET')
         return fauxAssistantMessage(fauxToolCall('submit_knowledge_contribution', {
           statements: [{
-            localRef: 'candidate-1',
             title: 'Candidate knowledge',
-            content: 'Verified from the second range.',
-            sources: [{
-              sourceRef: 'observation:test:1',
-              selector: 'L000002-L000002'
-            }]
+            content: 'Verified from the second range.'
           }]
         }), { stopReason: 'toolUse' })
       }
@@ -919,7 +893,10 @@ describe('PiKnowledgeMaintenanceAgent', () => {
 
     expect(result).toMatchObject({
       contribution: {
-        statements: [{ sources: [{ selector: 'L000002-L000002' }] }]
+        statements: [{
+          title: 'Candidate knowledge',
+          content: 'Verified from the second range.'
+        }]
       },
       modelCallCount: 4,
       toolCalls: [
@@ -1109,7 +1086,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
     })
   })
 
-  it('pages one oversized raw line without a failure and keeps L provenance on submission', async () => {
+  it('pages one oversized raw line without a failure before submitting semantic content', async () => {
     const longLine = `${'a'.repeat(70_000)}TAIL`
     const runtime = fauxRuntime([
       fauxAssistantMessage(fauxToolCall('read_evidence', {
@@ -1138,13 +1115,8 @@ describe('PiKnowledgeMaintenanceAgent', () => {
         expect(textContent(finalPage)).toContain('EOF: true')
         return fauxAssistantMessage(fauxToolCall('submit_knowledge_contribution', {
           statements: [{
-            localRef: 'long-line',
             title: 'Long line evidence',
-            content: 'The relevant detail was verified through bounded windows.',
-            sources: [{
-              sourceRef: 'observation:test:1',
-              selector: 'L000001-L000001'
-            }]
+            content: 'The relevant detail was verified through bounded windows.'
           }]
         }), { stopReason: 'toolUse' })
       }
@@ -1155,10 +1127,10 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       observationLines: [longLine]
     }))
 
-    expect(result.contribution.statements[0].sources).toEqual([{
-      sourceRef: 'observation:test:1',
-      selector: 'L000001-L000001'
-    }])
+    expect(result.contribution.statements[0]).toEqual({
+      title: 'Long line evidence',
+      content: 'The relevant detail was verified through bounded windows.'
+    })
   })
 
   it('keeps Unicode code points intact across continuation pages and reports EOF', async () => {
@@ -1207,7 +1179,8 @@ describe('PiKnowledgeMaintenanceAgent', () => {
     }))).resolves.toMatchObject({
       contribution: {
         statements: [{
-          sources: [{ sourceRef: 'observation:test:1', selector: 'L000001-L000001' }]
+          title: 'Candidate knowledge',
+          content: 'Unicode evidence was read without splitting a code point.'
         }]
       },
       modelCallCount: 4
@@ -1216,14 +1189,13 @@ describe('PiKnowledgeMaintenanceAgent', () => {
 
   it('allows repeated searches, knowledge and map reads, and overlapping evidence reads', async () => {
     const reader = new MemoryKnowledgeReader([{
-      id: 'statement:1',
       title: 'Output preference',
       content: 'The user prefers concise output.'
     }])
     const runtime = fauxRuntime([
       fauxAssistantMessage([
         fauxToolCall('search_knowledge', { query: '  Output   preference  ' }, { id: 'search-first' }),
-        fauxToolCall('read_knowledge_statement', { statementId: 'statement:1' }, { id: 'statement-first' }),
+        fauxToolCall('read_knowledge_statement', { title: 'Output preference' }, { id: 'statement-first' }),
         fauxToolCall('read_evidence_map_section', { sectionId: 'M000001' }, { id: 'map-first' }),
         fauxToolCall('read_evidence', {
           line: 1,
@@ -1233,7 +1205,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       ], { stopReason: 'toolUse' }),
       fauxAssistantMessage([
         fauxToolCall('search_knowledge', { query: 'output preference' }, { id: 'search-repeat' }),
-        fauxToolCall('read_knowledge_statement', { statementId: 'statement:1' }, { id: 'statement-repeat' }),
+        fauxToolCall('read_knowledge_statement', { title: 'Output preference' }, { id: 'statement-repeat' }),
         fauxToolCall('read_evidence_map_section', { sectionId: 'M000001' }, { id: 'map-repeat' }),
         fauxToolCall('read_evidence', {
           line: 1,
@@ -1245,7 +1217,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
         const repeated = toolResults(context).slice(-4)
         expect(repeated).toHaveLength(4)
         expect(repeated.every((result) => !result.isError)).toBe(true)
-        expect(textContent(repeated[0])).toContain('statement:1')
+        expect(textContent(repeated[0])).toContain('Output preference')
         expect(textContent(repeated[1])).toContain('The user prefers concise output.')
         expect(textContent(repeated[2])).toContain('MAP_DETAIL')
         expect(textContent(repeated[3])).toContain('prefers concise output')
@@ -1273,7 +1245,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       { query: 'Output   preference', limit: 8 },
       { query: 'output preference', limit: 8 }
     ])
-    expect(reader.readCalls).toEqual(['statement:1', 'statement:1'])
+    expect(reader.readCalls).toEqual(['Output preference', 'Output preference'])
   })
 
   it('allows individually bounded tool outputs to accumulate across the run', async () => {
@@ -1362,13 +1334,8 @@ describe('PiKnowledgeMaintenanceAgent', () => {
 
   it('does not impose a run-level Statement count on the final Contribution', async () => {
     const statements = Array.from({ length: 101 }, (_, index) => ({
-      localRef: `candidate-${index}`,
       title: `Candidate ${index}`,
-      content: `Knowledge candidate ${index}.`,
-      sources: [{
-        sourceRef: 'observation:test:1',
-        selector: 'L000001-L000001'
-      }]
+      content: `Knowledge candidate ${index}.`
     }))
     const runtime = fauxRuntime([fauxAssistantMessage(fauxToolCall(
       'submit_knowledge_contribution',

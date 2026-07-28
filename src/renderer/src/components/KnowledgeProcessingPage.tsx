@@ -37,27 +37,12 @@ function formatTime(value: string): string {
 
 function contributionText(contribution: KnowledgeContributionDraft): string {
   if (!contribution.statements.length) return '本次运行没有需要持久化的 Knowledge Statement。'
-  return contribution.statements.map((statement) => {
-    const sources = statement.sources?.length
-      ? `\nSources: ${statement.sources.map((source) => `${source.sourceRef}${source.selector ? ` ${source.selector}` : ''}`).join('；')}`
-      : ''
-    const relations = statement.relations?.length
-      ? `\nRelations: ${statement.relations.map((relation) => {
-        const target = relation.target.kind === 'statement'
-          ? relation.target.statementId
-          : relation.target.localRef
-        return `${relation.relation} ${target}`
-      }).join('；')}`
-      : ''
-    return `## ${statement.title}\nLocal ref: ${statement.localRef}\n\n${statement.content}${sources}${relations}`
-  }).join('\n\n---\n\n')
+  return contribution.statements
+    .map((statement) => `## ${statement.title}\n\n${statement.content}`)
+    .join('\n\n---\n\n')
 }
 
 function fullChainResultView(result: KnowledgeFullChainResult): FullChainResultView {
-  const statementTitles = new Map(result.knowledge.statements.map(({ statement }) => [
-    statement.id,
-    statement.title
-  ]))
   return {
     runId: result.runId,
     sandboxId: result.sandbox.id,
@@ -92,30 +77,9 @@ function fullChainResultView(result: KnowledgeFullChainResult): FullChainResultV
       content: contributionText(result.maintenance.contribution),
       createdAt: result.commit.contribution.createdAt
     }],
-    statements: result.knowledge.statements.map((details) => ({
-      id: details.statement.id,
-      title: details.statement.title,
-      content: details.statement.content,
-      originRef: details.statement.originRef,
-      createdAt: details.statement.createdAt,
-      sources: details.sources.map((source) => ({
-        sourceRef: source.sourceRef,
-        selector: source.selector
-      })),
-      relations: [
-        ...details.outgoingRelations.map((relation) => ({
-          relation: relation.relation,
-          direction: 'outgoing' as const,
-          statementId: relation.targetStatementId,
-          statementTitle: statementTitles.get(relation.targetStatementId)
-        })),
-        ...details.incomingRelations.map((relation) => ({
-          relation: relation.relation,
-          direction: 'incoming' as const,
-          statementId: relation.sourceStatementId,
-          statementTitle: statementTitles.get(relation.sourceStatementId)
-        }))
-      ]
+    statements: result.knowledge.statements.map((statement) => ({
+      title: statement.title,
+      content: statement.content
     }))
   }
 }
@@ -347,14 +311,14 @@ function PreprocessingResult(props: { result: ObservationPreprocessingResult }) 
 }
 
 function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
-  const [selectedLocalRef, setSelectedLocalRef] = createSignal<string>()
+  const [selectedTitle, setSelectedTitle] = createSignal<string>()
   const selectedStatement = createMemo(() => props.result.contribution.statements.find(
-    (statement) => statement.localRef === selectedLocalRef()
+    (statement) => statement.title === selectedTitle()
   ) ?? props.result.contribution.statements[0])
 
   createEffect(() => {
     const contribution = props.result.contribution
-    setSelectedLocalRef(contribution.statements[0]?.localRef)
+    setSelectedTitle(contribution.statements[0]?.title)
   })
 
   return (
@@ -377,11 +341,11 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
               <button
                 type="button"
                 class="sandbox-statement"
-                aria-selected={selectedStatement()?.localRef === statement.localRef}
-                onClick={() => setSelectedLocalRef(statement.localRef)}
+                aria-selected={selectedStatement()?.title === statement.title}
+                onClick={() => setSelectedTitle(statement.title)}
               >
                 <strong>{statement.title}</strong>
-                <span>{statement.localRef}</span>
+                <span>canonical title</span>
               </button>
             )}</For>
           </aside>
@@ -390,31 +354,9 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
               <article class="sandbox-knowledge__detail">
                 <h3>{statement().title}</h3>
                 <div class="sandbox-knowledge__detail-meta">
-                  <span>Local ref · {statement().localRef}</span>
-                  <span>Contribution Draft</span>
+                  <span>按 canonical title 创建或覆盖</span>
                 </div>
                 <div class="sandbox-knowledge__content">{statement().content}</div>
-                <Show when={statement().sources?.length}>
-                  <section class="sandbox-knowledge__section">
-                    <h4>来源证据</h4>
-                    <ul><For each={statement().sources ?? []}>{(source) => (
-                      <li><code>{source.sourceRef}</code>{source.selector ? ` · ${source.selector}` : ''}</li>
-                    )}</For></ul>
-                  </section>
-                </Show>
-                <Show when={statement().relations?.length}>
-                  <section class="sandbox-knowledge__section">
-                    <h4>候选关系</h4>
-                    <ul><For each={statement().relations ?? []}>{(relation) => (
-                      <li>
-                        {relation.relation}{' · '}
-                        {relation.target.kind === 'statement'
-                          ? `Statement ${relation.target.statementId}`
-                          : `Draft ${relation.target.localRef}`}
-                      </li>
-                    )}</For></ul>
-                  </section>
-                </Show>
               </article>
             )}
           </Show>

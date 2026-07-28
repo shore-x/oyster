@@ -202,19 +202,12 @@ function normalAgentFactory(options: {
         runRef: input.contributionRunRef,
         statements: [
           {
-            localRef: 'explicit-preference',
             title: `${prefix} summary preference`,
-            content: 'The user explicitly prefers concise summaries.',
-            sources: [{ sourceRef: input.sourceRef, selector: 'L000001-L000001' }]
+            content: 'The user explicitly prefers concise summaries.'
           },
           {
-            localRef: 'preservation-rule',
             title: `${prefix} preservation rule`,
-            content: 'Explicit rejections must be preserved when maintaining knowledge.',
-            relations: [{
-              relation: 'derived_from',
-              target: { kind: 'draft', localRef: 'explicit-preference' }
-            }]
+            content: `Explicit rejections must be preserved when maintaining [[${prefix} summary preference]].`
           }
         ]
       },
@@ -317,17 +310,15 @@ describe('KnowledgeFullChainService', () => {
     const baseline = harness.manager.production.commit({
       runRef: 'production:baseline',
       statements: [{
-        localRef: 'baseline',
         title: 'Production baseline',
-        content: 'This knowledge predates the test run.',
-        sources: [{ sourceRef: 'raw:production-baseline' }]
+        content: 'This knowledge predates the test run.'
       }]
     })
     let baselineVisibleToAgent = false
     const fullChain = harness.createFullChain(normalAgentFactory({
       observeReader: async (reader) => {
-        baselineVisibleToAgent = (await reader.search('Production baseline', 8))[0]?.id
-          === baseline.statements[0].id
+        baselineVisibleToAgent = (await reader.search('Production baseline', 8))[0]?.title
+          === baseline.statements[0].title
       }
     }))
 
@@ -335,36 +326,72 @@ describe('KnowledgeFullChainService', () => {
 
     expect(baselineVisibleToAgent).toBe(true)
     expect(result.commit.statements).toHaveLength(2)
-    expect(result.knowledge.createdStatementIds).toEqual(result.commit.statements.map((item) => item.id))
+    expect(result.knowledge.writtenStatementTitles).toEqual(result.commit.statements.map((item) => item.title))
     expect(result.knowledge.statements).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        statement: expect.objectContaining({ title: 'Current summary preference' }),
-        sources: [expect.objectContaining({
-          sourceRef: result.sourceRef,
-          selector: 'L000001-L000001'
-        })]
+        title: 'Current summary preference'
       }),
       expect.objectContaining({
-        statement: expect.objectContaining({ title: 'Current preservation rule' }),
-        outgoingRelations: [expect.objectContaining({ relation: 'derived_from' })]
+        title: 'Current preservation rule',
+        content: expect.stringContaining('[[Current summary preference]]')
       })
     ]))
 
     const sandbox = await harness.manager.openSandbox(result.sandbox.id)
-    expect(sandbox.listStatements({ includeRevised: true }).map((item) => item.title)).toEqual(
+    expect(sandbox.listStatements().map((item) => item.title)).toEqual(
       expect.arrayContaining([
         'Production baseline',
         'Current summary preference',
         'Current preservation rule'
       ])
     )
-    expect(harness.manager.production.listStatements({ includeRevised: true }).map((item) => item.title))
+    expect(harness.manager.production.listStatements().map((item) => item.title))
       .toEqual(['Production baseline'])
     expect(harness.manager.production.getContributionByRunRef(result.maintenance.contribution.runRef))
       .toBeUndefined()
   })
 
-  it('keeps global provenance through segmented preprocessing and Sandbox commit', async () => {
+  it('updates an existing title inside the Sandbox without changing production', async () => {
+    const harness = await createHarness()
+    harness.manager.production.commit({
+      runRef: 'production:existing-statement',
+      statements: [{
+        title: 'Oyster Knowledge Store',
+        content: 'The earlier understanding.'
+      }]
+    })
+    const fullChain = harness.createFullChain(() => new StaticAgent(async (input) => ({
+      contribution: {
+        runRef: input.contributionRunRef,
+        statements: [{
+          title: 'Oyster Knowledge Store',
+          content: 'The current understanding references [[Oyster architecture]].'
+        }]
+      },
+      modelCallCount: 1,
+      toolCalls: [
+        'search_knowledge',
+        'read_knowledge_statement',
+        'submit_knowledge_contribution'
+      ]
+    })))
+
+    const result = await fullChain.run(runInput(harness.discovery.session), harness.bindings)
+
+    expect(result.commit.createdTitles).toEqual([])
+    expect(result.commit.updatedTitles).toEqual(['Oyster Knowledge Store'])
+    expect(result.knowledge.statements).toEqual([{
+      title: 'Oyster Knowledge Store',
+      content: 'The current understanding references [[Oyster architecture]].'
+    }])
+    const sandbox = await harness.manager.openSandbox(result.sandbox.id)
+    expect(sandbox.getStatement('Oyster Knowledge Store')?.content)
+      .toBe('The current understanding references [[Oyster architecture]].')
+    expect(harness.manager.production.getStatement('Oyster Knowledge Store')?.content)
+      .toBe('The earlier understanding.')
+  })
+
+  it('keeps global Evidence Map locations through segmented preprocessing and Sandbox commit', async () => {
     const discovery = fakeDiscovery({
       content: 'line-one\nline-two\nline-three\nline-four'
     })
@@ -412,10 +439,8 @@ describe('KnowledgeFullChainService', () => {
         contribution: {
           runRef: input.contributionRunRef,
           statements: [{
-            localRef: 'last-range',
             title: 'Last range knowledge',
-            content: 'Knowledge grounded in the final global range.',
-            sources: [{ sourceRef: input.sourceRef, selector: 'L000004-L000004' }]
+            content: 'Knowledge grounded in the final global range.'
           }]
         },
         modelCallCount: 1,
@@ -453,13 +478,11 @@ describe('KnowledgeFullChainService', () => {
     expect(currentRunTraces.at(-1)?.status).toBe('completed')
     expect(currentRunTraces.slice(0, -1).every((trace) => trace.status === 'running')).toBe(true)
     expect(harness.backend.generationCalls).toHaveLength(3)
-    expect(result.knowledge.statements[0].sources).toEqual([
-      expect.objectContaining({
-        sourceRef: result.sourceRef,
-        selector: 'L000004-L000004'
-      })
-    ])
-    expect(harness.manager.production.listStatements({ includeRevised: true })).toEqual([])
+    expect(result.knowledge.statements[0]).toEqual({
+      title: 'Last range knowledge',
+      content: 'Knowledge grounded in the final global range.'
+    })
+    expect(harness.manager.production.listStatements()).toEqual([])
   })
 
   it('creates a fresh isolated Sandbox for every repeated run', async () => {
@@ -472,8 +495,8 @@ describe('KnowledgeFullChainService', () => {
     expect(second.sandbox.id).not.toBe(first.sandbox.id)
     const firstStore = await harness.manager.openSandbox(first.sandbox.id)
     const secondStore = await harness.manager.openSandbox(second.sandbox.id)
-    const firstTitles = firstStore.listStatements({ includeRevised: true }).map((item) => item.title)
-    const secondTitles = secondStore.listStatements({ includeRevised: true }).map((item) => item.title)
+    const firstTitles = firstStore.listStatements().map((item) => item.title)
+    const secondTitles = secondStore.listStatements().map((item) => item.title)
 
     expect(firstTitles).toEqual(expect.arrayContaining([
       'First run summary preference',
@@ -485,7 +508,7 @@ describe('KnowledgeFullChainService', () => {
       'Second run preservation rule'
     ]))
     expect(secondTitles).not.toContain('First run summary preference')
-    expect(harness.manager.production.listStatements({ includeRevised: true })).toEqual([])
+    expect(harness.manager.production.listStatements()).toEqual([])
   })
 
   it('rejects a stale Session revision before creating a Sandbox', async () => {
@@ -501,7 +524,7 @@ describe('KnowledgeFullChainService', () => {
     }, harness.bindings)).rejects.toThrow('Session 已失效或版本已变化')
 
     expect(await harness.manager.listSandboxes()).toEqual([])
-    expect(harness.manager.production.listStatements({ includeRevised: true })).toEqual([])
+    expect(harness.manager.production.listStatements()).toEqual([])
     expect(harness.processing.snapshot().debugTraces.find((trace) => trace.origin === 'full_chain'))
       .toMatchObject({
         id: expect.not.stringMatching(/^previous-full-chain$/),
@@ -510,20 +533,15 @@ describe('KnowledgeFullChainService', () => {
       })
   })
 
-  it('rejects an Agent-forged sourceRef and removes the partially created Sandbox', async () => {
+  it('rejects duplicate canonical titles and removes the partially created Sandbox', async () => {
     const harness = await createHarness()
     const forgedFactory: KnowledgeAgentFactory = () => new StaticAgent(async (input) => ({
       contribution: {
         runRef: input.contributionRunRef,
-        statements: [{
-          localRef: 'forged',
-          title: 'Forged provenance',
-          content: 'This must not be committed.',
-          sources: [{
-            sourceRef: `raw:another-session@sha256:${'f'.repeat(64)}`,
-            selector: 'L000001-L000001'
-          }]
-        }]
+        statements: [
+          { title: 'Duplicate title', content: 'First body.' },
+          { title: ' Duplicate title ', content: 'Second body.' }
+        ]
       },
       modelCallCount: 1,
       toolCalls: ['submit_knowledge_contribution']
@@ -531,10 +549,10 @@ describe('KnowledgeFullChainService', () => {
     const fullChain = harness.createFullChain(forgedFactory)
 
     await expect(fullChain.run(runInput(harness.discovery.session), harness.bindings))
-      .rejects.toThrow('当前运行之外的 Observation')
+      .rejects.toThrow('canonical title 重复')
 
     expect(await harness.manager.listSandboxes()).toEqual([])
-    expect(harness.manager.production.listStatements({ includeRevised: true })).toEqual([])
+    expect(harness.manager.production.listStatements()).toEqual([])
     expect(harness.processing.snapshot().debugTraces.find((trace) => trace.origin === 'full_chain'))
       .toMatchObject({
         status: 'failed',
@@ -625,7 +643,7 @@ describe('KnowledgeFullChainService', () => {
     expect(fullChain.isRunning()).toBe(false)
     expect(harness.processing.snapshot().runningStageIds).toEqual([])
     expect(await harness.manager.listSandboxes()).toEqual([])
-    expect(harness.manager.production.listStatements({ includeRevised: true })).toEqual([])
+    expect(harness.manager.production.listStatements()).toEqual([])
     expect(harness.processing.snapshot().debugTraces.find((trace) => trace.origin === 'full_chain'))
       .toMatchObject({
         status: 'cancelled',

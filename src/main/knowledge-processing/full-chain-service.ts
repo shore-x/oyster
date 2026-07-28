@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type {
-  KnowledgeContributionDraft,
-  KnowledgeStatementDraft
+  KnowledgeContributionDraft
 } from '../../shared/knowledge'
 import type {
   KnowledgeFullChainResult,
@@ -20,8 +19,6 @@ import {
   type ProcessingRunLease,
   type ProcessingStageRunBinding
 } from './knowledge-processing-service'
-
-const SOURCE_SELECTOR = /^L(\d{6,})-L(\d{6,})$/
 
 export interface KnowledgeFullChainBindings {
   preprocessor: ProcessingStageRunBinding
@@ -46,27 +43,10 @@ function validateInput(input: RunKnowledgeFullChainInput): void {
 
 function validateContribution(
   contribution: KnowledgeContributionDraft,
-  expectedRunRef: string,
-  expectedSourceRef: string,
-  observationLineCount: number
+  expectedRunRef: string
 ): void {
   if (!contribution || contribution.runRef !== expectedRunRef || !Array.isArray(contribution.statements)) {
     throw new Error('Agent 返回的 Knowledge Contribution 与当前运行不匹配')
-  }
-  for (const statement of contribution.statements as KnowledgeStatementDraft[]) {
-    for (const source of statement.sources ?? []) {
-      if (source.sourceRef !== expectedSourceRef) {
-        throw new Error('Knowledge Statement 引用了当前运行之外的 Observation')
-      }
-      if (!source.selector) continue
-      const match = SOURCE_SELECTOR.exec(source.selector)
-      if (!match) throw new Error('Knowledge Statement 的来源范围格式无效')
-      const start = Number(match[1])
-      const end = Number(match[2])
-      if (start < 1 || end < start || end > observationLineCount) {
-        throw new Error('Knowledge Statement 的来源范围超出当前 Observation')
-      }
-    }
   }
 }
 
@@ -109,7 +89,6 @@ export class KnowledgeFullChainService {
       this.processing.beginFullChainDebugTrace(debugTrace)
       const { session, evidence, sourceRef } = await loadSessionMaterial(this.discovery, input)
       controller.signal.throwIfAborted()
-      const lineCount = evidence.observationView.rawLines.length
       const sandbox = await this.stores.createSandbox()
       sandboxId = sandbox.id
       active.sandboxId = sandbox.id
@@ -141,20 +120,15 @@ export class KnowledgeFullChainService {
       })
       controller.signal.throwIfAborted()
 
-      validateContribution(
-        maintenance.contribution,
-        contributionRunRef,
-        sourceRef,
-        lineCount
-      )
+      validateContribution(maintenance.contribution, contributionRunRef)
       controller.signal.throwIfAborted()
       const commit = sandbox.store.commit(maintenance.contribution)
       controller.signal.throwIfAborted()
 
-      const statementDetails = commit.statements.map((statement) => {
-        const details = sandbox.store.getStatement(statement.id)
-        if (!details) throw new Error(`已提交的 Knowledge Statement 无法回读：${statement.id}`)
-        return details
+      const statements = commit.statements.map((statement) => {
+        const stored = sandbox.store.getStatement(statement.title)
+        if (!stored) throw new Error(`已提交的 Knowledge Statement 无法回读：${statement.title}`)
+        return stored
       })
       for (const previousSandboxId of [...this.ownedSandboxes]) {
         try {
@@ -177,8 +151,8 @@ export class KnowledgeFullChainService {
         maintenance: { ...maintenance, debugTrace: completedDebugTrace },
         commit,
         knowledge: {
-          createdStatementIds: commit.statements.map((statement) => statement.id),
-          statements: statementDetails
+          writtenStatementTitles: commit.statements.map((statement) => statement.title),
+          statements
         },
         durationMs: Date.now() - startedAt,
         completedAt: new Date().toISOString()
