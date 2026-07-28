@@ -64,7 +64,7 @@ Oyster 必须把三个认识论层次分开，避免把模型总结覆盖到原�
 | 层次 | 内容 | 规则 |
 | --- | --- | --- |
 | 观察层 | 由来源与版本身份指向的 Raw Evidence，以及可重建的 Session、Message、Tool Call/Result 等 Canonical Activity | 外部原文按需读取，确定性视图可重建；不得把模型解释伪装成来源事实 |
-| 知识层 | 从观察或已有知识形成的 Knowledge Statement；Statement 正文可以精确引用其他 Statement 并表达任意多元关系 | Statement 是领域语义的 Source of Truth；允许多个解释和多级抽象，不预设独立 Relation、Decision、Problem 等全局类型 |
+| 知识层 | 从观察或已有知识形成的 Knowledge Statement；Statement 正文可以通过 canonical title 显式引用其他 Statement 并表达任意多元关系 | Statement 是领域语义的 Source of Truth；允许多个解释和多级抽象，不预设独立 Relation、Decision、Problem 等全局类型 |
 | 投影层 | 持久 Markdown 协作文档，以及按需生成的临时 Context Packet | 持久文档由知识和 Attention 初始化，再由用户与 Agent 共同维护；更新必须基于当前文档，不得全量重建并覆盖人工编辑。临时消费视图不要求持久化 |
 
 Observation Preprocessing 产生的 Evidence Map 不构成第四个认识论层次。它是一种只供后续运行、可随时重算且不直接对外提供的 Working Artifact；如果某个处理器要把其中内容变为可持久检索、引用或进一步推理的知识，必须通过 Knowledge Contribution 提交为 Knowledge Statement，并保留出处、接受统一治理。
@@ -115,7 +115,7 @@ MVP 的“实时”定义为 **turn 级近实时**，不是 token streaming。�
 
 1. 默认或自定义 Observation Preprocessor 对观察进行分段、裁剪、Redaction、索引和有界摘要，生成保留原始定位、可丢弃、可重算且可回源的 Evidence Map；
 2. 默认或自定义 Knowledge Maintenance Agent 以 Evidence Map 和相关已有 Knowledge Statement 为起点，多次搜索和比较，必要时从地图给出的位置渐进读取最小原始证据；默认策略优先维护细粒度、持久且可复用的对象、概念及其关系理解，而不是生成 Session 总结或工作日志；
-3. Agent 通过 Knowledge Contribution 提出对一条或多条 Knowledge Statement 的创建、补充、限定、修订或并列保留；Statement 使用当前知识视图中唯一且语义丰富的 canonical title 和自由文本正文，并在关系含义确定时直接精确引用具体 Statement；
+3. Agent 通过 Knowledge Contribution 提出对一条或多条 Knowledge Statement 的创建、补充、限定、修订或并列保留；Statement 使用当前知识视图中唯一且语义丰富的 canonical title 和自由文本正文，并在关系含义确定时以 `[[canonical title]]` 或 `[[canonical title|local display text]]` 直接引用具体 Statement；
 4. Oyster Core 统一执行 Scope、出处、审计、持久化和删除规则；
 5. 用户可以检查来源，接受、修改、拒绝、固定、删除或重新加工派生知识。
 
@@ -130,7 +130,7 @@ Knowledge Maintenance Agent 是一个普通、可替换的工具使用 Agent：�
 对外检索保持只读优先，并从以下最小能力逐步开放：
 
 - `search_knowledge`：按 query 分页发现当前 Knowledge Statement；
-- `get_knowledge`：按稳定身份读取一条不可变 Statement、出处、它精确引用的 Statement，以及直接引用它的相关 Statement；
+- `get_knowledge`：读取一条不可变 Statement、出处，以及可由正文名称引用派生发现的相关 Statement；
 - `get_evidence`：在权限允许时读取最小必要的原始证据；
 - `build_context`：按目标、Scope 和 Token Budget 生成带引用的 Context Packet。
 

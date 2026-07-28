@@ -6,7 +6,8 @@
 - 修订：2026-07-26，明确 Observation Preprocessor、Evidence Map、Knowledge Maintenance Agent、Knowledge Contribution 与 Knowledge Statement 的定义
 - 修订：2026-07-26，明确本地外部 Agent 历史原地按需读取，不复制到 Oyster
 - 修订：2026-07-27，明确 Knowledge Maintenance Agent 使用通用 Agent Runtime，不由固定轮次、工具次数或总时长定义
-- 修订：2026-07-28，明确 Statement 是领域语义的 Source of Truth，多元关系由自由文本正文中的精确 Statement 引用表达
+- 修订：2026-07-28，明确 Statement 是领域语义的 Source of Truth，多元关系由自由文本正文中的显式 Statement 名称引用表达
+- 修订：2026-07-28，确定正文采用 canonical title 与可选局部显示文本引用；稳定 ID 绑定属于可选治理能力
 - 关联文档：[Product Brief](../product/product-brief.md)、[本地 Agent 发现与外部证据访问](../product/local-agent-discovery-mvp.md)、[AI Backend MVP](../product/ai-backends-mvp.md)、[知识加工验证 MVP](../product/knowledge-processing-mvp.md)、[知识加工与协作式投影](../architecture/knowledge-model-and-projection.md)
 
 ## Context
@@ -22,12 +23,12 @@ Oyster 的主要产品身份是：本地优先、跨 Agent、跨项目的知识�
 系统采用三个认识论层次：
 
 1. 观察层：Raw Evidence 以来源和版本身份引用 Harness 原始 transcript 与人类指令，并由 Source Adapter 在原始位置按需读取；Canonical Activity 确定性标准化 Session、Turn、Message、Tool 和 Artifact 等活动；
-2. 知识层：受控 Knowledge Maintenance Agent、经授权的知识生产 Pipeline 和用户从观察或已有知识形成可引用、可修订的 Knowledge Statement；Statement 以语义丰富的自然语言正文及其中对具体 Statement 的精确引用表达对象、概念与任意多元关系，不建立独立的领域 Relation 实体；
+2. 知识层：受控 Knowledge Maintenance Agent、经授权的知识生产 Pipeline 和用户从观察或已有知识形成可引用、可修订的 Knowledge Statement；Statement 以语义丰富的自然语言正文及其中对具体 Statement canonical title 的显式引用表达对象、概念与任意多元关系，不建立独立的领域 Relation 实体；
 3. 投影层：由共享知识和 Attention 初始化、由用户与 Projection Agent 基于当前版本共同维护的持久文档，以及临时 Context Packet。
 
 三层保持不同的数据所有权，但知识加工与投影通过共享 Attention 耦合。Observation Preprocessor 负责解析、降噪、索引和有界局部理解，只产生称为 Evidence Map 的可丢弃、可重算、可回源 Working Artifact；Knowledge Maintenance Agent 负责多步探索现有知识，并通过 Knowledge Contribution 提出对一条或多条 Knowledge Statement 的创建、补充、限定、修订或关联；Oyster Core 统一拥有 Scope、出处校验、审计、提交和删除。任何 Pipeline 若被授权直接产生 Knowledge Contribution，就成为正式知识生产者并服从同一治理契约，不按处理器或投影建立不同的真相存储。
 
-Knowledge Statement 是知识层领域语义的 Source of Truth。正文可以同时精确引用多个 Statement，并以自然语言保留参与者、语境、条件、例外和不确定性；出站引用、反向引用、图或超图等关系表示只能作为可重建索引。canonical title 与正文都应具有实际语义，不以机械编号、枚举关系或路由规则代替知识。普通 Statement 可以解释一个词语在不同语境下可能指向哪些具体 Statement，但它只服务外部消歧；内部含义已经确定时必须直接引用具体 Statement。
+Knowledge Statement 是知识层领域语义的 Source of Truth。正文使用 `[[canonical title]]`，或在需要局部措辞时使用 `[[canonical title|local display text]]`，同时引用多个 Statement，并以自然语言保留参与者、语境、条件、例外和不确定性；局部显示文本不参与目标选择。出站引用、反向引用、名称到内部身份的绑定、图或超图等关系表示只能作为可重建的治理信息或索引。canonical title 与正文都应具有实际语义，不以机械编号、枚举关系或路由规则代替知识。普通 Statement 可以解释一个词语在不同语境下可能指向哪些具体 Statement，但它只服务外部消歧；内部含义已经确定时必须直接使用具体 Statement 的 canonical title。
 
 Knowledge Maintenance Agent 是普通、可替换的工具使用 Agent，其角色由 System Prompt、Workspace、工具权限和最终 Contribution 协议定义，不引入专用状态机或固定运行步骤。一次运行不预设模型轮次、工具调用次数或总时长；通用 Agent Runtime 负责模型—工具循环与 transcript 压缩。模型的实际上下文、单次请求、分页读取和持久化完整性仍有各自的边界，但这些边界不限制 Agent 的总探索轮次；最终 Contribution 仍由 Core 校验和提交。
 

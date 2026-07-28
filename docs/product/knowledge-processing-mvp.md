@@ -29,20 +29,20 @@
 
 ## 2. Knowledge Sandbox
 
-**Knowledge Sandbox** 是正式 Knowledge Store 的一次物理隔离快照，使用完全相同的 SQLite Schema 和读写实现。完整链路开始时，Oyster Core 先创建独立 Sandbox，再把本次运行绑定到该 Store：Knowledge Maintenance Agent 可以搜索其基线知识，但不能选择、切换或感知其他写入目标。
+**Knowledge Sandbox** 是当前验证 Store 的一次物理隔离快照，使用相同的 SQLite Schema 和读写实现。完整链路开始时，Oyster Core 先创建独立 Sandbox，再把本次运行绑定到该 Store：Knowledge Maintenance Agent 可以搜索其基线知识，但不能选择、切换或感知其他写入目标。SQLite 只是当前 MVP 的验证介质，不决定正式知识层最终使用数据库还是本地文件。
 
-Agent 最终提交一份结构化 Knowledge Contribution，其中可以包含多条 Knowledge Statement。Statement 使用当前知识视图中唯一且语义丰富的 canonical title；正文仍是 Markdown 兼容的自然语言自由文本，结构只承担提交边界和治理元信息。目标知识模型允许正文中的提及精确绑定已有 Statement 或同一 Contribution 中的新 Statement，并以完整正文表达多元关系；领域关系不使用独立 Relation 实体或固定枚举。Core 校验运行身份、来源 revision、行范围和引用目标后，在一个事务中写入整份 Contribution，再从数据库回读实际记录供 UI 展示。
+Agent 最终提交一份结构化 Knowledge Contribution，其中可以包含多条 Knowledge Statement。Statement 使用当前知识视图中唯一且语义丰富的 canonical title；正文仍是 Markdown 兼容的自然语言自由文本，结构只承担提交边界和治理元信息。目标知识模型允许正文使用 `[[canonical title]]` 或 `[[canonical title|local display text]]` 提及已有 Statement 或同一 Contribution 中的新 Statement，并以完整正文表达多元关系；领域关系不使用独立 Relation 实体或固定枚举。当前 Core 校验运行身份、来源 revision 和行范围后，在一个事务中写入整份 Contribution，再从数据库回读实际记录供 UI 展示；它不解析名称引用或要求绑定稳定 ID。
 
-Sandbox 与正式库的语义保持一致：
+Sandbox 与目标知识层的语义保持一致：
 
 - Knowledge Statement 提交后不可原地修改；变化通过新 Statement 和 `revises` 表达；
 - `derived_from` 和 `revises` 是当前代码仍在使用的系统结构链接，不是领域关系类型；
 - 每条 Statement 必须具有 Observation 来源，或通过 `derived_from` 追溯到已有 Statement；
 - `title` 和 `content` 保持自由文本，身份、出处、创建时间和生命周期由 Core 管理。
 
-当前验证实现尚未完成正文提及到稳定 Statement 身份的精确绑定，也未从正文生成出站引用、反向引用或图投影索引；Contribution 中的 `derived_from` 暂时承担已有知识输入追溯。这是实现缺口，不改变权威设计：后续适配应把领域语义保留在 Statement 正文，把输入追溯归入治理元信息，并从正文精确引用派生关系索引，而不是继续增加新的关系枚举。
+当前验证实现将上述名称引用作为普通自由文本保存，尚未从正文生成出站引用、反向引用或图投影索引；Contribution 中的 `derived_from` 暂时承担已有知识输入追溯。这不构成 Statement 核心模型的缺口：领域语义已经完整保留在正文中，名称到稳定 ID 的绑定属于以后可按需要增加的派生治理能力，而不是当前提交协议的要求。
 
-Sandbox 的写入不影响正式知识库，当前也不存在 promote、merge 或复制回正式库的入口。失败或取消会丢弃本次 Sandbox；当前界面只持有最新的成功结果，因此成功重跑会用从正式库基线创建的新 Sandbox 替换旧 Sandbox。用户可显式丢弃当前结果，应用启动时也会清理上一次进程遗留的 Sandbox。
+Sandbox 的写入不影响当前验证 Store 的基线，当前也不存在 promote、merge 或复制回基线 Store 的入口。失败或取消会丢弃本次 Sandbox；当前界面只持有最新的成功结果，因此成功重跑会用同一验证基线创建的新 Sandbox 替换旧 Sandbox。用户可显式丢弃当前结果，应用启动时也会清理上一次进程遗留的 Sandbox。
 
 ## 3. 两个加工阶段
 
@@ -62,12 +62,12 @@ Knowledge Maintenance Agent 是普通、可替换的工具使用 Agent，当前�
 
 当 transcript 增长时，通用 Agent Runtime 层在必要时整理或压缩上下文。该压缩只是运行状态管理，不生成新的 Evidence Map 或知识来源。System Prompt 和工具定义不进入被压缩的 transcript；来源授权、Workspace revision 与最终 Contribution 由 Core 和工具闭包独立校验，不依赖摘要完整复述这些边界。Attention 和任务上下文可能进入压缩摘要；局部地图与 Raw Evidence 继续留在 Workspace 的按需读取边界中，可由 Agent 再次加载。
 
-默认 Agent 以识别并维护细粒度、持久且可复用的对象或概念理解为主，包括含义、定义、属性、约束、区别、关系、修正、否定边界和明确的长期偏好。这里不增加固定 Entity 或 Relation Schema；“实体”只是默认选择知识的启发式。一个 Statement 默认表达一个可以独立复用和修订的理解，也可以通过正文中的精确引用表达任意多元关系。Statement 的 canonical title 和正文必须使用具有实际区分力的自然语言，不使用机械编号或枚举关系代替语义。除非 Attention 明确要求任务历史，或某个事件本身形成了可复用理解，Agent 不把 Session 总结、时间线、工作日志、工具调用、文件改动、测试过程和短期结果作为默认知识。
+默认 Agent 以识别并维护细粒度、持久且可复用的对象或概念理解为主，包括含义、定义、属性、约束、区别、关系、修正、否定边界和明确的长期偏好。这里不增加固定 Entity 或 Relation Schema；“实体”只是默认选择知识的启发式。一个 Statement 默认表达一个可以独立复用和修订的理解，也可以通过正文中的显式名称引用表达任意多元关系。Statement 的 canonical title 和正文必须使用具有实际区分力的自然语言，不使用机械编号或枚举关系代替语义。除非 Attention 明确要求任务历史，或某个事件本身形成了可复用理解，Agent 不把 Session 总结、时间线、工作日志、工具调用、文件改动、测试过程和短期结果作为默认知识。
 
 当前开放五个工具，其中局部地图只在长 Session 产生可展开部分时提供：
 
 - `search_knowledge`：在本次绑定的 Knowledge Store 中分页搜索当前未被修订替代的 Statement；每次返回有界候选，并在仍可继续时给出下一 `offset`；
-- `read_knowledge_statement`：按已知 ID 读取一条不可变 Statement 的完整记录、Observation 来源和当前实现中的直接系统结构链接，并根据 incoming `revises` 派生其是否仍为当前理解；正文精确引用及其反向引用尚未接入该工具，相邻 Statement 仍可按 ID 渐进读取；
+- `read_knowledge_statement`：按当前实现中的记录 ID 读取一条不可变 Statement 的完整记录、Observation 来源和直接系统结构链接，并根据 incoming `revises` 派生其是否仍为当前理解；正文名称引用及其反向引用尚未接入该工具，相邻 Statement 仍可通过搜索后渐进读取；
 - `read_evidence_map_section`：按当前 Workspace 授权的 section ID 展开局部 Evidence Map；
 - `read_evidence`：从本次 Workspace 内的 `line` 与 `offset` 开始，按 Agent 指定且由 Core 再次约束的 `limit` 返回原始格式文本，并给出实际范围、下一 EvidenceLocation 与 `eof`；`offset` 和 `limit` 均以 UTF-16 code unit 计量；
 - `submit_knowledge_contribution`：提交本次唯一的结构化 Contribution 并结束 Agent 运行。
@@ -112,7 +112,7 @@ Model Connection 会在 Provider 能声明时保留 `contextWindowTokens` 和最
 
 ## 6. 当前未实现
 
-- Statement 正文提及到具体 Statement 身份的精确绑定，以及由此派生的出站引用、反向引用和图投影索引；
+- 从 Statement 正文的名称引用派生出站引用、反向引用和图投影索引；名称到稳定 ID 的持久绑定是可选的后续治理优化，不属于当前 MVP；
 - 从 Sandbox promote、merge 或复制到正式知识库；
 - 正式知识生产的自动调度、批量和流式处理；
 - Canonical Activity 作为跨 Harness 的标准化 Observation 视图；

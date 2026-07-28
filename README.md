@@ -16,7 +16,7 @@ Oyster 是一个独立于 Agent Harness 的本地知识库维护中心。当前�
 - 为知识加工的每个阶段独立选择 Connection、具体 Model 和模型支持的思考强度；
 - 从可用外部 Session 的确定 revision 运行 Observation Preprocessor，生成可回源、可丢弃的临时 Evidence Map；
 - 使用 Pi Agent Core 和受控工具提交可包含多条自由文本 Statement 的结构化 Knowledge Contribution；
-- 使用与正式知识库相同的 Schema，在独立 SQLite Knowledge Sandbox 中原子写入并回读 Statement、来源和 `derived_from` / `revises` 关系；
+- 使用当前验证 Knowledge Store 的 Schema，在独立 SQLite Knowledge Sandbox 中原子写入并回读 Statement、来源和 `derived_from` / `revises` 关系；
 - 默认提供完整链路测试，同时保留不提交 Knowledge Contribution 的阶段调试；
 - Electron Renderer 与文件系统业务逻辑通过 typed preload API 隔离。
 
@@ -67,12 +67,12 @@ src/main/ai-backends
 src/main/knowledge-processing
   默认 Prompt、临时 Workspace、Observation Preprocessor、Pi Agent Runtime 与完整链路编排
 src/main/knowledge-store
-  正式 SQLite Knowledge Store、不可变 Statement 提交与隔离 Sandbox
+  当前 SQLite Knowledge Store 验证实现、不可变 Statement 提交与隔离 Sandbox
 src/shared       Main / Preload / Renderer 共用契约
 ```
 
 生产模式只把外部来源的 catalog 状态写入 Electron `userData/discovery-state.json`，不复制 Agent 历史正文。上游 Agent 目录始终只读；记录变化或消失后，已保存的出处身份继续存在，但原文可能无法再次展开。JSON repository 是当前 bootstrap 实现，接口已与业务层隔离，数据量验证后可以替换为 SQLite。
 
-AI Connection 元数据和知识加工阶段的 Connection / Model 配置分别保存在 `userData/ai-connections.json` 与 `userData/knowledge-processing.json`；OAuth 与 API Key 凭据只保存在系统 Keychain。Evidence Map Workspace 只存在于主进程内存中。正式 Knowledge Store 位于 `userData/knowledge-store/knowledge.sqlite`；完整链路使用 `userData/knowledge-store/sandboxes/` 下的独立快照，失败或取消时立即丢弃，成功后可显式丢弃或通过重跑替换，且没有写回正式库的入口。
+AI Connection 元数据和知识加工阶段的 Connection / Model 配置分别保存在 `userData/ai-connections.json` 与 `userData/knowledge-processing.json`；OAuth 与 API Key 凭据只保存在系统 Keychain。Evidence Map Workspace 只存在于主进程内存中。当前验证 Knowledge Store 位于 `userData/knowledge-store/knowledge.sqlite`；完整链路使用 `userData/knowledge-store/sandboxes/` 下的独立快照，失败或取消时立即丢弃，成功后可显式丢弃或通过重跑替换，且没有写回基线 Store 的入口。SQLite 是当前实现选择，不代表正式知识层的长期存储介质已经确定。
 
 当前产品范围与设计边界见 [Product Brief](docs/product/product-brief.md)、[本地 Agent 发现与外部证据访问](docs/product/local-agent-discovery-mvp.md)、[AI Backend MVP](docs/product/ai-backends-mvp.md)、[知识加工验证 MVP](docs/product/knowledge-processing-mvp.md)和[知识加工与协作式投影](docs/architecture/knowledge-model-and-projection.md)。
