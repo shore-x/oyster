@@ -403,8 +403,8 @@ function segmentPrompt(
     : ''
   return `Create the Evidence Map material for the selected Observation material within exact source ranges ${observationSourceSelectorsText(segment.sourceRanges)}. This may be one part of a longer Session. Follow the System Prompt's language policy and preserve global line references exactly. Lines between these ranges are not part of this preprocessing material; do not infer that their raw evidence does not exist.
 
-Adjacent context, when present, is provided only to resolve continuity at the boundary. Do not treat it as new coverage or repeat its candidates unless it is necessary to explain a correction or dependency in the primary range.${context}
-When a long physical line is shown in multiple Cstart:end/total character windows, those windows are transport-only fragments of the same L line. Preserve the shown L and C location beside every relevant navigation item so the downstream Agent can use it as the read_evidence starting point. The stable provenance remains the original L selector.
+Adjacent context, when present, is provided only to resolve continuity, names, aliases, and implicit references at the boundary. Do not treat it as new coverage or repeat its candidates unless it is necessary to explain a correction, dependency, or referent in the primary range.${context}
+When a long physical line is shown in multiple Cstart:end/total character windows, those windows are transport-only fragments of the same L line. Preserve the shown L and C location beside every relevant navigation item so the downstream Agent can use it as the read_evidence starting point. The original L selector remains the raw-evidence address for this run.
 The owning source adapter may replace execution detail with a deterministic, bounded representation and bracketed record context. Treat it as navigation to the cited raw line, not as a replacement for the raw evidence. Runtime configuration, telemetry, duplicate representations, and low-level execution traces may be omitted from this view intentionally.
 Operator attention:
 ${attention ?? 'No additional focus.'}
@@ -418,7 +418,7 @@ END_AUTHORIZED_OBSERVATION`
 function mergePrompt(nodes: EvidenceMapNode[], attention?: string): string {
   return `Assemble the Evidence Map materials below into one concise navigation map for a downstream Knowledge Maintenance Agent. Follow the System Prompt's language policy.
 
-Preserve the original global L references, any shown C offsets, and expandable map section IDs. Surface cross-range corrections, rejections, dependencies, conflicts, uncertainty, and areas that require consulting the original evidence. Do not turn candidates into facts, invent missing evidence, or replace the source citations with references to this generated map.
+Preserve the original global L references, any shown C offsets, and expandable map section IDs. Keep enough concrete subject names and compact discussion context at this navigation level for the downstream Agent to decide which child material to expand. Preserve supported explanations of what names, aliases, and implicit references denote across ranges; do not collapse distinct uses of an overloaded expression or guess an unresolved identity. Surface cross-range corrections, rejections, dependencies, conflicts, uncertainty, and areas that require consulting the original evidence. Do not turn candidates into facts, invent missing evidence, or replace the source citations with references to this generated map.
 
 Operator attention:
 ${attention ?? 'No additional focus.'}

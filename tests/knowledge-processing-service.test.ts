@@ -263,14 +263,60 @@ describe('KnowledgeProcessingService', () => {
     }
 
     expect(OBSERVATION_PREPROCESSOR_PROMPT).toContain('Output only the Evidence Map as Markdown.')
+    expect(OBSERVATION_PREPROCESSOR_PROMPT).toContain('Preserve enough compact discussion context')
+    expect(OBSERVATION_PREPROCESSOR_PROMPT).toContain('names and context-bound expressions')
+    expect(OBSERVATION_PREPROCESSOR_PROMPT).toContain('preserve its exact wording, what it denotes')
+    expect(OBSERVATION_PREPROCESSOR_PROMPT).toContain('Do not extract every noun')
+    expect(OBSERVATION_PREPROCESSOR_PROMPT).toContain('what a name refers to')
     expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('submit_knowledge_contribution')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('terms whose meaning is local to the conversation')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('test it counterfactually')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('locally meaningful names and referents')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('does not need to be globally unique')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('project, repository, product, subsystem, and role context')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('reader who has never seen the Session')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('observed wording, useful aliases, and distinguishing context as separate queries')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('same semantic focus')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('a coherent, mutually explanatory whole')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('include the necessary supporting Statement or Statements')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('There is no preset quota on searches, reads, tool calls')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('make all relevant changes that materially improve the knowledge layer')
     expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('[[canonical title]]')
     expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('existing title replaces its current content')
     expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('Statement titles and content')
     expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('These references resolve dynamically')
     expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('a new title creates a Statement')
+  })
+
+  it('passes the entity-oriented default prompts through both processing runtimes', async () => {
+    const { service, backend, agent } = createService({
+      serviceOptions: {
+        evidenceMapPlanner: {
+          segmentBytes: 48,
+          adjacentContextBytes: 16,
+          mergeBytes: 1_000
+        }
+      }
+    })
+    await service.initialize()
+    await configure(service, 'observation_preprocessor')
+    await configure(service, 'knowledge_maintenance_agent')
+
+    const preprocessing = await service.runObservationPreprocessor({
+      observation: 'Oyster repository\nthe database\nlocal alias'
+    })
+
+    expect(backend.generationCalls.every(
+      (call) => call.request.systemPrompt === OBSERVATION_PREPROCESSOR_PROMPT
+    )).toBe(true)
+    expect(backend.generationCalls.filter(
+      (call) => !call.request.prompt.includes('BEGIN_EVIDENCE_MAP_MATERIALS')
+    ).every((call) => call.request.prompt.includes('resolve continuity, names, aliases'))).toBe(true)
+    expect(backend.generationCalls.find(
+      (call) => call.request.prompt.includes('BEGIN_EVIDENCE_MAP_MATERIALS')
+    )?.request.prompt).toContain('concrete subject names and compact discussion context')
+
+    await service.runKnowledgeMaintenance({ preprocessingRunId: preprocessing.runId })
+
+    expect(agent.calls[0].systemPrompt).toBe(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT)
   })
 
   it('persists prompt overrides and restores the default by removing the override', async () => {

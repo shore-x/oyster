@@ -48,6 +48,8 @@ Sandbox 的写入不影响当前验证 Store 的基线，当前也不存在 prom
 
 预处理器接收 Source Adapter 已生成的选择性 Observation View，按全局原始行号组织单元，但不理解 Claude、Pi 或 Codex 的 JSONL schema，也不自行判断特定 Harness 的记录类型。它将完整默认或用户覆盖的指令作为真正的 System Prompt 发送给该阶段所选的 Connection 与 Model。每次调用的预算同时计算 System Prompt、Attention、来源、固定模板、相邻上下文、主要材料、精确 selector 文本、输出 token 和安全余量，而不是只限制原始文本字符数；材料按 UTF-8 字节保守计量。模型声明上下文窗口时直接采用该窗口；窗口未知时使用保守预算，并在 Provider 明确报告 context overflow 后自动缩小分段重试，不要求用户裁剪 Session。短视图直接生成 Evidence Map；长视图中的各段绑定同一个 `sourceRef`，并保留一个或多个精确来源行 selector，分别生成独立的局部地图，再形成分层导航。精确 selector 另有单 Section 的元信息边界；稀疏位置超出时自动继续分段，不限制总段数或 Session 长度。Prompt 要求普通候选保留 `L` 行号或范围，来自超长物理行局部材料的候选同时保留该行的 `Cstart:end/total`，并在导航归并中继续保留。Core 不解析自由文本来验证每个候选，但会为每个 Section 独立附加完整来源范围和首个可靠 EvidenceLocation，作为确定性回退入口。导航归并与根地图只展示明确标注为非精确 union 的 coverage extent 和直接子 Section；精确 selector union 留在局部 Section 中按需展开，不被平铺进根 Prompt。局部地图不会以上一段摘要作为下一段输入，也不会取代原始证据。最终 Evidence Map 是 Markdown 自由文本 Working Artifact；它用于导航、可以丢弃，不是 Knowledge Statement。
 
+默认 Prompt 要求 Evidence Map 保留紧凑的讨论背景，以及重要名称、原始措辞、别名、隐含指代、局部含义和用于消歧的项目或组件范围；递归归并时也不能丢失这些信息。它不要求穷举名词、建立 Entity 分类或为候选提前生成 canonical title，指代无法可靠确定时应保留歧义和回源位置。
+
 当前 Workspace 使用两种位置表达来验证回源能力：`sourceRef` 与原始行范围描述本次加工所依据的来源区域；**EvidenceLocation** 用 `line` 和行内 `offset` 表示一次工具读取的起点。`line` 从 1 开始，`offset` 以 UTF-16 code unit 从 0 开始，Evidence Map 中的 `L` 与 `C` 可以转换成这一临时位置。这些都是当前 Observation Workspace 与调试协议，不属于 Statement 的核心格式，也不决定正式知识最终如何持久追溯信息。
 
 选择 Session 时，Renderer 只提交 catalog 中的稳定身份和所选版本标识；主进程经 Source Adapter 解析内部 locator、校验版本并从原始位置读取原文，再调用同一个预处理器。成功运行后，Workspace 暂存确定的来源引用、全局可读范围、Attention、Evidence Map 的分层导航和局部地图；当前验证 MVP 仍会在本次进程内保留所选 Session 的原文内存快照，以支持 Agent 的受控范围读取，但不会建立新的长期副本。Agent 先看到根导航，只能逐级发现并展开直接子节点；全部 section ID 不会被平铺进一个 Prompt。中间 Section 只向模型展示 coverage extent 和直接子节点，不先展开全部精确 selector 导致后续导航被截断；叶子 Section 再暴露它自身的精确 selector。`read_evidence` 从 Agent 提供的 `line`、`offset` 开始读取，并要求 Agent 给出本次所需的有限 `limit`。Core 还会执行自身上限；一次读取容纳不下时，工具返回实际范围、下一 EvidenceLocation 和 `eof`，而不是因某个原始行过长而失败并要求模型猜测结束位置。位置与分页信息放在工具信封中，证据正文保持原始行内容，不注入行号前缀破坏 JSONL 等来源格式。Workspace 已绑定唯一的 `sourceRef` 和 revision，模型不重复选择来源。阶段调试只保留当前可见的预处理结果所属 Workspace；新结果替换旧结果时同步释放旧 Workspace。完整链路的 Workspace 在运行结束时释放。Renderer 可以获得有界且必要时截断的预处理调用输出用于显式调试，但不会直接获得调用 Prompt、原始 Observation、模型凭据或本地来源路径。由于模型输出可能复述输入，调试视图仍可能间接包含原始材料中的文本，界面必须明确提示这一边界。
@@ -60,7 +62,9 @@ Knowledge Maintenance Agent 是普通、可替换的工具使用 Agent，当前�
 
 当 transcript 增长时，通用 Agent Runtime 层在必要时整理或压缩上下文。该压缩只是运行状态管理，不生成新的 Evidence Map 或知识来源。System Prompt 和工具定义不进入被压缩的 transcript；来源授权、Workspace revision 与最终 Contribution 由 Core 和工具闭包独立校验，不依赖摘要完整复述这些边界。Attention 和任务上下文可能进入压缩摘要；局部地图与 Raw Evidence 继续留在 Workspace 的按需读取边界中，可由 Agent 再次加载。
 
-默认 Agent 以识别并维护细粒度、持久且可复用的对象或概念理解为主，包括含义、定义、属性、约束、区别、关系、修正、否定边界和明确的长期偏好。这里不增加固定 Entity 或 Relation Schema；“实体”只是默认选择知识的启发式。一个 Statement 默认表达一个可以独立复用和修订的理解，也可以通过正文中的显式名称引用表达任意多元关系。Statement 的 canonical title 和正文必须使用具有实际区分力的自然语言，不使用机械编号或枚举关系代替语义。除非 Attention 明确要求任务历史，或某个事件本身形成了可复用理解，Agent 不把 Session 总结、时间线、工作日志、工具调用、文件改动、测试过程和短期结果作为默认知识。
+默认 Agent 优先解析对话中具有局部含义的名称和指代，再维护关于这些对象或概念的细粒度、持久且可复用的理解，包括含义、定义、属性、约束、区别、关系、修正、否定边界和明确的长期偏好。它会用原始称呼、别名和语境限定词搜索已有知识，并在创建或覆盖前读取可能具有相同语义焦点的 Statement。若当前知识缺少理解候选 Statement 所必需的背景，Agent 会继续搜索，并在同一 Contribution 中创建或补全相关背景 Statement，再用正文引用使它们互相解释。这里不增加固定 Entity 或 Relation Schema；“实体”只是默认选择知识的启发式。一个 Statement 默认围绕一个连贯且可独立理解的语义焦点，也可以通过正文中的显式名称引用表达任意多元关系。Statement 的 canonical title 和正文必须使用具有实际区分力的自然语言，不使用机械编号或枚举关系代替语义。除非 Attention 明确要求任务历史，或某个事件本身形成了可复用理解，Agent 不把 Session 总结、时间线、工作日志、工具调用、文件改动、测试过程和短期结果作为默认知识。
+
+知识维护不以最小改动为目标，也不对搜索、读取、工具调用或一次 Contribution 中涉及的 Statement 数量设置固定配额。Agent 根据相关性自行决定需要探索和修改的范围，目标是让本次涉及的知识邻域处于连贯、可互相解释的状态；普通常识、无关主题和不具持久价值的细节不因此被扩张为知识。
 
 当前开放五个工具，其中局部地图只在长 Session 产生可展开部分时提供：
 
