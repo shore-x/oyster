@@ -16,58 +16,35 @@ async function temporaryPath(prefix: string): Promise<string> {
   return directory
 }
 
-function createV1Database(
+function createPriorDatabase(
   databasePath: string,
-  statements: Array<{ id: string; title: string; content: string }>
+  statements: Array<{ title: string; content: string }>
 ): void {
   const database = new DatabaseSync(databasePath)
   try {
     database.exec(`
-      PRAGMA foreign_keys = ON;
       CREATE TABLE knowledge_contributions (
-        id TEXT PRIMARY KEY,
         run_ref TEXT NOT NULL UNIQUE,
         created_at TEXT NOT NULL
       ) STRICT;
       CREATE TABLE knowledge_statements (
-        id TEXT PRIMARY KEY,
         title TEXT NOT NULL CHECK(length(trim(title)) > 0),
-        content TEXT NOT NULL CHECK(length(trim(content)) > 0),
-        origin_ref TEXT NOT NULL REFERENCES knowledge_contributions(id) ON DELETE RESTRICT,
-        created_at TEXT NOT NULL
+        content TEXT NOT NULL CHECK(length(trim(content)) > 0)
       ) STRICT;
-      CREATE TABLE statement_sources (
-        statement_id TEXT NOT NULL REFERENCES knowledge_statements(id) ON DELETE RESTRICT,
-        source_ref TEXT NOT NULL,
-        selector TEXT NOT NULL DEFAULT '',
-        PRIMARY KEY (statement_id, source_ref, selector)
+      CREATE TABLE discarded_auxiliary (
+        payload TEXT NOT NULL
       ) STRICT;
-      CREATE TABLE statement_relations (
-        source_statement_id TEXT NOT NULL REFERENCES knowledge_statements(id) ON DELETE RESTRICT,
-        relation TEXT NOT NULL CHECK(relation IN ('derived_from', 'revises')),
-        target_statement_id TEXT NOT NULL REFERENCES knowledge_statements(id) ON DELETE RESTRICT,
-        CHECK(source_statement_id <> target_statement_id),
-        PRIMARY KEY (source_statement_id, relation, target_statement_id)
-      ) STRICT;
-      CREATE TRIGGER knowledge_statements_are_immutable
-        BEFORE UPDATE ON knowledge_statements
-        BEGIN
-          SELECT RAISE(ABORT, 'Knowledge Statements are immutable');
-        END;
-      INSERT INTO knowledge_contributions (id, run_ref, created_at)
-      VALUES ('legacy-contribution', 'run:legacy', '2026-07-27T00:00:00.000Z');
-      PRAGMA user_version = 1;
+      INSERT INTO knowledge_contributions (run_ref, created_at)
+      VALUES ('run:prior', '2026-07-27T00:00:00.000Z');
+      INSERT INTO discarded_auxiliary (payload) VALUES ('not part of the current model');
+      PRAGMA user_version = 2;
     `)
     const insert = database.prepare(`
-      INSERT INTO knowledge_statements (id, title, content, origin_ref, created_at)
-      VALUES (?, ?, ?, 'legacy-contribution', '2026-07-27T00:00:00.000Z')
+      INSERT INTO knowledge_statements (title, content)
+      VALUES (?, ?)
     `)
     for (const statement of statements) {
-      insert.run(statement.id, statement.title, statement.content)
-      database.prepare(`
-        INSERT INTO statement_sources (statement_id, source_ref, selector)
-        VALUES (?, 'raw:legacy', 'L000001-L000002')
-      `).run(statement.id)
+      insert.run(statement.title, statement.content)
     }
   } finally {
     database.close()
@@ -218,48 +195,50 @@ describe('SqliteKnowledgeStore', () => {
     expect(await store.read('database')).toBeUndefined()
   })
 
-  it('migrates an unambiguous v1 Store and archives all legacy structures', async () => {
+  it('rebuilds an unambiguous prior Store from only the current model fields', async () => {
     const directory = await temporaryPath('oyster-knowledge-migration-')
     const databasePath = join(directory, 'knowledge.sqlite')
-    createV1Database(databasePath, [
-      { id: 'legacy-a', title: ' Legacy A ', content: 'Legacy A body.' },
-      { id: 'legacy-b', title: 'Legacy B', content: 'Legacy B body.' }
+    createPriorDatabase(databasePath, [
+      { title: ' Prior A ', content: 'Prior A body.' },
+      { title: 'Prior B', content: 'Prior B body.' }
     ])
 
     const store = new SqliteKnowledgeStore(databasePath)
     closeables.push(store)
 
     expect(store.listStatements()).toEqual([
-      { title: 'Legacy A', content: 'Legacy A body.' },
-      { title: 'Legacy B', content: 'Legacy B body.' }
+      { title: 'Prior A', content: 'Prior A body.' },
+      { title: 'Prior B', content: 'Prior B body.' }
     ])
-    expect(store.getContributionByRunRef('run:legacy')).toBeDefined()
+    expect(store.getContributionByRunRef('run:prior')).toEqual({
+      runRef: 'run:prior',
+      createdAt: '2026-07-27T00:00:00.000Z'
+    })
 
     const database = new DatabaseSync(databasePath)
     closeables.push({ close: () => database.close() })
-    expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(2)
-    const archivedTables = database.prepare(`
+    expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(3)
+    const tables = database.prepare(`
       SELECT name FROM sqlite_master
-      WHERE type = 'table' AND name LIKE 'legacy_v1_%'
+      WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
       ORDER BY name
     `).all() as unknown as Array<{ name: string }>
-    expect(archivedTables.map(({ name }) => name)).toEqual([
-      'legacy_v1_knowledge_contributions',
-      'legacy_v1_knowledge_statements',
-      'legacy_v1_statement_relations',
-      'legacy_v1_statement_sources'
+    expect(tables.map(({ name }) => name)).toEqual([
+      'knowledge_contributions',
+      'knowledge_statements'
     ])
-    expect((database.prepare(`
-      SELECT count(*) AS count FROM legacy_v1_statement_sources
-    `).get() as { count: number }).count).toBe(2)
+    expect((database.prepare('PRAGMA table_info(knowledge_contributions)').all() as Array<{ name: string }>)
+      .map(({ name }) => name)).toEqual(['run_ref', 'created_at'])
+    expect((database.prepare('PRAGMA table_info(knowledge_statements)').all() as Array<{ name: string }>)
+      .map(({ name }) => name)).toEqual(['title', 'content'])
   })
 
-  it('refuses an ambiguous v1 migration without changing or hiding legacy data', async () => {
+  it('refuses an ambiguous migration before changing the prior Store', async () => {
     const directory = await temporaryPath('oyster-knowledge-migration-')
     const databasePath = join(directory, 'knowledge.sqlite')
-    createV1Database(databasePath, [
-      { id: 'legacy-a', title: 'Duplicate title', content: 'First legacy meaning.' },
-      { id: 'legacy-b', title: 'Duplicate title', content: 'Second legacy meaning.' }
+    createPriorDatabase(databasePath, [
+      { title: 'Duplicate title', content: 'First prior meaning.' },
+      { title: 'Duplicate title', content: 'Second prior meaning.' }
     ])
 
     expect(() => new SqliteKnowledgeStore(databasePath)).toThrow(
@@ -268,13 +247,13 @@ describe('SqliteKnowledgeStore', () => {
 
     const database = new DatabaseSync(databasePath)
     closeables.push({ close: () => database.close() })
-    expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(1)
+    expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(2)
     expect((database.prepare(`
       SELECT count(*) AS count FROM knowledge_statements
     `).get() as { count: number }).count).toBe(2)
     expect(database.prepare(`
-      SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'legacy_v1_knowledge_statements'
-    `).get()).toBeUndefined()
+      SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'discarded_auxiliary'
+    `).get()).toBeDefined()
   })
 })
 

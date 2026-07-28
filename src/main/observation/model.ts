@@ -22,11 +22,7 @@ export interface ObservationCharacterWindow {
   totalCharacters: number
 }
 
-/**
- * A transient, model-facing position in one immutable Observation revision.
- * It is used to navigate raw evidence and is deliberately separate from the
- * stable line-range selector stored as Knowledge provenance.
- */
+/** A transient, model-facing position used to navigate one immutable Observation revision. */
 export interface EvidenceLocation {
   /** One-based physical line in the unchanged raw source. */
   line: number

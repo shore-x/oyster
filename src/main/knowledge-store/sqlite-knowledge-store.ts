@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { backup, DatabaseSync, type SQLInputValue } from 'node:sqlite'
 import type {
   KnowledgeCommitResult,
@@ -14,7 +13,7 @@ import type {
   KnowledgeStatementRecord
 } from '../knowledge-processing/model'
 
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 const MAX_RUN_REF_LENGTH = 1_024
 const MAX_TITLE_LENGTH = 2_048
 const MAX_LIST_LIMIT = 1_000
@@ -26,7 +25,6 @@ interface StatementRow {
 }
 
 interface ContributionRow {
-  id: string
   run_ref: string
   created_at: string
 }
@@ -38,7 +36,6 @@ interface NormalizedContributionDraft {
 
 export interface SqliteKnowledgeStoreOptions {
   clock?: () => Date
-  idFactory?: () => string
 }
 
 function requiredTrimmed(value: unknown, label: string, maximum: number): string {
@@ -91,7 +88,11 @@ function statementFromRow(row: StatementRow): KnowledgeStatement {
 }
 
 function contributionFromRow(row: ContributionRow): KnowledgeContributionRecord {
-  return { id: row.id, runRef: row.run_ref, createdAt: row.created_at }
+  return { runRef: row.run_ref, createdAt: row.created_at }
+}
+
+function quoteIdentifier(identifier: string): string {
+  return `"${identifier.replace(/"/g, '""')}"`
 }
 
 function asSqlParameters(values: Array<string | number>): SQLInputValue[] {
@@ -107,7 +108,6 @@ function asSqlParameters(values: Array<string | number>): SQLInputValue[] {
 export class SqliteKnowledgeStore implements KnowledgeReader {
   private readonly database: DatabaseSync
   private readonly clock: () => Date
-  private readonly idFactory: () => string
   private closed = false
 
   constructor(
@@ -115,7 +115,6 @@ export class SqliteKnowledgeStore implements KnowledgeReader {
     options: SqliteKnowledgeStoreOptions = {}
   ) {
     this.clock = options.clock ?? (() => new Date())
-    this.idFactory = options.idFactory ?? randomUUID
     this.database = new DatabaseSync(databasePath)
     try {
       this.database.exec('PRAGMA foreign_keys = ON')
@@ -133,8 +132,8 @@ export class SqliteKnowledgeStore implements KnowledgeReader {
       throw new Error(`Knowledge Store Schema ${version} 高于当前支持版本 ${SCHEMA_VERSION}`)
     }
     if (version === SCHEMA_VERSION) return
-    if (version === 1) {
-      this.migrateV1()
+    if (version === 1 || version === 2) {
+      this.migrateToCurrentSchema()
       return
     }
     if (version !== 0) throw new Error(`不支持的 Knowledge Store Schema：${version}`)
@@ -142,8 +141,7 @@ export class SqliteKnowledgeStore implements KnowledgeReader {
     this.database.exec(`
       BEGIN IMMEDIATE;
       CREATE TABLE knowledge_contributions (
-        id TEXT PRIMARY KEY,
-        run_ref TEXT NOT NULL UNIQUE,
+        run_ref TEXT PRIMARY KEY,
         created_at TEXT NOT NULL
       ) STRICT;
       CREATE TABLE knowledge_statements (
@@ -155,11 +153,8 @@ export class SqliteKnowledgeStore implements KnowledgeReader {
     `)
   }
 
-  /**
-   * Preserve every v1 row in explicitly named legacy tables. Only an
-   * unambiguous title/content view is promoted into the v2 Store.
-   */
-  private migrateV1(): void {
+  /** Rebuild a prior Store from the fields that belong to the current model. */
+  private migrateToCurrentSchema(): void {
     const duplicate = this.database.prepare(`
       SELECT trim(title) AS title, count(*) AS count
       FROM knowledge_statements
@@ -170,37 +165,55 @@ export class SqliteKnowledgeStore implements KnowledgeReader {
     `).get() as { title: string; count: number } | undefined
     if (duplicate) {
       throw new Error(
-        `Knowledge Store v1 包含 ${duplicate.count} 条同名 Statement（${duplicate.title}），无法安全迁移到 canonical title 唯一的 v2`
+        `Knowledge Store 包含 ${duplicate.count} 条同名 Statement（${duplicate.title}），无法安全迁移到 canonical title 唯一的当前结构`
       )
     }
 
-    this.database.exec(`
-      BEGIN IMMEDIATE;
-      ALTER TABLE knowledge_contributions RENAME TO legacy_v1_knowledge_contributions;
-      ALTER TABLE knowledge_statements RENAME TO legacy_v1_knowledge_statements;
-      ALTER TABLE statement_sources RENAME TO legacy_v1_statement_sources;
-      ALTER TABLE statement_relations RENAME TO legacy_v1_statement_relations;
+    const auxiliaryTables = this.database.prepare(`
+      SELECT name
+      FROM sqlite_schema
+      WHERE type = 'table'
+        AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'
+        AND name NOT IN ('knowledge_contributions', 'knowledge_statements')
+      ORDER BY name
+    `).all() as unknown as Array<{ name: string }>
 
-      CREATE TABLE knowledge_contributions (
-        id TEXT PRIMARY KEY,
-        run_ref TEXT NOT NULL UNIQUE,
-        created_at TEXT NOT NULL
-      ) STRICT;
-      INSERT INTO knowledge_contributions (id, run_ref, created_at)
-      SELECT id, run_ref, created_at
-      FROM legacy_v1_knowledge_contributions;
+    this.database.exec('PRAGMA foreign_keys = OFF')
+    try {
+      this.database.exec('BEGIN IMMEDIATE')
+      for (const { name } of auxiliaryTables) {
+        this.database.exec(`DROP TABLE ${quoteIdentifier(name)}`)
+      }
+      this.database.exec(`
+        CREATE TABLE next_knowledge_contributions (
+          run_ref TEXT PRIMARY KEY,
+          created_at TEXT NOT NULL
+        ) STRICT;
+        INSERT INTO next_knowledge_contributions (run_ref, created_at)
+        SELECT run_ref, created_at
+        FROM knowledge_contributions;
 
-      CREATE TABLE knowledge_statements (
-        title TEXT NOT NULL PRIMARY KEY,
-        content TEXT NOT NULL CHECK(length(trim(content)) > 0)
-      ) STRICT;
-      INSERT INTO knowledge_statements (title, content)
-      SELECT trim(title), content
-      FROM legacy_v1_knowledge_statements;
+        CREATE TABLE next_knowledge_statements (
+          title TEXT NOT NULL PRIMARY KEY,
+          content TEXT NOT NULL CHECK(length(trim(content)) > 0)
+        ) STRICT;
+        INSERT INTO next_knowledge_statements (title, content)
+        SELECT trim(title), content
+        FROM knowledge_statements;
 
-      PRAGMA user_version = ${SCHEMA_VERSION};
-      COMMIT;
-    `)
+        DROP TABLE knowledge_statements;
+        DROP TABLE knowledge_contributions;
+        ALTER TABLE next_knowledge_contributions RENAME TO knowledge_contributions;
+        ALTER TABLE next_knowledge_statements RENAME TO knowledge_statements;
+        PRAGMA user_version = ${SCHEMA_VERSION};
+        COMMIT;
+      `)
+    } catch (error) {
+      this.database.exec('ROLLBACK')
+      throw error
+    } finally {
+      this.database.exec('PRAGMA foreign_keys = ON')
+    }
   }
 
   private assertOpen(): void {
@@ -216,7 +229,6 @@ export class SqliteKnowledgeStore implements KnowledgeReader {
     this.assertOpen()
     const normalized = normalizeDraft(draft)
     const contribution: KnowledgeContributionRecord = {
-      id: this.idFactory(),
       runRef: normalized.runRef,
       createdAt: this.clock().toISOString()
     }
@@ -224,7 +236,7 @@ export class SqliteKnowledgeStore implements KnowledgeReader {
     this.database.exec('BEGIN IMMEDIATE')
     try {
       const duplicateRun = this.database.prepare(
-        'SELECT id FROM knowledge_contributions WHERE run_ref = ?'
+        'SELECT run_ref FROM knowledge_contributions WHERE run_ref = ?'
       ).get(normalized.runRef)
       if (duplicateRun) throw new Error(`runRef 已提交 Knowledge Contribution：${normalized.runRef}`)
 
@@ -239,9 +251,9 @@ export class SqliteKnowledgeStore implements KnowledgeReader {
       }
 
       this.database.prepare(`
-        INSERT INTO knowledge_contributions (id, run_ref, created_at)
-        VALUES (?, ?, ?)
-      `).run(contribution.id, contribution.runRef, contribution.createdAt)
+        INSERT INTO knowledge_contributions (run_ref, created_at)
+        VALUES (?, ?)
+      `).run(contribution.runRef, contribution.createdAt)
 
       const upsertStatement = this.database.prepare(`
         INSERT INTO knowledge_statements (title, content)
@@ -340,7 +352,7 @@ export class SqliteKnowledgeStore implements KnowledgeReader {
     this.assertOpen()
     const normalizedRunRef = requiredTrimmed(runRef, 'runRef', MAX_RUN_REF_LENGTH)
     const row = this.database.prepare(`
-      SELECT id, run_ref, created_at
+      SELECT run_ref, created_at
       FROM knowledge_contributions
       WHERE run_ref = ?
     `).get(normalizedRunRef) as ContributionRow | undefined

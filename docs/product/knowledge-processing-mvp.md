@@ -33,11 +33,10 @@
 
 Agent 最终提交一份结构化 Knowledge Contribution，其中可以包含多条 Knowledge Statement。Statement 使用当前知识视图中唯一且语义丰富的 canonical title；正文仍是 Markdown 兼容的自然语言自由文本，结构只承担当前提交边界。目标知识模型允许正文使用 `[[canonical title]]` 或 `[[canonical title|local display text]]` 表达任意多元关系；名称在读取时动态指向当前知识视图中的同名 Statement，不永久绑定写作时的记录。
 
-目标知识语义与当前验证结构需要明确区分：
+当前 SQLite Sandbox 采用最小的 Statement 读写模型：
 
-- 目标语义中，Knowledge Statement 提交后不可原地修改，变化通过新的 Statement 表达；Statement 的领域关系只由自由文本正文及其中的动态名称引用表达；
-- 当前 SQLite Sandbox 将 canonical title 作为 Agent 可见的唯一读写键。一次 Contribution 内的 title 不得重复；提交时没有同名 Statement 就创建，已有同名 Statement 就原地覆盖正文；
-- 当前 Sandbox 不保存 Statement revision 或历史版本。这是验证核心读写能力的实现简化，不改变目标知识模型中已提交 Statement 不原地修改的长期原则。
+- canonical title 是 Agent 可见的唯一读写键。一次 Contribution 内的 title 不得重复；提交时没有同名 Statement 就创建，已有同名 Statement 就原地覆盖正文；
+- Sandbox 只维护当前 Statement 视图，不保存历史。Statement 的生命周期与历史如何治理尚未决定，不属于当前 MVP。
 
 Core 在一个事务中按 title 写入整份 Contribution，再回读实际 Statement 供 UI 展示。正文中的名称引用原样保存，Agent 可以使用引用中的 canonical title 继续精确读取对应 Statement；当前实现不解析引用，也不生成出站引用、反向引用或图投影视图。
 
@@ -51,7 +50,7 @@ Sandbox 的写入不影响当前验证 Store 的基线，当前也不存在 prom
 
 当前 Workspace 使用两种位置表达来验证回源能力：`sourceRef` 与原始行范围描述本次加工所依据的来源区域；**EvidenceLocation** 用 `line` 和行内 `offset` 表示一次工具读取的起点。`line` 从 1 开始，`offset` 以 UTF-16 code unit 从 0 开始，Evidence Map 中的 `L` 与 `C` 可以转换成这一临时位置。这些都是当前 Observation Workspace 与调试协议，不属于 Statement 的核心格式，也不决定正式知识最终如何持久追溯信息。
 
-选择 Session 时，Renderer 只提交 catalog 中的稳定身份和所选版本标识；主进程经 Source Adapter 解析内部 locator、校验版本并从原始位置读取原文，再调用同一个预处理器。成功运行后，Workspace 暂存确定的来源引用、全局可读范围、Attention、Evidence Map 的分层导航和局部地图；当前验证 MVP 仍会在本次进程内保留所选 Session 的原文内存快照，以支持 Agent 的受控范围读取，但不会建立新的长期副本。Agent 先看到根导航，只能逐级发现并展开直接子节点；全部 section ID 不会被平铺进一个 Prompt。中间 Section 只向模型展示 coverage extent 和直接子节点，不先展开全部精确 selector 导致后续导航被截断；叶子 Section 再暴露它自身的精确 selector。`read_evidence` 从 Agent 提供的 `line`、`offset` 开始读取，并要求 Agent 给出本次所需的有限 `limit`。Core 还会执行自身上限；一次读取容纳不下时，工具返回实际范围、下一 EvidenceLocation 和 `eof`，而不是因某个原始行过长而失败并要求模型猜测结束位置。位置与分页信息放在工具信封中，证据正文保持原始行内容，不注入行号前缀破坏 JSONL 等来源格式。Workspace 已绑定唯一的 `sourceRef` 和 revision，模型不重复选择来源。当前 Sandbox 会把来源范围作为调试和验证信息保存，但这不是正式 Statement 格式的承诺。阶段调试只保留当前可见的预处理结果所属 Workspace；新结果替换旧结果时同步释放旧 Workspace。完整链路的 Workspace 在运行结束时释放。Renderer 可以获得有界且必要时截断的预处理调用输出用于显式调试，但不会直接获得调用 Prompt、原始 Observation、模型凭据或本地来源路径。由于模型输出可能复述输入，调试视图仍可能间接包含原始材料中的文本，界面必须明确提示这一边界。
+选择 Session 时，Renderer 只提交 catalog 中的稳定身份和所选版本标识；主进程经 Source Adapter 解析内部 locator、校验版本并从原始位置读取原文，再调用同一个预处理器。成功运行后，Workspace 暂存确定的来源引用、全局可读范围、Attention、Evidence Map 的分层导航和局部地图；当前验证 MVP 仍会在本次进程内保留所选 Session 的原文内存快照，以支持 Agent 的受控范围读取，但不会建立新的长期副本。Agent 先看到根导航，只能逐级发现并展开直接子节点；全部 section ID 不会被平铺进一个 Prompt。中间 Section 只向模型展示 coverage extent 和直接子节点，不先展开全部精确 selector 导致后续导航被截断；叶子 Section 再暴露它自身的精确 selector。`read_evidence` 从 Agent 提供的 `line`、`offset` 开始读取，并要求 Agent 给出本次所需的有限 `limit`。Core 还会执行自身上限；一次读取容纳不下时，工具返回实际范围、下一 EvidenceLocation 和 `eof`，而不是因某个原始行过长而失败并要求模型猜测结束位置。位置与分页信息放在工具信封中，证据正文保持原始行内容，不注入行号前缀破坏 JSONL 等来源格式。Workspace 已绑定唯一的 `sourceRef` 和 revision，模型不重复选择来源。阶段调试只保留当前可见的预处理结果所属 Workspace；新结果替换旧结果时同步释放旧 Workspace。完整链路的 Workspace 在运行结束时释放。Renderer 可以获得有界且必要时截断的预处理调用输出用于显式调试，但不会直接获得调用 Prompt、原始 Observation、模型凭据或本地来源路径。由于模型输出可能复述输入，调试视图仍可能间接包含原始材料中的文本，界面必须明确提示这一边界。
 
 正式运行和测试运行共用这一读取路径，不建立测试专用 Observation 副本。外部记录在运行结束后可能变化或消失；当前验证结果保留本次使用的 `sourceRef` 以便调试，后续读取失败必须明确暴露，不能改读新版本。正式知识长期如何保存追溯信息仍待决定。
 
@@ -73,7 +72,7 @@ Knowledge Maintenance Agent 是普通、可替换的工具使用 Agent，当前�
 
 完整链路将前两个读取工具绑定到 Sandbox。Agent 必须通过一次最终的 `submit_knowledge_contribution` 结束运行；Core 校验后原子提交整份 Contribution。阶段调试使用同一 Agent Runtime 和结束协议，但只捕获 Contribution 预览，不执行提交。
 
-`search_knowledge` 只承担当前知识的轻量发现，`read_knowledge_statement` 再提供所选 Statement 的完整语义上下文。知识工具不向 Agent 暴露内部 ID、Statement revision、独立关系或反向引用；正文中的 `[[canonical title]]` 本身就是继续读取相关知识的键。Observation selector 可见并不扩大当前 Workspace 的来源权限；`read_evidence` 仍只读取本次运行已经授权的唯一来源。
+`search_knowledge` 只承担当前知识的轻量发现，`read_knowledge_statement` 再提供所选 Statement 的完整语义上下文。知识工具按 canonical title 读取当前 Statement；正文中的 `[[canonical title]]` 本身就是继续读取相关知识的键，领域关系仍由正文表达。Observation selector 可见并不扩大当前 Workspace 的来源权限；`read_evidence` 仍只读取本次运行已经授权的唯一来源。
 
 Knowledge Maintenance Agent 的 Debug Trace 只记录模型轮次的状态、停止原因和 token 总量，以及工具名称和严格白名单化的结果摘要，例如候选数量、局部地图 selector、证据读取的起点、实际范围、continuation 或候选 Statement 数量。读取失败只展示来源失效、位置无效、预算等安全错误类别，不展示本地路径和原文。它不记录 Assistant 文本、thinking/reasoning、工具结果正文、原始证据或完整模型上下文。最终 Contribution 和 Sandbox 中的 Statement 继续由各自的结构化结果视图展示，不复制进轨迹。
 
@@ -110,8 +109,8 @@ Model Connection 会在 Provider 能声明时保留 `contextWindowTokens` 和最
 
 ## 6. 当前未实现
 
-- 从 Statement 正文的动态名称引用派生出站引用、反向引用和图投影视图；是否还需要内部身份绑定及其形式，留待治理需求验证；
-- Statement revision、历史版本以及不可变提交的长期治理实现；
+- 从 Statement 正文的动态名称引用派生出站引用、反向引用和图投影视图；
+- Statement 生命周期与历史治理；
 - 脱离原始 Session、只依据知识层内容及显式引用进行的 Statement 可理解性盲审或对抗式校验；
 - 从 Sandbox promote、merge 或复制到正式知识库；
 - 正式知识生产的自动调度、批量和流式处理；

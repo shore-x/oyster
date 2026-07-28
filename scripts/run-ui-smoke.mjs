@@ -127,7 +127,7 @@ for (const requiredCopy of ['Observation Preprocessor', 'Evidence Map', 'primary
     throw new Error(`Observation Preprocessor prompt is missing its responsibility: ${requiredCopy}`)
   }
 }
-for (const requiredCopy of ['Knowledge Maintenance Agent', 'Knowledge Statements are immutable', 'primary language of the original observation', 'submit_knowledge_contribution']) {
+for (const requiredCopy of ['Knowledge Maintenance Agent', '[[canonical title]]', 'primary language of the original observation', 'submit_knowledge_contribution']) {
   if (!maintainerPrompt.includes(requiredCopy)) {
     throw new Error(`Knowledge Maintenance Agent prompt is missing its responsibility: ${requiredCopy}`)
   }

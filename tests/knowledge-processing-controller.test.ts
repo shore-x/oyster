@@ -130,7 +130,7 @@ function fullChainResult(): KnowledgeFullChainResult {
     preprocessing,
     maintenance,
     commit: {
-      contribution: { id: 'contribution-1', runRef: 'full-chain-1', createdAt: '2026-07-26T00:00:01.000Z' },
+      contribution: { runRef: 'full-chain-1', createdAt: '2026-07-26T00:00:01.000Z' },
       statements: [],
       createdTitles: [],
       updatedTitles: []

@@ -53,17 +53,17 @@ Canonical Activity 是可重建的公共活动语义，不是 LLM 对内容的�
 
 Statement 之间的领域语义关系以引用者的完整正文为 Source of Truth。正文采用 `[[canonical title]]` 显式引用当前知识视图中拥有该名称的 Statement；需要让句子更自然时，可以写成 `[[canonical title|local display text]]`。竖线左侧始终是完整 canonical title，右侧只是在该处显示的局部措辞，不声明全局别名，也不参与目标选择。无论正文何时写入，包括读取历史正文时，名称引用都在读取时动态解析，不永久绑定正文写作时的某条存储记录。引用只指出语义目标和提供导航，关系中的角色、方向、范围与含义继续由自然语言表达。一个包含多个引用的 Statement 可以自然表达多元关系；同一组参与者之间的不同关系分别由不同 Statement 表达。系统可以从正文派生出站引用、反向引用、邻接、图或超图等视图，但派生结果不得成为第二份权威关系。
 
-每个当前语义焦点都应使用在当前知识视图中唯一且能够说明范围的 canonical title，例如“数据库系统的一般概念”与“Oyster 当前验证实现使用的 SQLite 数据库”，而不是 `数据库 1`、`数据库 2`。title、正文以及任何供人或模型使用的关键词都必须是具有实际含义的自然语言，不使用无语义枚举值或机械规则代替知识。title 服务于阅读、搜索和选择，不承担稳定身份职责。
+每个当前语义焦点都应使用在当前知识视图中唯一且能够说明范围的 canonical title，例如“数据库系统的一般概念”与“Oyster 当前验证实现使用的 SQLite 数据库”，而不是 `数据库 1`、`数据库 2`。title、正文以及任何供人或模型使用的关键词都必须是具有实际含义的自然语言，不使用无语义枚举值或机械规则代替知识。canonical title 是当前知识视图中读取、写入和引用 Statement 的语义键。
 
 普通 Statement 也可以解释一个词语在不同语境下可能指向哪些具体 Statement。例如标题为“数据库”的 Statement 可以通过自由文本和显式名称引用说明一般技术语境与特定项目语境中的不同含义。这类内容只用于外部使用时的解释和消歧，不构成新的 Statement 类型、机械路由规则或具体知识的代理；当含义已经确定时，引用者应使用具体 Statement 的 canonical title，而不是依赖局部显示文本猜测目标。
 
-Knowledge Statement 的权威语义内容由 canonical title 与 Markdown 兼容的自由文本正文共同构成；它们可以由数据库、本地文件或其他能够原样保存这些内容的介质承载，物理介质不属于 Statement 的核心定义。已提交 Statement 的标题和正文不原地修改，变化通过新的 Statement 表达。系统可以在治理层识别当前知识和版本延续，但其具体结构不属于领域语义。知识层不预设固定领域 Schema，也不要求首先成为图数据库。
+Knowledge Statement 的权威语义内容由 canonical title 与 Markdown 兼容的自由文本正文共同构成；它们可以由数据库、本地文件或其他能够原样保存这些内容的介质承载，物理介质不属于 Statement 的核心定义。Statement 的生命周期与历史如何治理尚未决定，不改变这一核心内容。知识层不预设固定领域 Schema，也不要求首先成为图数据库。
 
-**Knowledge Contribution** 是处理器提交的一次知识变更提案。一次 Contribution 可以创建一条或多条新的 Knowledge Statement，并让它们的正文通过 canonical title 引用已有 Statement 或同一 Contribution 中的新 Statement，从而表达补充、限定、修订或关联；它不是知识层最终保存的语义单位。`Node`、`Edge` 和 `Relation` 只在具体图实现、派生索引或视图确有需要时使用，不作为当前核心语义概念。
+**Knowledge Contribution** 是处理器提交的一次知识变更提案。一次 Contribution 可以包含一条或多条 Knowledge Statement，并让它们的正文通过 canonical title 引用当前知识视图或同一 Contribution 中的 Statement，从而表达补充、限定、修订或关联；它不是知识层最终保存的语义单位。`Node`、`Edge` 和 `Relation` 只在具体图实现、派生索引或视图确有需要时使用，不作为当前核心语义概念。
 
 知识层允许：
 
-- 新的 Knowledge Statement 补充、限定或修订旧理解，而不静默覆盖历史；
+- Knowledge Statement 补充、限定或修订已有理解；
 - 多个 Attention 或处理器产生重叠、互补甚至冲突的知识；
 - 更高层知识复用较低层知识，而不必每次重新读取全部原始消息；
 - Decision、Problem、Attempt、Outcome、Preference 等视角由处理策略定义，而不是固化为全局本体。
@@ -79,7 +79,7 @@ Knowledge Statement 的权威语义内容由 canonical title 与 Markdown 兼容
 
 持久投影拥有独立修订历史，其正文与修订由文档侧管理。首次文档可以由知识和 Attention 初始化；后续更新必须读取当前文档，保留仍然有效的用户和 Agent 编辑，而不是从最新知识全量重建并覆盖。如果需要变更同步，Core 可以维护必要的来源或依赖信息，但不在核心模型中规定其结构。
 
-持久投影以本地 Markdown 文件为主要载体。正文可以在确有读者价值时显式提及 Knowledge Statement 的标题，但不要求把所有系统依赖暴露给读者，标题也不承担稳定身份职责。
+持久投影以本地 Markdown 文件为主要载体。正文可以在确有读者价值时显式提及 Knowledge Statement 的标题，但不要求把所有系统依赖暴露给读者。
 
 投影不是新的世界事实来源。当前 Markdown 内容不能因为被模型生成或用户编辑，就自动成为知识层真相。
 
@@ -88,12 +88,11 @@ Knowledge Statement 的权威语义内容由 canonical title 与 Markdown 兼容
 Statement 的核心内容只有：
 
 - 在当前知识视图中唯一、语义丰富的 canonical title；
-- Markdown 兼容的自由文本正文；
-- 正文中采用 `[[canonical title|optional local display text]]` 表达的动态名称引用。
+- Markdown 兼容的自由文本正文，其中可以采用 `[[canonical title|optional local display text]]` 表达动态名称引用。
 
-定位、版本延续、出处、权限、删除和投影变更同步属于治理问题，而不是 Statement 的领域语义。正式知识应能够追溯到原始观察或输入知识，但具体范围、记录方式、校验方式以及当前 MVP 是否实现均尚未确定。这里不预设数据库字段、文件元信息、ID、路径或关系表。
+生命周期、历史、出处、权限、删除和投影变更同步属于治理问题，而不是 Statement 的领域语义。正式知识应能够追溯到原始观察或输入知识，但具体范围、记录方式、校验方式以及当前 MVP 是否实现均尚未确定。这里不预设其实现形式。
 
-名称到内部记录或稳定 ID 的绑定、出站和反向引用、邻接、全文、Embedding、关键词、相似关系、图或超图投影以及反向影响分析，均属于可选或可重建能力。任何内部绑定都只能辅助当次名称解析，不能把历史正文冻结到写作时的记录。是否引入以及采用何种形式，应由真实治理和检索需求决定，不能反向改变 Statement 的核心定义。
+出站和反向引用、邻接、全文、Embedding、关键词、相似关系、图或超图投影以及反向影响分析，均属于可选或可重建能力。是否引入以及采用何种形式，应由真实治理和检索需求决定，不能反向改变 Statement 的核心定义。
 
 ## 3. Attention 是共享的处理策略
 
@@ -214,7 +213,7 @@ Observation Preprocessor、Knowledge Maintenance Agent 及其 Runtime 都可以�
 
 观察、知识和投影的层次区分，不要求在每两层之间再引入一套独立的接口层。Oyster Core 可以统一提供底层的存储、检索、出处和提交能力，再根据 Agent 当前承担的角色，向它开放不同的工具集合。工具集合决定 Agent 能看到什么、能够向哪一层提交结果；边界属于一次运行所承担的角色，而不绑定某个模型或常驻进程。
 
-工具应屏蔽物理表结构、派生索引、文件布局和引用编码，但不屏蔽完成任务所需的语义结果。读取某条历史记录的确切版本，与按正文名称引用解析当前知识焦点，是两种不同能力；工具不应把动态名称引用静默冻结为内部 ID。
+工具应屏蔽物理表结构、派生索引、文件布局和引用编码，但不屏蔽完成任务所需的语义结果。知识工具按当前知识视图中的 canonical title 读取和解析 Statement。
 
 Projection Agent 主要读取知识并维护投影；Knowledge Maintenance Agent 还可以在授权范围内探索观察并提出知识变更。具体工具名称、参数和角色矩阵属于运行配置，而不是层与层之间的新接口模型。
 
@@ -248,7 +247,7 @@ flowchart LR
 2. **修订输入依赖**：投影可以记录实际使用过的 Knowledge Statement，以便在知识变化时定位需要复核的内容；
 3. **Knowledge Need**：Projection Agent 发现现有知识不足时，可以请求 Knowledge Maintenance Agent 针对某个问题继续探索。
 
-Projection Agent 通过标题、关键词和语义搜索发现候选 Knowledge Statement，再判断哪些内容实际支撑本次文档修订。Prompt 和代码匹配可以辅助这一过程，但不能独自宣布依赖成立。当变更同步需要稳定依赖时，Core 可以在治理层记录 Agent 确认的 Statement；其身份表示和持久化方式留待治理设计。这类依赖与 Statement 正文中的动态名称引用彼此独立。
+Projection Agent 通过标题、关键词和语义搜索发现候选 Knowledge Statement，再判断哪些内容实际支撑本次文档修订。Prompt 和代码匹配可以辅助这一过程，但不能独自宣布依赖成立。变更同步是否需要记录 Agent 确认的依赖，以及如何持久化，留待治理设计。这类依赖与 Statement 正文中的动态名称引用彼此独立。
 
 当前优先考虑文档级依赖，而不预设段落、句子或 Statement 内部片段之间的精细映射。是否实现以及采用何种表示，由实际变更同步需求决定。
 
@@ -283,14 +282,13 @@ Projection Agent 通过标题、关键词和语义搜索发现候选 Knowledge S
 3. Statement 之间的领域关系由正文及其中的动态名称引用表达，不增加固定 Relation 实体、关系词表或领域 Schema。
 4. `[[canonical title]]` 无论出现于当前还是历史正文，都在读取时指向当前知识视图中拥有该名称的 Statement；`[[canonical title|local display text]]` 的右侧只服务局部表达。
 5. canonical title 与正文使用有实际含义的自然语言，不以机械编号或枚举代替语义。
-6. 已提交 Statement 不原地修改；变化通过新的 Statement 表达，多个解释可以并存。
-7. Attention 影响处理和表达，但不改写观察，也不把共享知识拆成互相隔离的真相。
-8. 投影不是新的世界事实，不能自动回流为知识；持久投影更新以当前文档为输入。
+6. Attention 影响处理和表达，但不改写观察，也不把共享知识拆成互相隔离的真相。
+7. 投影不是新的世界事实，不能自动回流为知识；持久投影更新以当前文档为输入。
 
 ### 7.2 治理预期
 
 - 正式 Knowledge Statement 应能追溯到原始观察或输入知识；具体如何记录、校验，以及当前 MVP 是否实现，尚未决定。
-- Oyster Core 负责权限、Scope、提交、生命周期和删除边界，但这些职责不规定数据库表、文件布局或 ID 形式。
+- Oyster Core 负责权限、Scope、提交、生命周期和删除边界，但这些职责不规定具体存储形式。
 - Agent 的能力由当前角色和工具集合决定；共用模型或 Runtime 不合并角色权限。
 - Knowledge Maintenance Agent 是普通、可扩展的 Agent，不由固定模型轮次、工具次数或总时长定义。
 - 对具有稳定原始位置的本地 Agent 历史，当前默认原地读取；其他来源是否由 Oyster 托管取决于来源生命周期。
@@ -301,8 +299,8 @@ Projection Agent 通过标题、关键词和语义搜索发现候选 Knowledge S
 以下内容不属于核心原则：
 
 - 知识层使用数据库、本地文件或其他介质；
-- 记录 ID、路径、来源 selector、运行时游标、Contribution 和审计结构；
-- 名称到稳定身份的绑定、出站和反向引用、全文、Embedding、相似度、图或超图索引；
+- 路径、来源 selector、运行时游标、Contribution 和审计结构；
+- 出站和反向引用、全文、Embedding、相似度、图或超图索引；
 - 预处理分段、Evidence Map 导航、Workspace 布局和原始证据读取协议；
 - 模型、Agent Runtime、上下文压缩、工具参数、调试轨迹和调度方式；
 - Sandbox 的介质、Schema、生命周期和结果展示。
@@ -314,9 +312,9 @@ Projection Agent 通过标题、关键词和语义搜索发现候选 Knowledge S
 - 知识层的长期存储介质及物理 Schema；
 - canonical title 的变更、复用与迁移治理；
 - 可追溯信息的具体范围、持久方式、校验方式及 MVP 实现范围；
-- 是否引入名称到稳定身份的绑定，以及其他派生索引的形式；
-- Knowledge Contribution、审计、投影依赖和版本治理的长期结构；
-- 知识搜索暴露当前知识还是历史版本，以及工具的长期形态；
+- 派生索引的形式；
+- Knowledge Contribution、审计、投影依赖以及 Statement 生命周期与历史治理的长期结构；
+- 知识搜索和工具的长期形态；
 - 默认 Attention、自定义处理器、运行时压缩和调度策略。
 
 这些问题应在真实知识维护与检索需求出现后再决定，不能预先反向扩张 Statement 的核心模型。

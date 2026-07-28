@@ -3,7 +3,6 @@ export const MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH = 1_024 * 1_024
 
 /** Runtime envelope metadata. It is not part of Statement semantics. */
 export interface KnowledgeContributionRecord {
-  id: string
   runRef: string
   createdAt: string
 }

@@ -40,7 +40,7 @@ export class SqliteKnowledgeStoreManager {
   ) {
     this.sandboxesPath = join(rootPath, 'sandboxes')
     this.sandboxIdFactory = options.sandboxIdFactory ?? randomUUID
-    this.storeOptions = { clock: options.clock, idFactory: options.idFactory }
+    this.storeOptions = { clock: options.clock }
     this.production = new SqliteKnowledgeStore(join(rootPath, 'knowledge.sqlite'), this.storeOptions)
   }
 
@@ -139,4 +139,3 @@ export class SqliteKnowledgeStoreManager {
     this.production.close()
   }
 }
-

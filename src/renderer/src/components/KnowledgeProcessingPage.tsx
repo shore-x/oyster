@@ -73,7 +73,7 @@ function fullChainResultView(result: KnowledgeFullChainResult): FullChainResultV
       }
     ],
     contributions: [{
-      id: result.commit.contribution.id,
+      id: result.commit.contribution.runRef,
       content: contributionText(result.maintenance.contribution),
       createdAt: result.commit.contribution.createdAt
     }],

@@ -268,9 +268,9 @@ describe('KnowledgeProcessingService', () => {
     expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('test it counterfactually')
     expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('[[canonical title]]')
     expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('existing title replaces its current content')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).not.toContain('derived_from')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).not.toContain('revises')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).not.toContain('immutable')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('Statement titles and content')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('These references resolve dynamically')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('a new title creates a Statement')
   })
 
   it('persists prompt overrides and restores the default by removing the override', async () => {
