@@ -2,7 +2,7 @@
 
 > 状态：当前实现规格
 >
-> 日期：2026-07-27
+> 日期：2026-07-28
 >
 > 范围：验证“外部 Session 的确定版本 → Evidence Map → Knowledge Maintenance Agent → 结构化 Knowledge Contribution → 隔离 Knowledge Sandbox 写入与回读”的最小闭环。Sandbox 不代表正式知识生产。
 
@@ -18,7 +18,7 @@
   -> Knowledge Maintenance Agent（通用 Agent Runtime；当前由 Pi Agent Core 实现）
   -> 包含多条自由文本 Statement 的结构化 Knowledge Contribution
   -> Oyster Core 校验并原子写入独立 SQLite Knowledge Sandbox
-  -> 从 Sandbox 回读 Statement、来源和关系
+  -> 从 Sandbox 回读 Statement、来源和当前系统结构链接
 ```
 
 用户从 discovery catalog 选择 Session 及其当前版本。运行时，主进程通过对应 Source Adapter 从原始位置读取该记录，并以稳定 artifact 身份和实际内容哈希固定本次使用的 `sourceRef`；扫描后已经变化或失效的记录会被拒绝，不会静默切换。Reader 不为单个 Session 预设产品长度上限，也不会把记录复制进应用管理的数据目录。Claude、Pi 与 Codex Adapter 分别按自身历史格式生成带版本的 Observation View；它们负责确定性选择对话主线、折叠可按需展开的执行详情，并为每个模型可读单元保留原始全局 `L` 行号、超长单行的 `Cstart:end/total` 窗口和必要的格式语境。共享文本原语只保证 Unicode 与 UTF-8 字节边界，不理解任何 Agent 的 JSONL Schema。通用 planner 只按所选模型预算组合 Adapter 已生成的单元，不以物理 JSONL 行作为调用边界。分段数、预处理调用数和整次运行时间不设固定上限，实际工作量随选择后的材料增长，用户可以随时取消。未进入预处理视图的原文没有被截断或删除，仍可由维护 Agent 按需回源。
@@ -31,14 +31,16 @@
 
 **Knowledge Sandbox** 是正式 Knowledge Store 的一次物理隔离快照，使用完全相同的 SQLite Schema 和读写实现。完整链路开始时，Oyster Core 先创建独立 Sandbox，再把本次运行绑定到该 Store：Knowledge Maintenance Agent 可以搜索其基线知识，但不能选择、切换或感知其他写入目标。
 
-Agent 最终提交一份结构化 Knowledge Contribution，其中可以包含多条 Knowledge Statement。Statement 的正文仍是 Markdown 兼容的自由文本；结构只承担提交边界，包含 Contribution 内局部引用、观察来源和少量关系。Core 校验运行身份、来源 revision、行范围和关系目标后，在一个事务中写入整份 Contribution，再从数据库回读实际记录供 UI 展示。
+Agent 最终提交一份结构化 Knowledge Contribution，其中可以包含多条 Knowledge Statement。Statement 使用当前知识视图中唯一且语义丰富的 canonical title；正文仍是 Markdown 兼容的自然语言自由文本，结构只承担提交边界和治理元信息。目标知识模型允许正文中的提及精确绑定已有 Statement 或同一 Contribution 中的新 Statement，并以完整正文表达多元关系；领域关系不使用独立 Relation 实体或固定枚举。Core 校验运行身份、来源 revision、行范围和引用目标后，在一个事务中写入整份 Contribution，再从数据库回读实际记录供 UI 展示。
 
 Sandbox 与正式库的语义保持一致：
 
 - Knowledge Statement 提交后不可原地修改；变化通过新 Statement 和 `revises` 表达；
-- `derived_from` 和 `revises` 是当前仅有的 Statement 关系；
+- `derived_from` 和 `revises` 是当前代码仍在使用的系统结构链接，不是领域关系类型；
 - 每条 Statement 必须具有 Observation 来源，或通过 `derived_from` 追溯到已有 Statement；
-- `title` 和 `content` 保持自由文本，身份、出处、创建时间和关系由 Core 管理。
+- `title` 和 `content` 保持自由文本，身份、出处、创建时间和生命周期由 Core 管理。
+
+当前验证实现尚未完成正文提及到稳定 Statement 身份的精确绑定，也未从正文生成出站引用、反向引用或图投影索引；Contribution 中的 `derived_from` 暂时承担已有知识输入追溯。这是实现缺口，不改变权威设计：后续适配应把领域语义保留在 Statement 正文，把输入追溯归入治理元信息，并从正文精确引用派生关系索引，而不是继续增加新的关系枚举。
 
 Sandbox 的写入不影响正式知识库，当前也不存在 promote、merge 或复制回正式库的入口。失败或取消会丢弃本次 Sandbox；当前界面只持有最新的成功结果，因此成功重跑会用从正式库基线创建的新 Sandbox 替换旧 Sandbox。用户可显式丢弃当前结果，应用启动时也会清理上一次进程遗留的 Sandbox。
 
@@ -60,12 +62,12 @@ Knowledge Maintenance Agent 是普通、可替换的工具使用 Agent，当前�
 
 当 transcript 增长时，通用 Agent Runtime 层在必要时整理或压缩上下文。该压缩只是运行状态管理，不生成新的 Evidence Map 或知识来源。System Prompt 和工具定义不进入被压缩的 transcript；来源授权、Workspace revision 与最终 Contribution 由 Core 和工具闭包独立校验，不依赖摘要完整复述这些边界。Attention 和任务上下文可能进入压缩摘要；局部地图与 Raw Evidence 继续留在 Workspace 的按需读取边界中，可由 Agent 再次加载。
 
-默认 Agent 以识别并维护细粒度、持久且可复用的对象或概念理解为主，包括含义、定义、属性、约束、区别、关系、修正、否定边界和明确的长期偏好。这里不增加固定 Entity Schema；“实体”只是默认选择知识的启发式。一个 Statement 默认表达一个可以独立复用和修订的理解。除非 Attention 明确要求任务历史，或某个事件本身形成了可复用理解，Agent 不把 Session 总结、时间线、工作日志、工具调用、文件改动、测试过程和短期结果作为默认知识。
+默认 Agent 以识别并维护细粒度、持久且可复用的对象或概念理解为主，包括含义、定义、属性、约束、区别、关系、修正、否定边界和明确的长期偏好。这里不增加固定 Entity 或 Relation Schema；“实体”只是默认选择知识的启发式。一个 Statement 默认表达一个可以独立复用和修订的理解，也可以通过正文中的精确引用表达任意多元关系。Statement 的 canonical title 和正文必须使用具有实际区分力的自然语言，不使用机械编号或枚举关系代替语义。除非 Attention 明确要求任务历史，或某个事件本身形成了可复用理解，Agent 不把 Session 总结、时间线、工作日志、工具调用、文件改动、测试过程和短期结果作为默认知识。
 
 当前开放五个工具，其中局部地图只在长 Session 产生可展开部分时提供：
 
 - `search_knowledge`：在本次绑定的 Knowledge Store 中分页搜索当前未被修订替代的 Statement；每次返回有界候选，并在仍可继续时给出下一 `offset`；
-- `read_knowledge_statement`：按已知 ID 读取一条不可变 Statement 的完整记录、Observation 来源和直接 incoming/outgoing 关系，并根据 incoming `revises` 派生其是否仍为当前理解；相邻 Statement 可继续按 ID 渐进读取，不递归展开整张关系图；
+- `read_knowledge_statement`：按已知 ID 读取一条不可变 Statement 的完整记录、Observation 来源和当前实现中的直接系统结构链接，并根据 incoming `revises` 派生其是否仍为当前理解；正文精确引用及其反向引用尚未接入该工具，相邻 Statement 仍可按 ID 渐进读取；
 - `read_evidence_map_section`：按当前 Workspace 授权的 section ID 展开局部 Evidence Map；
 - `read_evidence`：从本次 Workspace 内的 `line` 与 `offset` 开始，按 Agent 指定且由 Core 再次约束的 `limit` 返回原始格式文本，并给出实际范围、下一 EvidenceLocation 与 `eof`；`offset` 和 `limit` 均以 UTF-16 code unit 计量；
 - `submit_knowledge_contribution`：提交本次唯一的结构化 Contribution 并结束 Agent 运行。
@@ -88,7 +90,7 @@ Knowledge Maintenance Agent 的 Debug Trace 只记录模型轮次的状态、停
 - 可丢弃的 Evidence Map；
 - Agent 提交的结构化 Knowledge Contribution；
 - 从 Sandbox 回读的 Knowledge Statement 列表与正文；
-- 每条 Statement 的 Observation 来源、`derived_from` 和 `revises` 关系。
+- 每条 Statement 的 Observation 来源，以及当前实现中的 `derived_from` 和 `revises` 系统结构链接。
 
 Coding Plan 与 API Connection 都向两个阶段提供同一模型调用契约。Observation Preprocessor 使用所选模型进行一次或多次有界直接调用；Knowledge Maintenance Agent 使用同一模型的 stream 接入通用 Agent Runtime，当前 Runtime 实现为 Pi Agent Core。Backend 决定认证和计费通道，阶段 Runtime 决定直接生成还是 Agent loop，两者不混为一个概念。
 
@@ -110,6 +112,7 @@ Model Connection 会在 Provider 能声明时保留 `contextWindowTokens` 和最
 
 ## 6. 当前未实现
 
+- Statement 正文提及到具体 Statement 身份的精确绑定，以及由此派生的出站引用、反向引用和图投影索引；
 - 从 Sandbox promote、merge 或复制到正式知识库；
 - 正式知识生产的自动调度、批量和流式处理；
 - Canonical Activity 作为跨 Harness 的标准化 Observation 视图；
