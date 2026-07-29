@@ -53,6 +53,13 @@ export interface AgentHistoryAdapter {
   defaultRoot(context: DetectionContext): string
   detect(context: DetectionContext, rootOverride?: string): Promise<DetectionResult>
   scan(rootPath: string, signal: AbortSignal, context?: DetectionContext): AsyncGenerator<ScanEntry>
+  /** Re-discovers one conversation by its stable Agent-owned identity. Paths are only hints. */
+  refreshConversation(
+    rootPath: string,
+    artifact: HistoryArtifact,
+    signal: AbortSignal,
+    context?: DetectionContext
+  ): Promise<ArtifactCandidate | undefined>
   resolveArtifactPath(rootPath: string, artifact: HistoryArtifact): string
   /** Builds the deterministic, format-specific model view while preserving raw-line provenance. */
   createObservationView(rawContent: string): ObservationView

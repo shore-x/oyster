@@ -23,7 +23,7 @@ const EMPTY_SNAPSHOT: KnowledgeProcessingSnapshot = {
 }
 
 function sessionCatalogRevision(snapshot: DiscoverySnapshot): string {
-  return JSON.stringify([...snapshot.sources]
+  const sources = [...snapshot.sources]
     .sort((left, right) => left.id.localeCompare(right.id))
     .map((source) => [
       source.id,
@@ -31,7 +31,8 @@ function sessionCatalogRevision(snapshot: DiscoverySnapshot): string {
       source.discoveryState,
       source.sessionCount,
       source.lastScannedAt
-    ]))
+    ])
+  return JSON.stringify([snapshot.sessionCatalogVersion, sources])
 }
 
 export function createKnowledgeProcessingController() {

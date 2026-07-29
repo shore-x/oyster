@@ -23,6 +23,27 @@ export interface SourceEvidenceReader {
   read(input: SourceEvidenceReadInput): Promise<SourceEvidenceReadResult>
 }
 
+export class SourceSessionUnavailableError extends Error {
+  constructor(message = 'The source Session is no longer available') {
+    super(message)
+    this.name = 'SourceSessionUnavailableError'
+  }
+}
+
+export class SourceSessionUnreadableError extends Error {
+  constructor(message = 'The source Session is no longer readable') {
+    super(message)
+    this.name = 'SourceSessionUnreadableError'
+  }
+}
+
+export class SourceSessionRevisionChangedError extends Error {
+  constructor(message = 'The source Session revision has changed') {
+    super(message)
+    this.name = 'SourceSessionRevisionChangedError'
+  }
+}
+
 function assertReadLimit(maxBytes: number | undefined): void {
   if (maxBytes === undefined) return
   if (
@@ -44,10 +65,10 @@ function matchesExpectedRevision(
 function sourceAccessError(error: unknown): Error | undefined {
   const code = (error as NodeJS.ErrnoException).code
   if (code === 'ENOENT' || code === 'ENOTDIR') {
-    return new Error('The source Session is no longer available')
+    return new SourceSessionUnavailableError()
   }
   if (code === 'EACCES' || code === 'EPERM') {
-    return new Error('The source Session is no longer readable')
+    return new SourceSessionUnreadableError()
   }
   return undefined
 }
@@ -66,7 +87,7 @@ export class FileSourceEvidenceReader implements SourceEvidenceReader {
       throw new Error('The source Session is not a readable regular file')
     }
     if (!matchesExpectedRevision(pathMetadata, input)) {
-      throw new Error('The source Session revision has changed')
+      throw new SourceSessionRevisionChangedError()
     }
     if (input.maxBytes !== undefined && pathMetadata.size > input.maxBytes) {
       throw new Error(`Source Evidence exceeds the ${input.maxBytes} byte read limit`)
@@ -83,14 +104,20 @@ export class FileSourceEvidenceReader implements SourceEvidenceReader {
         || before.ino !== pathMetadata.ino
         || !matchesExpectedRevision(before, input)
       ) {
-        throw new Error('The source Session revision changed before it could be read')
+        throw new SourceSessionRevisionChangedError(
+          'The source Session revision changed before it could be read'
+        )
       }
 
       const content = Buffer.alloc(before.size)
       let offset = 0
       while (offset < content.length) {
         const { bytesRead } = await handle.read(content, offset, content.length - offset, offset)
-        if (bytesRead === 0) throw new Error('The source Session changed while it was being read')
+        if (bytesRead === 0) {
+          throw new SourceSessionRevisionChangedError(
+            'The source Session changed while it was being read'
+          )
+        }
         offset += bytesRead
       }
 
@@ -101,7 +128,9 @@ export class FileSourceEvidenceReader implements SourceEvidenceReader {
         || after.size !== before.size
         || after.mtimeMs !== before.mtimeMs
       ) {
-        throw new Error('The source Session changed while it was being read')
+        throw new SourceSessionRevisionChangedError(
+          'The source Session changed while it was being read'
+        )
       }
       return {
         content,
@@ -131,9 +160,9 @@ export class MemorySourceEvidenceReader implements SourceEvidenceReader {
   async read(input: SourceEvidenceReadInput): Promise<SourceEvidenceReadResult> {
     assertReadLimit(input.maxBytes)
     const stored = this.records.get(input.artifactId)
-    if (!stored) throw new Error('The source Session is no longer available')
+    if (!stored) throw new SourceSessionUnavailableError()
     if (stored.length !== input.expectedSizeBytes) {
-      throw new Error('The source Session revision has changed')
+      throw new SourceSessionRevisionChangedError()
     }
     if (input.maxBytes !== undefined && stored.length > input.maxBytes) {
       throw new Error(`Source Evidence exceeds the ${input.maxBytes} byte read limit`)

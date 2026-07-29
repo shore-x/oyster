@@ -22,7 +22,11 @@ const SNAPSHOT: KnowledgeProcessingSnapshot = {
   debugTraces: []
 }
 
-function discoverySnapshot(sessionCount = 0, lastScannedAt?: string): DiscoverySnapshot {
+function discoverySnapshot(
+  sessionCount = 0,
+  lastScannedAt?: string,
+  sessionCatalogVersion = 0
+): DiscoverySnapshot {
   return {
     sources: [{
       id: 'source-1',
@@ -38,7 +42,8 @@ function discoverySnapshot(sessionCount = 0, lastScannedAt?: string): DiscoveryS
       invalidFileCount: 0,
       lastScannedAt
     }],
-    runs: []
+    runs: [],
+    sessionCatalogVersion
   }
 }
 
@@ -350,6 +355,39 @@ describe('knowledge processing controller', () => {
       discoveryListener?.(discoverySnapshot(1, '2026-07-26T00:01:00.000Z'))
 
       await vi.waitFor(() => expect(controller.availableSessions()).toEqual(sessions))
+    } finally {
+      disposeRoot()
+    }
+  })
+
+  it('reloads Session revisions after a targeted refresh without a full source scan', async () => {
+    const initial = fullChainResult().session
+    const sessions: AvailableSessionSummary[] = [initial]
+    let discoveryListener: ((snapshot: DiscoverySnapshot) => void) | undefined
+    installApi({}, sessions, {
+      getSnapshot: async () => discoverySnapshot(1, '2026-07-26T00:00:00.000Z', 0),
+      subscribe: (listener) => {
+        discoveryListener = listener
+        return () => { discoveryListener = undefined }
+      }
+    })
+
+    let disposeRoot!: () => void
+    const controller = createRoot((dispose) => {
+      disposeRoot = dispose
+      return createKnowledgeProcessingController()
+    })
+    try {
+      await vi.waitFor(() => expect(controller.availableSessions()).toEqual([initial]))
+      const grown = {
+        ...initial,
+        revision: 'b'.repeat(64),
+        sizeBytes: initial.sizeBytes + 128
+      }
+      sessions[0] = grown
+      discoveryListener?.(discoverySnapshot(1, '2026-07-26T00:00:00.000Z', 1))
+
+      await vi.waitFor(() => expect(controller.availableSessions()).toEqual([grown]))
     } finally {
       disposeRoot()
     }

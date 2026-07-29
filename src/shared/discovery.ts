@@ -61,6 +61,8 @@ export interface ScanRun {
 export interface DiscoverySnapshot {
   sources: AgentSource[]
   runs: ScanRun[]
+  /** In-memory generation for material changes to the visible Session catalog. */
+  sessionCatalogVersion: number
 }
 
 /** A path-free reference to one discovered conversation revision. */

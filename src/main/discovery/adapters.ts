@@ -337,6 +337,22 @@ function resolveArtifactPath(rootPath: string, artifact: HistoryArtifact): strin
   return resolve(artifact.sourcePath)
 }
 
+async function refreshConversationFromScan(
+  entries: AsyncGenerator<ScanEntry>,
+  externalId: string
+): Promise<ArtifactCandidate | undefined> {
+  for await (const entry of entries) {
+    if (
+      entry.kind === 'artifact'
+      && entry.candidate.kind === 'conversation'
+      && entry.candidate.externalId === externalId
+    ) {
+      return entry.candidate
+    }
+  }
+  return undefined
+}
+
 export class ClaudeHistoryAdapter implements AgentHistoryAdapter {
   readonly agentType = 'claude' as const
   readonly displayName = 'Claude Code'
@@ -348,6 +364,15 @@ export class ClaudeHistoryAdapter implements AgentHistoryAdapter {
 
   detect(context: DetectionContext, rootOverride?: string): Promise<DetectionResult> {
     return detectDirectory(context, rootOverride || this.defaultRoot(context), 'claude')
+  }
+
+  refreshConversation(
+    rootPath: string,
+    artifact: HistoryArtifact,
+    signal: AbortSignal,
+    context?: DetectionContext
+  ): Promise<ArtifactCandidate | undefined> {
+    return refreshConversationFromScan(this.scan(rootPath, signal, context), artifact.externalId)
   }
 
   resolveArtifactPath(rootPath: string, artifact: HistoryArtifact): string {
@@ -469,6 +494,15 @@ export class PiHistoryAdapter implements AgentHistoryAdapter {
     return detectDirectory(context, rootPath, 'pi')
   }
 
+  refreshConversation(
+    rootPath: string,
+    artifact: HistoryArtifact,
+    signal: AbortSignal,
+    context?: DetectionContext
+  ): Promise<ArtifactCandidate | undefined> {
+    return refreshConversationFromScan(this.scan(rootPath, signal, context), artifact.externalId)
+  }
+
   resolveArtifactPath(rootPath: string, artifact: HistoryArtifact): string {
     return resolveArtifactPath(rootPath, artifact)
   }
@@ -555,6 +589,15 @@ export class CodexHistoryAdapter implements AgentHistoryAdapter {
     return detectDirectory(context, rootOverride || this.defaultRoot(context), 'codex')
   }
 
+  refreshConversation(
+    rootPath: string,
+    artifact: HistoryArtifact,
+    signal: AbortSignal,
+    context?: DetectionContext
+  ): Promise<ArtifactCandidate | undefined> {
+    return refreshConversationFromScan(this.scan(rootPath, signal, context), artifact.externalId)
+  }
+
   resolveArtifactPath(rootPath: string, artifact: HistoryArtifact): string {
     return resolveArtifactPath(rootPath, artifact)
   }
@@ -563,7 +606,11 @@ export class CodexHistoryAdapter implements AgentHistoryAdapter {
     return createCodexObservationView(rawContent)
   }
 
-  async *scan(rootPath: string, signal: AbortSignal): AsyncGenerator<ScanEntry> {
+  async *scan(
+    rootPath: string,
+    signal: AbortSignal,
+    _context?: DetectionContext
+  ): AsyncGenerator<ScanEntry> {
     const visited = new Set<string>()
     const projectPaths = new Set<string>()
     for (const folder of ['sessions', 'archived_sessions']) {

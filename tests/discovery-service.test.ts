@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { ClaudeHistoryAdapter } from '../src/main/discovery/adapters'
+import { ClaudeHistoryAdapter, CodexHistoryAdapter } from '../src/main/discovery/adapters'
 import { DiscoveryService } from '../src/main/discovery/discovery-service'
 import { InMemoryDiscoveryRepository } from '../src/main/discovery/repository'
 import { FileSourceEvidenceReader } from '../src/main/discovery/source-evidence-reader'
@@ -104,7 +104,7 @@ describe('DiscoveryService', () => {
     expect(service.snapshot().runs[0]).not.toHaveProperty('kind')
   })
 
-  it('rejects a changed or deleted source revision and removes it after a rescan', async () => {
+  it('refreshes a grown Session and removes a deleted Session without a full source rescan', async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), 'oyster-session-access-'))
     temporaryDirectories.push(homeDirectory)
     const historyRoot = join(homeDirectory, '.claude', 'projects', 'demo')
@@ -128,26 +128,67 @@ describe('DiscoveryService', () => {
     await expect(service.readAvailableSession({
       artifactId: selected.artifactId,
       expectedRevision: selected.revision
-    }, 1_024)).rejects.toThrow('revision has changed')
+    }, 1_024)).rejects.toThrow('has grown')
 
-    await service.scanSource('source:claude')
-    await service.waitForIdle()
     const changed = service.listAvailableSessions()[0]
     expect(changed.artifactId).toBe(selected.artifactId)
     expect(changed.revision).not.toBe(selected.revision)
+    expect(changed.sizeBytes).toBeGreaterThan(selected.sizeBytes)
     await expect(service.readAvailableSession({
       artifactId: selected.artifactId,
       expectedRevision: selected.revision
     }, 1_024)).rejects.toThrow('revision has changed')
+    await expect(service.readAvailableSession({
+      artifactId: changed.artifactId,
+      expectedRevision: changed.revision
+    }, 1_024)).resolves.toMatchObject({ revision: changed.revision })
 
     await rm(sessionPath)
     await expect(service.readAvailableSession({
       artifactId: changed.artifactId,
       expectedRevision: changed.revision
     }, 1_024)).rejects.toThrow('no longer available')
-    await service.scanSource('source:claude')
-    await service.waitForIdle()
     expect(service.listAvailableSessions()).toEqual([])
+  })
+
+  it('transparently follows a Codex Session moved into archived_sessions', async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), 'oyster-codex-move-'))
+    temporaryDirectories.push(homeDirectory)
+    const codexRoot = join(homeDirectory, '.codex')
+    const sessionsRoot = join(codexRoot, 'sessions', '2026', '07', '29')
+    const archivedRoot = join(codexRoot, 'archived_sessions')
+    const filename = 'rollout-2026-07-29T00-00-00-session-one.jsonl'
+    const originalPath = join(sessionsRoot, filename)
+    const archivedPath = join(archivedRoot, filename)
+    await mkdir(sessionsRoot, { recursive: true })
+    await mkdir(archivedRoot, { recursive: true })
+    await writeFile(originalPath, `${JSON.stringify({
+      type: 'session_meta',
+      timestamp: '2026-07-29T00:00:00.000Z',
+      payload: { id: 'session-one', cwd: '/work/oyster' }
+    })}\n`)
+
+    const service = new DiscoveryService(
+      new InMemoryDiscoveryRepository(),
+      new FileSourceEvidenceReader(),
+      [new CodexHistoryAdapter()],
+      { homeDirectory, environment: {}, pathEntries: [] }
+    )
+    await service.initialize()
+    await service.detectAgents()
+    await service.waitForIdle()
+    const selected = service.listAvailableSessions()[0]
+    const catalogVersion = service.snapshot().sessionCatalogVersion
+
+    await rename(originalPath, archivedPath)
+    const evidence = await service.readAvailableSession({
+      artifactId: selected.artifactId,
+      expectedRevision: selected.revision
+    })
+
+    expect(evidence.revision).toBe(selected.revision)
+    expect(service.listAvailableSessions()).toEqual([selected])
+    expect(service.snapshot().sessionCatalogVersion).toBeGreaterThan(catalogVersion)
   })
 
   it('resets indexed sessions when the user selects a different root', async () => {

@@ -18,7 +18,12 @@ import type {
   DiscoveryStateData,
   ArtifactCandidate
 } from './model'
-import type { SourceEvidenceReader } from './source-evidence-reader'
+import {
+  SourceSessionRevisionChangedError,
+  SourceSessionUnavailableError,
+  type SourceEvidenceReader,
+  type SourceEvidenceReadResult
+} from './source-evidence-reader'
 import type { ObservationView } from '../observation/model'
 
 type SnapshotListener = (snapshot: DiscoverySnapshot) => void
@@ -44,6 +49,11 @@ export interface AvailableSessionEvidence {
   contentHash: string
   sizeBytes: number
   observationView: ObservationView
+}
+
+interface RefreshedConversationArtifact {
+  artifact?: HistoryArtifact
+  grew: boolean
 }
 
 function now(): string {
@@ -93,6 +103,32 @@ function sessionSummary(
   }
 }
 
+function historyArtifact(
+  sourceId: string,
+  candidate: ArtifactCandidate,
+  existing?: HistoryArtifact
+): HistoryArtifact {
+  const nextFingerprint = fingerprint(sourceId, candidate)
+  return {
+    id: artifactId(sourceId, candidate.kind, candidate.externalId),
+    sourceId,
+    kind: candidate.kind,
+    externalId: candidate.externalId,
+    relativePath: candidate.relativePath,
+    sourcePath: candidate.sourcePath,
+    title: candidate.title,
+    projectPath: candidate.projectPath,
+    instructionScope: candidate.instructionScope,
+    startedAt: candidate.startedAt,
+    endedAt: candidate.endedAt
+      ?? (existing?.fingerprint === nextFingerprint ? existing.endedAt : undefined),
+    updatedAt: candidate.updatedAt,
+    sizeBytes: candidate.sizeBytes,
+    modifiedAt: candidate.modifiedAt,
+    fingerprint: nextFingerprint
+  }
+}
+
 function assertSessionReference(input: { artifactId: string; expectedRevision: string }): void {
   if (typeof input.artifactId !== 'string' || input.artifactId.length === 0 || input.artifactId.length > 256) {
     throw new Error('Invalid Session artifact ID')
@@ -108,6 +144,7 @@ export class DiscoveryService {
   private readonly activeOperations = new Map<string, ActiveOperation>()
   private readonly adapterByType = new Map<AgentType, AgentHistoryAdapter>()
   private detectionContext: DetectionContext
+  private sessionCatalogVersion = 0
 
   constructor(
     private readonly repository: DiscoveryRepository,
@@ -167,7 +204,8 @@ export class DiscoveryService {
       ),
       runs: [...this.state.runs]
         .sort((left, right) => (right.startedAt || '').localeCompare(left.startedAt || ''))
-        .slice(0, 30)
+        .slice(0, 30),
+      sessionCatalogVersion: this.sessionCatalogVersion
     })
   }
 
@@ -194,29 +232,114 @@ export class DiscoveryService {
     assertSessionReference(input)
     const artifact = this.state.artifacts.find((candidate) => candidate.id === input.artifactId)
     if (!artifact || artifact.kind !== 'conversation') {
-      throw new Error('The source Session is no longer available')
+      throw new SourceSessionUnavailableError()
     }
     if (artifact.fingerprint !== input.expectedRevision) {
-      throw new Error('The source Session revision has changed')
+      throw new SourceSessionRevisionChangedError()
     }
     const source = this.state.sources.find((candidate) => candidate.id === artifact.sourceId)
-    if (!source) throw new Error('The source Session is no longer available')
+    if (!source) throw new SourceSessionUnavailableError()
     const adapter = this.requireAdapter(source.agentType)
-    const evidence = await this.sourceEvidenceReader.read({
+    let currentArtifact = artifact
+    let evidence: SourceEvidenceReadResult
+    try {
+      evidence = await this.readArtifactEvidence(source, adapter, currentArtifact, maxBytes)
+    } catch (error) {
+      if (
+        !(error instanceof SourceSessionUnavailableError)
+        && !(error instanceof SourceSessionRevisionChangedError)
+      ) {
+        throw error
+      }
+
+      const refreshed = await this.refreshConversationArtifact(source, adapter, currentArtifact)
+      if (!refreshed.artifact) throw new SourceSessionUnavailableError()
+      currentArtifact = refreshed.artifact
+      if (currentArtifact.fingerprint !== input.expectedRevision) {
+        throw new SourceSessionRevisionChangedError(
+          refreshed.grew
+            ? 'The source Session has grown since it was selected; retry with the refreshed Session revision'
+            : 'The source Session revision has changed'
+        )
+      }
+      evidence = await this.readArtifactEvidence(source, adapter, currentArtifact, maxBytes)
+    }
+    const content = new TextDecoder('utf-8', { fatal: true }).decode(evidence.content)
+    return {
+      artifactId: currentArtifact.id,
+      revision: currentArtifact.fingerprint,
+      contentHash: evidence.contentHash,
+      sizeBytes: evidence.sizeBytes,
+      observationView: adapter.createObservationView(content)
+    }
+  }
+
+  private readArtifactEvidence(
+    source: AgentSource,
+    adapter: AgentHistoryAdapter,
+    artifact: HistoryArtifact,
+    maxBytes?: number
+  ): Promise<SourceEvidenceReadResult> {
+    return this.sourceEvidenceReader.read({
       artifactId: artifact.id,
       absolutePath: adapter.resolveArtifactPath(source.rootPath, artifact),
       expectedSizeBytes: artifact.sizeBytes,
       expectedModifiedAt: artifact.modifiedAt,
       ...(maxBytes === undefined ? {} : { maxBytes })
     })
-    const content = new TextDecoder('utf-8', { fatal: true }).decode(evidence.content)
-    return {
-      artifactId: artifact.id,
-      revision: artifact.fingerprint,
-      contentHash: evidence.contentHash,
-      sizeBytes: evidence.sizeBytes,
-      observationView: adapter.createObservationView(content)
+  }
+
+  private async refreshConversationArtifact(
+    source: AgentSource,
+    adapter: AgentHistoryAdapter,
+    previous: HistoryArtifact
+  ): Promise<RefreshedConversationArtifact> {
+    const candidate = await adapter.refreshConversation(
+      source.rootPath,
+      clone(previous),
+      new AbortController().signal,
+      this.detectionContext
+    )
+    const current = this.state.artifacts.find((artifact) => artifact.id === previous.id)
+    if (!candidate) {
+      this.state.artifacts = this.state.artifacts.filter((artifact) => artifact.id !== previous.id)
+      this.updateSourceArtifactSummary(source)
+      this.sessionCatalogVersion++
+      await this.persistAndEmit()
+      return { grew: false }
     }
+    if (candidate.kind !== 'conversation' || candidate.externalId !== previous.externalId) {
+      throw new Error(`History adapter returned the wrong Session while refreshing ${previous.externalId}`)
+    }
+
+    const previousSizeBytes = current?.sizeBytes ?? previous.sizeBytes
+    const next = historyArtifact(source.id, candidate, current)
+    if (next.id !== previous.id) {
+      throw new Error(`History adapter changed the stable Session identity for ${previous.externalId}`)
+    }
+    if (current) Object.assign(current, next)
+    else this.state.artifacts.push(next)
+    this.updateSourceArtifactSummary(source)
+    this.sessionCatalogVersion++
+    await this.persistAndEmit()
+    return {
+      artifact: current ?? next,
+      grew: next.sizeBytes > previousSizeBytes
+    }
+  }
+
+  private updateSourceArtifactSummary(source: AgentSource): void {
+    const artifacts = this.currentArtifacts(source.id)
+    const conversations = artifacts.filter((artifact) => artifact.kind === 'conversation')
+    source.fileCount = artifacts.length + source.invalidFileCount
+    source.sessionCount = conversations.length
+    source.instructionFileCount = artifacts.length - conversations.length
+    source.totalBytes = artifacts.reduce((total, artifact) => total + artifact.sizeBytes, 0)
+    const dates = conversations
+      .map((artifact) => artifact.startedAt || artifact.modifiedAt)
+      .sort()
+    source.oldestSessionAt = dates[0]
+    source.latestSessionAt = dates.at(-1)
   }
 
   subscribe(listener: SnapshotListener): () => void {
@@ -268,7 +391,9 @@ export class DiscoveryService {
     source.oldestSessionAt = undefined
     source.latestSessionAt = undefined
     source.lastScannedAt = undefined
+    const previousArtifactCount = this.state.artifacts.length
     this.state.artifacts = this.state.artifacts.filter((artifact) => artifact.sourceId !== sourceId)
+    if (this.state.artifacts.length !== previousArtifactCount) this.sessionCatalogVersion++
 
     const detection = await adapter.detect(this.detectionContext, rootPath)
     source.executablePath = detection.executablePath
@@ -349,26 +474,8 @@ export class DiscoveryService {
           const candidate = entry.candidate
           const id = artifactId(source.id, candidate.kind, candidate.externalId)
           observed.add(id)
-          const nextFingerprint = fingerprint(source.id, candidate)
           const existing = this.state.artifacts.find((artifact) => artifact.id === id)
-          const artifact: HistoryArtifact = {
-            id,
-            sourceId: source.id,
-            kind: candidate.kind,
-            externalId: candidate.externalId,
-            relativePath: candidate.relativePath,
-            sourcePath: candidate.sourcePath,
-            title: candidate.title,
-            projectPath: candidate.projectPath,
-            instructionScope: candidate.instructionScope,
-            startedAt: candidate.startedAt,
-            endedAt: candidate.endedAt
-              ?? (existing?.fingerprint === nextFingerprint ? existing.endedAt : undefined),
-            updatedAt: candidate.updatedAt,
-            sizeBytes: candidate.sizeBytes,
-            modifiedAt: candidate.modifiedAt,
-            fingerprint: nextFingerprint
-          }
+          const artifact = historyArtifact(source.id, candidate, existing)
           if (existing) Object.assign(existing, artifact)
           else this.state.artifacts.push(artifact)
 
@@ -399,6 +506,7 @@ export class DiscoveryService {
       source.errorMessage = undefined
       run.state = 'completed'
       run.finishedAt = now()
+      this.sessionCatalogVersion++
     } catch (error) {
       const cancelled = signal.aborted || isAbortError(error)
       run.state = cancelled ? 'cancelled' : 'failed'
