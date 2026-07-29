@@ -41,6 +41,10 @@ import { PiKnowledgeMaintenanceAgent } from './knowledge-processing/pi-knowledge
 import { JsonKnowledgeProcessingRepository } from './knowledge-processing/repository'
 import { SqliteKnowledgeStoreManager } from './knowledge-store/knowledge-store-manager'
 import { registerKnowledgeIpc } from './knowledge-store/ipc'
+import { ChatAgentService } from './chat/chat-agent-service'
+import { JsonChatConfigurationRepository } from './chat/chat-configuration-repository'
+import { registerChatIpc } from './chat/ipc'
+import { PiChatSessionRepository } from './chat/pi-chat-session-repository'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 let mainWindow: BrowserWindow | undefined
@@ -49,6 +53,8 @@ let knowledgeProcessingService: KnowledgeProcessingService | undefined
 let knowledgeFullChainService: KnowledgeFullChainService | undefined
 let knowledgeFullChainRunRepository: SqliteKnowledgeFullChainRunRepository | undefined
 let knowledgeStoreManager: SqliteKnowledgeStoreManager | undefined
+let chatAgentService: ChatAgentService | undefined
+let chatSessionRepository: PiChatSessionRepository | undefined
 
 function fixtureMode(): boolean {
   return process.env.OYSTER_FIXTURE_MODE === '1'
@@ -645,7 +651,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   const agentConfigurationSemantics = await window.webContents.executeJavaScript(`(async () => {
     const page = document.querySelector('[data-testid="page-agent-configuration"]')
     let deadline = Date.now() + 2_000
-    while (page.querySelectorAll('.agent-config-role').length < 2 && Date.now() < deadline) {
+    while (page.querySelectorAll('.agent-config-role').length < 3 && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
     const title = page.querySelector('h1')?.textContent?.trim()
@@ -663,6 +669,15 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const maintenanceToolNames = Array.from(page.querySelectorAll('.agent-config-tool code'))
       .map((node) => node.textContent?.trim())
     const toolsReadOnlyCopy = page.querySelector('[data-testid="agent-config-tools-panel"]')?.textContent?.trim()
+    const schemaPanelCount = page.querySelectorAll('.agent-config-tool__schema').length
+    const searchSchemaDetails = page.querySelector('[data-testid="agent-tool-schema-search_knowledge"]')
+    const candidateSchemaDetails = page.querySelector('[data-testid="agent-tool-schema-add_statement_candidates"]')
+    searchSchemaDetails.open = true
+    candidateSchemaDetails.open = true
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const searchToolSchema = JSON.parse(searchSchemaDetails.querySelector('pre')?.textContent || '{}')
+    const candidateToolSchema = JSON.parse(candidateSchemaDetails.querySelector('pre')?.textContent || '{}')
+    const expandedSchemaCount = page.querySelectorAll('.agent-config-tool__schema[open]').length
 
     page.querySelector('[data-testid="agent-config-tab-prompt"]')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
@@ -705,6 +720,43 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const restoredBadge = page.querySelector('.agent-config-detail__header .processing-mode-badge')?.textContent?.trim()
     const restoredPrompt = page.querySelector('[data-testid="agent-default-prompt-editor"]')?.value
 
+    page.querySelector('[data-testid="agent-config-role-chat_agent"]')?.click()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const chatRoleText = page.querySelector('[data-testid="agent-config-role-chat_agent"]')?.textContent?.trim()
+    page.querySelector('[data-testid="agent-config-tab-tools"]')?.click()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const chatToolNames = Array.from(page.querySelectorAll('.agent-config-tool code'))
+      .map((node) => node.textContent?.trim())
+    const chatSchemaPanelCount = page.querySelectorAll('.agent-config-tool__schema').length
+    const upsertSchemaDetails = page.querySelector('[data-testid="agent-tool-schema-upsert_knowledge_statements"]')
+    upsertSchemaDetails.open = true
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const chatUpsertSchema = JSON.parse(upsertSchemaDetails.querySelector('pre')?.textContent || '{}')
+
+    page.querySelector('[data-testid="agent-config-tab-prompt"]')?.click()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const chatEditor = page.querySelector('[data-testid="agent-default-prompt-editor"]')
+    const chatBuiltInPrompt = chatEditor?.value
+    chatEditor.value = chatBuiltInPrompt + '\\nConfigured chat default from Agent configuration UI.'
+    chatEditor.dispatchEvent(new Event('input', { bubbles: true }))
+    page.querySelector('[data-testid="save-agent-default-prompt"]')?.click()
+    deadline = Date.now() + 2_000
+    while (
+      page.querySelector('.agent-config-detail__header .processing-mode-badge')?.textContent?.trim() !== 'Configured default'
+      && Date.now() < deadline
+    ) await new Promise((resolve) => setTimeout(resolve, 25))
+    const chatConfiguredBadge = page.querySelector('.agent-config-detail__header .processing-mode-badge')?.textContent?.trim()
+    page.querySelector('[data-testid="restore-built-in-agent-prompt"]')?.click()
+    deadline = Date.now() + 2_000
+    while (
+      page.querySelector('.agent-config-detail__header .processing-mode-badge')?.textContent?.trim() !== 'Built-in default'
+      && Date.now() < deadline
+    ) await new Promise((resolve) => setTimeout(resolve, 25))
+    const chatRestoredPrompt = page.querySelector('[data-testid="agent-default-prompt-editor"]')?.value
+
+    page.querySelector('[data-testid="agent-config-role-knowledge_maintenance_agent"]')?.click()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+
     return {
       title,
       roleCount,
@@ -713,15 +765,80 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       preprocessorToolsEmpty,
       maintenanceToolNames,
       toolsReadOnlyCopy,
+      schemaPanelCount,
+      expandedSchemaCount,
+      searchToolSchema,
+      candidateToolSchema,
       builtInPrompt,
       configuredBadge,
       saveNotice,
       processingPromptUsesConfiguredDefault,
       restoredBadge,
       restoredMatchesBuiltIn: restoredPrompt === builtInPrompt,
+      chatRoleText,
+      chatToolNames,
+      chatSchemaPanelCount,
+      chatUpsertSchema,
+      chatConfiguredBadge,
+      chatRestoredMatchesBuiltIn: chatRestoredPrompt === chatBuiltInPrompt,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
     }
   })()`)
+  await window.webContents.executeJavaScript(`new Promise((resolve) => {
+    const page = document.querySelector('[data-testid="page-agent-configuration"]')
+    page.querySelector('[data-testid="agent-config-tab-tools"]')?.click()
+    requestAnimationFrame(() => {
+      const schema = page.querySelector('[data-testid="agent-tool-schema-add_statement_candidates"]')
+      if (schema) schema.open = true
+      window.scrollTo(0, 0)
+      requestAnimationFrame(resolve)
+    })
+  })`)
+  const agentToolsImage = await window.webContents.capturePage()
+  await writeFile(join(dirname(capturePath), 'agent-configuration-tools.png'), agentToolsImage.toPNG())
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-chat"]').click()`)
+  const chatSemantics = await window.webContents.executeJavaScript(`(async () => {
+    const page = document.querySelector('[data-testid="page-chat"]')
+    let deadline = Date.now() + 2_000
+    while (!page.querySelector('[data-testid="chat-model-picker"]') && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    const connection = page.querySelector('[data-testid="chat-model-picker"] select')
+    const firstConnection = connection?.options?.[1]?.value
+    if (firstConnection) {
+      connection.value = firstConnection
+      connection.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    const selects = page.querySelectorAll('[data-testid="chat-model-picker"] select')
+    const model = selects[1]
+    const composer = page.querySelector('.chat-composer textarea')
+    composer.value = '请简要介绍你能如何使用知识库。'
+    composer.dispatchEvent(new Event('input', { bubbles: true }))
+    page.querySelector('[data-testid="chat-send"]')?.click()
+    deadline = Date.now() + 5_000
+    while (
+      !page.querySelector('.chat-message--assistant')?.textContent?.includes('Fixture 对话 Agent')
+      && !page.querySelector('.page-error')
+      && Date.now() < deadline
+    ) await new Promise((resolve) => setTimeout(resolve, 25))
+    const workspace = page.querySelector('.chat-workspace')?.getBoundingClientRect()
+    return {
+      title: page.querySelector('h1')?.textContent?.trim(),
+      sessionCount: page.querySelectorAll('.chat-session').length,
+      selectedModel: model?.value,
+      binding: page.querySelector('[data-testid="chat-current-binding"]')?.textContent?.trim(),
+      userText: page.querySelector('.chat-message--user')?.textContent?.trim(),
+      assistantText: page.querySelector('.chat-message--assistant')?.textContent?.trim(),
+      composerVisible: Boolean(composer),
+      pageError: page.querySelector('.page-error')?.textContent?.trim(),
+      workspaceWithinViewport: Boolean(workspace && workspace.bottom <= window.innerHeight + 1),
+      overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
+    }
+  })()`)
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  const chatImage = await window.webContents.capturePage()
+  await writeFile(join(dirname(capturePath), 'chat.png'), chatImage.toPNG())
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-knowledge-processing"]').click()`)
   await new Promise((resolve) => setTimeout(resolve, 120))
   const processingStateAfterNavigation = await window.webContents.executeJavaScript(`(() => {
@@ -737,6 +854,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       ...semantics,
       ai: { ...aiSemantics, directTest: aiDirectTestSemantics },
       agentConfiguration: agentConfigurationSemantics,
+      chat: chatSemantics,
       knowledge: {
         browse: knowledgeBrowseSemantics,
         clear: clearKnowledgeSemantics
@@ -808,6 +926,15 @@ app.whenReady().then(async () => {
     await knowledgeStoreManager.discardSandbox(sandbox.id)
   }
   knowledgeProcessingService = createKnowledgeProcessingService(aiBackendService, knowledgeStoreManager)
+  chatSessionRepository = new PiChatSessionRepository(join(app.getPath('userData'), 'chat-sessions'))
+  chatAgentService = new ChatAgentService({
+    sessions: chatSessionRepository,
+    configuration: new JsonChatConfigurationRepository(
+      join(app.getPath('userData'), 'chat-agent.json')
+    ),
+    aiBackend: aiBackendService,
+    knowledgeStore: knowledgeStoreManager.production
+  })
   knowledgeFullChainService = new KnowledgeFullChainService(
     service,
     knowledgeProcessingService,
@@ -820,7 +947,8 @@ app.whenReady().then(async () => {
   await Promise.all([
     service.initialize(),
     aiBackendService.initialize(),
-    knowledgeProcessingService.initialize()
+    knowledgeProcessingService.initialize(),
+    chatAgentService.initialize()
   ])
   if (fixtureMode() && knowledgeStoreManager.production.listStatements().length === 0) {
     knowledgeStoreManager.production.commit({
@@ -850,6 +978,7 @@ app.whenReady().then(async () => {
     knowledgeFullChainService,
     () => mainWindow
   )
+  registerChatIpc(chatAgentService, () => mainWindow)
   await createMainWindow()
 
   app.on('activate', () => {
@@ -858,11 +987,13 @@ app.whenReady().then(async () => {
 })
 
 app.on('before-quit', () => {
+  chatAgentService?.dispose()
   knowledgeFullChainService?.dispose()
   knowledgeProcessingService?.dispose()
   knowledgeFullChainRunRepository?.close()
   knowledgeStoreManager?.close()
   aiBackendService?.dispose()
+  void chatSessionRepository?.dispose()
 })
 
 app.on('window-all-closed', () => {

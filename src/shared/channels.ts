@@ -42,3 +42,14 @@ export const knowledgeChannels = {
   read: 'knowledge:read',
   clear: 'knowledge:clear'
 } as const
+
+export const chatChannels = {
+  event: 'chat:event',
+  getSnapshot: 'chat:get-snapshot',
+  createSession: 'chat:create-session',
+  readSession: 'chat:read-session',
+  deleteSession: 'chat:delete-session',
+  sendMessage: 'chat:send-message',
+  cancelRun: 'chat:cancel-run',
+  saveDefaultInstructions: 'chat:save-default-instructions'
+} as const

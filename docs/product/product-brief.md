@@ -2,13 +2,15 @@
 
 > 状态：当前产品定位（source of truth）
 >
-> 日期：2026-07-28
+> 日期：2026-07-29
 >
 > 决策记录：[ADR-0001：将 Oyster 定位为 Agent-Agnostic Knowledge Hub](../decisions/0001-agent-agnostic-knowledge-hub.md)
 >
 > 知识模型原则：[知识加工与协作式投影](../architecture/knowledge-model-and-projection.md)
 >
 > AI 运行后端：[AI Backend MVP](ai-backends-mvp.md)
+>
+> 内置知识对话界面：[对话 Agent MVP](chat-agent-mvp.md)
 
 ## 1. 一句话定位
 
@@ -50,7 +52,7 @@ Oyster 是：
 
 Oyster 不是：
 
-- 某个 Agent 的聊天客户端或历史记录查看器；
+- 以替代某个 Agent Harness 为目标的聊天客户端或历史记录查看器；内置的极简对话只作为正式知识库的查询、维护与测试界面；
 - 只提供向量搜索的 Memory MCP Server；
 - 将全部聊天无差别上传云端的遥测系统；
 - 默认把所有历史自动塞入每次 Prompt 的上下文注入器；
@@ -79,7 +81,7 @@ Observation Preprocessing 发现的 Candidate 是带回源线索的待调查问�
 
 ### 6.1 发现 Agent 和数据源
 
-当前已落地的纵向切片见[《本地 Agent 发现与外部证据访问》](local-agent-discovery-mvp.md)、[《AI Backend MVP》](ai-backends-mvp.md)和[《知识加工验证 MVP》](knowledge-processing-mvp.md)。发现分为未读取聊天正文的被动候选检查，以及用户触发的有界扫描与 catalog 建立；知识加工可以直接选择一条可用 Session 运行完整测试链路。
+当前已落地的纵向切片见[《本地 Agent 发现与外部证据访问》](local-agent-discovery-mvp.md)、[《AI Backend MVP》](ai-backends-mvp.md)、[《知识加工验证 MVP》](knowledge-processing-mvp.md)和[《对话 Agent MVP》](chat-agent-mvp.md)。发现分为未读取聊天正文的被动候选检查，以及用户触发的有界扫描与 catalog 建立；知识加工可以直接选择一条可用 Session 运行完整测试链路；极简对话 Agent 用于直接验证正式知识库的查询与显式维护。
 
 Oyster 启动后执行本地发现，并分别报告：
 

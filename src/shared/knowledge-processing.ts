@@ -21,10 +21,20 @@ export const PROCESSING_STAGE_IDS = [
 export type ProcessingStageId = (typeof PROCESSING_STAGE_IDS)[number]
 export type ProcessingRuntime = 'direct_model_call' | 'pi_agent_core'
 
+export type SerializableJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | SerializableJsonValue[]
+  | { [key: string]: SerializableJsonValue }
+
 export interface ProcessingToolView {
   name: string
   label: string
   description: string
+  /** JSON-safe projection of the exact parameter schema supplied to the model. */
+  parameters: { [key: string]: SerializableJsonValue }
 }
 
 export interface ProcessingConnectionView {

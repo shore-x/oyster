@@ -129,7 +129,7 @@ if (!semantics.ai.model.configuredSummary?.includes('fixture-model')) throw new 
 if (!semantics.ai.model.bodyText.includes('OpenAI-compatible')) throw new Error('Custom compatible provider choice is missing')
 
 const agentConfiguration = semantics.agentConfiguration
-if (agentConfiguration?.title !== 'Agent 配置' || agentConfiguration.roleCount !== 2) {
+if (agentConfiguration?.title !== 'Agent 配置' || agentConfiguration.roleCount !== 3) {
   throw new Error('Agent configuration page does not list the registered AI runtime roles')
 }
 if (!agentConfiguration.preprocessorRoleText?.includes('Direct Model')) {
@@ -152,6 +152,31 @@ if (
 if (!agentConfiguration.toolsReadOnlyCopy?.includes('只读展示')) {
   throw new Error('The Agent configuration page does not explain that tools are code-owned')
 }
+if (agentConfiguration.schemaPanelCount !== 11 || agentConfiguration.expandedSchemaCount !== 2) {
+  throw new Error('The Agent tool parameter schemas are not available through expandable panels')
+}
+const searchToolSchema = agentConfiguration.searchToolSchema
+if (
+  searchToolSchema?.type !== 'object'
+  || searchToolSchema.additionalProperties !== false
+  || !searchToolSchema.required?.includes('query')
+  || searchToolSchema.properties?.query?.maxLength !== 1024
+  || searchToolSchema.properties?.limit?.maximum !== 20
+) {
+  throw new Error('The search_knowledge developer schema lost required fields or constraints')
+}
+const candidateItemSchema = agentConfiguration.candidateToolSchema?.properties?.candidates?.items
+const candidateLocationSchema = candidateItemSchema?.properties?.locations?.items
+if (
+  !agentConfiguration.candidateToolSchema?.required?.includes('candidates')
+  || !candidateItemSchema?.required?.includes('expression')
+  || !candidateItemSchema?.required?.includes('question')
+  || candidateItemSchema?.properties?.expression?.maxLength !== 512
+  || !candidateLocationSchema?.required?.includes('line')
+  || !candidateLocationSchema?.required?.includes('offset')
+) {
+  throw new Error('The nested Statement candidate developer schema is incomplete')
+}
 if (
   !agentConfiguration.builtInPrompt?.includes('Knowledge Maintenance Agent')
   || agentConfiguration.configuredBadge !== 'Configured default'
@@ -163,7 +188,46 @@ if (
 if (agentConfiguration.restoredBadge !== 'Built-in default' || !agentConfiguration.restoredMatchesBuiltIn) {
   throw new Error('The configured default System Prompt cannot be restored to the code default')
 }
+if (!agentConfiguration.chatRoleText?.includes('对话 Agent')) {
+  throw new Error('The conversational Agent is missing from Agent configuration')
+}
+if (
+  agentConfiguration.chatToolNames?.join(',')
+    !== 'search_knowledge,read_knowledge_statement,upsert_knowledge_statements'
+  || agentConfiguration.chatSchemaPanelCount !== 3
+) {
+  throw new Error('The conversational Agent tool catalog is incomplete')
+}
+const chatStatementItem = agentConfiguration.chatUpsertSchema?.properties?.statements?.items
+if (
+  agentConfiguration.chatUpsertSchema?.type !== 'object'
+  || !agentConfiguration.chatUpsertSchema?.required?.includes('statements')
+  || !chatStatementItem?.required?.includes('title')
+  || !chatStatementItem?.required?.includes('content')
+) {
+  throw new Error('The conversational Agent write-tool schema is not available to developers')
+}
+if (
+  agentConfiguration.chatConfiguredBadge !== 'Configured default'
+  || !agentConfiguration.chatRestoredMatchesBuiltIn
+) {
+  throw new Error('The conversational Agent default System Prompt cannot be configured and restored')
+}
 if (agentConfiguration.overflowX) throw new Error('Agent configuration page has unexpected horizontal overflow')
+
+const chat = semantics.chat
+if (chat?.title !== '对话' || chat.sessionCount !== 1) {
+  throw new Error('The conversational Agent page did not create a persistent Session')
+}
+if (!chat.selectedModel || !chat.binding?.includes(chat.selectedModel)) {
+  throw new Error('The conversational Agent did not expose its frozen model binding')
+}
+if (!chat.userText?.includes('使用知识库') || !chat.assistantText?.includes('Fixture 对话 Agent')) {
+  throw new Error(`The conversational Agent did not complete a real fixture turn: ${chat.pageError || 'no response'}`)
+}
+if (!chat.composerVisible || !chat.workspaceWithinViewport || chat.overflowX) {
+  throw new Error('The conversational workspace does not remain within the viewport')
+}
 
 const processing = semantics.processing
 if (processing.title !== '加工测试') throw new Error('Knowledge processing page was not rendered')

@@ -5,7 +5,6 @@ import {
   type StreamFn
 } from '@earendil-works/pi-agent-core'
 import {
-  Type,
   createAssistantMessageEventStream,
   type Api,
   type AssistantMessage,
@@ -28,8 +27,6 @@ import {
   splitsSurrogatePair
 } from '../observation/evidence-location'
 import {
-  MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH,
-  MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH,
   type KnowledgeContributionDraft,
   type KnowledgeStatement,
   type KnowledgeStatementDraft
@@ -50,90 +47,30 @@ import {
 } from './statement-candidate-agenda'
 import { KnowledgeContributionWorkspace } from './knowledge-contribution-workspace'
 import {
+  addStatementCandidatesParameters,
+  contributionStatementParameters,
   KNOWLEDGE_MAINTENANCE_TOOL_CATALOG,
-  knowledgeMaintenanceToolMetadata
+  knowledgeMaintenanceToolDefinition,
+  listContributionStatementsParameters,
+  listStatementCandidatesParameters,
+  MAX_KNOWLEDGE_SEARCH_RESULTS as MAX_SEARCH_RESULTS,
+  MAX_KNOWLEDGE_WORKSPACE_LIST_RESULTS as MAX_WORKSPACE_LIST_RESULTS,
+  readContributionStatementParameters,
+  readEvidenceParameters,
+  readKnowledgeParameters,
+  removeContributionStatementParameters,
+  resolveStatementCandidatesParameters,
+  searchKnowledgeParameters,
+  submitContributionParameters
 } from './knowledge-maintenance-tool-catalog'
 
 const MAX_EVIDENCE_OUTPUT_CHARS = 64 * 1_024
-const MAX_SEARCH_RESULTS = 20
-const MAX_WORKSPACE_LIST_RESULTS = 100
 const WORKSPACE_STATUS_CONTEXT_TOKENS = 2_048
 const UNKNOWN_TRACE_TOOL_NAME = '未知工具'
 
 const TRACEABLE_TOOL_NAMES = new Set<string>(
   KNOWLEDGE_MAINTENANCE_TOOL_CATALOG.map((tool) => tool.name)
 )
-
-const searchKnowledgeParameters = Type.Object({
-  query: Type.String({ minLength: 1, maxLength: 1_024 }),
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_SEARCH_RESULTS })),
-  offset: Type.Optional(Type.Integer({ minimum: 0 }))
-}, { additionalProperties: false })
-
-const readKnowledgeParameters = Type.Object({
-  title: Type.String({ minLength: 1, maxLength: MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH })
-}, { additionalProperties: false })
-
-const readEvidenceParameters = Type.Object({
-  line: Type.Integer({ minimum: 1 }),
-  offset: Type.Integer({ minimum: 0 }),
-  limit: Type.Integer({ minimum: 2 })
-}, { additionalProperties: false })
-
-const listStatementCandidatesParameters = Type.Object({
-  status: Type.Optional(Type.Union([Type.Literal('open'), Type.Literal('resolved')])),
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_WORKSPACE_LIST_RESULTS })),
-  offset: Type.Optional(Type.Integer({ minimum: 0 }))
-}, { additionalProperties: false })
-
-const candidateLocationParameters = Type.Object({
-  line: Type.Integer({ minimum: 1 }),
-  offset: Type.Integer({ minimum: 0 })
-}, { additionalProperties: false })
-
-const addStatementCandidatesParameters = Type.Object({
-  candidates: Type.Array(Type.Object({
-    expression: Type.String({ minLength: 1, maxLength: MAX_STATEMENT_CANDIDATE_EXPRESSION_CHARACTERS }),
-    question: Type.String({ minLength: 1, maxLength: MAX_STATEMENT_CANDIDATE_QUESTION_CHARACTERS }),
-    locations: Type.Optional(Type.Array(candidateLocationParameters))
-  }, { additionalProperties: false }))
-}, { additionalProperties: false })
-
-const resolveStatementCandidatesParameters = Type.Object({
-  resolutions: Type.Array(Type.Object({
-    ref: Type.String({ minLength: 1, maxLength: 64 }),
-    resolution: Type.String({ minLength: 1, maxLength: 16 * 1_024 })
-  }, { additionalProperties: false }))
-}, { additionalProperties: false })
-
-const contributionStatementParameters = Type.Object({
-  title: Type.String({
-    minLength: 1,
-    maxLength: MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH,
-    description: 'The established proper name, term, or natural noun phrase that identifies this Statement subject. Put scenarios, attributes, and relationships in content instead of turning them into a topic-style title.'
-  }),
-  content: Type.String({
-    minLength: 1,
-    maxLength: MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH,
-    description: 'The self-explaining free-text knowledge about the named subject, including its scope, properties, constraints, and natural-language relationships to [[other Statements]].'
-  })
-}, { additionalProperties: false })
-
-const readContributionStatementParameters = Type.Object({
-  title: Type.String({ minLength: 1, maxLength: MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH })
-}, { additionalProperties: false })
-
-const listContributionStatementsParameters = Type.Object({
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_WORKSPACE_LIST_RESULTS })),
-  offset: Type.Optional(Type.Integer({ minimum: 0 }))
-}, { additionalProperties: false })
-
-const removeContributionStatementParameters = Type.Object({
-  title: Type.String({ minLength: 1, maxLength: MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH })
-}, { additionalProperties: false })
-
-const submitContributionParameters = Type.Object({
-}, { additionalProperties: false })
 
 function emptyUsage(): Usage {
   return {
@@ -553,8 +490,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
 
     const tools: AgentTool[] = [
       {
-        ...knowledgeMaintenanceToolMetadata('search_knowledge'),
-        parameters: searchKnowledgeParameters,
+        ...knowledgeMaintenanceToolDefinition('search_knowledge'),
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
           signal?.throwIfAborted()
@@ -583,8 +519,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         }
       } as AgentTool<typeof searchKnowledgeParameters>,
       {
-        ...knowledgeMaintenanceToolMetadata('read_knowledge_statement'),
-        parameters: readKnowledgeParameters,
+        ...knowledgeMaintenanceToolDefinition('read_knowledge_statement'),
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
           signal?.throwIfAborted()
@@ -604,8 +539,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         }
       } as AgentTool<typeof readKnowledgeParameters>,
       {
-        ...knowledgeMaintenanceToolMetadata('list_statement_candidates'),
-        parameters: listStatementCandidatesParameters,
+        ...knowledgeMaintenanceToolDefinition('list_statement_candidates'),
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
           signal?.throwIfAborted()
@@ -626,8 +560,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         }
       } as AgentTool<typeof listStatementCandidatesParameters>,
       {
-        ...knowledgeMaintenanceToolMetadata('add_statement_candidates'),
-        parameters: addStatementCandidatesParameters,
+        ...knowledgeMaintenanceToolDefinition('add_statement_candidates'),
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
           signal?.throwIfAborted()
@@ -654,8 +587,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         }
       } as AgentTool<typeof addStatementCandidatesParameters>,
       {
-        ...knowledgeMaintenanceToolMetadata('resolve_statement_candidates'),
-        parameters: resolveStatementCandidatesParameters,
+        ...knowledgeMaintenanceToolDefinition('resolve_statement_candidates'),
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
           signal?.throwIfAborted()
@@ -676,8 +608,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         }
       } as AgentTool<typeof resolveStatementCandidatesParameters>,
       {
-        ...knowledgeMaintenanceToolMetadata('upsert_contribution_statement'),
-        parameters: contributionStatementParameters,
+        ...knowledgeMaintenanceToolDefinition('upsert_contribution_statement'),
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
           signal?.throwIfAborted()
@@ -690,8 +621,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         }
       } as AgentTool<typeof contributionStatementParameters>,
       {
-        ...knowledgeMaintenanceToolMetadata('read_contribution_statement'),
-        parameters: readContributionStatementParameters,
+        ...knowledgeMaintenanceToolDefinition('read_contribution_statement'),
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
           signal?.throwIfAborted()
@@ -706,8 +636,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         }
       } as AgentTool<typeof readContributionStatementParameters>,
       {
-        ...knowledgeMaintenanceToolMetadata('list_contribution_statements'),
-        parameters: listContributionStatementsParameters,
+        ...knowledgeMaintenanceToolDefinition('list_contribution_statements'),
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
           signal?.throwIfAborted()
@@ -724,8 +653,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         }
       } as AgentTool<typeof listContributionStatementsParameters>,
       {
-        ...knowledgeMaintenanceToolMetadata('remove_contribution_statement'),
-        parameters: removeContributionStatementParameters,
+        ...knowledgeMaintenanceToolDefinition('remove_contribution_statement'),
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
           signal?.throwIfAborted()
@@ -741,8 +669,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         }
       } as AgentTool<typeof removeContributionStatementParameters>,
       {
-        ...knowledgeMaintenanceToolMetadata('read_evidence'),
-        parameters: readEvidenceParameters,
+        ...knowledgeMaintenanceToolDefinition('read_evidence'),
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
           signal?.throwIfAborted()
@@ -771,8 +698,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         }
       } as AgentTool<typeof readEvidenceParameters>,
       {
-        ...knowledgeMaintenanceToolMetadata('submit_knowledge_contribution'),
-        parameters: submitContributionParameters,
+        ...knowledgeMaintenanceToolDefinition('submit_knowledge_contribution'),
         executionMode: 'sequential',
         execute: async (_toolCallId, _parameters, signal) => {
           signal?.throwIfAborted()

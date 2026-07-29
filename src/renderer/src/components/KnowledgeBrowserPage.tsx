@@ -3,10 +3,23 @@ import { createKnowledgeController } from '../knowledge-controller'
 import { Button, Icon } from '../ui'
 import { KnowledgeStatementBrowser } from './KnowledgeStatementBrowser'
 
-export function KnowledgeBrowserPage(props: { active: boolean; onKnowledgeCleared(): void }) {
+export function KnowledgeBrowserPage(props: {
+  active: boolean
+  navigationRequest?: { title: string; version: number }
+  onKnowledgeCleared(): void
+}) {
   const controller = createKnowledgeController()
   const [query, setQuery] = createSignal('')
   const [clearDialogOpen, setClearDialogOpen] = createSignal(false)
+
+  let handledNavigationVersion = 0
+  createEffect(() => {
+    const request = props.navigationRequest
+    if (!props.active || !request || request.version === handledNavigationVersion) return
+    handledNavigationVersion = request.version
+    setQuery(request.title)
+    void controller.select(request.title)
+  })
 
   createEffect(() => {
     const value = query()

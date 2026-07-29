@@ -2,17 +2,19 @@ import { For, Show, createMemo, createSignal } from 'solid-js'
 import { createDiscoveryController } from './discovery-controller'
 import { AiBackendsPage } from './components/AiBackendsPage'
 import { AgentConfigurationPage } from './components/AgentConfigurationPage'
+import { ChatPage } from './components/ChatPage'
 import { KnowledgeProcessingPage } from './components/KnowledgeProcessingPage'
 import { KnowledgeBrowserPage } from './components/KnowledgeBrowserPage'
 import { SourceCard } from './components/SourceCard'
 import { Button, Icon } from './ui'
 
-type PageId = 'sources' | 'knowledge' | 'knowledge-processing' | 'agent-configuration' | 'ai-backends'
+type PageId = 'sources' | 'knowledge' | 'chat' | 'knowledge-processing' | 'agent-configuration' | 'ai-backends'
 
 export function App() {
   const controller = createDiscoveryController()
   const [page, setPage] = createSignal<PageId>('sources')
   const [knowledgeResetVersion, setKnowledgeResetVersion] = createSignal(0)
+  const [knowledgeNavigation, setKnowledgeNavigation] = createSignal<{ title: string; version: number }>()
   const foundCount = createMemo(
     () => controller.snapshot().sources.filter((source) => source.discoveryState === 'found').length
   )
@@ -41,6 +43,12 @@ export function App() {
             onClick={(event) => { event.preventDefault(); navigateTo('knowledge') }}
           ><Icon name="layers" /><span>知识库</span></a>
           <a
+            href="#chat"
+            data-testid="nav-chat"
+            class={`nav-item${page() === 'chat' ? ' nav-item--active' : ''}`}
+            onClick={(event) => { event.preventDefault(); navigateTo('chat') }}
+          ><Icon name="chat" /><span>对话</span></a>
+          <a
             href="#knowledge-processing"
             data-testid="nav-knowledge-processing"
             class={`nav-item${page() === 'knowledge-processing' ? ' nav-item--active' : ''}`}
@@ -61,7 +69,7 @@ export function App() {
         </nav>
       </aside>
 
-      <main class={`content${page() === 'knowledge-processing' || page() === 'knowledge' || page() === 'agent-configuration' ? ' content--wide' : ''}`}>
+      <main class={`content${page() === 'knowledge-processing' || page() === 'knowledge' || page() === 'chat' || page() === 'agent-configuration' ? ' content--wide' : ''}`}>
         <div class="window-drag-region" data-testid="window-drag-region" aria-hidden="true" />
         {/* Navigation changes visibility; mounted page state and active runs remain intact. */}
         <div data-testid="page-sources" hidden={page() !== 'sources'}>
@@ -111,8 +119,15 @@ export function App() {
         <div data-testid="page-knowledge" hidden={page() !== 'knowledge'}>
           <KnowledgeBrowserPage
             active={page() === 'knowledge'}
+            navigationRequest={knowledgeNavigation()}
             onKnowledgeCleared={() => setKnowledgeResetVersion((version) => version + 1)}
           />
+        </div>
+        <div data-testid="page-chat" hidden={page() !== 'chat'}>
+          <ChatPage onOpenKnowledge={(title) => {
+            setKnowledgeNavigation((current) => ({ title, version: (current?.version ?? 0) + 1 }))
+            navigateTo('knowledge')
+          }} />
         </div>
         <div data-testid="page-knowledge-processing" hidden={page() !== 'knowledge-processing'}>
           <KnowledgeProcessingPage knowledgeResetVersion={knowledgeResetVersion()} />

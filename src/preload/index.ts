@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import {
   aiBackendChannels,
+  chatChannels,
   discoveryChannels,
   knowledgeChannels,
   knowledgeProcessingChannels
@@ -12,6 +13,7 @@ import type {
   KnowledgeProcessingSnapshot
 } from '../shared/knowledge-processing'
 import type { KnowledgeApi } from '../shared/knowledge'
+import type { ChatApi, ChatEvent } from '../shared/chat'
 
 const api: DiscoveryApi = {
   getSnapshot: () => ipcRenderer.invoke(discoveryChannels.getSnapshot),
@@ -94,4 +96,28 @@ const knowledge: KnowledgeApi = {
   clear: () => ipcRenderer.invoke(knowledgeChannels.clear)
 }
 
-contextBridge.exposeInMainWorld('oyster', { discovery: api, aiBackends, knowledge, knowledgeProcessing })
+const chat: ChatApi = {
+  getSnapshot: () => ipcRenderer.invoke(chatChannels.getSnapshot),
+  createSession: (input) => ipcRenderer.invoke(chatChannels.createSession, input),
+  readSession: (sessionId) => ipcRenderer.invoke(chatChannels.readSession, sessionId),
+  deleteSession: (input) => ipcRenderer.invoke(chatChannels.deleteSession, input),
+  sendMessage: (input) => ipcRenderer.invoke(chatChannels.sendMessage, input),
+  cancelRun: (input) => ipcRenderer.invoke(chatChannels.cancelRun, input),
+  saveDefaultInstructions: (input) => ipcRenderer.invoke(
+    chatChannels.saveDefaultInstructions,
+    input
+  ),
+  subscribe: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, chatEvent: ChatEvent): void => listener(chatEvent)
+    ipcRenderer.on(chatChannels.event, handler)
+    return () => ipcRenderer.removeListener(chatChannels.event, handler)
+  }
+}
+
+contextBridge.exposeInMainWorld('oyster', {
+  discovery: api,
+  aiBackends,
+  knowledge,
+  knowledgeProcessing,
+  chat
+})

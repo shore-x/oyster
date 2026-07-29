@@ -1,10 +1,18 @@
 import type { AiConnection } from '../../shared/ai-backends'
 import type { AvailableModel, ModelProviderId } from '../../shared/ai-backends'
+import {
+  createAssistantMessageEventStream,
+  type Api,
+  type AssistantMessage,
+  type Model,
+  type Usage
+} from '@earendil-works/pi-ai'
 import { AiBackendService, type CodingPlanBackend } from './ai-backend-service'
 import { MemoryCredentialStore } from './credential-store'
 import type {
   AgentBackendAdapter,
   AgentTaskRequest,
+  ModelRuntime,
   ModelBackendAdapter,
   ModelGenerationRequest,
   StoredModelConnection
@@ -38,6 +46,52 @@ class FixtureAgentAdapter implements AgentBackendAdapter {
   dispose(): void {}
 }
 
+function fixtureUsage(): Usage {
+  return {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+  }
+}
+
+function fixtureRuntime(modelId: string): ModelRuntime {
+  const model: Model<Api> = {
+    id: modelId,
+    name: modelId,
+    api: 'fixture',
+    provider: 'fixture',
+    baseUrl: 'http://localhost:0',
+    reasoning: false,
+    input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128_000,
+    maxTokens: 16_384
+  }
+  return {
+    model,
+    streamFn: (requestedModel, _context, options) => {
+      const stream = createAssistantMessageEventStream()
+      const aborted = Boolean(options?.signal?.aborted)
+      const output: AssistantMessage = {
+        role: 'assistant',
+        content: aborted ? [] : [{ type: 'text', text: '这是 Fixture 对话 Agent 的回复。' }],
+        api: requestedModel.api,
+        provider: requestedModel.provider,
+        model: requestedModel.id,
+        usage: fixtureUsage(),
+        stopReason: aborted ? 'aborted' : 'stop',
+        ...(aborted ? { errorMessage: 'aborted' } : {}),
+        timestamp: Date.now()
+      }
+      stream.end(output)
+      return stream
+    }
+  }
+}
+
 class FixtureCodingPlanBackend implements CodingPlanBackend {
   readonly models: AvailableModel[] = [{
     id: 'fixture-codex-small',
@@ -50,7 +104,7 @@ class FixtureCodingPlanBackend implements CodingPlanBackend {
   async connect(): Promise<void> {}
   cancelConnect(): void {}
   async generate(): Promise<{ text: string }> { return { text: 'OYSTER' } }
-  runtime(): never { throw new Error('Fixture Coding Plan runtime is not used') }
+  runtime(modelId: string): ModelRuntime { return fixtureRuntime(modelId) }
   dispose(): void {}
 }
 
@@ -101,6 +155,7 @@ export function createFixtureAiBackendService(): AiBackendService {
     credentials,
     new FixtureAgentAdapter(),
     new FixtureModelAdapter(),
-    new FixtureCodingPlanBackend()
+    new FixtureCodingPlanBackend(),
+    (connection) => fixtureRuntime(connection.model)
   )
 }

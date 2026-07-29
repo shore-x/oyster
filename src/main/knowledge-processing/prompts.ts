@@ -3,7 +3,7 @@ import type {
   ProcessingStageId,
   ProcessingToolView
 } from '../../shared/knowledge-processing'
-import { KNOWLEDGE_MAINTENANCE_TOOL_CATALOG } from './knowledge-maintenance-tool-catalog'
+import { KNOWLEDGE_MAINTENANCE_TOOL_VIEWS } from './knowledge-maintenance-tool-catalog'
 
 export interface ProcessingStageDefinition {
   id: ProcessingStageId
@@ -78,7 +78,7 @@ export const PROCESSING_STAGE_DEFINITIONS: readonly ProcessingStageDefinition[] 
     outputDescription: 'Knowledge Contribution（由 Core 决定是否提交）',
     runtime: 'pi_agent_core',
     capabilities: ['读取当前知识库', '维护开放候选清单', '按需读取原始观察', '增量维护 Contribution 草稿'],
-    tools: KNOWLEDGE_MAINTENANCE_TOOL_CATALOG,
+    tools: KNOWLEDGE_MAINTENANCE_TOOL_VIEWS,
     defaultInstructions: KNOWLEDGE_MAINTENANCE_AGENT_PROMPT
   }
 ] as const

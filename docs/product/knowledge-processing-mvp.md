@@ -105,7 +105,7 @@ Knowledge Maintenance Agent 的 Debug Trace 按模型轮次记录有界的模型
 
 ## 4. 配置与结果界面
 
-“Agent 配置”页面列出代码中实际注册的 AI 运行角色，展示每个角色的 Runtime、System Prompt 和工具。Observation Preprocessor 明确显示为不带工具的直接模型调用；Knowledge Maintenance Agent 显示运行时实际提供的工具名称与描述。工具目录由 Agent 构造代码共同使用，只读展示，不在 UI 中另行启停或编辑。尚未接入运行时的概念角色不作为占位配置出现。
+“Agent 配置”页面列出代码中实际注册的 AI 运行角色，展示每个角色的 Runtime、System Prompt 和工具。Observation Preprocessor 明确显示为不带工具的直接模型调用；Knowledge Maintenance Agent 和对话 Agent 分别显示运行时实际提供的工具名称、描述和可展开的参数 JSON Schema，包括必填字段、嵌套结构与约束。参数 Schema 与 AgentTool 由同一工具目录生成，向 Renderer 只投影可序列化的只读信息，不在 UI 中另行启停或编辑。尚未接入运行时的概念角色不作为占位配置出现。
 
 System Prompt 有三个清晰层次：代码内置 Prompt 是始终存在的 fallback；用户可以在 Agent 配置页保存一个默认 Prompt；加工测试页还可以保存该阶段的调试覆盖。实际运行依次选择“阶段覆盖、用户默认、代码内置”中第一个存在的值，并在运行开始时固化到本次配置和成功历史中。在 Agent 配置页恢复代码默认会删除用户默认覆盖；在加工测试页恢复当前默认会删除阶段覆盖，二者都不复制内置文本。Host 动态注入的输入材料、Workspace 状态和 follow-up 不属于 System Prompt，也不由该页面配置。
 
