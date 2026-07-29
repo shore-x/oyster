@@ -105,7 +105,11 @@ Knowledge Maintenance Agent 的 Debug Trace 按模型轮次记录有界的模型
 
 ## 4. 配置与结果界面
 
-页面完整展示两个阶段当前生效的 System Prompt。默认 Prompt 由主进程维护并使用英文表达，但要求 Candidate 的表达与问题以及 Knowledge Statement 跟随原始材料的主要语言；当材料混合多种语言时，保留翻译可能改变含义的关键原文术语。每个阶段只保存可选的 Prompt 覆盖、用户明确选择的 Connection、该 Connection 中的 Model，以及模型明确支持时的可选思考强度。恢复默认会删除 Prompt 覆盖，而不是复制一份默认文本。两个阶段可以选择不同 Backend、Connection、Model 与思考强度；不支持或能力未知的模型不显示该控制，也不会收到相应参数。
+“Agent 配置”页面列出代码中实际注册的 AI 运行角色，展示每个角色的 Runtime、System Prompt 和工具。Observation Preprocessor 明确显示为不带工具的直接模型调用；Knowledge Maintenance Agent 显示运行时实际提供的工具名称与描述。工具目录由 Agent 构造代码共同使用，只读展示，不在 UI 中另行启停或编辑。尚未接入运行时的概念角色不作为占位配置出现。
+
+System Prompt 有三个清晰层次：代码内置 Prompt 是始终存在的 fallback；用户可以在 Agent 配置页保存一个默认 Prompt；加工测试页还可以保存该阶段的调试覆盖。实际运行依次选择“阶段覆盖、用户默认、代码内置”中第一个存在的值，并在运行开始时固化到本次配置和成功历史中。在 Agent 配置页恢复代码默认会删除用户默认覆盖；在加工测试页恢复当前默认会删除阶段覆盖，二者都不复制内置文本。Host 动态注入的输入材料、Workspace 状态和 follow-up 不属于 System Prompt，也不由该页面配置。
+
+代码内置 Prompt 默认使用英文表达，但要求 Candidate 的表达与问题以及 Knowledge Statement 跟随原始材料的主要语言；当材料混合多种语言时，保留翻译可能改变含义的关键原文术语。每个阶段还保存用户明确选择的 Connection、该 Connection 中的 Model，以及模型明确支持时的可选思考强度。两个阶段可以选择不同 Backend、Connection、Model 与思考强度；不支持或能力未知的模型不显示该控制，也不会收到相应参数。
 
 Sandbox 链路测试和预处理高级调试均可选择 catalog 中可用的 Session 与 Attention，并展示所用阶段配置。运行结果包括：
 

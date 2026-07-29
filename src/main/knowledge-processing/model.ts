@@ -17,6 +17,7 @@ export interface StoredProcessingStage {
   connectionId?: string
   modelId?: string
   reasoningEffort?: ReasoningEffort
+  defaultInstructionsOverride?: string
   instructionsOverride?: string
 }
 

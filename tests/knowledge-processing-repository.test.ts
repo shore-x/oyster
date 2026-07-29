@@ -37,6 +37,7 @@ describe('JsonKnowledgeProcessingRepository', () => {
           stageId: 'observation_preprocessor' as const,
           connectionId: 'model:a',
           reasoningEffort: 'low' as const,
+          defaultInstructionsOverride: 'configured default prompt',
           instructionsOverride: 'custom prompt'
         },
         {
@@ -54,6 +55,7 @@ describe('JsonKnowledgeProcessingRepository', () => {
           stageId: 'observation_preprocessor',
           connectionId: 'model:a',
           reasoningEffort: 'low',
+          defaultInstructionsOverride: 'configured default prompt',
           instructionsOverride: 'custom prompt'
         },
         {
@@ -72,6 +74,7 @@ describe('JsonKnowledgeProcessingRepository', () => {
           stageId: 'observation_preprocessor',
           connectionId: 'model:a',
           reasoningEffort: 'low',
+          defaultInstructionsOverride: 'configured default prompt',
           instructionsOverride: 'custom prompt'
         },
         {
@@ -124,6 +127,11 @@ describe('JsonKnowledgeProcessingRepository', () => {
 
     await writeFile(filePath, JSON.stringify({
       stages: [{ stageId: 'observation_preprocessor', instructionsOverride: '   ' }]
+    }), 'utf8')
+    await expect(repository.load()).rejects.toThrow('第 1 条记录无效')
+
+    await writeFile(filePath, JSON.stringify({
+      stages: [{ stageId: 'observation_preprocessor', defaultInstructionsOverride: '   ' }]
     }), 'utf8')
     await expect(repository.load()).rejects.toThrow('第 1 条记录无效')
 

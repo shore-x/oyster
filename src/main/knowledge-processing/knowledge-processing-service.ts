@@ -13,6 +13,7 @@ import {
   type ProcessingStageId,
   type RunKnowledgeMaintenanceInput,
   type RunObservationPreprocessorInput,
+  type SaveProcessingDefaultInstructionsInput,
   type SaveProcessingStageInput
 } from '../../shared/knowledge-processing'
 import {
@@ -52,6 +53,7 @@ import {
   type ResolvedObservationSegmentPlannerOptions
 } from './observation-segment-planner'
 import { PROCESSING_STAGE_DEFINITIONS, stageDefinition } from './prompts'
+import { KNOWLEDGE_MAINTENANCE_TOOL_CATALOG } from './knowledge-maintenance-tool-catalog'
 import {
   parseStatementCandidateBatch,
   type StatementCandidate
@@ -198,19 +200,9 @@ function traceTerminalStatus(signal: AbortSignal): 'failed' | 'cancelled' {
   return signal.aborted ? 'cancelled' : 'failed'
 }
 
-const KNOWLEDGE_TOOL_LABELS: Record<string, string> = {
-  search_knowledge: '搜索已有知识',
-  read_knowledge_statement: '读取 Knowledge Statement',
-  list_statement_candidates: '查看 Statement 候选',
-  add_statement_candidates: '补充 Statement 候选',
-  resolve_statement_candidates: '裁决 Statement 候选',
-  upsert_contribution_statement: '写入 Contribution 草稿',
-  read_contribution_statement: '读取 Contribution 草稿',
-  list_contribution_statements: '查看 Contribution 草稿',
-  remove_contribution_statement: '移除 Contribution 草稿',
-  read_evidence: '读取原始观察证据',
-  submit_knowledge_contribution: '提交 Knowledge Contribution'
-}
+const KNOWLEDGE_TOOL_LABELS: Record<string, string> = Object.fromEntries(
+  KNOWLEDGE_MAINTENANCE_TOOL_CATALOG.map((tool) => [tool.name, tool.label])
+)
 
 function knowledgeToolLabel(toolName: string): string {
   return KNOWLEDGE_TOOL_LABELS[toolName] ?? '未知工具'
@@ -224,6 +216,13 @@ function safeKnowledgeToolName(toolName: string): string | undefined {
 
 function isStageId(value: unknown): value is ProcessingStageId {
   return typeof value === 'string' && PROCESSING_STAGE_IDS.includes(value as ProcessingStageId)
+}
+
+function defaultInstructions(
+  stageId: ProcessingStageId,
+  stored?: StoredProcessingStage
+): string {
+  return stored?.defaultInstructionsOverride ?? stageDefinition(stageId).defaultInstructions
 }
 
 function processingConnections(aiBackend: AiBackendPort): ProcessingConnectionView[] {
@@ -478,6 +477,7 @@ export class KnowledgeProcessingService {
     return structuredClone({
       stages: PROCESSING_STAGE_DEFINITIONS.map((definition) => {
         const stored = this.state.stages.find((candidate) => candidate.stageId === definition.id)
+        const configuredDefault = defaultInstructions(definition.id, stored)
         return {
           id: definition.id,
           displayName: definition.displayName,
@@ -486,11 +486,14 @@ export class KnowledgeProcessingService {
           outputDescription: definition.outputDescription,
           runtime: definition.runtime,
           capabilities: [...definition.capabilities],
+          tools: definition.tools.map((tool) => ({ ...tool })),
           connectionId: stored?.connectionId,
           modelId: stored?.modelId,
           reasoningEffort: stored?.reasoningEffort,
-          defaultInstructions: definition.defaultInstructions,
-          effectiveInstructions: stored?.instructionsOverride ?? definition.defaultInstructions,
+          builtInInstructions: definition.defaultInstructions,
+          defaultInstructions: configuredDefault,
+          effectiveInstructions: stored?.instructionsOverride ?? configuredDefault,
+          isDefaultCustomized: stored?.defaultInstructionsOverride !== undefined,
           isCustomized: stored?.instructionsOverride !== undefined
         }
       }),
@@ -552,16 +555,15 @@ export class KnowledgeProcessingService {
         throw new Error('思考强度配置无效')
       }
 
+      const currentStage = this.state.stages.find((candidate) => candidate.stageId === input.stageId)
       let instructionsOverride: string | undefined
       if (typeof input.instructionsOverride === 'string') {
         instructionsOverride = input.instructionsOverride.trim()
         if (!instructionsOverride) throw new Error('System Prompt 不能为空')
-        if (instructionsOverride === stageDefinition(input.stageId).defaultInstructions) {
+        if (instructionsOverride === defaultInstructions(input.stageId, currentStage)) {
           instructionsOverride = undefined
         }
       }
-
-      const currentStage = this.state.stages.find((candidate) => candidate.stageId === input.stageId)
       const reasoningEffort = input.reasoningEffort === undefined
         ? currentStage?.reasoningEffort
         : input.reasoningEffort ?? undefined
@@ -577,8 +579,52 @@ export class KnowledgeProcessingService {
         ...(input.connectionId ? { connectionId: input.connectionId } : {}),
         ...(input.modelId ? { modelId: input.modelId } : {}),
         ...(reasoningEffort ? { reasoningEffort } : {}),
+        ...(currentStage?.defaultInstructionsOverride
+          ? { defaultInstructionsOverride: currentStage.defaultInstructionsOverride }
+          : {}),
         ...(instructionsOverride ? { instructionsOverride } : {})
       }
+      const nextState: KnowledgeProcessingStateData = {
+        stages: [
+          ...this.state.stages.filter((candidate) => candidate.stageId !== input.stageId),
+          nextStage
+        ]
+      }
+      await this.repository.save(nextState)
+      this.state = nextState
+      this.emit()
+      return this.snapshot()
+    })
+  }
+
+  saveDefaultInstructions(
+    input: SaveProcessingDefaultInstructionsInput
+  ): Promise<KnowledgeProcessingSnapshot> {
+    return this.enqueueMutation(async () => {
+      this.assertConfigurationWritable()
+      if (!input || typeof input !== 'object' || !isStageId(input.stageId)) {
+        throw new Error('未知的知识加工阶段')
+      }
+      if (input.instructionsOverride !== null && typeof input.instructionsOverride !== 'string') {
+        throw new Error('默认 System Prompt 配置无效')
+      }
+
+      let configuredDefault: string | undefined
+      if (typeof input.instructionsOverride === 'string') {
+        configuredDefault = input.instructionsOverride.trim()
+        if (!configuredDefault) throw new Error('默认 System Prompt 不能为空')
+        if (configuredDefault === stageDefinition(input.stageId).defaultInstructions) {
+          configuredDefault = undefined
+        }
+      }
+
+      const currentStage = this.state.stages.find((candidate) => candidate.stageId === input.stageId)
+      const nextStage: StoredProcessingStage = {
+        ...currentStage,
+        stageId: input.stageId,
+        ...(configuredDefault ? { defaultInstructionsOverride: configuredDefault } : {})
+      }
+      if (!configuredDefault) delete nextStage.defaultInstructionsOverride
       const nextState: KnowledgeProcessingStateData = {
         stages: [
           ...this.state.stages.filter((candidate) => candidate.stageId !== input.stageId),
@@ -612,7 +658,7 @@ export class KnowledgeProcessingService {
     return {
       connectionId: stored.connectionId,
       modelId: model.id,
-      instructions: stored.instructionsOverride ?? stageDefinition(stageId).defaultInstructions,
+      instructions: stored.instructionsOverride ?? defaultInstructions(stageId, stored),
       ...(stored.reasoningEffort ? { reasoningEffort: stored.reasoningEffort } : {})
     }
   }

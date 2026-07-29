@@ -35,6 +35,13 @@ function isStoredStage(value: unknown): value is StoredProcessingStage {
       )
     )
     && (
+      record.defaultInstructionsOverride === undefined
+      || (
+        typeof record.defaultInstructionsOverride === 'string'
+        && Boolean(record.defaultInstructionsOverride.trim())
+      )
+    )
+    && (
       record.instructionsOverride === undefined
       || (
         typeof record.instructionsOverride === 'string'

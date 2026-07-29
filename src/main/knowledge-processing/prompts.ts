@@ -1,4 +1,9 @@
-import type { ProcessingRuntime, ProcessingStageId } from '../../shared/knowledge-processing'
+import type {
+  ProcessingRuntime,
+  ProcessingStageId,
+  ProcessingToolView
+} from '../../shared/knowledge-processing'
+import { KNOWLEDGE_MAINTENANCE_TOOL_CATALOG } from './knowledge-maintenance-tool-catalog'
 
 export interface ProcessingStageDefinition {
   id: ProcessingStageId
@@ -8,6 +13,7 @@ export interface ProcessingStageDefinition {
   outputDescription: string
   runtime: ProcessingRuntime
   capabilities: string[]
+  tools: readonly ProcessingToolView[]
   defaultInstructions: string
 }
 
@@ -61,6 +67,7 @@ export const PROCESSING_STAGE_DEFINITIONS: readonly ProcessingStageDefinition[] 
     outputDescription: 'Statement Candidate Agenda Seed（可丢弃工作材料）',
     runtime: 'direct_model_call',
     capabilities: ['有界分段发现', '开放候选清单', '保留回溯线索', '不写入知识层'],
+    tools: [],
     defaultInstructions: OBSERVATION_PREPROCESSOR_PROMPT
   },
   {
@@ -71,6 +78,7 @@ export const PROCESSING_STAGE_DEFINITIONS: readonly ProcessingStageDefinition[] 
     outputDescription: 'Knowledge Contribution（由 Core 决定是否提交）',
     runtime: 'pi_agent_core',
     capabilities: ['读取当前知识库', '维护开放候选清单', '按需读取原始观察', '增量维护 Contribution 草稿'],
+    tools: KNOWLEDGE_MAINTENANCE_TOOL_CATALOG,
     defaultInstructions: KNOWLEDGE_MAINTENANCE_AGENT_PROMPT
   }
 ] as const

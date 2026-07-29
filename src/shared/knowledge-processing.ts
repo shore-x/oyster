@@ -21,6 +21,12 @@ export const PROCESSING_STAGE_IDS = [
 export type ProcessingStageId = (typeof PROCESSING_STAGE_IDS)[number]
 export type ProcessingRuntime = 'direct_model_call' | 'pi_agent_core'
 
+export interface ProcessingToolView {
+  name: string
+  label: string
+  description: string
+}
+
 export interface ProcessingConnectionView {
   id: string
   displayName: string
@@ -43,11 +49,17 @@ export interface ProcessingStageView {
   outputDescription: string
   runtime: ProcessingRuntime
   capabilities: string[]
+  tools: ProcessingToolView[]
   connectionId?: string
   modelId?: string
   reasoningEffort?: ReasoningEffort
+  /** Versioned fallback shipped in source code. */
+  builtInInstructions: string
+  /** User-configured default, or the built-in fallback when none is configured. */
   defaultInstructions: string
+  /** Stage override first, then the configured default. */
   effectiveInstructions: string
+  isDefaultCustomized: boolean
   isCustomized: boolean
 }
 
@@ -178,6 +190,12 @@ export interface SaveProcessingStageInput {
   reasoningEffort?: ReasoningEffort | null
 }
 
+export interface SaveProcessingDefaultInstructionsInput {
+  stageId: ProcessingStageId
+  /** null restores the source-code default. */
+  instructionsOverride: string | null
+}
+
 export interface RunObservationPreprocessorInput {
   observation: string
   attention?: string
@@ -295,6 +313,9 @@ export interface KnowledgeFullChainRunSummary {
 export interface KnowledgeProcessingApi {
   getSnapshot(): Promise<KnowledgeProcessingSnapshot>
   saveStage(input: SaveProcessingStageInput): Promise<KnowledgeProcessingSnapshot>
+  saveDefaultInstructions(
+    input: SaveProcessingDefaultInstructionsInput
+  ): Promise<KnowledgeProcessingSnapshot>
   runObservationPreprocessor(
     input: RunObservationPreprocessorInput
   ): Promise<ObservationPreprocessingResult | undefined>

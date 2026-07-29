@@ -637,6 +637,91 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       }
     })))
   })()`)
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-agent-configuration"]').click()`)
+  await window.webContents.executeJavaScript(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
+  await new Promise((resolve) => setTimeout(resolve, 120))
+  const agentConfigurationImage = await window.webContents.capturePage()
+  await writeFile(join(dirname(capturePath), 'agent-configuration.png'), agentConfigurationImage.toPNG())
+  const agentConfigurationSemantics = await window.webContents.executeJavaScript(`(async () => {
+    const page = document.querySelector('[data-testid="page-agent-configuration"]')
+    let deadline = Date.now() + 2_000
+    while (page.querySelectorAll('.agent-config-role').length < 2 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    const title = page.querySelector('h1')?.textContent?.trim()
+    const roleCount = page.querySelectorAll('.agent-config-role').length
+    const preprocessorRoleText = page.querySelector('[data-testid="agent-config-role-observation_preprocessor"]')?.textContent?.trim()
+    page.querySelector('[data-testid="agent-config-tab-tools"]')?.click()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const preprocessorToolCount = page.querySelectorAll('.agent-config-tool').length
+    const preprocessorToolsEmpty = page.querySelector('.agent-config-tools__empty')?.textContent?.trim()
+
+    page.querySelector('[data-testid="agent-config-role-knowledge_maintenance_agent"]')?.click()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    page.querySelector('[data-testid="agent-config-tab-tools"]')?.click()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const maintenanceToolNames = Array.from(page.querySelectorAll('.agent-config-tool code'))
+      .map((node) => node.textContent?.trim())
+    const toolsReadOnlyCopy = page.querySelector('[data-testid="agent-config-tools-panel"]')?.textContent?.trim()
+
+    page.querySelector('[data-testid="agent-config-tab-prompt"]')?.click()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const editor = page.querySelector('[data-testid="agent-default-prompt-editor"]')
+    const builtInPrompt = editor?.value
+    const marker = '\\nConfigured default from Agent configuration UI.'
+    editor.value = builtInPrompt + marker
+    editor.dispatchEvent(new Event('input', { bubbles: true }))
+    page.querySelector('[data-testid="save-agent-default-prompt"]')?.click()
+    deadline = Date.now() + 2_000
+    while (
+      page.querySelector('.agent-config-detail__header .processing-mode-badge')?.textContent?.trim() !== 'Configured default'
+      && Date.now() < deadline
+    ) await new Promise((resolve) => setTimeout(resolve, 25))
+    const configuredBadge = page.querySelector('.agent-config-detail__header .processing-mode-badge')?.textContent?.trim()
+    const saveNotice = page.querySelector('[data-testid="agent-default-prompt-saved"]')?.textContent?.trim()
+
+    document.querySelector('[data-testid="nav-knowledge-processing"]')?.click()
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    const processingPage = document.querySelector('[data-testid="page-knowledge-processing"]')
+    processingPage.querySelector('[data-testid="processing-view-stage-debug"]')?.click()
+    processingPage.querySelector('[data-testid="processing-stage-tab-knowledge_maintenance_agent"]')?.click()
+    deadline = Date.now() + 2_000
+    while (
+      !processingPage.querySelector('[data-testid="processing-instructions-knowledge_maintenance_agent"]')?.value?.includes('Configured default from Agent configuration UI.')
+      && Date.now() < deadline
+    ) await new Promise((resolve) => setTimeout(resolve, 25))
+    const processingPromptUsesConfiguredDefault = processingPage
+      .querySelector('[data-testid="processing-instructions-knowledge_maintenance_agent"]')
+      ?.value?.includes('Configured default from Agent configuration UI.')
+
+    document.querySelector('[data-testid="nav-agent-configuration"]')?.click()
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    page.querySelector('[data-testid="restore-built-in-agent-prompt"]')?.click()
+    deadline = Date.now() + 2_000
+    while (
+      page.querySelector('.agent-config-detail__header .processing-mode-badge')?.textContent?.trim() !== 'Built-in default'
+      && Date.now() < deadline
+    ) await new Promise((resolve) => setTimeout(resolve, 25))
+    const restoredBadge = page.querySelector('.agent-config-detail__header .processing-mode-badge')?.textContent?.trim()
+    const restoredPrompt = page.querySelector('[data-testid="agent-default-prompt-editor"]')?.value
+
+    return {
+      title,
+      roleCount,
+      preprocessorRoleText,
+      preprocessorToolCount,
+      preprocessorToolsEmpty,
+      maintenanceToolNames,
+      toolsReadOnlyCopy,
+      builtInPrompt,
+      configuredBadge,
+      saveNotice,
+      processingPromptUsesConfiguredDefault,
+      restoredBadge,
+      restoredMatchesBuiltIn: restoredPrompt === builtInPrompt,
+      overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
+    }
+  })()`)
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-knowledge-processing"]').click()`)
   await new Promise((resolve) => setTimeout(resolve, 120))
   const processingStateAfterNavigation = await window.webContents.executeJavaScript(`(() => {
@@ -651,6 +736,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     `${JSON.stringify({
       ...semantics,
       ai: { ...aiSemantics, directTest: aiDirectTestSemantics },
+      agentConfiguration: agentConfigurationSemantics,
       knowledge: {
         browse: knowledgeBrowseSemantics,
         clear: clearKnowledgeSemantics

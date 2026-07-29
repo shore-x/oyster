@@ -6,6 +6,7 @@ import type {
   RunKnowledgeFullChainInput,
   RunKnowledgeMaintenanceInput,
   RunObservationPreprocessorInput,
+  SaveProcessingDefaultInstructionsInput,
   SaveProcessingStageInput
 } from '../../shared/knowledge-processing'
 import type { KnowledgeProcessingService } from './knowledge-processing-service'
@@ -85,6 +86,13 @@ export function registerKnowledgeProcessingIpc(
     (event, input: SaveProcessingStageInput) => {
       assertTrustedSender(event)
       return service.saveStage(input)
+    }
+  )
+  ipcMain.handle(
+    knowledgeProcessingChannels.saveDefaultInstructions,
+    (event, input: SaveProcessingDefaultInstructionsInput) => {
+      assertTrustedSender(event)
+      return service.saveDefaultInstructions(input)
     }
   )
   ipcMain.handle(

@@ -14,6 +14,7 @@ Oyster 是一个独立于 Agent Harness 的本地知识库维护中心。当前�
 - Codex `sessions` / `archived_sessions` 去重；
 - 配置 Codex Coding Plan、OpenAI API 或自定义 OpenAI-compatible Connection，发现其可用模型，OAuth 与 API Key 凭据保存在系统 Keychain；
 - 为知识加工的每个阶段独立选择 Connection、具体 Model 和模型支持的思考强度；
+- 通过独立的 Agent 配置页查看当前已注册的模型运行角色、代码内置 System Prompt 和实际工具清单，并为各角色配置默认 System Prompt；
 - 从可用外部 Session 的确定 revision 运行 Observation Preprocessor，分段发现带 Raw Evidence 位置的开放 Candidate 问题；
 - 使用 Pi Agent Core 调查开放 Candidate Agenda、按需读取 Raw Evidence、增量维护 Contribution Draft，并在全部 Candidate 得到处置后提交 Knowledge Contribution；
 - 在独立 SQLite Knowledge Sandbox 中按 canonical title 原子创建、覆盖并回读自由文本 Statement；
@@ -68,7 +69,7 @@ src/main/discovery
 src/main/ai-backends
   Connection、Keychain、Coding Plan OAuth、模型目录与 OpenAI-compatible 调用
 src/main/knowledge-processing
-  默认 Prompt、临时 Workspace、Observation Preprocessor、Pi Agent Runtime 与完整链路编排
+  Prompt 与工具目录、临时 Workspace、Observation Preprocessor、Pi Agent Runtime 与完整链路编排
 src/main/knowledge-store
   当前 SQLite Knowledge Store 验证实现、按 title 读写 Statement 与隔离 Sandbox
 src/shared       Main / Preload / Renderer 共用契约
@@ -76,6 +77,6 @@ src/shared       Main / Preload / Renderer 共用契约
 
 生产模式只把外部来源的 catalog 状态写入 Electron `userData/discovery-state.json`，不复制 Agent 历史正文。上游 Agent 目录始终只读；记录变化或消失后，已保存的出处身份继续存在，但原文可能无法再次展开。JSON repository 是当前 bootstrap 实现，接口已与业务层隔离，数据量验证后可以替换为 SQLite。
 
-AI Connection 元数据和知识加工阶段的 Connection / Model 配置分别保存在 `userData/ai-connections.json` 与 `userData/knowledge-processing.json`；OAuth 与 API Key 凭据只保存在系统 Keychain。Observation Workspace 只存在于主进程内存中，Candidate Agenda 和 Contribution Draft 只存在于一次知识维护运行中。当前验证 Knowledge Store 位于 `userData/knowledge-store/knowledge.sqlite`；完整链路使用 `userData/knowledge-store/sandboxes/` 下的独立快照，失败或取消时立即丢弃，成功重跑会替换当前 Sandbox。成功的完整链路结果另存于 `userData/knowledge-processing-history.sqlite`，不依赖 Sandbox 继续存在；它默认与正式知识隔离，只有用户显式导入时才按 canonical title 写入正式 Store。SQLite 是当前实现选择，不代表正式知识层的长期存储介质已经确定。
+AI Connection 元数据，以及知识加工阶段的 Connection、Model 和用户默认 Prompt 配置，分别保存在 `userData/ai-connections.json` 与 `userData/knowledge-processing.json`；OAuth 与 API Key 凭据只保存在系统 Keychain。Observation Workspace 只存在于主进程内存中，Candidate Agenda 和 Contribution Draft 只存在于一次知识维护运行中。当前验证 Knowledge Store 位于 `userData/knowledge-store/knowledge.sqlite`；完整链路使用 `userData/knowledge-store/sandboxes/` 下的独立快照，失败或取消时立即丢弃，成功重跑会替换当前 Sandbox。成功的完整链路结果另存于 `userData/knowledge-processing-history.sqlite`，不依赖 Sandbox 继续存在；它默认与正式知识隔离，只有用户显式导入时才按 canonical title 写入正式 Store。SQLite 是当前实现选择，不代表正式知识层的长期存储介质已经确定。
 
 当前产品范围与设计边界见 [Product Brief](docs/product/product-brief.md)、[本地 Agent 发现与外部证据访问](docs/product/local-agent-discovery-mvp.md)、[AI Backend MVP](docs/product/ai-backends-mvp.md)、[知识加工验证 MVP](docs/product/knowledge-processing-mvp.md)和[知识加工与协作式投影](docs/architecture/knowledge-model-and-projection.md)。

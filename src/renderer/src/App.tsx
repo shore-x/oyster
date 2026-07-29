@@ -1,14 +1,17 @@
 import { For, Show, createMemo, createSignal } from 'solid-js'
 import { createDiscoveryController } from './discovery-controller'
 import { AiBackendsPage } from './components/AiBackendsPage'
+import { AgentConfigurationPage } from './components/AgentConfigurationPage'
 import { KnowledgeProcessingPage } from './components/KnowledgeProcessingPage'
 import { KnowledgeBrowserPage } from './components/KnowledgeBrowserPage'
 import { SourceCard } from './components/SourceCard'
 import { Button, Icon } from './ui'
 
+type PageId = 'sources' | 'knowledge' | 'knowledge-processing' | 'agent-configuration' | 'ai-backends'
+
 export function App() {
   const controller = createDiscoveryController()
-  const [page, setPage] = createSignal<'sources' | 'knowledge' | 'knowledge-processing' | 'ai-backends'>('sources')
+  const [page, setPage] = createSignal<PageId>('sources')
   const [knowledgeResetVersion, setKnowledgeResetVersion] = createSignal(0)
   const foundCount = createMemo(
     () => controller.snapshot().sources.filter((source) => source.discoveryState === 'found').length
@@ -16,6 +19,10 @@ export function App() {
   const totalSessions = createMemo(() =>
     controller.snapshot().sources.reduce((total, source) => total + source.sessionCount, 0)
   )
+  const navigateTo = (nextPage: PageId): void => {
+    setPage(nextPage)
+    requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0 }))
+  }
 
   return (
     <div class="app-shell">
@@ -25,30 +32,36 @@ export function App() {
           <a
             href="#sources"
             class={`nav-item${page() === 'sources' ? ' nav-item--active' : ''}`}
-            onClick={(event) => { event.preventDefault(); setPage('sources') }}
+            onClick={(event) => { event.preventDefault(); navigateTo('sources') }}
           ><Icon name="archive" /><span>数据来源</span></a>
           <a
             href="#knowledge"
             data-testid="nav-knowledge"
             class={`nav-item${page() === 'knowledge' ? ' nav-item--active' : ''}`}
-            onClick={(event) => { event.preventDefault(); setPage('knowledge') }}
+            onClick={(event) => { event.preventDefault(); navigateTo('knowledge') }}
           ><Icon name="layers" /><span>知识库</span></a>
           <a
             href="#knowledge-processing"
             data-testid="nav-knowledge-processing"
             class={`nav-item${page() === 'knowledge-processing' ? ' nav-item--active' : ''}`}
-            onClick={(event) => { event.preventDefault(); setPage('knowledge-processing') }}
+            onClick={(event) => { event.preventDefault(); navigateTo('knowledge-processing') }}
           ><Icon name="play" /><span>加工测试</span></a>
+          <a
+            href="#agent-configuration"
+            data-testid="nav-agent-configuration"
+            class={`nav-item${page() === 'agent-configuration' ? ' nav-item--active' : ''}`}
+            onClick={(event) => { event.preventDefault(); navigateTo('agent-configuration') }}
+          ><Icon name="agent" /><span>Agent 配置</span></a>
           <a
             href="#ai-backends"
             data-testid="nav-ai-backends"
             class={`nav-item${page() === 'ai-backends' ? ' nav-item--active' : ''}`}
-            onClick={(event) => { event.preventDefault(); setPage('ai-backends') }}
+            onClick={(event) => { event.preventDefault(); navigateTo('ai-backends') }}
           ><Icon name="spark" /><span>AI 后端</span></a>
         </nav>
       </aside>
 
-      <main class={`content${page() === 'knowledge-processing' || page() === 'knowledge' ? ' content--wide' : ''}`}>
+      <main class={`content${page() === 'knowledge-processing' || page() === 'knowledge' || page() === 'agent-configuration' ? ' content--wide' : ''}`}>
         <div class="window-drag-region" data-testid="window-drag-region" aria-hidden="true" />
         {/* Navigation changes visibility; mounted page state and active runs remain intact. */}
         <div data-testid="page-sources" hidden={page() !== 'sources'}>
@@ -106,6 +119,9 @@ export function App() {
         </div>
         <div data-testid="page-ai-backends" hidden={page() !== 'ai-backends'}>
           <AiBackendsPage />
+        </div>
+        <div data-testid="page-agent-configuration" hidden={page() !== 'agent-configuration'}>
+          <AgentConfigurationPage />
         </div>
       </main>
     </div>

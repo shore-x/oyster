@@ -179,6 +179,7 @@ function installApi(
   const api: KnowledgeProcessingApi = {
     getSnapshot: async () => SNAPSHOT,
     saveStage: async () => SNAPSHOT,
+    saveDefaultInstructions: async () => SNAPSHOT,
     runObservationPreprocessor: async () => preprocessingResult(),
     runSessionPreprocessor: async () => preprocessingResult(),
     runKnowledgeMaintenance: async () => maintenanceResult(),

@@ -46,6 +46,10 @@ const aiBackends: AiBackendApi = {
 const knowledgeProcessing: KnowledgeProcessingApi = {
   getSnapshot: () => ipcRenderer.invoke(knowledgeProcessingChannels.getSnapshot),
   saveStage: (input) => ipcRenderer.invoke(knowledgeProcessingChannels.saveStage, input),
+  saveDefaultInstructions: (input) => ipcRenderer.invoke(
+    knowledgeProcessingChannels.saveDefaultInstructions,
+    input
+  ),
   runObservationPreprocessor: (input) => ipcRenderer.invoke(
     knowledgeProcessingChannels.runObservationPreprocessor,
     input

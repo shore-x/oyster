@@ -274,17 +274,29 @@ describe('KnowledgeProcessingService', () => {
     expect(snapshot.stages).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: 'observation_preprocessor',
+        builtInInstructions: OBSERVATION_PREPROCESSOR_PROMPT,
         defaultInstructions: OBSERVATION_PREPROCESSOR_PROMPT,
         effectiveInstructions: OBSERVATION_PREPROCESSOR_PROMPT,
+        isDefaultCustomized: false,
+        tools: [],
         isCustomized: false
       }),
       expect.objectContaining({
         id: 'knowledge_maintenance_agent',
+        builtInInstructions: KNOWLEDGE_MAINTENANCE_AGENT_PROMPT,
         defaultInstructions: KNOWLEDGE_MAINTENANCE_AGENT_PROMPT,
         effectiveInstructions: KNOWLEDGE_MAINTENANCE_AGENT_PROMPT,
+        isDefaultCustomized: false,
+        tools: expect.arrayContaining([
+          expect.objectContaining({ name: 'search_knowledge' }),
+          expect.objectContaining({ name: 'read_evidence' }),
+          expect.objectContaining({ name: 'submit_knowledge_contribution' })
+        ]),
         isCustomized: false
       })
     ]))
+    expect(snapshot.stages.find((stage) => stage.id === 'knowledge_maintenance_agent')?.tools)
+      .toHaveLength(11)
   })
 
   it('uses product-agnostic English defaults that follow the source language', () => {
@@ -387,6 +399,80 @@ describe('KnowledgeProcessingService', () => {
       isCustomized: false
     })
     expect(await repository.load()).toEqual({
+      stages: [{
+        stageId: 'observation_preprocessor',
+        connectionId: 'model:a',
+        modelId: 'model:a'
+      }]
+    })
+  })
+
+  it('keeps code defaults, configured defaults, and processing-stage overrides distinct', async () => {
+    const repository = new InMemoryKnowledgeProcessingRepository()
+    const { service } = createService({ repository })
+    await service.initialize()
+
+    let snapshot = await service.saveDefaultInstructions({
+      stageId: 'observation_preprocessor',
+      instructionsOverride: '  configured default prompt  '
+    })
+    expect(snapshot.stages[0]).toMatchObject({
+      builtInInstructions: OBSERVATION_PREPROCESSOR_PROMPT,
+      defaultInstructions: 'configured default prompt',
+      effectiveInstructions: 'configured default prompt',
+      isDefaultCustomized: true,
+      isCustomized: false
+    })
+
+    snapshot = await service.saveStage({
+      stageId: 'observation_preprocessor',
+      connectionId: 'model:a',
+      modelId: 'model:a',
+      instructionsOverride: 'processing-stage override'
+    })
+    expect(snapshot.stages[0]).toMatchObject({
+      defaultInstructions: 'configured default prompt',
+      effectiveInstructions: 'processing-stage override',
+      isDefaultCustomized: true,
+      isCustomized: true
+    })
+
+    snapshot = await service.saveDefaultInstructions({
+      stageId: 'observation_preprocessor',
+      instructionsOverride: 'new configured default'
+    })
+    expect(snapshot.stages[0]).toMatchObject({
+      defaultInstructions: 'new configured default',
+      effectiveInstructions: 'processing-stage override',
+      isDefaultCustomized: true,
+      isCustomized: true
+    })
+
+    snapshot = await service.saveStage({
+      stageId: 'observation_preprocessor',
+      connectionId: 'model:a',
+      modelId: 'model:a',
+      instructionsOverride: null
+    })
+    expect(snapshot.stages[0]).toMatchObject({
+      defaultInstructions: 'new configured default',
+      effectiveInstructions: 'new configured default',
+      isDefaultCustomized: true,
+      isCustomized: false
+    })
+
+    snapshot = await service.saveDefaultInstructions({
+      stageId: 'observation_preprocessor',
+      instructionsOverride: null
+    })
+    expect(snapshot.stages[0]).toMatchObject({
+      builtInInstructions: OBSERVATION_PREPROCESSOR_PROMPT,
+      defaultInstructions: OBSERVATION_PREPROCESSOR_PROMPT,
+      effectiveInstructions: OBSERVATION_PREPROCESSOR_PROMPT,
+      isDefaultCustomized: false,
+      isCustomized: false
+    })
+    await expect(repository.load()).resolves.toEqual({
       stages: [{
         stageId: 'observation_preprocessor',
         connectionId: 'model:a',

@@ -128,6 +128,43 @@ if (semantics.ai.model.configuredReasoning !== '') throw new Error('API fixture 
 if (!semantics.ai.model.configuredSummary?.includes('fixture-model')) throw new Error('API Connection test configuration is not visible')
 if (!semantics.ai.model.bodyText.includes('OpenAI-compatible')) throw new Error('Custom compatible provider choice is missing')
 
+const agentConfiguration = semantics.agentConfiguration
+if (agentConfiguration?.title !== 'Agent 配置' || agentConfiguration.roleCount !== 2) {
+  throw new Error('Agent configuration page does not list the registered AI runtime roles')
+}
+if (!agentConfiguration.preprocessorRoleText?.includes('Direct Model')) {
+  throw new Error('The Observation Preprocessor is not identified as a direct model call')
+}
+if (
+  agentConfiguration.preprocessorToolCount !== 0
+  || !agentConfiguration.preprocessorToolsEmpty?.includes('不向模型提供工具')
+) {
+  throw new Error('The direct preprocessing call incorrectly exposes Agent tools')
+}
+if (
+  agentConfiguration.maintenanceToolNames?.length !== 11
+  || !agentConfiguration.maintenanceToolNames.includes('search_knowledge')
+  || !agentConfiguration.maintenanceToolNames.includes('read_evidence')
+  || !agentConfiguration.maintenanceToolNames.includes('submit_knowledge_contribution')
+) {
+  throw new Error('The Agent tool catalog does not match the Knowledge Maintenance runtime')
+}
+if (!agentConfiguration.toolsReadOnlyCopy?.includes('只读展示')) {
+  throw new Error('The Agent configuration page does not explain that tools are code-owned')
+}
+if (
+  !agentConfiguration.builtInPrompt?.includes('Knowledge Maintenance Agent')
+  || agentConfiguration.configuredBadge !== 'Configured default'
+  || !agentConfiguration.saveNotice?.includes('已保存')
+  || !agentConfiguration.processingPromptUsesConfiguredDefault
+) {
+  throw new Error('A configured default System Prompt does not flow into knowledge processing')
+}
+if (agentConfiguration.restoredBadge !== 'Built-in default' || !agentConfiguration.restoredMatchesBuiltIn) {
+  throw new Error('The configured default System Prompt cannot be restored to the code default')
+}
+if (agentConfiguration.overflowX) throw new Error('Agent configuration page has unexpected horizontal overflow')
+
 const processing = semantics.processing
 if (processing.title !== '加工测试') throw new Error('Knowledge processing page was not rendered')
 if (processing.fullChain.fullChainSelected !== 'true' || !processing.fullChain.workspaceExists) {

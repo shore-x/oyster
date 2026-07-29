@@ -49,6 +49,10 @@ import {
   type StatementCandidateInput
 } from './statement-candidate-agenda'
 import { KnowledgeContributionWorkspace } from './knowledge-contribution-workspace'
+import {
+  KNOWLEDGE_MAINTENANCE_TOOL_CATALOG,
+  knowledgeMaintenanceToolMetadata
+} from './knowledge-maintenance-tool-catalog'
 
 const MAX_EVIDENCE_OUTPUT_CHARS = 64 * 1_024
 const MAX_SEARCH_RESULTS = 20
@@ -56,19 +60,9 @@ const MAX_WORKSPACE_LIST_RESULTS = 100
 const WORKSPACE_STATUS_CONTEXT_TOKENS = 2_048
 const UNKNOWN_TRACE_TOOL_NAME = '未知工具'
 
-const TRACEABLE_TOOL_NAMES = new Set([
-  'search_knowledge',
-  'read_knowledge_statement',
-  'list_statement_candidates',
-  'add_statement_candidates',
-  'resolve_statement_candidates',
-  'upsert_contribution_statement',
-  'read_contribution_statement',
-  'list_contribution_statements',
-  'remove_contribution_statement',
-  'read_evidence',
-  'submit_knowledge_contribution'
-])
+const TRACEABLE_TOOL_NAMES = new Set<string>(
+  KNOWLEDGE_MAINTENANCE_TOOL_CATALOG.map((tool) => tool.name)
+)
 
 const searchKnowledgeParameters = Type.Object({
   query: Type.String({ minLength: 1, maxLength: 1_024 }),
@@ -559,9 +553,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
 
     const tools: AgentTool[] = [
       {
-        name: 'search_knowledge',
-        label: '搜索知识',
-        description: '按标题和正文文本搜索当前 Knowledge Statement，返回有界的候选列表；结果给出 Next offset 时可用相同 query 继续读取。',
+        ...knowledgeMaintenanceToolMetadata('search_knowledge'),
         parameters: searchKnowledgeParameters,
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
@@ -591,9 +583,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         }
       } as AgentTool<typeof searchKnowledgeParameters>,
       {
-        name: 'read_knowledge_statement',
-        label: '读取知识',
-        description: '按完整 canonical title 精确读取当前 Knowledge Statement。正文中的 [[canonical title]] 引用可用同一工具继续展开。',
+        ...knowledgeMaintenanceToolMetadata('read_knowledge_statement'),
         parameters: readKnowledgeParameters,
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
@@ -614,9 +604,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         }
       } as AgentTool<typeof readKnowledgeParameters>,
       {
-        name: 'list_statement_candidates',
-        label: '查看 Statement 候选',
-        description: '分页读取 Host 持有的开放调查清单。候选不是拟定的 canonical title，也不与 Statement 一一对应。',
+        ...knowledgeMaintenanceToolMetadata('list_statement_candidates'),
         parameters: listStatementCandidatesParameters,
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
@@ -638,9 +626,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         }
       } as AgentTool<typeof listStatementCandidatesParameters>,
       {
-        name: 'add_statement_candidates',
-        label: '补充 Statement 候选',
-        description: '把调查中新发现的名称、指代或必要背景问题加入开放清单；这不会创建 Knowledge Statement。',
+        ...knowledgeMaintenanceToolMetadata('add_statement_candidates'),
         parameters: addStatementCandidatesParameters,
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
@@ -668,9 +654,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         }
       } as AgentTool<typeof addStatementCandidatesParameters>,
       {
-        name: 'resolve_statement_candidates',
-        label: '处置 Statement 候选',
-        description: '批量记录候选已经过调查及其自由文本处置结论；它不自动写入或更新 Statement。',
+        ...knowledgeMaintenanceToolMetadata('resolve_statement_candidates'),
         parameters: resolveStatementCandidatesParameters,
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
@@ -692,9 +676,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         }
       } as AgentTool<typeof resolveStatementCandidatesParameters>,
       {
-        name: 'upsert_contribution_statement',
-        label: '暂存 Statement 草稿',
-        description: 'Stage or replace one free-text Statement in the run-local Contribution Draft. The title names one searchable subject; its context, attributes, and relationships belong in the body. This does not write to the knowledge Store.',
+        ...knowledgeMaintenanceToolMetadata('upsert_contribution_statement'),
         parameters: contributionStatementParameters,
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
@@ -708,9 +690,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         }
       } as AgentTool<typeof contributionStatementParameters>,
       {
-        name: 'read_contribution_statement',
-        label: '读取 Statement 草稿',
-        description: '按 canonical title 读取本次运行中已经暂存的完整 Statement 草稿。',
+        ...knowledgeMaintenanceToolMetadata('read_contribution_statement'),
         parameters: readContributionStatementParameters,
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
@@ -726,9 +706,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         }
       } as AgentTool<typeof readContributionStatementParameters>,
       {
-        name: 'list_contribution_statements',
-        label: '查看 Contribution 草稿',
-        description: '分页查看本次运行已经暂存的 Statement 标题和正文预览。',
+        ...knowledgeMaintenanceToolMetadata('list_contribution_statements'),
         parameters: listContributionStatementsParameters,
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
@@ -746,9 +724,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         }
       } as AgentTool<typeof listContributionStatementsParameters>,
       {
-        name: 'remove_contribution_statement',
-        label: '移除 Statement 草稿',
-        description: '从本次运行的 Contribution Draft 移除一条尚未提交的 Statement。',
+        ...knowledgeMaintenanceToolMetadata('remove_contribution_statement'),
         parameters: removeContributionStatementParameters,
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
@@ -765,9 +741,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         }
       } as AgentTool<typeof removeContributionStatementParameters>,
       {
-        name: 'read_evidence',
-        label: '读取观察证据',
-        description: '从候选提供的原始行与行内 offset 开始读取有界 Observation；offset 和 limit 使用 UTF-16 code unit，limit 至少为 2，并在需要时直接使用返回的 Next 位置续读。',
+        ...knowledgeMaintenanceToolMetadata('read_evidence'),
         parameters: readEvidenceParameters,
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
@@ -797,9 +771,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         }
       } as AgentTool<typeof readEvidenceParameters>,
       {
-        name: 'submit_knowledge_contribution',
-        label: '提交 Knowledge Contribution',
-        description: '在所有 Statement 候选均已明确处置后，原子提交当前 Contribution Draft；开放候选仍存在时不会结束 Agent。',
+        ...knowledgeMaintenanceToolMetadata('submit_knowledge_contribution'),
         parameters: submitContributionParameters,
         executionMode: 'sequential',
         execute: async (_toolCallId, _parameters, signal) => {
