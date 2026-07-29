@@ -115,6 +115,31 @@ if (!processing.fullChain.bodyText.includes('Knowledge Sandbox')) {
 if (!processing.fullChain.bodyText.includes('运行时从 Agent 的原始位置读取内容')) {
   throw new Error('Full-chain view does not explain on-demand Session reading')
 }
+if (
+  !processing.clearKnowledge?.exists
+  || processing.clearKnowledge.role !== 'alertdialog'
+  || processing.clearKnowledge.modal !== 'true'
+) {
+  throw new Error('Clearing knowledge does not use an in-app modal confirmation dialog')
+}
+if (processing.clearKnowledge.title !== '清空知识？') {
+  throw new Error('The clear-knowledge confirmation title is missing')
+}
+if (!processing.clearKnowledge.description?.includes('无法撤销')) {
+  throw new Error('The irreversible clear-knowledge impact is not explained')
+}
+if (processing.clearKnowledge.actions?.join(',') !== '取消,清空知识') {
+  throw new Error('Clear-knowledge confirmation actions are not ordered cancel then confirm')
+}
+if (!processing.clearKnowledge.cancelled) {
+  throw new Error('The clear-knowledge confirmation cannot be cancelled')
+}
+if (!processing.clearKnowledge.completed || !processing.clearKnowledge.closedAfterCompletion) {
+  throw new Error(`Knowledge was not cleared through the confirmed action: ${processing.clearKnowledge.error || 'unknown error'}`)
+}
+if (!processing.clearKnowledge.result?.includes('下一次完整链路将从空的基础知识开始')) {
+  throw new Error('The page does not report the completed knowledge reset')
+}
 if (!processing.fullChainRun?.impactVisible || !processing.fullChainRun?.completed) {
   throw new Error(`Full-chain run did not complete without a native confirmation dialog: ${processing.fullChainRun?.error || 'unknown error'}`)
 }
@@ -237,5 +262,7 @@ const preprocessingTraceImage = await readFile(join(dirname(capturePath), 'knowl
 if (preprocessingTraceImage.length === 0) throw new Error('Preprocessing trace screenshot is empty')
 const maintenanceTraceImage = await readFile(join(dirname(capturePath), 'knowledge-processing-trace-maintenance.png'))
 if (maintenanceTraceImage.length === 0) throw new Error('Maintenance trace screenshot is empty')
+const clearKnowledgeImage = await readFile(join(dirname(capturePath), 'knowledge-processing-clear-confirmation.png'))
+if (clearKnowledgeImage.length === 0) throw new Error('Clear-knowledge confirmation screenshot is empty')
 
 console.log(`UI smoke test passed: ${capturePath}`)

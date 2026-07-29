@@ -237,6 +237,11 @@ export interface KnowledgeSandboxView {
   baselineCreatedAt: string
 }
 
+export interface ClearKnowledgeResult {
+  deletedStatementCount: number
+  deletedContributionCount: number
+}
+
 export interface KnowledgeFullChainResult {
   runId: string
   session: AvailableSessionSummary
@@ -267,6 +272,7 @@ export interface KnowledgeProcessingApi {
   ): Promise<KnowledgeMaintenanceResult | undefined>
   runFullChain(input: RunKnowledgeFullChainInput): Promise<KnowledgeFullChainResult | undefined>
   cancelFullChain(): Promise<void>
+  clearKnowledge(): Promise<ClearKnowledgeResult>
   discardSandbox(sandboxId: string): Promise<void>
   cancelRun(stageId: ProcessingStageId): Promise<void>
   subscribe(listener: (snapshot: KnowledgeProcessingSnapshot) => void): () => void

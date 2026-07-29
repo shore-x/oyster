@@ -107,6 +107,31 @@ describe('SqliteKnowledgeStore', () => {
     }])
   })
 
+  it('atomically clears Statements and their Contribution records', async () => {
+    const directory = await temporaryPath('oyster-knowledge-store-')
+    const store = new SqliteKnowledgeStore(join(directory, 'knowledge.sqlite'))
+    closeables.push(store)
+    store.commit({
+      runRef: 'run:clear-one',
+      statements: [{ title: 'First Statement', content: 'First body.' }]
+    })
+    store.commit({
+      runRef: 'run:clear-two',
+      statements: [{ title: 'Second Statement', content: 'Second body.' }]
+    })
+
+    expect(store.clear()).toEqual({
+      deletedStatementCount: 2,
+      deletedContributionCount: 2
+    })
+    expect(store.listStatements()).toEqual([])
+    expect(store.getContributionByRunRef('run:clear-one')).toBeUndefined()
+    expect(store.clear()).toEqual({
+      deletedStatementCount: 0,
+      deletedContributionCount: 0
+    })
+  })
+
   it('preserves dynamic title references verbatim while their targets update independently', async () => {
     const directory = await temporaryPath('oyster-knowledge-store-')
     const store = new SqliteKnowledgeStore(join(directory, 'knowledge.sqlite'))

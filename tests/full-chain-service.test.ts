@@ -395,6 +395,29 @@ describe('KnowledgeFullChainService', () => {
       .toBeUndefined()
   })
 
+  it('clears production knowledge and discards completed Sandboxes as one reset operation', async () => {
+    const harness = await createHarness()
+    harness.manager.production.commit({
+      runRef: 'production:clear-me',
+      statements: [
+        { title: 'First baseline', content: 'First baseline body.' },
+        { title: 'Second baseline', content: 'Second baseline body.' }
+      ]
+    })
+    const fullChain = harness.createFullChain()
+    await fullChain.run(runInput(harness.discovery.session), harness.bindings)
+    expect(await harness.manager.listSandboxes()).toHaveLength(1)
+
+    await expect(fullChain.clearKnowledge()).resolves.toEqual({
+      deletedStatementCount: 2,
+      deletedContributionCount: 1
+    })
+
+    expect(harness.manager.production.listStatements()).toEqual([])
+    expect(harness.manager.production.getContributionByRunRef('production:clear-me')).toBeUndefined()
+    expect(await harness.manager.listSandboxes()).toEqual([])
+  })
+
   it('updates an existing title inside the Sandbox without changing production', async () => {
     const harness = await createHarness()
     harness.manager.production.commit({
@@ -662,6 +685,7 @@ describe('KnowledgeFullChainService', () => {
     const fullChainRun = fullChain.run(runInput(harness.discovery.session), harness.bindings)
     await enteredFullChainPreprocessing.promise
 
+    await expect(fullChain.clearKnowledge()).rejects.toThrow('完整链路正在运行')
     await expect(harness.processing.runObservationPreprocessor({ observation: 'manual observation' }))
       .rejects.toThrow('完整链路正在运行')
     releaseFullChainPreprocessing.resolve(undefined)
@@ -680,6 +704,7 @@ describe('KnowledgeFullChainService', () => {
     const manualRun = harness.processing.runObservationPreprocessor({ observation: 'manual observation' })
     await enteredManualPreprocessing.promise
 
+    await expect(fullChain.clearKnowledge()).rejects.toThrow('已有知识加工运行正在占用工作区')
     await expect(fullChain.run(runInput(harness.discovery.session), harness.bindings))
       .rejects.toThrow('已有知识加工运行正在占用工作区')
     releaseManualPreprocessing.resolve(undefined)

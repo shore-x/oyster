@@ -40,6 +40,11 @@ export interface SqliteKnowledgeStoreOptions {
   clock?: () => Date
 }
 
+export interface ClearKnowledgeResult {
+  deletedStatementCount: number
+  deletedContributionCount: number
+}
+
 function requiredTrimmed(value: unknown, label: string, maximum: number): string {
   if (typeof value !== 'string') throw new Error(`${label} 必须是字符串`)
   const normalized = value.trim()
@@ -367,6 +372,28 @@ export class SqliteKnowledgeStore implements KnowledgeReader {
       WHERE run_ref = ?
     `).get(normalizedRunRef) as ContributionRow | undefined
     return row ? contributionFromRow(row) : undefined
+  }
+
+  clear(): ClearKnowledgeResult {
+    this.assertOpen()
+    this.database.exec('BEGIN IMMEDIATE')
+    try {
+      const deletedStatementCount = Number((this.database.prepare(`
+        SELECT count(*) AS count FROM knowledge_statements
+      `).get() as { count: number }).count)
+      const deletedContributionCount = Number((this.database.prepare(`
+        SELECT count(*) AS count FROM knowledge_contributions
+      `).get() as { count: number }).count)
+      this.database.exec(`
+        DELETE FROM knowledge_statements;
+        DELETE FROM knowledge_contributions;
+        COMMIT;
+      `)
+      return { deletedStatementCount, deletedContributionCount }
+    } catch (error) {
+      this.database.exec('ROLLBACK')
+      throw error
+    }
   }
 
   close(): void {

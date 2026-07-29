@@ -44,6 +44,8 @@ Core 在一个事务中按 title 写入整份 Contribution，再回读实际 Sta
 
 Sandbox 的写入不影响当前验证 Store 的基线，当前也不存在 promote、merge 或复制回基线 Store 的入口。失败或取消会丢弃本次 Sandbox；当前界面只持有最新的成功结果，因此成功重跑会用同一验证基线创建的新 Sandbox 替换旧 Sandbox。用户可显式丢弃当前结果，应用启动时也会清理上一次进程遗留的 Sandbox。
 
+完整链路页面另提供显式的“清空知识”操作，用于让后续验证从空基线开始。该操作经应用内确认弹窗授权后，原子删除基线 Store 中全部 Statement 及 Contribution 记录，并丢弃当前页面持有的 Sandbox；它与任何知识加工运行互斥，且不可撤销。
+
 ## 3. 两个加工阶段
 
 ### Observation Preprocessor

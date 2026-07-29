@@ -1,6 +1,7 @@
 import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
 import type { AvailableSessionSummary } from '../../../shared/discovery'
 import type {
+  ClearKnowledgeResult,
   KnowledgeProcessingDebugTrace,
   ObservationPreprocessingProgress,
   ProcessingConnectionView,
@@ -70,11 +71,14 @@ export interface FullChainWorkspaceProps {
   debugTrace?: KnowledgeProcessingDebugTrace
   locked: boolean
   discarding: boolean
+  clearingKnowledge: boolean
+  knowledgeClearResult?: ClearKnowledgeResult
   result?: FullChainResultView
   onSelectSession(id: string): void
   onAttentionInput(value: string): void
   onRun(): void
   onCancel(): void
+  onClearKnowledge(): Promise<boolean>
   onDiscardSandbox(): void
 }
 
@@ -149,6 +153,7 @@ function preprocessingProgressText(progress: ObservationPreprocessingProgress): 
 export function FullChainWorkspace(props: FullChainWorkspaceProps) {
   const [workspace, setWorkspace] = createSignal<'input' | 'process' | 'result'>('input')
   const [output, setOutput] = createSignal<'knowledge' | 'candidates' | 'contributions'>('knowledge')
+  const [clearDialogOpen, setClearDialogOpen] = createSignal(false)
   const [selectedStatementTitle, setSelectedStatementTitle] = createSignal<string>()
   const selectedSession = createMemo(() => props.sessions.find(
     (session) => session.artifactId === props.selectedSessionId
@@ -195,6 +200,10 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
     const trace = visibleDebugTrace()
     return !trace || !props.result || trace.id === props.result.debugTrace.id
   })
+
+  async function confirmClearKnowledge(): Promise<void> {
+    if (await props.onClearKnowledge()) setClearDialogOpen(false)
+  }
 
   let previousRunId: string | undefined
   createEffect(() => {
@@ -248,8 +257,25 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
             <h2>从 Session 生成知识</h2>
             <p>选择一条已发现的本机会话，在隔离知识库中运行与正式流程相同的预处理、知识维护与写入。</p>
           </div>
-          <span class="sandbox-badge">Knowledge Sandbox</span>
+          <div class="full-chain-card__heading-actions">
+            <span class="sandbox-badge">Knowledge Sandbox</span>
+            <Button
+              variant="danger"
+              icon="trash"
+              data-testid="clear-knowledge"
+              disabled={props.locked || props.clearingKnowledge}
+              onClick={() => setClearDialogOpen(true)}
+            >{props.clearingKnowledge ? '正在清空…' : '清空知识'}</Button>
+          </div>
         </div>
+
+        <Show when={props.knowledgeClearResult}>
+          {(result) => (
+            <div class="full-chain-clear-notice" data-testid="clear-knowledge-result" role="status">
+              已清空 {result().deletedStatementCount} 条 Knowledge Statement；下一次完整链路将从空的基础知识开始。
+            </div>
+          )}
+        </Show>
 
         <div class="full-chain-form">
           <label class="ai-field ai-field--wide">
@@ -546,6 +572,54 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
           )}
         </Show>
       </section>
+
+      <Show when={clearDialogOpen()}>
+        <div
+          class="confirmation-dialog-backdrop"
+          data-testid="clear-knowledge-dialog"
+          role="presentation"
+          onClick={(event) => {
+            if (event.target === event.currentTarget && !props.clearingKnowledge) {
+              setClearDialogOpen(false)
+            }
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && !props.clearingKnowledge) setClearDialogOpen(false)
+          }}
+        >
+          <section
+            class="confirmation-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="clear-knowledge-dialog-title"
+            aria-describedby="clear-knowledge-dialog-description"
+          >
+            <div class="confirmation-dialog__body">
+              <h2 id="clear-knowledge-dialog-title">清空知识？</h2>
+              <p id="clear-knowledge-dialog-description">
+                将清空完整链路使用的全部基础 Knowledge Statements，并丢弃当前隔离结果。此操作无法撤销。
+              </p>
+            </div>
+            <div class="confirmation-dialog__actions">
+              <Button
+                variant="secondary"
+                icon="stop"
+                data-testid="cancel-clear-knowledge"
+                disabled={props.clearingKnowledge}
+                autofocus
+                onClick={() => setClearDialogOpen(false)}
+              >取消</Button>
+              <Button
+                variant="danger"
+                icon="trash"
+                data-testid="confirm-clear-knowledge"
+                disabled={props.clearingKnowledge}
+                onClick={() => void confirmClearKnowledge()}
+              >{props.clearingKnowledge ? '正在清空…' : '清空知识'}</Button>
+            </div>
+          </section>
+        </div>
+      </Show>
     </div>
   )
 }

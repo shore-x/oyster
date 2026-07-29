@@ -724,6 +724,8 @@ export function KnowledgeProcessingPage() {
             && controller.snapshot().runningStageIds.includes('knowledge_maintenance_agent')}
           debugTrace={fullChainDebugTrace()}
           locked={anyStageRunning()}
+          clearingKnowledge={controller.clearingKnowledge()}
+          knowledgeClearResult={controller.knowledgeClearResult()}
           discarding={Boolean(
             fullChainResult()
             && controller.isDiscardingSandbox(fullChainResult()!.sandboxId)
@@ -743,6 +745,7 @@ export function KnowledgeProcessingPage() {
             })
           }}
           onCancel={() => void controller.cancelFullChain()}
+          onClearKnowledge={() => controller.clearKnowledge()}
           onDiscardSandbox={() => {
             const result = controller.fullChainResult()
             if (result) void controller.discardSandbox(result.sandbox.id)

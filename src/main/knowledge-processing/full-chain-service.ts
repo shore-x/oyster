@@ -3,6 +3,7 @@ import type {
   KnowledgeContributionDraft
 } from '../../shared/knowledge'
 import type {
+  ClearKnowledgeResult,
   KnowledgeFullChainResult,
   RunKnowledgeFullChainInput
 } from '../../shared/knowledge-processing'
@@ -183,6 +184,26 @@ export class KnowledgeFullChainService {
     active.controller.abort(new Error('用户取消了完整链路运行'))
     this.processing.cancelRun('observation_preprocessor')
     this.processing.cancelRun('knowledge_maintenance_agent')
+  }
+
+  async clearKnowledge(): Promise<ClearKnowledgeResult> {
+    if (this.active) throw new Error('完整链路正在运行，不能清空知识')
+    const lease = this.processing.acquireExclusiveRun()
+    try {
+      const result = this.stores.production.clear()
+      for (const sandboxId of [...this.ownedSandboxes]) {
+        try {
+          await this.stores.discardSandbox(sandboxId)
+        } catch {
+          // Knowledge is already clear; stale disposable Sandboxes are cleaned on startup.
+        } finally {
+          this.ownedSandboxes.delete(sandboxId)
+        }
+      }
+      return result
+    } finally {
+      this.processing.releaseExclusiveRun(lease)
+    }
   }
 
   async discardSandbox(sandboxId: string): Promise<void> {

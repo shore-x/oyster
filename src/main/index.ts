@@ -189,6 +189,55 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       readyReason: page.querySelector('[data-testid="full-chain-disabled-reason"]')?.textContent?.trim()
     })))
   })()`)
+  await window.webContents.executeJavaScript(`(async () => {
+    document.querySelector('[data-testid="clear-knowledge"]')?.click()
+    const deadline = Date.now() + 2_000
+    while (
+      !document.querySelector('[data-testid="clear-knowledge-dialog"]')
+      && Date.now() < deadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+  })()`)
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  const clearKnowledgeImage = await window.webContents.capturePage()
+  await writeFile(
+    join(dirname(capturePath), 'knowledge-processing-clear-confirmation.png'),
+    clearKnowledgeImage.toPNG()
+  )
+  const clearKnowledgeSemantics = await window.webContents.executeJavaScript(`(async () => {
+    const page = document.querySelector('[data-testid="page-knowledge-processing"]')
+    const dialog = page.querySelector('[data-testid="clear-knowledge-dialog"]')
+    const initial = {
+      exists: Boolean(dialog),
+      role: dialog?.querySelector('[role="alertdialog"]')?.getAttribute('role'),
+      modal: dialog?.querySelector('[role="alertdialog"]')?.getAttribute('aria-modal'),
+      title: dialog?.querySelector('h2')?.textContent?.trim(),
+      description: dialog?.querySelector('p')?.textContent?.trim(),
+      actions: Array.from(dialog?.querySelectorAll('button') ?? []).map((button) => button.textContent?.trim())
+    }
+    page.querySelector('[data-testid="cancel-clear-knowledge"]')?.click()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const cancelled = !page.querySelector('[data-testid="clear-knowledge-dialog"]')
+    page.querySelector('[data-testid="clear-knowledge"]')?.click()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    page.querySelector('[data-testid="confirm-clear-knowledge"]')?.click()
+    const deadline = Date.now() + 2_000
+    while (Date.now() < deadline) {
+      const result = page.querySelector('[data-testid="clear-knowledge-result"]')?.textContent?.trim()
+      const error = page.querySelector('.page-error')?.textContent?.trim()
+      if (result || error) return {
+        ...initial,
+        cancelled,
+        completed: Boolean(result),
+        result,
+        error,
+        closedAfterCompletion: !page.querySelector('[data-testid="clear-knowledge-dialog"]')
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    return { ...initial, cancelled, completed: false, error: 'Timed out clearing knowledge' }
+  })()`)
   const fullChainRunSemantics = await window.webContents.executeJavaScript(`(async () => {
     const page = document.querySelector('[data-testid="page-knowledge-processing"]')
     page.querySelector('[data-testid="run-full-chain"]')?.click()
@@ -374,6 +423,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       ai: { ...aiSemantics, directTest: aiDirectTestSemantics },
       processing: {
         fullChain: fullChainSemantics,
+        clearKnowledge: clearKnowledgeSemantics,
         fullChainRun: fullChainRunSemantics,
         ...processingSemantics,
         promptRestore: promptRestoreSemantics,
