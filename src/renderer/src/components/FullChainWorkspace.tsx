@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
 import type { AvailableSessionSummary } from '../../../shared/discovery'
-import type { KnowledgeStatement } from '../../../shared/knowledge'
+import type { KnowledgeCommitResult, KnowledgeStatement } from '../../../shared/knowledge'
 import type {
   KnowledgeProcessingDebugTrace,
   ObservationPreprocessingProgress,
@@ -16,10 +16,8 @@ import {
   selectedStageModel
 } from '../processing-configuration'
 import { Button } from '../ui'
-import { ProcessingTraceExplorer } from './ProcessingDebugTracePanel'
-import { KnowledgeStatementBrowser, statementPreview } from './KnowledgeStatementBrowser'
+import { FullChainActivityDetail, FullChainResultDetail } from './FullChainRunDetails'
 import { SessionMetadata, sessionOptionLabel } from './SessionMetadata'
-import { StatementCandidateList } from './StatementCandidateList'
 
 export type FullChainStepState = 'pending' | 'running' | 'completed' | 'failed'
 
@@ -31,6 +29,7 @@ export interface FullChainStepView {
 }
 
 export interface FullChainResultView {
+  runId: string
   completedAt?: string
   durationMs?: number
   statementCandidates: StatementCandidateView[]
@@ -53,13 +52,14 @@ export interface FullChainWorkspaceProps {
   maintenanceRunning: boolean
   debugTrace?: KnowledgeProcessingDebugTrace
   locked: boolean
-  discarding: boolean
+  importingResult: boolean
+  importResult?: KnowledgeCommitResult
   result?: FullChainResultView
   onSelectSession(id: string): void
   onAttentionInput(value: string): void
   onRun(): void
   onCancel(): void
-  onDiscardSandbox(): void
+  onImportResult(): void
 }
 
 function formatTime(value?: string): string {
@@ -94,17 +94,6 @@ function stageSummary(stage?: ProcessingStageView, connection?: ProcessingConnec
   }
 }
 
-function stepClass(state: FullChainStepState): string {
-  return `full-chain-step full-chain-step--${state}`
-}
-
-function stepMarker(step: FullChainStepView, index: number): string {
-  if (step.state === 'completed') return '✓'
-  if (step.state === 'failed') return '!'
-  if (step.state === 'running') return '…'
-  return String(index + 1)
-}
-
 function progressText(
   progress: ObservationPreprocessingProgress | undefined,
   maintenanceRunning: boolean
@@ -121,17 +110,9 @@ function progressText(
 
 export function FullChainWorkspace(props: FullChainWorkspaceProps) {
   const [page, setPage] = createSignal<'overview' | 'activity' | 'result'>('overview')
-  const [selectedStatementTitle, setSelectedStatementTitle] = createSignal<string>()
   const selectedSession = createMemo(() => props.sessions.find(
     (session) => session.artifactId === props.selectedSessionId
   ))
-  const selectedStatement = createMemo(() => props.result?.statements.find(
-    (statement) => statement.title === selectedStatementTitle()
-  ) || props.result?.statements[0])
-  const statementSummaries = createMemo(() => props.result?.statements.map((statement) => ({
-    title: statement.title,
-    preview: statementPreview(statement.content, 150)
-  })) ?? [])
   const preprocessor = createMemo(() => stageSummary(props.preprocessor, props.preprocessorConnection))
   const maintainer = createMemo(() => stageSummary(props.maintainer, props.maintainerConnection))
   const disabledReason = createMemo(() => {
@@ -150,10 +131,6 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
   ).length ?? 0)
 
   createEffect(() => {
-    setSelectedStatementTitle(props.result?.statements[0]?.title)
-  })
-
-  createEffect(() => {
     if (page() === 'result' && !props.result) setPage('overview')
   })
 
@@ -161,7 +138,7 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
     <div class="chain-test" data-testid="full-chain-workspace">
       <div class="chain-test__boundary" data-testid="sandbox-boundary">
         <span class="sandbox-badge">Sandbox 链路测试</span>
-        <p>使用当前知识库的隔离副本运行；测试产生的 Statement 不会写回知识库。</p>
+        <p>使用当前知识库的隔离副本运行；测试产生的 Statement 不会自动写回，可在结果详情中手动导入。</p>
       </div>
 
       <Show when={page() === 'overview'}>
@@ -319,66 +296,27 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
       </Show>
 
       <Show when={page() === 'activity'}>
-        <section class="chain-test__detail-page" data-testid="full-chain-activity-detail">
-          <div class="chain-test__detail-header">
-            <Button variant="ghost" icon="back" data-testid="full-chain-detail-back" onClick={() => setPage('overview')}>返回概览</Button>
-            <div><h2>运行详情</h2><p>选择一次模型或工具调用，检查该事件的输出与结果。</p></div>
-          </div>
-          <p class="chain-test__detail-disclosure">模型输出和工具结果可能包含原始观察材料；这里只保存有界的本地调试副本。</p>
-          <Show when={visibleDebugTrace()} fallback={<div class="chain-test__empty">当前没有可查看的运行轨迹。</div>}>
-            {(trace) => <ProcessingTraceExplorer trace={trace()} />}
-          </Show>
-        </section>
+        <FullChainActivityDetail
+          trace={visibleDebugTrace()}
+          backLabel="返回概览"
+          detailTestId="full-chain-activity-detail"
+          backTestId="full-chain-detail-back"
+          onBack={() => setPage('overview')}
+        />
       </Show>
 
       <Show when={page() === 'result' && props.result ? props.result : undefined}>
-        {(result) => (
-          <section class="chain-test__detail-page chain-test__result" data-testid="full-chain-result-detail" aria-label="Sandbox 测试结果详情">
-            <div class="chain-test__detail-header">
-              <Button variant="ghost" icon="back" data-testid="full-chain-result-back" onClick={() => setPage('overview')}>返回概览</Button>
-              <div><h2>Sandbox 结果详情</h2><p>这是测试产生的隔离知识，不代表当前知识库。</p></div>
-              <div class="chain-test__detail-actions">
-                <span>{result().completedAt ? `完成于 ${formatTime(result().completedAt)}` : ''}</span>
-                <Button
-                  variant="ghost"
-                  icon="trash"
-                  data-testid="discard-full-chain-sandbox"
-                  disabled={props.discarding}
-                  onClick={props.onDiscardSandbox}
-                >{props.discarding ? '正在丢弃…' : '丢弃结果'}</Button>
-              </div>
-            </div>
-
-            <div class="full-chain-progress">
-              <For each={result().steps}>{(step, index) => (
-                <div class={stepClass(step.state)}>
-                  <span class="full-chain-step__marker">{stepMarker(step, index())}</span>
-                  <strong>{step.label}</strong>
-                  <p title={step.detail}>{step.detail}</p>
-                </div>
-              )}</For>
-            </div>
-
-            <div class="knowledge-browser knowledge-browser--sandbox">
-              <KnowledgeStatementBrowser
-                items={statementSummaries()}
-                total={result().statements.length}
-                selectedTitle={selectedStatement()?.title}
-                selectedStatement={selectedStatement()}
-                listLabel="Sandbox Statements"
-                emptyListText="本次测试没有生成 Knowledge Statement。"
-                navigationKey={result().debugTrace.startedAt}
-                onSelect={setSelectedStatementTitle}
-                onRead={async (title) => result().statements.find((statement) => statement.title === title)}
-              />
-            </div>
-
-            <details class="chain-test__candidates" open>
-              <summary>候选裁决（{result().statementCandidates.length}）</summary>
-              <StatementCandidateList candidates={result().statementCandidates} emptyText="本次测试没有发现需要裁决的 Statement 候选。" />
-            </details>
-          </section>
-        )}
+        {(result) => <FullChainResultDetail
+          result={result()}
+          backLabel="返回概览"
+          detailTestId="full-chain-result-detail"
+          backTestId="full-chain-result-back"
+          importTestId="import-full-chain-result"
+          importing={props.importingResult}
+          importResult={props.importResult}
+          onBack={() => setPage('overview')}
+          onImport={props.onImportResult}
+        />}
       </Show>
     </div>
   )

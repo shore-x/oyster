@@ -63,6 +63,7 @@ if (
   knowledge.browse.linkedTitle !== 'Knowledge Maintenance Agent'
   || !knowledge.browse.backAvailable
   || knowledge.browse.titleAfterBack !== 'Oyster 知识加工链路'
+  || knowledge.browse.overflowAfterBack
   || !knowledge.browse.forwardAvailable
   || knowledge.browse.titleAfterForward !== 'Knowledge Maintenance Agent'
 ) {
@@ -168,7 +169,10 @@ for (const requiredCopy of ['预处理', '知识维护', 'API', 'OpenAI-compatib
 if (!processing.fullChain.bodyText.includes('Sandbox 链路测试')) {
   throw new Error('Knowledge Sandbox boundary is not visible in the full-chain view')
 }
-if (!processing.fullChain.bodyText.includes('不会写回知识库')) {
+if (
+  !processing.fullChain.bodyText.includes('不会自动写回')
+  || !processing.fullChain.bodyText.includes('手动导入')
+) {
   throw new Error('Full-chain view does not explain its isolated write boundary')
 }
 if (!processing.fullChainRun?.runningStateVisible || !processing.fullChainRun?.completed) {
@@ -208,6 +212,7 @@ if (
 if (
   !processing.fullChainRun.sandboxBackAvailable
   || processing.fullChainRun.sandboxTitleAfterBack !== '知识加工链路'
+  || processing.fullChainRun.sandboxOverflowAfterBack
   || !processing.fullChainRun.sandboxForwardAvailable
   || processing.fullChainRun.sandboxTitleAfterForward !== 'Knowledge Maintenance Agent'
 ) {
@@ -215,6 +220,35 @@ if (
 }
 if (/来源范围\s+L\d|Raw source|sourceRef|revision|Run ID|扫描版本/.test(processing.fullChainRun.bodyText || '')) {
   throw new Error('The full-chain result exposes internal source coordinates or implementation identifiers')
+}
+if (processing.history?.runCount !== 1 || !processing.history.listText?.includes('知识加工 Sandbox 设计讨论')) {
+  throw new Error('The completed full-chain run was not added to persistent history')
+}
+if (/Fixture raw evidence|Tool call ·|sourceRef|L\d{6}/.test(processing.history.listText || '')) {
+  throw new Error('The compact history list eagerly exposes trace or evidence payloads')
+}
+if (!processing.history.resultDetailExists || !processing.history.sharedBrowserExists) {
+  throw new Error('Historical results do not reuse the shared Statement browser')
+}
+if (
+  !processing.history.importButtonExists
+  || !processing.history.importNotice?.includes('已导入 2 条知识')
+  || processing.history.productionTitles?.join(',') !== 'Knowledge Maintenance Agent,知识加工链路'
+) {
+  throw new Error('A persisted test result cannot be imported into production by title')
+}
+if (processing.history.overflowAfterStatementBack) {
+  throw new Error('Historical Statement navigation introduces horizontal overflow after going back')
+}
+if (
+  !processing.history.activityDetailExists
+  || processing.history.traceEventCount < 4
+  || !processing.history.traceText?.includes('Fixture raw evidence')
+) {
+  throw new Error('Historical run details do not expose the persisted model and tool trace')
+}
+if (!processing.history.returnedToHistory) {
+  throw new Error('Historical secondary pages do not return to the history list')
 }
 if (processing.fullChain.bodyText.includes('已导入 Session')) {
   throw new Error('Full-chain view still exposes the removed import model')

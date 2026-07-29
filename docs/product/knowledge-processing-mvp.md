@@ -2,9 +2,9 @@
 
 > 状态：当前实现规格
 >
-> 日期：2026-07-28
+> 日期：2026-07-29
 >
-> 范围：验证“外部 Session 的确定版本 → Candidate 发现 → Knowledge Maintenance Agent 裁决 → Knowledge Contribution → 隔离 Knowledge Sandbox 写入与回读”的最小闭环。Sandbox 不代表正式知识生产。
+> 范围：验证“外部 Session 的确定版本 → Candidate 发现 → Knowledge Maintenance Agent 裁决 → Knowledge Contribution → 隔离 Knowledge Sandbox 写入与回读”的最小闭环，以及测试结果的本地复盘与显式导入。Sandbox 不代表正式知识生产。
 
 ## 1. 两种运行方式
 
@@ -25,7 +25,7 @@
 
 用户从 discovery catalog 选择 Session 及其当前版本。运行时，主进程通过对应 Source Adapter 从原始位置读取该记录，并以稳定 artifact 身份和实际内容哈希固定本次使用的 `sourceRef`；扫描后已经变化或失效的记录会被拒绝，不会静默切换。Reader 不为单个 Session 预设产品长度上限，也不会把记录复制进应用管理的数据目录。Claude、Pi 与 Codex Adapter 分别按自身历史格式生成带版本的 Observation View；它们负责确定性选择对话主线、折叠可按需展开的执行详情，并为每个模型可读单元保留原始全局 `L` 行号、超长单行的 `Cstart:end/total` 窗口和必要的格式语境。共享文本原语只保证 Unicode 与 UTF-8 字节边界，不理解任何 Agent 的 JSONL Schema。通用 planner 只按所选模型预算组合 Adapter 已生成的单元，不以物理 JSONL 行作为调用边界。分段数、预处理调用数和整次运行时间不设固定上限，实际工作量随选择后的材料增长，用户可以随时取消。未进入预处理视图的原文没有被截断或删除，仍可由维护 Agent 按需回源。
 
-页面同时保留独立的**高级调试**工作面，用于分别观察预处理器和维护 Agent 的行为。它以阶段为主要切换层级，并在同一工作面直接呈现配置、输入、运行过程和输出，不再为这些内容继续嵌套页签。预处理调试默认直接选择一条 catalog 中可用的 Session；手工粘贴只作为排查特殊输入的显式 fallback。两个阶段分别触发，其 Knowledge Contribution 只用于预览，不提交到任何 Knowledge Store。每次实际启动的运行还会生成一份仅存在于内存中的 Debug Trace：预处理展示输入规模、总分段、每次 Candidate 发现调用的状态和输出；维护阶段展示 Candidate Agenda、Contribution Draft 的最新规模、模型轮次和脱敏工具活动。原始行号、内部运行 ID、版本指纹与本地路径不作为常规用户界面信息展示。
+页面同时保留独立的**高级调试**工作面，用于分别观察预处理器和维护 Agent 的行为。它以阶段为主要切换层级，并在同一工作面直接呈现配置、输入、运行过程和输出，不再为这些内容继续嵌套页签。预处理调试默认直接选择一条 catalog 中可用的 Session；手工粘贴只作为排查特殊输入的显式 fallback。两个阶段分别触发，其 Knowledge Contribution 只用于预览，不提交到任何 Knowledge Store。每次实际启动的运行都会生成 Debug Trace：预处理展示输入规模、总分段、每次 Candidate 发现调用的状态和输出；维护阶段展示 Candidate Agenda、Contribution Draft 的最新规模、模型轮次和工具活动。独立阶段调试只在内存中保留最近一次轨迹；成功的完整链路会把有界轨迹连同结果保存为本地测试快照。原始行号、内部运行 ID、版本指纹与本地路径不作为常规用户界面信息展示。
 
 运行按钮是显式启动操作，不再叠加系统原生确认弹窗。页面在启动前展示所选 Connection、Model、目的地和输入，在启动后持续展示发送影响、阶段进度、模型调用与错误；长 Session 可能产生多次预处理调用，模型调用可能消耗额度或产生费用。成功结果分别展示两个阶段成功完成的 `modelCallCount`；失败或取消前已经发起的请求仍可能计费，当前结果计数不作为 Provider 账单。
 
@@ -42,7 +42,11 @@ Agent 最终提交一份结构化 Knowledge Contribution，其中可以包含多
 
 Core 在一个事务中按 title 写入整份 Contribution，再回读实际 Statement 供 UI 展示。正文中的名称引用原样保存，Agent 可以使用引用中的 canonical title 继续精确读取对应 Statement；当前实现不解析引用，也不生成出站引用、反向引用或图投影视图。
 
-Sandbox 的写入不影响当前验证 Store 的基线，当前也不存在 promote、merge 或复制回基线 Store 的入口。失败或取消会丢弃本次 Sandbox；当前界面只持有最新的成功结果，因此成功重跑会用同一验证基线创建的新 Sandbox 替换旧 Sandbox。用户可显式丢弃当前结果，应用启动时也会清理上一次进程遗留的 Sandbox。
+Sandbox 的写入不会自动影响正式知识库。失败或取消会丢弃本次 Sandbox；成功重跑会用同一正式知识基线创建新的 Sandbox，并替换当前运行持有的旧 Sandbox。应用启动时会清理上一次进程遗留的 Sandbox。
+
+每次成功的完整链路另存为自包含、不可变的本地测试快照。快照保存所选 Session 的识别信息、两个阶段当时生效的配置、候选裁决、最终 Statement 和有界 Debug Trace，不依赖临时 Sandbox 或外部 Session 继续存在。历史列表只读取轻量摘要，结果与调用轨迹在打开二级页时按需加载。快照是调试产物，不是新的知识层。
+
+用户可以从当前结果或任意历史快照显式导入正式知识库。当前 MVP 直接取快照中的最终 Statement，以 canonical title 为键在一个事务中写入：不存在的名称创建，已有的名称覆盖正文，不执行冲突判断、自动合并或隐式同步。重复导入同一次结果也是合法操作。这个入口只用于早期验证，不等同于已经设计了正式知识加工调度链路。
 
 “知识库”是当前持久知识的独立浏览入口，提供标题与正文搜索、Statement 列表和完整正文回读。它与仅展示单次 Sandbox 输出的“加工测试”保持明确边界。“清空知识”也只位于知识库页面：经应用内确认弹窗授权后，原子删除基线 Store 中全部 Statement 及 Contribution 记录，并清理当前进程持有的 Sandbox；该操作与任何知识加工运行互斥，且不可撤销。
 
@@ -97,7 +101,7 @@ Agenda、Draft、来源授权和提交状态由 Host 持有，不依赖 transcri
 
 完整链路把知识读取和最终提交绑定到 Sandbox；阶段调试使用同一 Agent Runtime、Agenda、Draft 和提交门，但只返回 Contribution 预览，不执行 Sandbox 写入。知识工具按 canonical title 读取当前 Statement；正文中的 `[[canonical title]]` 本身就是继续读取相关知识的键，领域关系仍由正文表达。`read_evidence` 只读取本次运行已经授权的唯一 Raw Evidence 来源。
 
-Knowledge Maintenance Agent 的 Debug Trace 只记录模型轮次、工具名称和严格白名单化的结果摘要，以及 Candidate 总数、开放与已处置数量、Draft 数量和证据读取 continuation。读取失败只展示来源失效、位置无效、预算等安全错误类别，不展示本地路径和原文。它不记录 Assistant 文本、thinking/reasoning、工具结果正文、Raw Evidence 或完整模型上下文。最终 Candidate 处置、Contribution 和 Sandbox Statement 由各自的结构化结果视图展示，不复制进轨迹。
+Knowledge Maintenance Agent 的 Debug Trace 按模型轮次记录有界的模型输出、工具名称、工具输入与工具结果，并附带 Candidate 总数、开放与已处置数量、Draft 数量和证据读取 continuation，便于逐次调试 Agent 行为。证据读取结果可能包含原始材料，因此轨迹只保存在本机并在界面中明确提示；thinking/reasoning、完整模型上下文、凭据和本地来源路径不进入轨迹。读取失败只展示来源失效、位置无效、预算等安全错误类别。最终 Candidate 处置、Contribution 和 Sandbox Statement 仍由各自的结构化结果视图展示，不依赖轨迹作为权威结果。
 
 ## 4. 配置与结果界面
 
@@ -109,13 +113,15 @@ Sandbox 链路测试和预处理高级调试均可选择 catalog 中可用的 Se
 - 成功结果中两个阶段成功完成的 `modelCallCount`；
 - 预处理的总分段、每次 Candidate 发现调用的输出及原始位置；
 - Candidate Agenda 的总数、开放与已处置状态以及自由文本处置；
-- Contribution Draft 规模、Raw Evidence 有界读取与 continuation 的安全活动时间线；
+- Contribution Draft 规模，以及逐次模型输出、工具调用、Raw Evidence 有界读取与 continuation；
 - Agent 提交的结构化 Knowledge Contribution；
 - 从 Sandbox 按 canonical title 回读的 Knowledge Statement 列表与正文。
 
+“历史记录”按完成时间浏览成功的完整链路测试，并提供两个按需打开的二级视图：结果快照复用正式知识浏览器的 Statement 阅读与名称引用跳转体验；运行详情展示该次保存的逐次模型输出和工具结果。当前结果与历史结果都可以由用户显式导入正式知识库，导入完成后在页面内报告新增和覆盖数量。
+
 Coding Plan 与 API Connection 都向两个阶段提供同一模型调用契约。Observation Preprocessor 使用所选模型进行一次或多次有界直接调用；Knowledge Maintenance Agent 使用同一模型的 stream 接入通用 Agent Runtime，当前 Runtime 实现为 Pi Agent Core。Backend 决定认证和计费通道，阶段 Runtime 决定直接生成还是 Agent loop，两者不混为一个概念。
 
-Debug Trace 不是新的知识层或审计日志，不持久化到 Repository。完整链路与阶段调试各自只保留最近一次真正开始的轨迹。失败或取消会保留已经完成的预处理输出，并把正在执行的条目标记为失败或取消，以便复盘。每次调用的调试输出副本具有独立于实际处理结果的字符上限，截断只影响界面展示；预处理的分段与调用数量、维护 Agent 的模型轮次与工具调用数量都反映实际运行，不作为处理配额。轨迹中的条目表示应用观察到的处理尝试，不等同于 Provider 账单。
+Debug Trace 不是新的知识层或正式审计日志。阶段调试只在内存中保留最近一次真正开始的轨迹；成功的完整链路轨迹随不可变测试快照持久化，失败或取消的运行当前不进入历史。轨迹可能包含模型输出和工具结果，因此历史详情明确按本地调试材料展示，历史列表不会预读或展开这些内容。每次调用的调试输出副本具有独立于实际处理结果的字符上限，截断只影响界面展示；预处理的分段与调用数量、维护 Agent 的模型轮次与工具调用数量都反映实际运行，不作为处理配额。轨迹中的条目表示应用观察到的处理尝试，不等同于 Provider 账单。
 
 界面只展示用户做出选择、理解运行影响和判断结果所需的信息。Session 标题、来源、项目、时间范围和原始记录大小用于识别输入；阶段、模型配置、进度、模型输出、候选裁决和 Statement 正文用于调试链路。EvidenceLocation、`sourceRef`、revision、Sandbox ID、Run ID 与格式版本仍可在内部协议中存在，但不因实现方便而暴露为产品信息。
 
@@ -138,11 +144,11 @@ Model Connection 会在 Provider 能声明时保留 `contextWindowTokens` 和最
 - 从 Statement 正文的动态名称引用派生出站引用、反向引用和图投影视图；
 - Statement 生命周期与历史治理；
 - 脱离原始 Session、只依据知识层内容及显式引用进行的 Statement 可理解性盲审或对抗式校验；
-- 从 Sandbox promote、merge 或复制到正式知识库；
+- 正式知识生产的自动提交、冲突裁决与增量同步链路；
 - 正式知识生产的自动调度、批量和流式处理；
 - Canonical Activity 作为跨 Harness 的标准化 Observation 视图；
 - 持久 Workspace 与作业恢复；
 - Projection Agent 与投影文档生成；
 - 更多消费者 Coding Plan Provider。
 
-当前实现先验证 Candidate 发现、开放 Agenda 的调查覆盖、Raw Evidence 按需读取、Contribution Draft、提交门和隔离提交，不把测试结果混入正式知识。对抗式盲审仍只是未来方向，不参与当前运行。
+当前实现先验证 Candidate 发现、开放 Agenda 的调查覆盖、Raw Evidence 按需读取、Contribution Draft、提交门和隔离提交。测试结果默认不进入正式知识，只有用户从当前结果或持久历史中显式导入时才按 title 写入。对抗式盲审仍只是未来方向，不参与当前运行。

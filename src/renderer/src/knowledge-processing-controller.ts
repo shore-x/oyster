@@ -1,7 +1,10 @@
 import { createSignal, onCleanup } from 'solid-js'
 import type { AvailableSessionSummary, DiscoverySnapshot } from '../../shared/discovery'
+import type { KnowledgeCommitResult } from '../../shared/knowledge'
 import type {
   KnowledgeFullChainResult,
+  KnowledgeFullChainRunRecord,
+  KnowledgeFullChainRunSummary,
   KnowledgeMaintenanceResult,
   KnowledgeProcessingDebugTrace,
   KnowledgeProcessingSnapshot,
@@ -46,9 +49,19 @@ export function createKnowledgeProcessingController() {
   const [sessionsLoading, setSessionsLoading] = createSignal(true)
   const [fullChainPending, setFullChainPending] = createSignal(false)
   const [fullChainResult, setFullChainResult] = createSignal<KnowledgeFullChainResult>()
+  const [fullChainRuns, setFullChainRuns] = createSignal<KnowledgeFullChainRunSummary[]>([])
+  const [fullChainRunsLoading, setFullChainRunsLoading] = createSignal(true)
+  const [selectedFullChainRun, setSelectedFullChainRun] = createSignal<KnowledgeFullChainRunRecord>()
+  const [loadingFullChainRunId, setLoadingFullChainRunId] = createSignal<string>()
+  const [importingFullChainRunId, setImportingFullChainRunId] = createSignal<string>()
+  const [fullChainImportResult, setFullChainImportResult] = createSignal<{
+    runId: string
+    commit: KnowledgeCommitResult
+  }>()
   const [discardingSandboxId, setDiscardingSandboxId] = createSignal<string>()
   const [hiddenStageDebugTraceId, setHiddenStageDebugTraceId] = createSignal<string>()
   let sessionLoadRevision = 0
+  let fullChainRunReadGeneration = 0
 
   function errorMessage(cause: unknown): string {
     return cause instanceof Error ? cause.message : String(cause)
@@ -120,6 +133,7 @@ export function createKnowledgeProcessingController() {
     updateAvailableSessions(discoverySnapshot)
   })
   void loadAvailableSessions()
+  void loadFullChainRuns()
   void window.oyster.discovery.getSnapshot()
     .then((discoverySnapshot) => {
       if (!receivedDiscoverySnapshot) updateAvailableSessions(discoverySnapshot)
@@ -141,6 +155,35 @@ export function createKnowledgeProcessingController() {
       if (revision === sessionLoadRevision) setError(errorMessage(cause))
     } finally {
       if (revision === sessionLoadRevision) setSessionsLoading(false)
+    }
+  }
+
+  async function loadFullChainRuns(): Promise<void> {
+    try {
+      setFullChainRunsLoading(true)
+      setError(undefined)
+      setFullChainRuns(await window.oyster.knowledgeProcessing.listFullChainRuns())
+    } catch (cause) {
+      setError(errorMessage(cause))
+    } finally {
+      setFullChainRunsLoading(false)
+    }
+  }
+
+  async function readFullChainRun(runId: string): Promise<KnowledgeFullChainRunRecord | undefined> {
+    const generation = ++fullChainRunReadGeneration
+    try {
+      setLoadingFullChainRunId(runId)
+      setError(undefined)
+      const record = await window.oyster.knowledgeProcessing.readFullChainRun(runId)
+      if (generation !== fullChainRunReadGeneration) return undefined
+      setSelectedFullChainRun(record)
+      return record
+    } catch (cause) {
+      if (generation === fullChainRunReadGeneration) setError(errorMessage(cause))
+      return undefined
+    } finally {
+      if (generation === fullChainRunReadGeneration) setLoadingFullChainRunId(undefined)
     }
   }
 
@@ -219,7 +262,10 @@ export function createKnowledgeProcessingController() {
       setFullChainPending(true)
       setError(undefined)
       const result = await window.oyster.knowledgeProcessing.runFullChain(input)
-      if (result) setFullChainResult(result)
+      if (result) {
+        setFullChainResult(result)
+        await loadFullChainRuns()
+      }
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {
@@ -249,6 +295,22 @@ export function createKnowledgeProcessingController() {
     }
   }
 
+  async function importFullChainRun(runId: string): Promise<KnowledgeCommitResult | undefined> {
+    try {
+      setImportingFullChainRunId(runId)
+      setFullChainImportResult(undefined)
+      setError(undefined)
+      const commit = await window.oyster.knowledgeProcessing.importFullChainRun(runId)
+      setFullChainImportResult({ runId, commit })
+      return commit
+    } catch (cause) {
+      setError(errorMessage(cause))
+      return undefined
+    } finally {
+      setImportingFullChainRunId(undefined)
+    }
+  }
+
   return {
     snapshot,
     isSaving: (stageId: ProcessingStageId) => savingStageIds().includes(stageId),
@@ -258,9 +320,15 @@ export function createKnowledgeProcessingController() {
     availableSessions,
     sessionsLoading,
     fullChainResult,
+    fullChainRuns,
+    fullChainRunsLoading,
+    selectedFullChainRun,
+    fullChainImportResult,
     debugTrace,
     isFullChainRunning: fullChainPending,
     isDiscardingSandbox: (sandboxId: string) => discardingSandboxId() === sandboxId,
+    isLoadingFullChainRun: (runId: string) => loadingFullChainRunId() === runId,
+    isImportingFullChainRun: (runId: string) => importingFullChainRunId() === runId,
     invalidateInputResults,
     resetFullChainResult,
     isRunning,
@@ -270,8 +338,11 @@ export function createKnowledgeProcessingController() {
     runKnowledgeMaintenance,
     cancelRun,
     loadAvailableSessions,
+    loadFullChainRuns,
+    readFullChainRun,
     runFullChain,
     cancelFullChain,
-    discardSandbox
+    discardSandbox,
+    importFullChainRun
   }
 }

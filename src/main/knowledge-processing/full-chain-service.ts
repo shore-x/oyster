@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import type {
   ClearKnowledgeResult,
+  KnowledgeCommitResult,
   KnowledgeContributionDraft
 } from '../../shared/knowledge'
 import type {
+  KnowledgeFullChainRunRecord,
+  KnowledgeFullChainRunSummary,
   KnowledgeFullChainResult,
   RunKnowledgeFullChainInput
 } from '../../shared/knowledge-processing'
@@ -20,6 +23,7 @@ import {
   type ProcessingRunLease,
   type ProcessingStageRunBinding
 } from './knowledge-processing-service'
+import type { KnowledgeFullChainRunHistory } from './full-chain-run-repository'
 
 export interface KnowledgeFullChainBindings {
   preprocessor: ProcessingStageRunBinding
@@ -63,7 +67,8 @@ export class KnowledgeFullChainService {
     private readonly discovery: DiscoveryService,
     private readonly processing: KnowledgeProcessingService,
     private readonly stores: SqliteKnowledgeStoreManager,
-    private readonly knowledgeAgentFactory: KnowledgeAgentFactory
+    private readonly knowledgeAgentFactory: KnowledgeAgentFactory,
+    private readonly history?: KnowledgeFullChainRunHistory
   ) {}
 
   isRunning(): boolean {
@@ -140,10 +145,9 @@ export class KnowledgeFullChainService {
         }
       }
       controller.signal.throwIfAborted()
-      this.ownedSandboxes.add(sandbox.id)
       const completedDebugTrace = this.processing.completeFullChainDebugTrace(debugTrace)
 
-      return {
+      const result: KnowledgeFullChainResult = {
         runId,
         session: structuredClone(session),
         sandbox: { id: sandbox.id, baselineCreatedAt: sandbox.baselineCreatedAt },
@@ -158,6 +162,18 @@ export class KnowledgeFullChainService {
         durationMs: Date.now() - startedAt,
         completedAt: new Date().toISOString()
       }
+      this.history?.save({
+        formatVersion: 1,
+        runId,
+        ...(input.attention ? { attention: input.attention } : {}),
+        configuration: {
+          preprocessor: structuredClone(bindings.preprocessor),
+          maintainer: structuredClone(bindings.maintainer)
+        },
+        result
+      })
+      this.ownedSandboxes.add(sandbox.id)
+      return result
     } catch (error) {
       this.processing.failFullChainDebugTrace(
         debugTrace,
@@ -211,6 +227,32 @@ export class KnowledgeFullChainService {
     if (!this.ownedSandboxes.has(sandboxId)) throw new Error('未找到当前会话创建的 Knowledge Sandbox')
     await this.stores.discardSandbox(sandboxId)
     this.ownedSandboxes.delete(sandboxId)
+  }
+
+  listRuns(): KnowledgeFullChainRunSummary[] {
+    return this.history?.list() ?? []
+  }
+
+  readRun(runId: string): KnowledgeFullChainRunRecord | undefined {
+    return this.history?.read(runId)
+  }
+
+  async importRun(runId: string): Promise<KnowledgeCommitResult> {
+    if (this.active) throw new Error('完整链路正在运行，不能导入测试结果')
+    const lease = this.processing.acquireExclusiveRun()
+    try {
+      const record = this.history?.read(runId)
+      if (!record) throw new Error('未找到要导入的加工测试记录')
+      return this.stores.production.commit({
+        runRef: `full-chain-import:${record.runId}:${randomUUID()}`,
+        statements: record.result.knowledge.statements.map(({ title, content }) => ({
+          title,
+          content
+        }))
+      })
+    } finally {
+      this.processing.releaseExclusiveRun(lease)
+    }
   }
 
   dispose(): void {

@@ -33,6 +33,7 @@ import {
 import {
   KnowledgeFullChainService
 } from './knowledge-processing/full-chain-service'
+import { SqliteKnowledgeFullChainRunRepository } from './knowledge-processing/full-chain-run-repository'
 import { registerKnowledgeProcessingIpc } from './knowledge-processing/ipc'
 import { SessionPreprocessor } from './knowledge-processing/session-preprocessor'
 import { KnowledgeProcessingService } from './knowledge-processing/knowledge-processing-service'
@@ -46,6 +47,7 @@ let mainWindow: BrowserWindow | undefined
 let aiBackendService: AiBackendService | undefined
 let knowledgeProcessingService: KnowledgeProcessingService | undefined
 let knowledgeFullChainService: KnowledgeFullChainService | undefined
+let knowledgeFullChainRunRepository: SqliteKnowledgeFullChainRunRepository | undefined
 let knowledgeStoreManager: SqliteKnowledgeStoreManager | undefined
 
 function fixtureMode(): boolean {
@@ -155,6 +157,8 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     }
   })()`)
 
+  window.setSize(900, 780)
+  await new Promise((resolve) => setTimeout(resolve, 80))
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-knowledge"]').click()`)
   await window.webContents.executeJavaScript(`(async () => {
     const deadline = Date.now() + 2_000
@@ -183,12 +187,12 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     link?.dispatchEvent(new MouseEvent('mouseenter'))
     deadline = Date.now() + 2_000
     while (
-      page.querySelector('.knowledge-statement-link__preview > span')?.textContent?.includes('正在读取')
+      document.querySelector('.knowledge-statement-preview > span')?.textContent?.includes('正在读取')
       && Date.now() < deadline
     ) await new Promise((resolve) => setTimeout(resolve, 25))
     const linkLabel = link?.textContent?.trim()
-    const linkPreviewTitle = page.querySelector('.knowledge-statement-link__preview > strong')?.textContent?.trim()
-    const linkPreview = page.querySelector('.knowledge-statement-link__preview > span')?.textContent?.trim()
+    const linkPreviewTitle = document.querySelector('.knowledge-statement-preview > strong')?.textContent?.trim()
+    const linkPreview = document.querySelector('.knowledge-statement-preview > span')?.textContent?.trim()
     link?.click()
     deadline = Date.now() + 2_000
     while (
@@ -199,12 +203,21 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const backButton = page.querySelector('[data-testid="statement-nav-back"]')
     const backAvailable = backButton?.disabled === false
     backButton?.click()
-    await new Promise((resolve) => requestAnimationFrame(resolve))
+    deadline = Date.now() + 2_000
+    while (
+      page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim() !== 'Oyster 知识加工链路'
+      && Date.now() < deadline
+    ) await new Promise((resolve) => setTimeout(resolve, 25))
     const titleAfterBack = page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
+    const overflowAfterBack = document.documentElement.scrollWidth > document.documentElement.clientWidth
     const forwardButton = page.querySelector('[data-testid="statement-nav-forward"]')
     const forwardAvailable = forwardButton?.disabled === false
     forwardButton?.click()
-    await new Promise((resolve) => requestAnimationFrame(resolve))
+    deadline = Date.now() + 2_000
+    while (
+      page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim() !== 'Knowledge Maintenance Agent'
+      && Date.now() < deadline
+    ) await new Promise((resolve) => setTimeout(resolve, 25))
     const titleAfterForward = page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
     return {
       title: page.querySelector('h1')?.textContent?.trim(),
@@ -218,6 +231,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       linkedTitle,
       backAvailable,
       titleAfterBack,
+      overflowAfterBack,
       forwardAvailable,
       titleAfterForward,
       searchPlaceholder: page.querySelector('[data-testid="knowledge-search"]')?.getAttribute('placeholder'),
@@ -274,6 +288,8 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     return { ...initial, cancelled, completed: false, error: 'Timed out clearing knowledge' }
   })()`)
 
+  window.setSize(1160, 780)
+  await new Promise((resolve) => setTimeout(resolve, 80))
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-knowledge-processing"]').click()`)
   await window.webContents.executeJavaScript(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
   await new Promise((resolve) => setTimeout(resolve, 200))
@@ -348,11 +364,11 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
         sandboxLink?.dispatchEvent(new MouseEvent('mouseenter'))
         let linkDeadline = Date.now() + 2_000
         while (
-          page.querySelector('.knowledge-browser--sandbox .knowledge-statement-link__preview > span')?.textContent?.includes('正在读取')
+          document.querySelector('.knowledge-statement-preview > span')?.textContent?.includes('正在读取')
           && Date.now() < linkDeadline
         ) await new Promise((resolve) => setTimeout(resolve, 25))
         const sandboxLinkLabel = sandboxLink?.textContent?.trim()
-        const sandboxLinkPreview = page.querySelector('.knowledge-browser--sandbox .knowledge-statement-link__preview')?.textContent?.trim()
+        const sandboxLinkPreview = document.querySelector('.knowledge-statement-preview')?.textContent?.trim()
         sandboxLink?.click()
         linkDeadline = Date.now() + 2_000
         while (
@@ -365,6 +381,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
         sandboxBack?.click()
         await new Promise((resolve) => requestAnimationFrame(resolve))
         const sandboxTitleAfterBack = page.querySelector('.knowledge-browser--sandbox [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
+        const sandboxOverflowAfterBack = document.documentElement.scrollWidth > document.documentElement.clientWidth
         const sandboxForward = page.querySelector('.knowledge-browser--sandbox [data-testid="statement-nav-forward"]')
         const sandboxForwardAvailable = sandboxForward?.disabled === false
         sandboxForward?.click()
@@ -393,6 +410,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
           sandboxLinkedTitle,
           sandboxBackAvailable,
           sandboxTitleAfterBack,
+          sandboxOverflowAfterBack,
           sandboxForwardAvailable,
           sandboxTitleAfterForward,
           returnedToOverview: Boolean(page.querySelector('[data-testid="full-chain-session-select"]')),
@@ -403,6 +421,73 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     }
     return { completed: false, runningStateVisible, error: 'Timed out waiting for full-chain result' }
   })()`)
+  const processingHistorySemantics = await window.webContents.executeJavaScript(`(async () => {
+    const page = document.querySelector('[data-testid="page-knowledge-processing"]')
+    page.querySelector('[data-testid="processing-view-history"]')?.click()
+    let deadline = Date.now() + 2_000
+    while (!page.querySelector('.processing-history-run') && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    const run = page.querySelector('.processing-history-run')
+    const listText = page.querySelector('[data-testid="processing-run-history"]')?.innerText
+    run?.querySelector('[data-testid^="open-history-result-"]')?.click()
+    deadline = Date.now() + 2_000
+    while (!page.querySelector('[data-testid="history-run-result-detail"]') && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    const resultDetailExists = Boolean(page.querySelector('[data-testid="history-run-result-detail"]'))
+    const sharedBrowserExists = Boolean(page.querySelector('[data-testid="history-run-result-detail"] [data-testid="knowledge-statement-browser"]'))
+    const importButton = page.querySelector('[data-testid="import-history-run"]')
+    importButton?.click()
+    deadline = Date.now() + 2_000
+    while (!page.querySelector('[data-testid="full-chain-import-result"]') && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    const importNotice = page.querySelector('[data-testid="full-chain-import-result"]')?.textContent?.trim()
+    const historyLink = page.querySelector('[data-testid="history-run-result-detail"] .knowledge-statement-link > a')
+    historyLink?.click()
+    deadline = Date.now() + 2_000
+    while (
+      page.querySelector('[data-testid="history-run-result-detail"] [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim() !== 'Knowledge Maintenance Agent'
+      && Date.now() < deadline
+    ) await new Promise((resolve) => setTimeout(resolve, 25))
+    page.querySelector('[data-testid="history-run-result-detail"] [data-testid="statement-nav-back"]')?.click()
+    deadline = Date.now() + 2_000
+    while (
+      page.querySelector('[data-testid="history-run-result-detail"] [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim() !== '知识加工链路'
+      && Date.now() < deadline
+    ) await new Promise((resolve) => setTimeout(resolve, 25))
+    const overflowAfterStatementBack = document.documentElement.scrollWidth > document.documentElement.clientWidth
+    page.querySelector('[data-testid="history-run-result-back"]')?.click()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    page.querySelector('.processing-history-run [data-testid^="open-history-activity-"]')?.click()
+    deadline = Date.now() + 2_000
+    while (!page.querySelector('[data-testid="history-run-activity-detail"]') && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    const activityDetailExists = Boolean(page.querySelector('[data-testid="history-run-activity-detail"]'))
+    const traceEventCount = page.querySelectorAll('[data-testid="history-run-activity-detail"] .trace-explorer-event').length
+    const traceText = page.querySelector('[data-testid="history-run-activity-detail"]')?.textContent
+    page.querySelector('[data-testid="history-run-activity-back"]')?.click()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    return {
+      runCount: page.querySelectorAll('.processing-history-run').length,
+      listText,
+      resultDetailExists,
+      sharedBrowserExists,
+      importButtonExists: Boolean(importButton),
+      importNotice,
+      overflowAfterStatementBack,
+      activityDetailExists,
+      traceEventCount,
+      traceText,
+      returnedToHistory: Boolean(page.querySelector('.processing-history__list'))
+    }
+  })()`)
+  const productionTitlesAfterHistoryImport = knowledgeStoreManager?.production
+    .listStatements()
+    .map((statement) => statement.title)
+    .sort()
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="processing-view-stage-debug"]').click()`)
   await new Promise((resolve) => setTimeout(resolve, 120))
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="processing-preprocessor-session"]')?.scrollIntoView({ block: 'center' })`)
@@ -573,6 +658,10 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       processing: {
         fullChain: fullChainSemantics,
         fullChainRun: fullChainRunSemantics,
+        history: {
+          ...processingHistorySemantics,
+          productionTitles: productionTitlesAfterHistoryImport
+        },
         ...processingSemantics,
         promptRestore: promptRestoreSemantics,
         trace: traceSemantics,
@@ -626,6 +715,9 @@ app.whenReady().then(async () => {
   knowledgeStoreManager = await SqliteKnowledgeStoreManager.open(
     join(app.getPath('userData'), 'knowledge-store')
   )
+  knowledgeFullChainRunRepository = await SqliteKnowledgeFullChainRunRepository.open(
+    join(app.getPath('userData'), 'knowledge-processing-history.sqlite')
+  )
   for (const sandbox of await knowledgeStoreManager.listSandboxes()) {
     await knowledgeStoreManager.discardSandbox(sandbox.id)
   }
@@ -636,7 +728,8 @@ app.whenReady().then(async () => {
     knowledgeStoreManager,
     (reader) => fixtureMode()
       ? new FixtureKnowledgeAgentRuntime()
-      : new PiKnowledgeMaintenanceAgent(reader)
+      : new PiKnowledgeMaintenanceAgent(reader),
+    knowledgeFullChainRunRepository
   )
   await Promise.all([
     service.initialize(),
@@ -681,6 +774,7 @@ app.whenReady().then(async () => {
 app.on('before-quit', () => {
   knowledgeFullChainService?.dispose()
   knowledgeProcessingService?.dispose()
+  knowledgeFullChainRunRepository?.close()
   knowledgeStoreManager?.close()
   aiBackendService?.dispose()
 })

@@ -1,6 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
 import type {
-  KnowledgeFullChainResult,
   KnowledgeMaintenanceResult,
   ObservationPreprocessingResult,
   ProcessingConnectionView,
@@ -20,7 +19,9 @@ import {
   selectedStageModel
 } from '../processing-configuration'
 import { Button, Icon } from '../ui'
-import { FullChainWorkspace, type FullChainResultView } from './FullChainWorkspace'
+import { FullChainWorkspace } from './FullChainWorkspace'
+import { fullChainResultView } from './FullChainRunDetails'
+import { ProcessingRunHistoryWorkspace } from './ProcessingRunHistoryWorkspace'
 import { ProcessingDebugTracePanel } from './ProcessingDebugTracePanel'
 import { SessionMetadata, sessionOptionLabel } from './SessionMetadata'
 import { StatementCandidateList } from './StatementCandidateList'
@@ -33,39 +34,6 @@ function formatDuration(durationMs: number): string {
 function formatTime(value: string): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN')
-}
-
-function fullChainResultView(result: KnowledgeFullChainResult): FullChainResultView {
-  return {
-    completedAt: result.completedAt,
-    durationMs: result.durationMs,
-    statementCandidates: result.maintenance.statementCandidates,
-    debugTrace: result.maintenance.debugTrace,
-    steps: [
-      {
-        id: 'session',
-        label: '读取 Session',
-        detail: result.session.sourceDisplayName,
-        state: 'completed'
-      },
-      {
-        id: 'preprocessing',
-        label: '观察预处理',
-        detail: `${result.preprocessing.segmentCount} 个分段 · ${result.preprocessing.execution.modelCallCount} 次模型调用 · ${formatDuration(result.preprocessing.durationMs)}`,
-        state: 'completed'
-      },
-      {
-        id: 'maintenance',
-        label: '知识维护与写入',
-        detail: `${result.maintenance.execution.modelCallCount} 次模型调用 · ${result.commit.statements.length} 条 Statement`,
-        state: 'completed'
-      }
-    ],
-    statements: result.knowledge.statements.map((statement) => ({
-      title: statement.title,
-      content: statement.content
-    }))
-  }
 }
 
 function ExecutionDetails(props: {
@@ -373,7 +341,7 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
 
 export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }) {
   const controller = createKnowledgeProcessingController()
-  const [view, setView] = createSignal<'full_chain' | 'stage_debug'>('full_chain')
+  const [view, setView] = createSignal<'full_chain' | 'history' | 'stage_debug'>('full_chain')
   const [debugStage, setDebugStage] = createSignal<'preprocessor' | 'maintainer'>('preprocessor')
   const [selectedSessionId, setSelectedSessionId] = createSignal<string>()
   const [fullChainAttention, setFullChainAttention] = createSignal('')
@@ -617,7 +585,7 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
           <div class="page-summary">
             <span>所有运行均为显式测试</span>
             <span class="page-summary__separator">·</span>
-            <span>不会写入当前知识库</span>
+            <span>结果默认隔离，可手动导入知识库</span>
           </div>
         </div>
         <div class="processing-mode-nav" role="tablist" aria-label="加工测试工作面">
@@ -628,6 +596,16 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
             aria-selected={view() === 'full_chain'}
             onClick={() => setView('full_chain')}
           >链路测试</button>
+          <button
+            type="button"
+            role="tab"
+            data-testid="processing-view-history"
+            aria-selected={view() === 'history'}
+            onClick={() => {
+              setView('history')
+              void controller.loadFullChainRuns()
+            }}
+          >历史记录</button>
           <button
             type="button"
             role="tab"
@@ -667,10 +645,14 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
             && controller.snapshot().runningStageIds.includes('knowledge_maintenance_agent')}
           debugTrace={fullChainDebugTrace()}
           locked={anyStageRunning()}
-          discarding={Boolean(
+          importingResult={Boolean(
             controller.fullChainResult()
-            && controller.isDiscardingSandbox(controller.fullChainResult()!.sandbox.id)
+            && controller.isImportingFullChainRun(controller.fullChainResult()!.runId)
           )}
+          importResult={controller.fullChainResult()
+            && controller.fullChainImportResult()?.runId === controller.fullChainResult()!.runId
+            ? controller.fullChainImportResult()!.commit
+            : undefined}
           result={fullChainResult()}
           onSelectSession={updateSelectedSession}
           onAttentionInput={setFullChainAttention}
@@ -686,10 +668,31 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
             })
           }}
           onCancel={() => void controller.cancelFullChain()}
-          onDiscardSandbox={() => {
+          onImportResult={() => {
             const result = controller.fullChainResult()
-            if (result) void controller.discardSandbox(result.sandbox.id)
+            if (result) void controller.importFullChainRun(result.runId)
           }}
+        />
+      </div>
+
+      <div
+        class="processing-page-panel processing-tab-panel"
+        role="tabpanel"
+        hidden={view() !== 'history'}
+      >
+        <ProcessingRunHistoryWorkspace
+          runs={controller.fullChainRuns()}
+          loading={controller.fullChainRunsLoading()}
+          selected={controller.selectedFullChainRun()}
+          loadingRunId={controller.fullChainRuns().find(
+            (run) => controller.isLoadingFullChainRun(run.runId)
+          )?.runId}
+          importingRunId={controller.fullChainRuns().find(
+            (run) => controller.isImportingFullChainRun(run.runId)
+          )?.runId}
+          importResult={controller.fullChainImportResult()}
+          onOpen={controller.readFullChainRun}
+          onImport={controller.importFullChainRun}
         />
       </div>
 

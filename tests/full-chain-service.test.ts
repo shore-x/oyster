@@ -17,6 +17,10 @@ import {
   type KnowledgeFullChainBindings
 } from '../src/main/knowledge-processing/full-chain-service'
 import {
+  SqliteKnowledgeFullChainRunRepository,
+  type KnowledgeFullChainRunHistory
+} from '../src/main/knowledge-processing/full-chain-run-repository'
+import {
   KnowledgeProcessingService,
   type KnowledgeProcessingServiceOptions
 } from '../src/main/knowledge-processing/knowledge-processing-service'
@@ -252,7 +256,10 @@ interface Harness {
   manager: SqliteKnowledgeStoreManager
   discovery: ReturnType<typeof fakeDiscovery>
   bindings: KnowledgeFullChainBindings
-  createFullChain(factory?: KnowledgeAgentFactory): KnowledgeFullChainService
+  createFullChain(
+    factory?: KnowledgeAgentFactory,
+    history?: KnowledgeFullChainRunHistory
+  ): KnowledgeFullChainService
 }
 
 async function createHarness(
@@ -297,11 +304,12 @@ async function createHarness(
     manager,
     discovery,
     bindings,
-    createFullChain: (factory = normalAgentFactory()) => new KnowledgeFullChainService(
+    createFullChain: (factory = normalAgentFactory(), history) => new KnowledgeFullChainService(
       discovery.service,
       processing,
       manager,
-      factory
+      factory,
+      history
     )
   }
 }
@@ -334,6 +342,127 @@ afterEach(async () => {
 })
 
 describe('KnowledgeFullChainService', () => {
+  it('persists a completed immutable Run snapshot with its exact configuration', async () => {
+    const harness = await createHarness()
+    const records = new Map<string, Parameters<KnowledgeFullChainRunHistory['save']>[0]>()
+    const history: KnowledgeFullChainRunHistory = {
+      save: (record) => { records.set(record.runId, structuredClone(record)) },
+      list: () => [...records.values()].map((record) => ({
+        runId: record.runId,
+        completedAt: record.result.completedAt,
+        durationMs: record.result.durationMs,
+        sourceDisplayName: record.result.session.sourceDisplayName,
+        statementCount: record.result.knowledge.statements.length,
+        candidateCount: record.result.maintenance.statementCandidates.length,
+        preprocessorModel: record.result.preprocessing.execution.model,
+        maintainerModel: record.result.maintenance.execution.model
+      })),
+      read: (runId) => records.get(runId)
+    }
+    const fullChain = harness.createFullChain(undefined, history)
+
+    const result = await fullChain.run(runInput(harness.discovery.session), harness.bindings)
+
+    expect(fullChain.listRuns()).toHaveLength(1)
+    expect(fullChain.readRun(result.runId)).toMatchObject({
+      runId: result.runId,
+      attention: 'Preserve explicit preferences and rejections.',
+      configuration: {
+        preprocessor: harness.bindings.preprocessor,
+        maintainer: harness.bindings.maintainer
+      },
+      result: { runId: result.runId }
+    })
+  })
+
+  it('does not report success when the completed Run snapshot cannot be persisted', async () => {
+    const harness = await createHarness()
+    const history: KnowledgeFullChainRunHistory = {
+      save: () => { throw new Error('history unavailable') },
+      list: () => [],
+      read: () => undefined
+    }
+    const fullChain = harness.createFullChain(undefined, history)
+
+    await expect(fullChain.run(runInput(harness.discovery.session), harness.bindings))
+      .rejects.toThrow('history unavailable')
+    expect(await harness.manager.listSandboxes()).toEqual([])
+  })
+
+  it('imports a persisted result after Sandbox cleanup and allows clear-and-reimport by title', async () => {
+    const harness = await createHarness()
+    const records = new Map<string, Parameters<KnowledgeFullChainRunHistory['save']>[0]>()
+    const history: KnowledgeFullChainRunHistory = {
+      save: (record) => { records.set(record.runId, structuredClone(record)) },
+      list: () => [],
+      read: (runId) => records.get(runId)
+    }
+    harness.manager.production.commit({
+      runRef: 'production:existing',
+      statements: [{
+        title: 'Current summary preference',
+        content: 'An older understanding.'
+      }]
+    })
+    const fullChain = harness.createFullChain(undefined, history)
+    const result = await fullChain.run(runInput(harness.discovery.session), harness.bindings)
+    await fullChain.discardSandbox(result.sandbox.id)
+    expect(await harness.manager.listSandboxes()).toEqual([])
+
+    const firstImport = await fullChain.importRun(result.runId)
+    expect(firstImport.createdTitles).toEqual(['Current preservation rule'])
+    expect(firstImport.updatedTitles).toEqual(['Current summary preference'])
+    expect(harness.manager.production.getStatement('Current summary preference')?.content)
+      .toBe('The user explicitly prefers concise summaries.')
+
+    const secondImport = await fullChain.importRun(result.runId)
+    expect(secondImport.createdTitles).toEqual([])
+    expect(secondImport.updatedTitles).toEqual([
+      'Current summary preference',
+      'Current preservation rule'
+    ])
+    expect(secondImport.contribution.runRef).not.toBe(firstImport.contribution.runRef)
+
+    await fullChain.clearKnowledge()
+    expect(harness.manager.production.listStatements()).toEqual([])
+    expect(fullChain.readRun(result.runId)).toBeDefined()
+
+    const thirdImport = await fullChain.importRun(result.runId)
+    expect(thirdImport.createdTitles).toEqual([
+      'Current summary preference',
+      'Current preservation rule'
+    ])
+    expect(harness.manager.production.getStatement('Current summary preference')?.content)
+      .toBe('The user explicitly prefers concise summaries.')
+  })
+
+  it('imports a completed result after reopening the SQLite history repository', async () => {
+    const harness = await createHarness()
+    const directory = await mkdtemp(join(tmpdir(), 'oyster-full-chain-history-'))
+    temporaryDirectories.push(directory)
+    const databasePath = join(directory, 'history.sqlite')
+    let history = await SqliteKnowledgeFullChainRunRepository.open(databasePath)
+    const fullChain = harness.createFullChain(undefined, history)
+
+    const result = await fullChain.run(runInput(harness.discovery.session), harness.bindings)
+    await fullChain.discardSandbox(result.sandbox.id)
+    history.close()
+
+    history = await SqliteKnowledgeFullChainRunRepository.open(databasePath)
+    try {
+      const restartedService = harness.createFullChain(undefined, history)
+      const imported = await restartedService.importRun(result.runId)
+      expect(imported.createdTitles).toEqual([
+        'Current summary preference',
+        'Current preservation rule'
+      ])
+      expect(harness.manager.production.getStatement('Current preservation rule')?.content)
+        .toContain('[[Current summary preference]]')
+    } finally {
+      history.close()
+    }
+  })
+
   it('commits multiple Statements to the Sandbox, reads them back, and leaves production unchanged', async () => {
     const harness = await createHarness()
     const baseline = harness.manager.production.commit({

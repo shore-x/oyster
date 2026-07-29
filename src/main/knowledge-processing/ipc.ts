@@ -119,6 +119,24 @@ export function registerKnowledgeProcessingIpc(
       return fullChain.run(input, resolveFullChainBindings())
     }
   )
+  ipcMain.handle(knowledgeProcessingChannels.listFullChainRuns, (event) => {
+    assertTrustedSender(event)
+    return fullChain.listRuns()
+  })
+  ipcMain.handle(
+    knowledgeProcessingChannels.readFullChainRun,
+    (event, runId: string) => {
+      assertTrustedSender(event)
+      return fullChain.readRun(runId)
+    }
+  )
+  ipcMain.handle(
+    knowledgeProcessingChannels.importFullChainRun,
+    (event, runId: string) => {
+      assertTrustedSender(event)
+      return fullChain.importRun(runId)
+    }
+  )
   ipcMain.handle(knowledgeProcessingChannels.cancelFullChain, (event) => {
     assertTrustedSender(event)
     fullChain.cancel()

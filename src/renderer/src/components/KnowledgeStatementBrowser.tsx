@@ -1,4 +1,14 @@
-import { For, Show, createEffect, createSignal, untrack } from 'solid-js'
+import {
+  For,
+  Show,
+  createEffect,
+  createSignal,
+  createUniqueId,
+  onCleanup,
+  onMount,
+  untrack
+} from 'solid-js'
+import { Portal } from 'solid-js/web'
 import type {
   KnowledgeStatement,
   KnowledgeStatementSummary
@@ -13,6 +23,18 @@ interface StatementPreviewState {
   status: 'loading' | 'ready' | 'missing' | 'failed'
   statement?: KnowledgeStatement
 }
+
+interface StatementPreviewOverlay {
+  target: string
+  left: number
+  width: number
+  top?: number
+  bottom?: number
+}
+
+const PREVIEW_MAX_WIDTH = 310
+const PREVIEW_EDGE_GAP = 12
+const PREVIEW_ESTIMATED_HEIGHT = 170
 
 export interface KnowledgeStatementBrowserProps {
   items: KnowledgeStatementSummary[]
@@ -55,9 +77,11 @@ export function parseStatementContent(content: string): StatementContentPart[] {
 }
 
 export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps) {
+  const previewId = `knowledge-statement-preview-${createUniqueId()}`
   const [history, setHistory] = createSignal<string[]>([])
   const [historyIndex, setHistoryIndex] = createSignal(-1)
   const [previews, setPreviews] = createSignal<Record<string, StatementPreviewState>>({})
+  const [previewOverlay, setPreviewOverlay] = createSignal<StatementPreviewOverlay>()
   const previewLoads = new Map<string, Promise<KnowledgeStatement | undefined>>()
   let previousNavigationKey: string | undefined
 
@@ -79,7 +103,52 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
     }
   })
 
+  onMount(() => {
+    const dismissPreview = () => setPreviewOverlay(undefined)
+    window.addEventListener('resize', dismissPreview)
+    window.addEventListener('scroll', dismissPreview, true)
+    window.addEventListener('blur', dismissPreview)
+    document.addEventListener('pointerdown', dismissPreview)
+    document.addEventListener('visibilitychange', dismissPreview)
+    onCleanup(() => {
+      window.removeEventListener('resize', dismissPreview)
+      window.removeEventListener('scroll', dismissPreview, true)
+      window.removeEventListener('blur', dismissPreview)
+      document.removeEventListener('pointerdown', dismissPreview)
+      document.removeEventListener('visibilitychange', dismissPreview)
+    })
+  })
+
+  function showPreview(title: string, anchor: HTMLAnchorElement): void {
+    const bounds = anchor.getBoundingClientRect()
+    const width = Math.min(PREVIEW_MAX_WIDTH, window.innerWidth - PREVIEW_EDGE_GAP * 2)
+    const left = Math.max(
+      PREVIEW_EDGE_GAP,
+      Math.min(bounds.left - PREVIEW_EDGE_GAP, window.innerWidth - width - PREVIEW_EDGE_GAP)
+    )
+    const placeAbove = bounds.bottom + PREVIEW_ESTIMATED_HEIGHT > window.innerHeight
+      && bounds.top > PREVIEW_ESTIMATED_HEIGHT
+    setPreviewOverlay({
+      target: title,
+      left,
+      width,
+      top: placeAbove ? undefined : bounds.bottom + 8,
+      bottom: placeAbove ? window.innerHeight - bounds.top + 8 : undefined
+    })
+    void loadPreview(title)
+  }
+
+  function previewOverlayStyle(overlay: StatementPreviewOverlay): string {
+    return [
+      `left:${overlay.left}px`,
+      `width:${overlay.width}px`,
+      overlay.top === undefined ? undefined : `top:${overlay.top}px`,
+      overlay.bottom === undefined ? undefined : `bottom:${overlay.bottom}px`
+    ].filter(Boolean).join(';')
+  }
+
   function navigate(title: string): void {
+    setPreviewOverlay(undefined)
     if (history()[historyIndex()] === title) return
     const nextHistory = history().slice(0, historyIndex() + 1)
     nextHistory.push(title)
@@ -92,6 +161,7 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
     const nextIndex = historyIndex() + offset
     const title = history()[nextIndex]
     if (!title) return
+    setPreviewOverlay(undefined)
     setHistoryIndex(nextIndex)
     void props.onSelect(title)
   }
@@ -206,17 +276,17 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
                         <span class="knowledge-statement-link">
                           <a
                             href={`#statement-${encodeURIComponent(link().target)}`}
-                            onMouseEnter={() => void loadPreview(link().target)}
-                            onFocus={() => void loadPreview(link().target)}
+                            aria-describedby={previewOverlay()?.target === link().target ? previewId : undefined}
+                            onMouseEnter={(event) => showPreview(link().target, event.currentTarget)}
+                            onMouseLeave={() => setPreviewOverlay(undefined)}
+                            onFocus={(event) => showPreview(link().target, event.currentTarget)}
+                            onBlur={() => setPreviewOverlay(undefined)}
                             onClick={(event) => {
                               event.preventDefault()
+                              setPreviewOverlay(undefined)
                               void followLink(link().target)
                             }}
                           >{link().label}</a>
-                          <span class="knowledge-statement-link__preview" role="tooltip">
-                            <strong>{link().target}</strong>
-                            <span>{previewCopy(link().target)}</span>
-                          </span>
                         </span>
                       )}
                     </Show>
@@ -227,6 +297,21 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
           )}
         </Show>
       </div>
+      <Portal>
+        <Show when={previewOverlay()}>
+          {(overlay) => (
+            <div
+              id={previewId}
+              class="knowledge-statement-preview"
+              role="tooltip"
+              style={previewOverlayStyle(overlay())}
+            >
+              <strong>{overlay().target}</strong>
+              <span>{previewCopy(overlay().target)}</span>
+            </div>
+          )}
+        </Show>
+      </Portal>
     </div>
   )
 }

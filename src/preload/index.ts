@@ -59,6 +59,15 @@ const knowledgeProcessing: KnowledgeProcessingApi = {
     input
   ),
   runFullChain: (input) => ipcRenderer.invoke(knowledgeProcessingChannels.runFullChain, input),
+  listFullChainRuns: () => ipcRenderer.invoke(knowledgeProcessingChannels.listFullChainRuns),
+  readFullChainRun: (runId) => ipcRenderer.invoke(
+    knowledgeProcessingChannels.readFullChainRun,
+    runId
+  ),
+  importFullChainRun: (runId) => ipcRenderer.invoke(
+    knowledgeProcessingChannels.importFullChainRun,
+    runId
+  ),
   cancelFullChain: () => ipcRenderer.invoke(knowledgeProcessingChannels.cancelFullChain),
   discardSandbox: (sandboxId) => ipcRenderer.invoke(
     knowledgeProcessingChannels.discardSandbox,

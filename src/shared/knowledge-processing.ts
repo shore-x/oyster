@@ -257,6 +257,41 @@ export interface KnowledgeFullChainResult {
   completedAt: string
 }
 
+export interface KnowledgeFullChainStageSnapshot {
+  connectionId: string
+  modelId: string
+  instructions: string
+  reasoningEffort?: ReasoningEffort
+}
+
+/** Immutable local record of one successfully completed full-chain test. */
+export interface KnowledgeFullChainRunRecord {
+  formatVersion: 1
+  runId: string
+  attention?: string
+  configuration: {
+    preprocessor: KnowledgeFullChainStageSnapshot
+    maintainer: KnowledgeFullChainStageSnapshot
+  }
+  result: KnowledgeFullChainResult
+}
+
+/** Compact fields used to browse history without loading trace payloads. */
+export interface KnowledgeFullChainRunSummary {
+  runId: string
+  completedAt: string
+  durationMs: number
+  sessionTitle?: string
+  sourceDisplayName: string
+  projectPath?: string
+  startedAt?: string
+  endedAt?: string
+  statementCount: number
+  candidateCount: number
+  preprocessorModel: string
+  maintainerModel: string
+}
+
 export interface KnowledgeProcessingApi {
   getSnapshot(): Promise<KnowledgeProcessingSnapshot>
   saveStage(input: SaveProcessingStageInput): Promise<KnowledgeProcessingSnapshot>
@@ -270,6 +305,9 @@ export interface KnowledgeProcessingApi {
     input: RunKnowledgeMaintenanceInput
   ): Promise<KnowledgeMaintenanceResult | undefined>
   runFullChain(input: RunKnowledgeFullChainInput): Promise<KnowledgeFullChainResult | undefined>
+  listFullChainRuns(): Promise<KnowledgeFullChainRunSummary[]>
+  readFullChainRun(runId: string): Promise<KnowledgeFullChainRunRecord | undefined>
+  importFullChainRun(runId: string): Promise<KnowledgeCommitResult>
   cancelFullChain(): Promise<void>
   discardSandbox(sandboxId: string): Promise<void>
   cancelRun(stageId: ProcessingStageId): Promise<void>

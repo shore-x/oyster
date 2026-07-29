@@ -15,6 +15,19 @@ import type {
 } from '../src/shared/knowledge-processing'
 import { createKnowledgeProcessingController } from '../src/renderer/src/knowledge-processing-controller'
 
+interface Deferred<T> {
+  promise: Promise<T>
+  resolve(value: T): void
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
 const SNAPSHOT: KnowledgeProcessingSnapshot = {
   stages: [],
   connections: [],
@@ -170,6 +183,14 @@ function installApi(
     runSessionPreprocessor: async () => preprocessingResult(),
     runKnowledgeMaintenance: async () => maintenanceResult(),
     runFullChain: async () => fullChainResult(),
+    listFullChainRuns: async () => [],
+    readFullChainRun: async () => undefined,
+    importFullChainRun: async () => ({
+      contribution: { runRef: 'import:fixture', createdAt: '2026-07-26T00:00:02.000Z' },
+      statements: [],
+      createdTitles: [],
+      updatedTitles: []
+    }),
     cancelFullChain: async () => undefined,
     discardSandbox: async () => undefined,
     cancelRun: async () => undefined,
@@ -308,6 +329,118 @@ describe('knowledge processing controller', () => {
 
         expect(discardSandbox).toHaveBeenCalledWith('sandbox-1')
         expect(controller.fullChainResult()).toBeUndefined()
+      } finally {
+        dispose()
+      }
+    })
+  })
+
+  it('loads and opens persisted full-chain history', async () => {
+    const result = fullChainResult()
+    const record = {
+      formatVersion: 1 as const,
+      runId: result.runId,
+      configuration: {
+        preprocessor: { connectionId: 'model:fixture', modelId: 'fixture-model', instructions: 'Preprocess.' },
+        maintainer: { connectionId: 'model:fixture', modelId: 'fixture-model', instructions: 'Maintain.' }
+      },
+      result
+    }
+    const summary = {
+      runId: result.runId,
+      completedAt: result.completedAt,
+      durationMs: result.durationMs,
+      sessionTitle: result.session.title,
+      sourceDisplayName: result.session.sourceDisplayName,
+      statementCount: 0,
+      candidateCount: 1,
+      preprocessorModel: 'fixture-model',
+      maintainerModel: 'fixture-model'
+    }
+    installApi({
+      listFullChainRuns: async () => [summary],
+      readFullChainRun: async () => record
+    })
+
+    await createRoot(async (dispose) => {
+      try {
+        const controller = createKnowledgeProcessingController()
+        await controller.loadFullChainRuns()
+        expect(controller.fullChainRuns()).toEqual([summary])
+
+        await expect(controller.readFullChainRun(result.runId)).resolves.toEqual(record)
+        expect(controller.selectedFullChainRun()).toEqual(record)
+
+      } finally {
+        dispose()
+      }
+    })
+  })
+
+  it('keeps the last selected history record when reads finish out of order', async () => {
+    const firstResult = { ...fullChainResult(), runId: 'full-chain-first' }
+    const secondResult = { ...fullChainResult(), runId: 'full-chain-second' }
+    const firstRecord = {
+      formatVersion: 1 as const,
+      runId: firstResult.runId,
+      configuration: {
+        preprocessor: { connectionId: 'model:fixture', modelId: 'fixture-model', instructions: 'Preprocess.' },
+        maintainer: { connectionId: 'model:fixture', modelId: 'fixture-model', instructions: 'Maintain.' }
+      },
+      result: firstResult
+    }
+    const secondRecord = {
+      ...firstRecord,
+      runId: secondResult.runId,
+      result: secondResult
+    }
+    const firstRead = deferred<typeof firstRecord | undefined>()
+    const secondRead = deferred<typeof secondRecord | undefined>()
+    installApi({
+      readFullChainRun: (runId) => runId === firstRecord.runId
+        ? firstRead.promise
+        : secondRead.promise
+    })
+
+    await createRoot(async (dispose) => {
+      try {
+        const controller = createKnowledgeProcessingController()
+        const pendingFirst = controller.readFullChainRun(firstRecord.runId)
+        const pendingSecond = controller.readFullChainRun(secondRecord.runId)
+
+        secondRead.resolve(secondRecord)
+        await pendingSecond
+        firstRead.resolve(firstRecord)
+        await pendingFirst
+
+        expect(controller.selectedFullChainRun()?.runId).toBe(secondRecord.runId)
+        expect(controller.isLoadingFullChainRun(secondRecord.runId)).toBe(false)
+      } finally {
+        dispose()
+      }
+    })
+  })
+
+  it('imports any persisted full-chain result into production and reports the write', async () => {
+    const commit = {
+      contribution: { runRef: 'import:full-chain-1', createdAt: '2026-07-26T00:00:02.000Z' },
+      statements: [{ title: 'Candidate', content: 'Imported candidate content.' }],
+      createdTitles: ['Candidate'],
+      updatedTitles: []
+    }
+    const importFullChainRun = vi.fn(async () => commit)
+    installApi({ importFullChainRun })
+
+    await createRoot(async (dispose) => {
+      try {
+        const controller = createKnowledgeProcessingController()
+        await expect(controller.importFullChainRun('full-chain-1')).resolves.toEqual(commit)
+        expect(importFullChainRun).toHaveBeenCalledWith('full-chain-1')
+        expect(controller.fullChainImportResult()).toEqual({
+          runId: 'full-chain-1',
+          commit
+        })
+        expect(controller.isImportingFullChainRun('full-chain-1')).toBe(false)
       } finally {
         dispose()
       }
