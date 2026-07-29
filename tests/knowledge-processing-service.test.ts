@@ -1374,21 +1374,33 @@ describe('KnowledgeProcessingService', () => {
         status: 'completed',
         detail: 'stop=toolUse · tokens=10'
       })
-      input.onTrace?.({ type: 'tool_started', toolCallId: 'first', toolName: 'read_evidence' })
-      input.onTrace?.({ type: 'tool_started', toolCallId: 'second', toolName: 'read_evidence' })
+      input.onTrace?.({
+        type: 'tool_started',
+        toolCallId: 'first',
+        toolName: 'read_evidence',
+        input: '{"line":1}'
+      })
+      input.onTrace?.({
+        type: 'tool_started',
+        toolCallId: 'second',
+        toolName: 'read_evidence',
+        input: '{"line":2}'
+      })
       input.onTrace?.({
         type: 'tool_completed',
         toolCallId: 'first',
         toolName: 'read_evidence',
         status: 'completed',
-        detail: 'FIRST RESULT'
+        detail: 'FIRST RESULT',
+        output: 'first tool payload'
       })
       input.onTrace?.({
         type: 'tool_completed',
         toolCallId: 'second',
         toolName: 'read_evidence',
         status: 'completed',
-        detail: 'SECOND RESULT'
+        detail: 'SECOND RESULT',
+        output: 'second tool payload'
       })
       return {
         contribution: {
@@ -1409,11 +1421,22 @@ describe('KnowledgeProcessingService', () => {
       (event) => event.kind === 'tool_call'
     )
     expect(toolEvents).toMatchObject([
-      { id: 'tool-call-1', detail: 'FIRST RESULT', status: 'completed' },
-      { id: 'tool-call-2', detail: 'SECOND RESULT', status: 'completed' }
+      {
+        id: 'tool-call-1',
+        detail: 'FIRST RESULT',
+        input: '{"line":1}',
+        output: 'first tool payload',
+        status: 'completed'
+      },
+      {
+        id: 'tool-call-2',
+        detail: 'SECOND RESULT',
+        input: '{"line":2}',
+        output: 'second tool payload',
+        status: 'completed'
+      }
     ])
-    expect(JSON.stringify(toolEvents)).not.toContain('first')
-    expect(JSON.stringify(toolEvents)).not.toContain('second')
+    expect(JSON.stringify(toolEvents)).not.toContain('toolCallId')
   })
 
   it('protects each stage from concurrent runs and propagates cancellation', async () => {

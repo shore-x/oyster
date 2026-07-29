@@ -168,14 +168,58 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   })()`)
   const knowledgeImage = await window.webContents.capturePage()
   await writeFile(join(dirname(capturePath), 'knowledge.png'), knowledgeImage.toPNG())
-  const knowledgeBrowseSemantics = await window.webContents.executeJavaScript(`(() => {
+  const knowledgeBrowseSemantics = await window.webContents.executeJavaScript(`(async () => {
     const page = document.querySelector('[data-testid="page-knowledge"]')
+    const oysterItem = Array.from(page.querySelectorAll('.knowledge-browser__item')).find(
+      (item) => item.querySelector('strong')?.textContent?.trim() === 'Oyster 知识加工链路'
+    )
+    oysterItem?.click()
+    let deadline = Date.now() + 2_000
+    while (
+      page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim() !== 'Oyster 知识加工链路'
+      && Date.now() < deadline
+    ) await new Promise((resolve) => setTimeout(resolve, 25))
+    const link = page.querySelector('.knowledge-statement-link > a')
+    link?.dispatchEvent(new MouseEvent('mouseenter'))
+    deadline = Date.now() + 2_000
+    while (
+      page.querySelector('.knowledge-statement-link__preview > span')?.textContent?.includes('正在读取')
+      && Date.now() < deadline
+    ) await new Promise((resolve) => setTimeout(resolve, 25))
+    const linkLabel = link?.textContent?.trim()
+    const linkPreviewTitle = page.querySelector('.knowledge-statement-link__preview > strong')?.textContent?.trim()
+    const linkPreview = page.querySelector('.knowledge-statement-link__preview > span')?.textContent?.trim()
+    link?.click()
+    deadline = Date.now() + 2_000
+    while (
+      page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim() !== 'Knowledge Maintenance Agent'
+      && Date.now() < deadline
+    ) await new Promise((resolve) => setTimeout(resolve, 25))
+    const linkedTitle = page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
+    const backButton = page.querySelector('[data-testid="statement-nav-back"]')
+    const backAvailable = backButton?.disabled === false
+    backButton?.click()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const titleAfterBack = page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
+    const forwardButton = page.querySelector('[data-testid="statement-nav-forward"]')
+    const forwardAvailable = forwardButton?.disabled === false
+    forwardButton?.click()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const titleAfterForward = page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
     return {
       title: page.querySelector('h1')?.textContent?.trim(),
       statementCount: page.querySelectorAll('.knowledge-browser__item').length,
       selectedTitle: page.querySelector('.knowledge-browser__item[aria-selected="true"] strong')?.textContent?.trim(),
       detailTitle: page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim(),
       detailContent: page.querySelector('[data-testid="knowledge-statement-detail"]')?.textContent?.trim(),
+      linkLabel,
+      linkPreviewTitle,
+      linkPreview,
+      linkedTitle,
+      backAvailable,
+      titleAfterBack,
+      forwardAvailable,
+      titleAfterForward,
       searchPlaceholder: page.querySelector('[data-testid="knowledge-search"]')?.getAttribute('placeholder'),
       clearButtonDisabled: page.querySelector('[data-testid="clear-knowledge"]')?.disabled,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
@@ -276,14 +320,84 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       runningStateVisible ||= !page.querySelector('[data-testid="run-full-chain"]')
       const completed = Boolean(page.querySelector('[data-testid="full-chain-run-result"]'))
       const error = page.querySelector('.page-error')?.textContent?.trim()
-      if (completed || error) return {
-        completed,
-        runningStateVisible,
-        error,
-        candidateCount: page.querySelectorAll('.chain-test__candidates .statement-candidate').length,
-        resolutionCount: page.querySelectorAll('.chain-test__candidates .statement-candidate__resolution').length,
-        statementCount: page.querySelectorAll('.chain-test__knowledge aside button').length,
-        bodyText: page.innerText
+      if (completed || error) {
+        if (error) return { completed, runningStateVisible, error }
+        const overviewHasTraceExplorer = Boolean(page.querySelector('[data-testid="processing-trace-explorer"]'))
+        const summaryStatementCount = page.querySelector('[data-testid="full-chain-result-statement-count"]')?.textContent?.trim()
+        const summaryCandidateCount = page.querySelector('[data-testid="full-chain-result-candidate-count"]')?.textContent?.trim()
+        page.querySelector('[data-testid="open-full-chain-activity"]')?.click()
+        await new Promise((resolve) => requestAnimationFrame(resolve))
+        const traceExplorerExists = Boolean(page.querySelector('[data-testid="processing-trace-explorer"]'))
+        const traceEventCount = page.querySelectorAll('.trace-explorer-event').length
+        page.querySelector('[data-testid="trace-explorer-event-maintenance-model-call-1"]')?.click()
+        await new Promise((resolve) => requestAnimationFrame(resolve))
+        const modelOutput = page.querySelector('[data-testid="trace-explorer-event-output"]')?.textContent
+        page.querySelector('[data-testid="trace-explorer-event-maintenance-tool-call-1"]')?.click()
+        await new Promise((resolve) => requestAnimationFrame(resolve))
+        const toolInput = page.querySelector('[data-testid="trace-explorer-event-input"]')?.textContent
+        const toolOutput = page.querySelector('[data-testid="trace-explorer-event-output"]')?.textContent
+        page.querySelector('[data-testid="full-chain-detail-back"]')?.click()
+        await new Promise((resolve) => requestAnimationFrame(resolve))
+        page.querySelector('[data-testid="open-full-chain-result"]')?.click()
+        await new Promise((resolve) => requestAnimationFrame(resolve))
+        const resultDetailExists = Boolean(page.querySelector('[data-testid="full-chain-result-detail"]'))
+        const candidateCount = page.querySelectorAll('.chain-test__candidates .statement-candidate').length
+        const resolutionCount = page.querySelectorAll('.chain-test__candidates .statement-candidate__resolution').length
+        const statementCount = page.querySelectorAll('.knowledge-browser--sandbox .knowledge-browser__item').length
+        const sandboxLink = page.querySelector('.knowledge-browser--sandbox .knowledge-statement-link > a')
+        sandboxLink?.dispatchEvent(new MouseEvent('mouseenter'))
+        let linkDeadline = Date.now() + 2_000
+        while (
+          page.querySelector('.knowledge-browser--sandbox .knowledge-statement-link__preview > span')?.textContent?.includes('正在读取')
+          && Date.now() < linkDeadline
+        ) await new Promise((resolve) => setTimeout(resolve, 25))
+        const sandboxLinkLabel = sandboxLink?.textContent?.trim()
+        const sandboxLinkPreview = page.querySelector('.knowledge-browser--sandbox .knowledge-statement-link__preview')?.textContent?.trim()
+        sandboxLink?.click()
+        linkDeadline = Date.now() + 2_000
+        while (
+          page.querySelector('.knowledge-browser--sandbox [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim() !== 'Knowledge Maintenance Agent'
+          && Date.now() < linkDeadline
+        ) await new Promise((resolve) => setTimeout(resolve, 25))
+        const sandboxLinkedTitle = page.querySelector('.knowledge-browser--sandbox [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
+        const sandboxBack = page.querySelector('.knowledge-browser--sandbox [data-testid="statement-nav-back"]')
+        const sandboxBackAvailable = sandboxBack?.disabled === false
+        sandboxBack?.click()
+        await new Promise((resolve) => requestAnimationFrame(resolve))
+        const sandboxTitleAfterBack = page.querySelector('.knowledge-browser--sandbox [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
+        const sandboxForward = page.querySelector('.knowledge-browser--sandbox [data-testid="statement-nav-forward"]')
+        const sandboxForwardAvailable = sandboxForward?.disabled === false
+        sandboxForward?.click()
+        await new Promise((resolve) => requestAnimationFrame(resolve))
+        const sandboxTitleAfterForward = page.querySelector('.knowledge-browser--sandbox [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
+        const bodyText = page.innerText
+        page.querySelector('[data-testid="full-chain-result-back"]')?.click()
+        await new Promise((resolve) => requestAnimationFrame(resolve))
+        return {
+          completed,
+          runningStateVisible,
+          overviewHasTraceExplorer,
+          summaryStatementCount,
+          summaryCandidateCount,
+          traceExplorerExists,
+          traceEventCount,
+          modelOutput,
+          toolInput,
+          toolOutput,
+          resultDetailExists,
+          candidateCount,
+          resolutionCount,
+          statementCount,
+          sandboxLinkLabel,
+          sandboxLinkPreview,
+          sandboxLinkedTitle,
+          sandboxBackAvailable,
+          sandboxTitleAfterBack,
+          sandboxForwardAvailable,
+          sandboxTitleAfterForward,
+          returnedToOverview: Boolean(page.querySelector('[data-testid="full-chain-session-select"]')),
+          bodyText
+        }
       }
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
@@ -328,7 +442,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       tabButtonCount: page.querySelectorAll('button[role="tab"]').length,
       sourceSwitchButtonCount: page.querySelectorAll('.processing-input-source button').length,
       statementButtonCount: page.querySelectorAll('.sandbox-statement').length,
-      chainStatementButtonCount: page.querySelectorAll('.chain-test__knowledge aside button').length,
+      chainStatementButtonCount: page.querySelectorAll('.knowledge-browser--sandbox .knowledge-browser__item').length,
       buttonIconCount: buttons.filter((button) => button.querySelector('.ui-button__icon .ui-icon')?.childElementCount > 0).length,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
       bodyText: page.innerText
@@ -535,7 +649,7 @@ app.whenReady().then(async () => {
       statements: [
         {
           title: 'Oyster 知识加工链路',
-          content: '将外部 Agent 对话中的候选概念交给 [[Knowledge Maintenance Agent]] 判断，并在隔离空间中验证写入结果。'
+          content: '将外部 Agent 对话中的候选概念交给 [[Knowledge Maintenance Agent|知识维护 Agent]] 判断，并在隔离空间中验证写入结果。'
         },
         {
           title: 'Knowledge Maintenance Agent',

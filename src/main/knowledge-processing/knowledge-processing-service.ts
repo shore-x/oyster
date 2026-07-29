@@ -61,6 +61,7 @@ const MAX_SOURCE_REF_CHARACTERS = 512
 const MAX_DEBUG_TRACE_ERROR_CHARACTERS = 2 * 1_024
 const MAX_DEBUG_TRACE_DETAIL_CHARACTERS = 1 * 1_024
 const MAX_DEBUG_TRACE_PREPROCESSOR_OUTPUT_CHARACTERS = 8 * 1_024
+const MAX_DEBUG_TRACE_EVENT_PAYLOAD_CHARACTERS = 64 * 1_024
 const PREPROCESSOR_OUTPUT_TOKENS = 4_096
 const PREPROCESSOR_CONTEXT_SAFETY_TOKENS = 2_048
 const UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS = 32_768
@@ -116,6 +117,23 @@ function errorText(error: unknown): string {
 
 function boundedDebugText(value: string, maximum: number): string {
   return value.length <= maximum ? value : `${value.slice(0, maximum - 1)}…`
+}
+
+function setBoundedEventPayload(
+  target: {
+    input?: string
+    inputTruncated?: boolean
+    output?: string
+    outputTruncated?: boolean
+  },
+  field: 'input' | 'output',
+  value?: string
+): void {
+  if (value === undefined) return
+  target[field] = boundedDebugText(value, MAX_DEBUG_TRACE_EVENT_PAYLOAD_CHARACTERS)
+  if (value.length > MAX_DEBUG_TRACE_EVENT_PAYLOAD_CHARACTERS) {
+    target[field === 'input' ? 'inputTruncated' : 'outputTruncated'] = true
+  }
 }
 
 function debugError(error: unknown): string {
@@ -906,6 +924,7 @@ export class KnowledgeProcessingService {
         if (event.detail) {
           modelEvent.detail = boundedDebugText(event.detail, MAX_DEBUG_TRACE_DETAIL_CHARACTERS)
         }
+        setBoundedEventPayload(modelEvent, 'output', event.output)
         return
       }
       if (event.type === 'workspace_status') {
@@ -935,6 +954,11 @@ export class KnowledgeProcessingService {
           startedAt: new Date().toISOString(),
           detail: traceToolName
         })
+        setBoundedEventPayload(
+          maintenance.events[maintenance.events.length - 1]!,
+          'input',
+          event.input
+        )
         return
       }
       const toolTraceIds = this.maintenanceToolTraceIds.get(context.origin)
@@ -952,6 +976,7 @@ export class KnowledgeProcessingService {
       if (event.detail) {
         toolEvent.detail = boundedDebugText(event.detail, MAX_DEBUG_TRACE_DETAIL_CHARACTERS)
       }
+      setBoundedEventPayload(toolEvent, 'output', event.output)
     })
   }
 

@@ -1,5 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
 import type { AvailableSessionSummary } from '../../../shared/discovery'
+import type { KnowledgeStatement } from '../../../shared/knowledge'
 import type {
   KnowledgeProcessingDebugTrace,
   ObservationPreprocessingProgress,
@@ -14,8 +15,9 @@ import {
   reasoningLabel,
   selectedStageModel
 } from '../processing-configuration'
-import { Button, Icon } from '../ui'
-import { ProcessingDebugTracePanel } from './ProcessingDebugTracePanel'
+import { Button } from '../ui'
+import { ProcessingTraceExplorer } from './ProcessingDebugTracePanel'
+import { KnowledgeStatementBrowser, statementPreview } from './KnowledgeStatementBrowser'
 import { SessionMetadata, sessionOptionLabel } from './SessionMetadata'
 import { StatementCandidateList } from './StatementCandidateList'
 
@@ -28,18 +30,13 @@ export interface FullChainStepView {
   state: FullChainStepState
 }
 
-export interface SandboxStatementView {
-  title: string
-  content: string
-}
-
 export interface FullChainResultView {
   completedAt?: string
   durationMs?: number
   statementCandidates: StatementCandidateView[]
   debugTrace: KnowledgeProcessingDebugTrace
   steps: FullChainStepView[]
-  statements: SandboxStatementView[]
+  statements: KnowledgeStatement[]
 }
 
 export interface FullChainWorkspaceProps {
@@ -69,6 +66,11 @@ function formatTime(value?: string): string {
   if (!value) return '—'
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN')
+}
+
+function formatDuration(durationMs: number): string {
+  if (durationMs < 1_000) return `${durationMs} ms`
+  return `${(durationMs / 1_000).toFixed(1)} s`
 }
 
 function stageSummary(stage?: ProcessingStageView, connection?: ProcessingConnectionView): {
@@ -118,6 +120,7 @@ function progressText(
 }
 
 export function FullChainWorkspace(props: FullChainWorkspaceProps) {
+  const [page, setPage] = createSignal<'overview' | 'activity' | 'result'>('overview')
   const [selectedStatementTitle, setSelectedStatementTitle] = createSignal<string>()
   const selectedSession = createMemo(() => props.sessions.find(
     (session) => session.artifactId === props.selectedSessionId
@@ -125,6 +128,10 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
   const selectedStatement = createMemo(() => props.result?.statements.find(
     (statement) => statement.title === selectedStatementTitle()
   ) || props.result?.statements[0])
+  const statementSummaries = createMemo(() => props.result?.statements.map((statement) => ({
+    title: statement.title,
+    preview: statementPreview(statement.content, 150)
+  })) ?? [])
   const preprocessor = createMemo(() => stageSummary(props.preprocessor, props.preprocessorConnection))
   const maintainer = createMemo(() => stageSummary(props.maintainer, props.maintainerConnection))
   const disabledReason = createMemo(() => {
@@ -135,9 +142,19 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
     return undefined
   })
   const visibleDebugTrace = createMemo(() => props.debugTrace ?? props.result?.debugTrace)
+  const resolvedCandidateCount = createMemo(() => props.result?.statementCandidates.filter(
+    (candidate) => candidate.status === 'resolved'
+  ).length ?? 0)
+  const completedPreprocessingCalls = createMemo(() => visibleDebugTrace()?.preprocessing?.calls.filter(
+    (call) => call.status === 'completed'
+  ).length ?? 0)
 
   createEffect(() => {
     setSelectedStatementTitle(props.result?.statements[0]?.title)
+  })
+
+  createEffect(() => {
+    if (page() === 'result' && !props.result) setPage('overview')
   })
 
   return (
@@ -147,111 +164,180 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
         <p>使用当前知识库的隔离副本运行；测试产生的 Statement 不会写回知识库。</p>
       </div>
 
-      <div class="chain-test__workspace">
-        <section class="chain-test__setup" aria-label="链路测试输入">
-          <div class="chain-test__section-heading">
-            <div>
-              <h2>运行设置</h2>
-              <p>选择输入和关注点，然后启动两阶段测试。</p>
+      <Show when={page() === 'overview'}>
+        <div class="chain-test__workspace">
+          <section class="chain-test__setup" aria-label="链路测试输入">
+            <div class="chain-test__section-heading">
+              <div>
+                <h2>运行设置</h2>
+                <p>选择输入和关注点，然后启动两阶段测试。</p>
+              </div>
             </div>
-          </div>
 
-          <label class="ai-field ai-field--wide">
-            <span>Session</span>
-            <select
-              data-testid="full-chain-session-select"
-              value={props.selectedSessionId || ''}
-              disabled={props.sessionsLoading || props.locked || props.sessions.length === 0}
-              onChange={(event) => props.onSelectSession(event.currentTarget.value)}
-            >
-              <option value="">
-                {props.sessionsLoading ? '正在读取 Session…' : props.sessions.length ? '选择一个 Session' : '暂无可用 Session'}
-              </option>
-              <For each={props.sessions}>{(session) => (
-                <option value={session.artifactId}>{sessionOptionLabel(session)}</option>
-              )}</For>
-            </select>
-          </label>
+            <label class="ai-field ai-field--wide">
+              <span>Session</span>
+              <select
+                data-testid="full-chain-session-select"
+                value={props.selectedSessionId || ''}
+                disabled={props.sessionsLoading || props.locked || props.sessions.length === 0}
+                onChange={(event) => props.onSelectSession(event.currentTarget.value)}
+              >
+                <option value="">
+                  {props.sessionsLoading ? '正在读取 Session…' : props.sessions.length ? '选择一个 Session' : '暂无可用 Session'}
+                </option>
+                <For each={props.sessions}>{(session) => (
+                  <option value={session.artifactId}>{sessionOptionLabel(session)}</option>
+                )}</For>
+              </select>
+            </label>
 
-          <Show when={selectedSession()}>
-            {(session) => (
-              <SessionMetadata
-                session={session()}
-                class="chain-test__session"
-                testId="full-chain-session-meta"
+            <Show when={selectedSession()}>
+              {(session) => (
+                <SessionMetadata
+                  session={session()}
+                  class="chain-test__session"
+                  testId="full-chain-session-meta"
+                />
+              )}
+            </Show>
+
+            <label class="ai-field ai-field--wide">
+              <span>Attention（可选）</span>
+              <input
+                data-testid="full-chain-attention-input"
+                value={props.attention}
+                disabled={props.locked}
+                placeholder="例如：重点关注用户明确否定过的设计选择"
+                onInput={(event) => props.onAttentionInput(event.currentTarget.value)}
               />
-            )}
-          </Show>
+            </label>
 
-          <label class="ai-field ai-field--wide">
-            <span>Attention（可选）</span>
-            <input
-              data-testid="full-chain-attention-input"
-              value={props.attention}
-              disabled={props.locked}
-              placeholder="例如：重点关注用户明确否定过的设计选择"
-              onInput={(event) => props.onAttentionInput(event.currentTarget.value)}
-            />
-          </label>
+            <div class="chain-test__models" aria-label="链路模型配置">
+              <div><span>预处理</span><strong>{preprocessor().detail}</strong></div>
+              <div><span>知识维护</span><strong>{maintainer().detail}</strong></div>
+              <p>模型与提示词可在“高级调试”中查看和修改。</p>
+            </div>
 
-          <div class="chain-test__models" aria-label="链路模型配置">
-            <div><span>预处理</span><strong>{preprocessor().detail}</strong></div>
-            <div><span>知识维护</span><strong>{maintainer().detail}</strong></div>
-            <p>模型与提示词可在“高级调试”中查看和修改。</p>
-          </div>
+            <div class="chain-test__actions">
+              <p data-testid="full-chain-disabled-reason">
+                {props.running
+                  ? progressText(props.preprocessingProgress, props.maintenanceRunning)
+                  : disabledReason() || '输入和模型已经准备完成。'}
+              </p>
+              <Show
+                when={props.running}
+                fallback={(
+                  <Button
+                    variant="primary"
+                    size="wide"
+                    icon="play"
+                    data-testid="run-full-chain"
+                    disabled={Boolean(disabledReason())}
+                    onClick={props.onRun}
+                  >运行链路测试</Button>
+                )}
+              >
+                <Button variant="danger" size="wide" icon="stop" onClick={props.onCancel}>停止测试</Button>
+              </Show>
+            </div>
+          </section>
 
-          <div class="chain-test__actions">
-            <p data-testid="full-chain-disabled-reason">
-              {props.running
-                ? progressText(props.preprocessingProgress, props.maintenanceRunning)
-                : disabledReason() || '输入和模型已经准备完成。'}
-            </p>
+          <section class="chain-test__activity" aria-label="链路测试过程">
+            <div class="chain-test__section-heading">
+              <div>
+                <h2>运行概览</h2>
+                <p>主页面只保留阶段状态；逐次调用在运行详情中查看。</p>
+              </div>
+              <Show when={visibleDebugTrace()}>
+                {(trace) => <span class={`chain-test__status chain-test__status--${trace().status}`}>{trace().status === 'running' ? '运行中' : trace().status === 'completed' ? '已完成' : trace().status === 'cancelled' ? '已取消' : '失败'}</span>}
+              </Show>
+            </div>
             <Show
-              when={props.running}
-              fallback={(
+              when={visibleDebugTrace()}
+              fallback={<div class="chain-test__empty">运行开始后，这里会显示两个阶段的实时进度。</div>}
+            >
+              {(trace) => (
+                <>
+                  <div class="chain-test__activity-summary" data-testid="full-chain-activity-summary">
+                    <div>
+                      <span class="processing-debug__marker" aria-hidden="true" />
+                      <div><strong>观察预处理</strong><p>{trace().preprocessing ? `${trace().preprocessing!.completedSegments}${trace().preprocessing!.totalSegments ? ` / ${trace().preprocessing!.totalSegments}` : ''} 个分段 · ${completedPreprocessingCalls()} / ${trace().preprocessing!.calls.length} 次调用完成` : '等待开始'}</p></div>
+                    </div>
+                    <div>
+                      <span class="processing-debug__marker" aria-hidden="true" />
+                      <div><strong>知识维护</strong><p>{trace().maintenance ? `${trace().maintenance!.modelCallCount} 次模型 · ${trace().maintenance!.toolCallCount} 次工具 · ${trace().maintenance!.workspace?.candidates.open ?? 0} 个候选待处理` : '等待预处理完成'}</p></div>
+                    </div>
+                  </div>
+                  <Show when={trace().error}>{(error) => <p class="processing-debug__error">{error()}</p>}</Show>
+                  <div class="chain-test__activity-actions">
+                    <Button
+                      variant="secondary"
+                      icon="link"
+                      data-testid="open-full-chain-activity"
+                      onClick={() => setPage('activity')}
+                    >查看运行详情</Button>
+                  </div>
+                </>
+              )}
+            </Show>
+          </section>
+        </div>
+
+        <Show when={!props.running && props.result ? props.result : undefined}>
+          {(result) => (
+            <section class="chain-test__result-summary" data-testid="full-chain-run-result" aria-label="Sandbox 测试结果概览">
+              <div class="chain-test__result-heading">
+                <div>
+                  <h2>Sandbox 结果</h2>
+                  <p>隔离知识已经生成；正文与候选裁决放在结果详情中。</p>
+                </div>
+                <span>{result().completedAt ? `完成于 ${formatTime(result().completedAt)}` : ''}</span>
+              </div>
+              <div class="chain-test__result-metrics">
+                <div><strong data-testid="full-chain-result-statement-count">{result().statements.length}</strong><span>Statements</span></div>
+                <div><strong data-testid="full-chain-result-candidate-count">{result().statementCandidates.length}</strong><span>候选</span></div>
+                <div><strong>{resolvedCandidateCount()}</strong><span>已裁决</span></div>
+                <div><strong>{result().durationMs === undefined ? '—' : formatDuration(result().durationMs!)}</strong><span>耗时</span></div>
+              </div>
+              <Show when={result().statements.length}>
+                <div class="chain-test__result-titles">
+                  <For each={result().statements.slice(0, 5)}>{(statement) => <span>{statement.title}</span>}</For>
+                  <Show when={result().statements.length > 5}><span>+{result().statements.length - 5}</span></Show>
+                </div>
+              </Show>
+              <div class="chain-test__result-actions">
                 <Button
                   variant="primary"
-                  size="wide"
-                  icon="play"
-                  data-testid="run-full-chain"
-                  disabled={Boolean(disabledReason())}
-                  onClick={props.onRun}
-                >运行链路测试</Button>
-              )}
-            >
-              <Button variant="danger" size="wide" icon="stop" onClick={props.onCancel}>停止测试</Button>
-            </Show>
-          </div>
-        </section>
+                  icon="layers"
+                  data-testid="open-full-chain-result"
+                  onClick={() => setPage('result')}
+                >查看结果详情</Button>
+              </div>
+            </section>
+          )}
+        </Show>
+      </Show>
 
-        <section class="chain-test__activity" aria-label="链路测试过程">
-          <div class="chain-test__section-heading">
-            <div>
-              <h2>运行过程</h2>
-              <p>查看阶段进度、模型调用和 Agent 工具活动。</p>
-            </div>
-            <Show when={visibleDebugTrace()}>
-              {(trace) => <span class={`chain-test__status chain-test__status--${trace().status}`}>{trace().status === 'running' ? '运行中' : trace().status === 'completed' ? '已完成' : trace().status === 'cancelled' ? '已取消' : '失败'}</span>}
-            </Show>
+      <Show when={page() === 'activity'}>
+        <section class="chain-test__detail-page" data-testid="full-chain-activity-detail">
+          <div class="chain-test__detail-header">
+            <Button variant="ghost" icon="back" data-testid="full-chain-detail-back" onClick={() => setPage('overview')}>返回概览</Button>
+            <div><h2>运行详情</h2><p>选择一次模型或工具调用，检查该事件的输出与结果。</p></div>
           </div>
-          <Show
-            when={visibleDebugTrace()}
-            fallback={<div class="chain-test__empty">运行开始后，这里会显示两个阶段的实时进度。</div>}
-          >
-            {(trace) => <ProcessingDebugTracePanel trace={trace()} title="链路活动" />}
+          <p class="chain-test__detail-disclosure">模型输出和工具结果可能包含原始观察材料；这里只保存有界的本地调试副本。</p>
+          <Show when={visibleDebugTrace()} fallback={<div class="chain-test__empty">当前没有可查看的运行轨迹。</div>}>
+            {(trace) => <ProcessingTraceExplorer trace={trace()} />}
           </Show>
         </section>
-      </div>
+      </Show>
 
-      <Show when={!props.running && props.result ? props.result : undefined}>
+      <Show when={page() === 'result' && props.result ? props.result : undefined}>
         {(result) => (
-          <section class="chain-test__result" data-testid="full-chain-run-result" aria-label="Sandbox 测试结果">
-            <div class="chain-test__result-heading">
-              <div>
-                <h2>Sandbox 结果</h2>
-                <p>这是本次测试生成的隔离知识，不代表当前知识库。</p>
-              </div>
-              <div>
+          <section class="chain-test__detail-page chain-test__result" data-testid="full-chain-result-detail" aria-label="Sandbox 测试结果详情">
+            <div class="chain-test__detail-header">
+              <Button variant="ghost" icon="back" data-testid="full-chain-result-back" onClick={() => setPage('overview')}>返回概览</Button>
+              <div><h2>Sandbox 结果详情</h2><p>这是测试产生的隔离知识，不代表当前知识库。</p></div>
+              <div class="chain-test__detail-actions">
                 <span>{result().completedAt ? `完成于 ${formatTime(result().completedAt)}` : ''}</span>
                 <Button
                   variant="ghost"
@@ -273,43 +359,23 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
               )}</For>
             </div>
 
-            <div class="chain-test__knowledge">
-              <aside aria-label="Sandbox Knowledge Statements">
-                <div><span>生成的 Statements</span><strong>{result().statements.length}</strong></div>
-                <Show
-                  when={result().statements.length}
-                  fallback={<p>本次测试没有生成 Knowledge Statement。</p>}
-                >
-                  <For each={result().statements}>{(statement) => (
-                    <button
-                      type="button"
-                      aria-selected={selectedStatement()?.title === statement.title}
-                      onClick={() => setSelectedStatementTitle(statement.title)}
-                    >{statement.title}</button>
-                  )}</For>
-                </Show>
-              </aside>
-              <div>
-                <Show
-                  when={selectedStatement()}
-                  fallback={<div class="chain-test__empty">选择一条 Statement 查看内容。</div>}
-                >
-                  {(statement) => (
-                    <article>
-                      <h3>{statement().title}</h3>
-                      <div>{statement().content}</div>
-                    </article>
-                  )}
-                </Show>
-              </div>
+            <div class="knowledge-browser knowledge-browser--sandbox">
+              <KnowledgeStatementBrowser
+                items={statementSummaries()}
+                total={result().statements.length}
+                selectedTitle={selectedStatement()?.title}
+                selectedStatement={selectedStatement()}
+                listLabel="Sandbox Statements"
+                emptyListText="本次测试没有生成 Knowledge Statement。"
+                navigationKey={result().debugTrace.startedAt}
+                onSelect={setSelectedStatementTitle}
+                onRead={async (title) => result().statements.find((statement) => statement.title === title)}
+              />
             </div>
 
-            <details class="chain-test__candidates">
-              <summary>查看候选裁决（{result().statementCandidates.length}）</summary>
-              <StatementCandidateList
-                candidates={result().statementCandidates}
-                emptyText="本次测试没有发现需要裁决的 Statement 候选。"
-              />
+            <details class="chain-test__candidates" open>
+              <summary>候选裁决（{result().statementCandidates.length}）</summary>
+              <StatementCandidateList candidates={result().statementCandidates} emptyText="本次测试没有发现需要裁决的 Statement 候选。" />
             </details>
           </section>
         )}

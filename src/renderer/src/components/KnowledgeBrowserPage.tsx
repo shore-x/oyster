@@ -1,6 +1,7 @@
-import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js'
+import { Show, createEffect, createSignal, onCleanup } from 'solid-js'
 import { createKnowledgeController } from '../knowledge-controller'
 import { Button, Icon } from '../ui'
+import { KnowledgeStatementBrowser } from './KnowledgeStatementBrowser'
 
 export function KnowledgeBrowserPage(props: { active: boolean; onKnowledgeCleared(): void }) {
   const controller = createKnowledgeController()
@@ -69,56 +70,23 @@ export function KnowledgeBrowserPage(props: { active: boolean; onKnowledgeCleare
           <span>{controller.loading() ? '正在读取…' : `${controller.result().total} 条结果`}</span>
         </div>
 
-        <div class="knowledge-browser__body">
-          <aside class="knowledge-browser__list" aria-label="Knowledge Statements">
-            <Show
-              when={controller.result().statements.length}
-              fallback={(
-                <div class="knowledge-browser__empty-list">
-                  {controller.loading()
-                    ? '正在读取知识…'
-                    : query().trim()
-                      ? '没有匹配的知识。'
-                      : '知识库目前为空。知识写入后会显示在这里。'}
-                </div>
-              )}
-            >
-              <For each={controller.result().statements}>{(item) => (
-                <button
-                  type="button"
-                  class="knowledge-browser__item"
-                  aria-selected={controller.selectedTitle() === item.title}
-                  onClick={() => void controller.select(item.title)}
-                >
-                  <strong>{item.title}</strong>
-                  <span>{item.preview}</span>
-                </button>
-              )}</For>
-              <Show when={controller.result().nextOffset !== undefined}>
-                <button
-                  type="button"
-                  class="knowledge-browser__more"
-                  disabled={controller.loadingMore()}
-                  onClick={() => void controller.browse(query(), true)}
-                >{controller.loadingMore() ? '正在加载…' : '加载更多'}</button>
-              </Show>
-            </Show>
-          </aside>
-
-          <div class="knowledge-browser__detail">
-            <Show
-              when={controller.statement()}
-              fallback={<div class="knowledge-browser__empty-detail">选择一条知识查看完整内容。</div>}
-            >
-              {(statement) => (
-                <article data-testid="knowledge-statement-detail">
-                  <h2>{statement().title}</h2>
-                  <div class="knowledge-browser__content">{statement().content}</div>
-                </article>
-              )}
-            </Show>
-          </div>
-        </div>
+        <KnowledgeStatementBrowser
+          items={controller.result().statements}
+          total={controller.result().total}
+          selectedTitle={controller.selectedTitle()}
+          selectedStatement={controller.statement()}
+          emptyListText={controller.loading()
+            ? '正在读取知识…'
+            : query().trim()
+              ? '没有匹配的知识。'
+              : '知识库目前为空。知识写入后会显示在这里。'}
+          navigationKey={query()}
+          loadingMore={controller.loadingMore()}
+          hasMore={controller.result().nextOffset !== undefined}
+          onSelect={(title) => controller.select(title)}
+          onRead={(title) => window.oyster.knowledge.read(title)}
+          onLoadMore={() => void controller.browse(query(), true)}
+        />
       </section>
 
       <Show when={clearDialogOpen()}>

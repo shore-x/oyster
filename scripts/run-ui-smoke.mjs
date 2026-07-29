@@ -52,6 +52,22 @@ if (!knowledge.browse.selectedTitle || knowledge.browse.detailTitle !== knowledg
 if (!knowledge.browse.detailContent?.includes('Knowledge Maintenance Agent')) {
   throw new Error('Knowledge browser did not render the current Statement body')
 }
+if (
+  knowledge.browse.linkLabel !== '知识维护 Agent'
+  || knowledge.browse.linkPreviewTitle !== 'Knowledge Maintenance Agent'
+  || !knowledge.browse.linkPreview?.includes('读取候选清单')
+) {
+  throw new Error('Knowledge browser did not render the wikilink alias and hover preview')
+}
+if (
+  knowledge.browse.linkedTitle !== 'Knowledge Maintenance Agent'
+  || !knowledge.browse.backAvailable
+  || knowledge.browse.titleAfterBack !== 'Oyster 知识加工链路'
+  || !knowledge.browse.forwardAvailable
+  || knowledge.browse.titleAfterForward !== 'Knowledge Maintenance Agent'
+) {
+  throw new Error('Knowledge browser wikilink history cannot navigate backward and forward')
+}
 if (knowledge.browse.searchPlaceholder !== '搜索标题或正文') {
   throw new Error('Knowledge browser search is missing')
 }
@@ -158,11 +174,44 @@ if (!processing.fullChain.bodyText.includes('不会写回知识库')) {
 if (!processing.fullChainRun?.runningStateVisible || !processing.fullChainRun?.completed) {
   throw new Error(`Full-chain run did not complete without a native confirmation dialog: ${processing.fullChainRun?.error || 'unknown error'}`)
 }
+if (processing.fullChainRun.overviewHasTraceExplorer) {
+  throw new Error('The full-chain overview still renders the unbounded detailed trace')
+}
+if (processing.fullChainRun.summaryStatementCount !== '2' || processing.fullChainRun.summaryCandidateCount !== '1') {
+  throw new Error('The full-chain overview does not expose compact result counts')
+}
+if (!processing.fullChainRun.traceExplorerExists || processing.fullChainRun.traceEventCount < 4) {
+  throw new Error('The secondary run-detail page does not expose the complete event list')
+}
+if (!processing.fullChainRun.modelOutput?.includes('Tool call · read_evidence')) {
+  throw new Error('The run-detail page does not expose each model call output')
+}
+if (!processing.fullChainRun.toolInput?.includes('"line":1') || !processing.fullChainRun.toolOutput?.includes('Fixture raw evidence')) {
+  throw new Error('The run-detail page does not expose tool arguments and results')
+}
+if (!processing.fullChainRun.resultDetailExists || !processing.fullChainRun.returnedToOverview) {
+  throw new Error('The full-chain result detail is not a navigable secondary page')
+}
 if (processing.fullChainRun.candidateCount !== 1 || processing.fullChainRun.resolutionCount !== 1) {
   throw new Error('Full-chain result does not expose the adjudicated Statement Candidate Agenda')
 }
-if (processing.fullChainRun.statementCount !== 1) {
+if (processing.fullChainRun.statementCount !== 2) {
   throw new Error('Full-chain result does not expose the committed Knowledge Statement')
+}
+if (
+  processing.fullChainRun.sandboxLinkLabel !== '知识维护 Agent'
+  || !processing.fullChainRun.sandboxLinkPreview?.includes('Knowledge Maintenance Agent')
+  || processing.fullChainRun.sandboxLinkedTitle !== 'Knowledge Maintenance Agent'
+) {
+  throw new Error('Sandbox result does not use the shared wikilink reader with hover previews')
+}
+if (
+  !processing.fullChainRun.sandboxBackAvailable
+  || processing.fullChainRun.sandboxTitleAfterBack !== '知识加工链路'
+  || !processing.fullChainRun.sandboxForwardAvailable
+  || processing.fullChainRun.sandboxTitleAfterForward !== 'Knowledge Maintenance Agent'
+) {
+  throw new Error('Sandbox Statement reader cannot navigate backward and forward')
 }
 if (/来源范围\s+L\d|Raw source|sourceRef|revision|Run ID|扫描版本/.test(processing.fullChainRun.bodyText || '')) {
   throw new Error('The full-chain result exposes internal source coordinates or implementation identifiers')
@@ -265,7 +314,7 @@ for (const requiredCopy of ['模型输出可能复述原始材料', '模型轮�
     throw new Error(`Knowledge processing trace is missing: ${requiredCopy}`)
   }
 }
-if (processing.trace.workspaceValues.join(',') !== '0,1,1,1') {
+if (processing.trace.workspaceValues.join(',') !== '0,1,1,2') {
   throw new Error(`Knowledge maintenance workspace status is incorrect: ${processing.trace.workspaceValues.join(',')}`)
 }
 if (processing.trace.overflowX) throw new Error('Debug trace view has unexpected horizontal overflow')

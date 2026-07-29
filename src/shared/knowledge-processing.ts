@@ -112,6 +112,10 @@ export interface KnowledgeMaintenanceTraceEvent {
   completedAt?: string
   durationMs?: number
   detail?: string
+  input?: string
+  inputTruncated?: boolean
+  output?: string
+  outputTruncated?: boolean
 }
 
 export interface KnowledgeMaintenanceDebugTrace {

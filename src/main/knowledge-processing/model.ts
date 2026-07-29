@@ -87,14 +87,16 @@ export type KnowledgeAgentTraceEvent =
       callNumber: number
       status: 'completed' | 'failed' | 'cancelled'
       detail?: string
+      output?: string
     }
-  | { type: 'tool_started'; toolCallId: string; toolName: string }
+  | { type: 'tool_started'; toolCallId: string; toolName: string; input?: string }
   | {
       type: 'tool_completed'
       toolCallId: string
       toolName: string
       status: 'completed' | 'failed' | 'cancelled'
       detail?: string
+      output?: string
     }
   | {
       type: 'workspace_status'

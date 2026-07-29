@@ -287,6 +287,54 @@ function modelTraceDetail(message: AssistantMessage): string {
   ].filter((part): part is string => Boolean(part)).join(' · ')
 }
 
+function traceJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2) ?? String(value)
+  } catch {
+    return String(value)
+  }
+}
+
+function modelTraceOutput(message: AssistantMessage): string | undefined {
+  const blocks = message.content.flatMap((content) => {
+    if (content.type === 'text') return content.text.trim() ? [content.text] : []
+    if (content.type === 'thinking') {
+      if (content.redacted) return ['Reasoning\n[redacted by provider]']
+      return content.thinking.trim() ? [`Reasoning\n${content.thinking}`] : []
+    }
+    const toolName = safeTraceToolName(content.name)
+    return [toolName === UNKNOWN_TRACE_TOOL_NAME
+      ? `Tool call · ${toolName}\n[arguments hidden]`
+      : `Tool call · ${toolName}\n${traceJson(content.arguments)}`]
+  })
+  if (message.errorMessage) blocks.push(`Error\n${message.errorMessage}`)
+  return blocks.length ? blocks.join('\n\n') : undefined
+}
+
+function toolTraceOutput(result: unknown): string | undefined {
+  if (!result || typeof result !== 'object') return result === undefined ? undefined : traceJson(result)
+  const record = result as { content?: unknown; details?: unknown }
+  const blocks: string[] = []
+  if (Array.isArray(record.content)) {
+    for (const content of record.content) {
+      if (!content || typeof content !== 'object') {
+        blocks.push(traceJson(content))
+        continue
+      }
+      const item = content as Record<string, unknown>
+      if (item.type === 'text' && typeof item.text === 'string') {
+        blocks.push(item.text)
+      } else if (item.type === 'image' && typeof item.mimeType === 'string') {
+        blocks.push(`[Image result · ${item.mimeType}]`)
+      } else {
+        blocks.push(traceJson(item))
+      }
+    }
+  }
+  if (record.details !== undefined) blocks.push(`Details\n${traceJson(record.details)}`)
+  return blocks.filter((block) => block.trim()).join('\n\n') || undefined
+}
+
 function searchResultText(
   records: KnowledgeStatementRecord[],
   offset: number,
@@ -821,7 +869,8 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
             ? `context compaction · ${modelTraceDetail(event.message)}`
             : input.signal.aborted
               ? 'context compaction cancelled'
-              : 'context compaction failed'
+              : 'context compaction failed',
+          output: event.message ? modelTraceOutput(event.message) : undefined
         })
         activeCompactionCall = undefined
       }
@@ -889,7 +938,8 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
             type: 'model_completed',
             callNumber: activeModelCall,
             status,
-            detail: modelTraceDetail(event.message)
+            detail: modelTraceDetail(event.message),
+            output: modelTraceOutput(event.message)
           })
           activeModelCall = undefined
         }
@@ -897,6 +947,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
       }
       if (event.type === 'tool_execution_end') {
         const toolName = safeTraceToolName(event.toolName)
+        const traceable = TRACEABLE_TOOL_NAMES.has(event.toolName)
         const status = event.isError
           ? (input.signal.aborted ? 'cancelled' : 'failed')
           : 'completed'
@@ -907,16 +958,19 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
           status,
           detail: status === 'cancelled'
             ? '工具调用已取消'
-            : safeTraceDetails(event.toolName, event.result, event.isError)
+            : safeTraceDetails(event.toolName, event.result, event.isError),
+          output: traceable ? toolTraceOutput(event.result) : undefined
         })
         return
       }
       if (event.type === 'tool_execution_start') {
         const toolName = safeTraceToolName(event.toolName)
+        const traceable = TRACEABLE_TOOL_NAMES.has(event.toolName)
         reportTrace({
           type: 'tool_started',
           toolCallId: event.toolCallId,
-          toolName
+          toolName,
+          input: traceable ? traceJson(event.args) : undefined
         })
         toolCalls.push(toolName)
         return

@@ -255,7 +255,20 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       candidates: { total: 1, open: 0, resolved: 1 },
       draftStatementCount: 1
     }))
-    expect(JSON.stringify(traces)).not.toContain('The user says the database is SQLite')
+    expect(traces).toContainEqual(expect.objectContaining({
+      type: 'model_completed',
+      output: expect.stringContaining('Tool call · list_statement_candidates')
+    }))
+    expect(traces).toContainEqual(expect.objectContaining({
+      type: 'tool_started',
+      toolName: 'read_evidence',
+      input: expect.stringContaining('"line": 1')
+    }))
+    expect(traces).toContainEqual(expect.objectContaining({
+      type: 'tool_completed',
+      toolName: 'read_evidence',
+      output: expect.stringContaining('The user says the database is SQLite')
+    }))
   })
 
   it('keeps a premature submission nonterminal until every open candidate is resolved', async () => {
