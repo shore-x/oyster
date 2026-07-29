@@ -9,6 +9,7 @@
 - 修订：2026-07-28，明确 Statement 是领域语义的 Source of Truth，多元关系由自由文本正文中的显式 Statement 名称引用表达
 - 修订：2026-07-28，确定正文采用读取时动态解析的 canonical title 引用；Statement 生命周期与追溯方式留给治理设计
 - 修订：2026-07-28，明确候选发现、开放调查与知识裁决的边界
+- 修订：2026-07-29，明确 canonical title 只指称知识主体，语境、属性和关系由正文表达
 - 关联文档：[Product Brief](../product/product-brief.md)、[本地 Agent 发现与外部证据访问](../product/local-agent-discovery-mvp.md)、[AI Backend MVP](../product/ai-backends-mvp.md)、[知识加工验证 MVP](../product/knowledge-processing-mvp.md)、[知识加工与协作式投影](../architecture/knowledge-model-and-projection.md)
 
 ## Context
@@ -29,7 +30,7 @@ Oyster 的主要产品身份是：本地优先、跨 Agent、跨项目的知识�
 
 三层保持不同的数据所有权，但知识加工与投影通过共享 Attention 耦合。Observation Preprocessor 负责从有界观察中发现带回源线索的待调查问题，而不生成 Session 摘要或提前决定 Knowledge Statement。候选进入一次运行的开放调查清单；Knowledge Maintenance Agent 依据当前知识和 Raw Evidence 补充并裁决这些问题，再独立形成 Contribution Draft。候选不是事实或 Statement，也不与最终 Statement 一一对应。Oyster Core 统一执行权限与提交边界。无论知识由 Agent、经授权的 Pipeline 还是用户产生，都进入同一个知识层，不按处理器或投影建立不同的真相存储。
 
-Knowledge Statement 是知识层领域语义的 Source of Truth。正文使用 `[[canonical title]]`，或在需要局部措辞时使用 `[[canonical title|local display text]]`，同时引用多个 Statement，并以自然语言保留参与者、语境、条件、例外和不确定性；局部显示文本不参与目标选择。名称引用在读取时动态指向当前知识视图中拥有该 canonical title 的 Statement，不永久绑定正文写作时的存储记录。出站引用、反向引用、图或超图等表示只能作为派生能力。canonical title 与正文都应具有实际语义，不以机械编号、枚举关系或路由规则代替知识。普通 Statement 可以解释一个词语在不同语境下可能指向哪些具体 Statement，但它只服务外部消歧；内部含义已经确定时应直接使用具体 Statement 的 canonical title。
+Knowledge Statement 是知识层领域语义的 Source of Truth。canonical title 使用专名、术语或自然名词短语稳定指称一个知识主体，而不把“X 在 Y 中的含义”“X 与 Y 的关系”等命题或场景概括成标题；主体的语境、范围、属性、关系、条件、例外和不确定性由正文表达。正文使用 `[[canonical title]]`，或在需要局部措辞时使用 `[[canonical title|local display text]]`，同时引用多个 Statement；局部显示文本不参与目标选择。名称引用在读取时动态指向当前知识视图中拥有该 canonical title 的 Statement，不永久绑定正文写作时的存储记录。出站引用、反向引用、图或超图等表示只能作为派生能力。canonical title 与正文都应具有实际语义，不以机械编号、枚举关系或路由规则代替知识。普通 Statement 可以解释一个词语在不同语境下可能指向哪些具体 Statement，但它只服务外部消歧；内部含义已经确定时应直接使用具体 Statement 的 canonical title。
 
 正式 Knowledge Statement 应能够追溯到原始观察或输入知识；具体记录和校验方式，以及当前 MVP 是否完整实现，不由本 ADR 决定。
 

@@ -177,12 +177,12 @@ if (processing.promptValues.some((prompt) => typeof prompt !== 'string' || !prom
   throw new Error('A processing default prompt is empty')
 }
 const [preprocessorPrompt, maintainerPrompt] = processing.promptValues
-for (const requiredCopy of ['open investigation agenda', 'not draft Knowledge Statements', 'primary language of the original material']) {
+for (const requiredCopy of ['open investigation agenda', 'not draft Knowledge Statements', 'not a generated topic heading', 'primary language of the original material']) {
   if (!preprocessorPrompt.includes(requiredCopy)) {
     throw new Error(`Observation Preprocessor prompt is missing its responsibility: ${requiredCopy}`)
   }
 }
-for (const requiredCopy of ['Knowledge Maintenance Agent', '[[canonical title]]', 'primary language of the original observation', 'submit_knowledge_contribution']) {
+for (const requiredCopy of ['Knowledge Maintenance Agent', 'canonical title names that subject', 'Make the body, not an overloaded title, self-explaining', '[[canonical title]]', 'primary language of the original observation', 'submit_knowledge_contribution']) {
   if (!maintainerPrompt.includes(requiredCopy)) {
     throw new Error(`Knowledge Maintenance Agent prompt is missing its responsibility: ${requiredCopy}`)
   }

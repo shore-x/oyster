@@ -113,8 +113,16 @@ const resolveStatementCandidatesParameters = Type.Object({
 }, { additionalProperties: false })
 
 const contributionStatementParameters = Type.Object({
-  title: Type.String({ minLength: 1, maxLength: MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH }),
-  content: Type.String({ minLength: 1, maxLength: MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH })
+  title: Type.String({
+    minLength: 1,
+    maxLength: MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH,
+    description: 'The established proper name, term, or natural noun phrase that identifies this Statement subject. Put scenarios, attributes, and relationships in content instead of turning them into a topic-style title.'
+  }),
+  content: Type.String({
+    minLength: 1,
+    maxLength: MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH,
+    description: 'The self-explaining free-text knowledge about the named subject, including its scope, properties, constraints, and natural-language relationships to [[other Statements]].'
+  })
 }, { additionalProperties: false })
 
 const readContributionStatementParameters = Type.Object({
@@ -638,7 +646,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
       {
         name: 'upsert_contribution_statement',
         label: '暂存 Statement 草稿',
-        description: '按 canonical title 在本次运行的 Contribution Draft 中新增或替换一条自由文本 Statement；尚不写入知识库。',
+        description: 'Stage or replace one free-text Statement in the run-local Contribution Draft. The title names one searchable subject; its context, attributes, and relationships belong in the body. This does not write to the knowledge Store.',
         parameters: contributionStatementParameters,
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {

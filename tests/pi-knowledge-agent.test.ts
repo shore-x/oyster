@@ -198,6 +198,10 @@ describe('PiKnowledgeMaintenanceAgent', () => {
     const runtime = fauxRuntime([
       (context) => {
         expect(context.tools?.map((tool) => tool.name)).toEqual(TOOL_NAMES)
+        const upsertTool = context.tools?.find((tool) => tool.name === 'upsert_contribution_statement')
+        expect(upsertTool?.description).toContain('title names one searchable subject')
+        expect(JSON.stringify(upsertTool?.parameters)).toContain('natural noun phrase')
+        expect(JSON.stringify(upsertTool?.parameters)).toContain('relationships in content')
         expect(contextText(context)).toContain('<knowledge-maintenance-workspace-status>')
         expect(contextText(context)).toContain('Candidates: 1 total; 1 open; 0 resolved.')
         expect(contextText(context)).toContain('database')

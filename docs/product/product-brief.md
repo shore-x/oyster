@@ -115,7 +115,7 @@ MVP 的“实时”定义为 **turn 级近实时**，不是 token streaming。�
 
 1. 默认或自定义 Observation Preprocessor 从观察中发现带回源线索的 Candidate 问题，作为开放调查清单的初始内容，而不是生成 Session 摘要或拟定 Statement；
 2. 默认或自定义 Knowledge Maintenance Agent 以开放清单和相关已有 Knowledge Statement 为起点，按需读取 Raw Evidence，补充并裁决问题；默认策略优先维护细粒度、持久且可复用的对象、概念及其关系理解，而不是生成 Session 总结或工作日志；
-3. Agent 独立维护 Contribution Draft，并通过统一提交边界提出一条或多条 Knowledge Statement；Statement 使用当前知识视图中唯一且语义丰富的 canonical title 和自由文本正文，以 `[[canonical title]]` 或 `[[canonical title|local display text]]` 表达关系，并在读取时动态解析到当前同名 Statement；
+3. Agent 独立维护 Contribution Draft，并通过统一提交边界提出一条或多条 Knowledge Statement；Statement 使用当前知识视图中唯一、能够指称一个知识主体的 canonical title，以自由文本正文解释该主体的语境、含义、属性和关系，并通过 `[[canonical title]]` 或 `[[canonical title|local display text]]` 动态引用当前同名 Statement；
 4. Oyster Core 统一执行权限、提交和生命周期边界；
 5. 用户可以审查、纠正、删除或重新加工派生知识；如何向用户呈现其追溯关系随治理设计确定。
 

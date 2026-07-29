@@ -55,8 +55,8 @@ export class FixtureKnowledgeAgentRuntime implements KnowledgeAgentRuntime {
       contribution: {
         runRef: input.contributionRunRef,
         statements: [{
-          title: 'Fixture 中的明确偏好',
-          content: '用户希望知识加工链路保持简洁，并保留可回溯的来源。'
+          title: '知识加工链路',
+          content: '知识加工链路应保持简洁，并保留可回溯的来源。'
         }]
       },
       statementCandidates: input.statementCandidates.map((candidate, index) => ({
