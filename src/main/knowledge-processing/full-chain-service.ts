@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import type {
+  ClearKnowledgeResult,
   KnowledgeContributionDraft
 } from '../../shared/knowledge'
 import type {
-  ClearKnowledgeResult,
   KnowledgeFullChainResult,
   RunKnowledgeFullChainInput
 } from '../../shared/knowledge-processing'

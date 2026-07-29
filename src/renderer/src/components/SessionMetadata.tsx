@@ -84,18 +84,6 @@ export function SessionMetadata(props: {
           {props.session.projectPath || '—'}
         </dd>
       </div>
-      <div>
-        <dt>Session</dt>
-        <dd title={props.session.externalId}>{props.session.externalId}</dd>
-      </div>
-      <div>
-        <dt>文件更新</dt>
-        <dd>{formatTime(props.session.updatedAt)}</dd>
-      </div>
-      <div>
-        <dt>扫描版本</dt>
-        <dd title={props.session.revision}>{props.session.revision.slice(0, 12)}</dd>
-      </div>
     </dl>
   )
 }

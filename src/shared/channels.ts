@@ -29,7 +29,12 @@ export const knowledgeProcessingChannels = {
   runKnowledgeMaintenance: 'knowledge-processing:run-knowledge-maintenance',
   runFullChain: 'knowledge-processing:run-full-chain',
   cancelFullChain: 'knowledge-processing:cancel-full-chain',
-  clearKnowledge: 'knowledge-processing:clear-knowledge',
   discardSandbox: 'knowledge-processing:discard-sandbox',
   cancelRun: 'knowledge-processing:cancel-run'
+} as const
+
+export const knowledgeChannels = {
+  browse: 'knowledge:browse',
+  read: 'knowledge:read',
+  clear: 'knowledge:clear'
 } as const

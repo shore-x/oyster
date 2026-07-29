@@ -220,6 +220,39 @@ describe('SqliteKnowledgeStore', () => {
     expect(await store.read('database')).toBeUndefined()
   })
 
+  it('browses compact previews with search ranking and pagination', async () => {
+    const directory = await temporaryPath('oyster-knowledge-browser-')
+    const store = new SqliteKnowledgeStore(join(directory, 'knowledge.sqlite'))
+    closeables.push(store)
+    store.commit({
+      runRef: 'run:browse',
+      statements: [
+        { title: 'Database', content: `General database concept. ${'x'.repeat(400)}` },
+        { title: 'Oyster Database', content: 'The local SQLite knowledge store.' },
+        { title: 'Persistence boundary', content: 'The database sits behind this boundary.' }
+      ]
+    })
+
+    const firstPage = store.browse({ limit: 2 })
+    expect(firstPage.total).toBe(3)
+    expect(firstPage.statements).toHaveLength(2)
+    expect(firstPage.statements[0].preview.length).toBeLessThanOrEqual(280)
+    expect(firstPage.nextOffset).toBe(2)
+    const secondPage = store.browse({ limit: 2, offset: firstPage.nextOffset })
+    expect(secondPage).toMatchObject({
+      total: 3,
+      statements: [{ title: 'Persistence boundary' }]
+    })
+    expect(secondPage.nextOffset).toBeUndefined()
+
+    const search = store.browse({ query: 'Database', limit: 3 })
+    expect(search.statements.map(({ title }) => title)).toEqual([
+      'Database',
+      'Oyster Database',
+      'Persistence boundary'
+    ])
+  })
+
   it('rebuilds an unambiguous prior Store from only the current model fields', async () => {
     const directory = await temporaryPath('oyster-knowledge-migration-')
     const databasePath = join(directory, 'knowledge.sqlite')

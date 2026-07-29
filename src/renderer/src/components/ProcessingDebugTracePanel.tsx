@@ -32,11 +32,29 @@ function phaseLabel(phase: NonNullable<KnowledgeProcessingDebugTrace['preprocess
 }
 
 function callLabel(call: PreprocessingModelCallTrace): string {
-  const ranges = call.selectors.length <= 4
-    ? call.selectors.join(', ')
-    : `${call.selectors.slice(0, 4).join(', ')} 等 ${call.selectors.length} 个精确范围`
-  const location = `L${String(call.readLocation.line).padStart(6, '0')}:C${call.readLocation.offset}`
-  return `候选发现 · 读取起点 ${location} · 来源范围 ${ranges}`
+  return `Statement 候选发现 · 分段 ${call.sequence}`
+}
+
+function visiblePreprocessingOutput(output: string): string {
+  try {
+    const parsed = JSON.parse(output) as { candidates?: unknown }
+    if (!Array.isArray(parsed.candidates)) return output
+    return JSON.stringify({
+      ...parsed,
+      candidates: parsed.candidates.map((candidate) => {
+        if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return candidate
+        const {
+          locations: _locations,
+          evidenceLocations: _evidenceLocations,
+          selectors: _selectors,
+          ...visible
+        } = candidate as Record<string, unknown>
+        return visible
+      })
+    }, null, 2)
+  } catch {
+    return output.replace(/L\d{6}(?:(?:\s+|:)C\d+(?::\d+(?:\/\d+)?)?)?(?:\s*-\s*L\d{6}(?:(?:\s+|:)C\d+(?::\d+(?:\/\d+)?)?)?)?/g, '原始证据')
+  }
 }
 
 function PreprocessingCalls(props: {
@@ -61,14 +79,11 @@ function PreprocessingCalls(props: {
         {(view) => (
           <div class="processing-debug__progress" data-testid="preprocessing-view-summary">
             <div>
-              <span>选择性预处理视图</span>
-              <strong>{view().selectedLineCount} / {view().sourceLineCount} 行</strong>
+              <span>模型输入材料</span>
+              <strong>{view().selectedUnitCount} 个对话单元</strong>
             </div>
             <p>
-              {view().formatVersion} · 原始约 {formatBytes(view().sourceBytes)} ·
-              {' '}{view().selectedUnitCount} 个单元 ·
-              {' '}{formatBytes(view().modelMaterialBytes)} 模型材料 ·
-              {' '}{formatBytes(view().selectedSourceBytes)} 选中范围原文
+              约 {formatBytes(view().modelMaterialBytes)}，低层执行细节仍可由 Agent 按需读取。
             </p>
           </div>
         )}
@@ -103,7 +118,7 @@ function PreprocessingCalls(props: {
               <summary>
                 <span class="processing-debug__marker" aria-hidden="true" />
                 <span class="processing-debug-call__identity">
-                  <strong>Call {call.sequence} · {callLabel(call)}</strong>
+                  <strong>{callLabel(call)}</strong>
                   <small>从本段原始观察中发现需要知识维护 Agent 裁决的名称与指代问题</small>
                 </span>
                 <span class="processing-debug-call__meta">
@@ -114,7 +129,7 @@ function PreprocessingCalls(props: {
                 {(output) => (
                   <div class="processing-debug-call__body">
                     <span>模型输出</span>
-                    <pre>{output()}</pre>
+                    <pre>{visiblePreprocessingOutput(output())}</pre>
                     <Show when={call.outputTruncated}>
                       <p class="processing-debug-call__notice">调试副本已截断；实际候选发现结果未受影响。</p>
                     </Show>
@@ -167,7 +182,7 @@ function MaintenanceTimeline(props: {
               <strong>{workspace().candidates.total}</strong>
             </div>
             <div>
-              <span>Contribution Draft</span>
+              <span>待写入知识</span>
               <strong>{workspace().draftStatementCount}</strong>
             </div>
           </div>
@@ -187,7 +202,13 @@ function MaintenanceTimeline(props: {
                   <span>{eventMeta(event)}</span>
                 </div>
                 <p>{event.kind === 'model_call' ? '模型调用' : 'Agent 工具调用'}</p>
-                <Show when={event.detail}>
+                <Show when={
+                  event.kind === 'tool_call'
+                  && event.detail
+                  && event.label !== '读取原始观察证据'
+                    ? event.detail
+                    : undefined
+                }>
                   {(detail) => <code>{detail()}</code>}
                 </Show>
               </div>
@@ -217,7 +238,6 @@ export function ProcessingDebugTracePanel(props: ProcessingDebugTracePanelProps)
           <span class="processing-debug__marker" aria-hidden="true" />
           <div>
             <h3>{props.title ?? '运行调试'}</h3>
-            <p>Run <code>{props.trace.id}</code></p>
           </div>
         </div>
         <span class="processing-debug__status">{statusLabel(props.trace.status)}</span>

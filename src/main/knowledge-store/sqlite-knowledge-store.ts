@@ -3,9 +3,12 @@ import type {
   KnowledgeCommitResult,
   KnowledgeContributionDraft,
   KnowledgeContributionRecord,
+  KnowledgeBrowseResult,
+  ClearKnowledgeResult,
   KnowledgeStatement,
   KnowledgeStatementDraft,
-  ListKnowledgeStatementsOptions
+  ListKnowledgeStatementsOptions,
+  BrowseKnowledgeInput
 } from './model'
 import {
   MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH,
@@ -26,6 +29,11 @@ interface StatementRow {
   content: string
 }
 
+interface StatementSummaryRow {
+  title: string
+  preview: string
+}
+
 interface ContributionRow {
   run_ref: string
   created_at: string
@@ -38,11 +46,6 @@ interface NormalizedContributionDraft {
 
 export interface SqliteKnowledgeStoreOptions {
   clock?: () => Date
-}
-
-export interface ClearKnowledgeResult {
-  deletedStatementCount: number
-  deletedContributionCount: number
 }
 
 function requiredTrimmed(value: unknown, label: string, maximum: number): string {
@@ -346,6 +349,59 @@ export class SqliteKnowledgeStore implements KnowledgeReader {
       LIMIT ? OFFSET ?
     `).all(limit, offset) as unknown as StatementRow[]
     return rows.map(statementFromRow)
+  }
+
+  browse(input: BrowseKnowledgeInput = {}): KnowledgeBrowseResult {
+    this.assertOpen()
+    const limit = normalizeLimit(input.limit, 100, MAX_LIST_LIMIT)
+    const offset = normalizeOffset(input.offset)
+    const query = typeof input.query === 'string' ? input.query.trim() : ''
+    if (query.length > 1_024) throw new Error('搜索 query 超出长度上限 1024')
+    let rows: StatementSummaryRow[]
+    let total: number
+
+    if (query) {
+      const escaped = query.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')
+      const contains = `%${escaped}%`
+      const prefix = `${escaped}%`
+      total = Number((this.database.prepare(`
+        SELECT count(*) AS count
+        FROM knowledge_statements
+        WHERE title LIKE ? ESCAPE '\\' COLLATE NOCASE
+           OR content LIKE ? ESCAPE '\\' COLLATE NOCASE
+      `).get(contains, contains) as { count: number }).count)
+      rows = this.database.prepare(`
+        SELECT title, substr(content, 1, 280) AS preview
+        FROM knowledge_statements
+        WHERE title LIKE ? ESCAPE '\\' COLLATE NOCASE
+           OR content LIKE ? ESCAPE '\\' COLLATE NOCASE
+        ORDER BY
+          CASE
+            WHEN title = ? THEN 0
+            WHEN title LIKE ? ESCAPE '\\' COLLATE NOCASE THEN 1
+            ELSE 2
+          END,
+          title COLLATE NOCASE,
+          title
+        LIMIT ? OFFSET ?
+      `).all(contains, contains, query, prefix, limit, offset) as unknown as StatementSummaryRow[]
+    } else {
+      total = Number((this.database.prepare(`
+        SELECT count(*) AS count FROM knowledge_statements
+      `).get() as { count: number }).count)
+      rows = this.database.prepare(`
+        SELECT title, substr(content, 1, 280) AS preview
+        FROM knowledge_statements
+        ORDER BY title COLLATE NOCASE, title
+        LIMIT ? OFFSET ?
+      `).all(limit, offset) as unknown as StatementSummaryRow[]
+    }
+
+    return {
+      statements: rows,
+      total,
+      ...(offset + rows.length < total ? { nextOffset: offset + rows.length } : {})
+    }
   }
 
   getStatement(title: string): KnowledgeStatement | undefined {

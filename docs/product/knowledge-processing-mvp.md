@@ -8,7 +8,7 @@
 
 ## 1. 两种运行方式
 
-知识加工页面默认提供**完整链路**：
+“加工测试”页面默认提供 **Sandbox 链路测试**：
 
 ```text
 可用外部 Session 的确定 Raw Evidence revision
@@ -25,7 +25,7 @@
 
 用户从 discovery catalog 选择 Session 及其当前版本。运行时，主进程通过对应 Source Adapter 从原始位置读取该记录，并以稳定 artifact 身份和实际内容哈希固定本次使用的 `sourceRef`；扫描后已经变化或失效的记录会被拒绝，不会静默切换。Reader 不为单个 Session 预设产品长度上限，也不会把记录复制进应用管理的数据目录。Claude、Pi 与 Codex Adapter 分别按自身历史格式生成带版本的 Observation View；它们负责确定性选择对话主线、折叠可按需展开的执行详情，并为每个模型可读单元保留原始全局 `L` 行号、超长单行的 `Cstart:end/total` 窗口和必要的格式语境。共享文本原语只保证 Unicode 与 UTF-8 字节边界，不理解任何 Agent 的 JSONL Schema。通用 planner 只按所选模型预算组合 Adapter 已生成的单元，不以物理 JSONL 行作为调用边界。分段数、预处理调用数和整次运行时间不设固定上限，实际工作量随选择后的材料增长，用户可以随时取消。未进入预处理视图的原文没有被截断或删除，仍可由维护 Agent 按需回源。
 
-页面同时保留**阶段调试**，用于分别观察预处理器和维护 Agent 的行为。预处理调试默认直接选择一条 catalog 中可用的 Session；手工粘贴只作为排查特殊输入的显式 fallback。两个阶段分别触发，其 Knowledge Contribution 只用于预览，不提交到任何 Knowledge Store。每次实际启动的运行还会生成一份仅存在于内存中的 Debug Trace：预处理展示原始来源与选择性视图的规模、规划出的总分段、每次 Candidate 发现调用的原始位置和输出；维护阶段展示 Candidate Agenda、Contribution Draft 的最新规模、模型轮次，以及包含实际读取范围和 continuation 的脱敏工具活动。
+页面同时保留独立的**高级调试**工作面，用于分别观察预处理器和维护 Agent 的行为。它以阶段为主要切换层级，并在同一工作面直接呈现配置、输入、运行过程和输出，不再为这些内容继续嵌套页签。预处理调试默认直接选择一条 catalog 中可用的 Session；手工粘贴只作为排查特殊输入的显式 fallback。两个阶段分别触发，其 Knowledge Contribution 只用于预览，不提交到任何 Knowledge Store。每次实际启动的运行还会生成一份仅存在于内存中的 Debug Trace：预处理展示输入规模、总分段、每次 Candidate 发现调用的状态和输出；维护阶段展示 Candidate Agenda、Contribution Draft 的最新规模、模型轮次和脱敏工具活动。原始行号、内部运行 ID、版本指纹与本地路径不作为常规用户界面信息展示。
 
 运行按钮是显式启动操作，不再叠加系统原生确认弹窗。页面在启动前展示所选 Connection、Model、目的地和输入，在启动后持续展示发送影响、阶段进度、模型调用与错误；长 Session 可能产生多次预处理调用，模型调用可能消耗额度或产生费用。成功结果分别展示两个阶段成功完成的 `modelCallCount`；失败或取消前已经发起的请求仍可能计费，当前结果计数不作为 Provider 账单。
 
@@ -44,7 +44,7 @@ Core 在一个事务中按 title 写入整份 Contribution，再回读实际 Sta
 
 Sandbox 的写入不影响当前验证 Store 的基线，当前也不存在 promote、merge 或复制回基线 Store 的入口。失败或取消会丢弃本次 Sandbox；当前界面只持有最新的成功结果，因此成功重跑会用同一验证基线创建的新 Sandbox 替换旧 Sandbox。用户可显式丢弃当前结果，应用启动时也会清理上一次进程遗留的 Sandbox。
 
-完整链路页面另提供显式的“清空知识”操作，用于让后续验证从空基线开始。该操作经应用内确认弹窗授权后，原子删除基线 Store 中全部 Statement 及 Contribution 记录，并丢弃当前页面持有的 Sandbox；它与任何知识加工运行互斥，且不可撤销。
+“知识库”是当前持久知识的独立浏览入口，提供标题与正文搜索、Statement 列表和完整正文回读。它与仅展示单次 Sandbox 输出的“加工测试”保持明确边界。“清空知识”也只位于知识库页面：经应用内确认弹窗授权后，原子删除基线 Store 中全部 Statement 及 Contribution 记录，并清理当前进程持有的 Sandbox；该操作与任何知识加工运行互斥，且不可撤销。
 
 ## 3. 两个加工阶段
 
@@ -103,7 +103,7 @@ Knowledge Maintenance Agent 的 Debug Trace 只记录模型轮次、工具名称
 
 页面完整展示两个阶段当前生效的 System Prompt。默认 Prompt 由主进程维护并使用英文表达，但要求 Candidate 的表达与问题以及 Knowledge Statement 跟随原始材料的主要语言；当材料混合多种语言时，保留翻译可能改变含义的关键原文术语。每个阶段只保存可选的 Prompt 覆盖、用户明确选择的 Connection、该 Connection 中的 Model，以及模型明确支持时的可选思考强度。恢复默认会删除 Prompt 覆盖，而不是复制一份默认文本。两个阶段可以选择不同 Backend、Connection、Model 与思考强度；不支持或能力未知的模型不显示该控制，也不会收到相应参数。
 
-完整链路和预处理阶段调试均可选择 catalog 中可用的 Session 与 Attention，并展示所用阶段配置。运行结果包括：
+Sandbox 链路测试和预处理高级调试均可选择 catalog 中可用的 Session 与 Attention，并展示所用阶段配置。运行结果包括：
 
 - 两个阶段及 Sandbox 提交的执行状态；
 - 成功结果中两个阶段成功完成的 `modelCallCount`；
@@ -116,6 +116,8 @@ Knowledge Maintenance Agent 的 Debug Trace 只记录模型轮次、工具名称
 Coding Plan 与 API Connection 都向两个阶段提供同一模型调用契约。Observation Preprocessor 使用所选模型进行一次或多次有界直接调用；Knowledge Maintenance Agent 使用同一模型的 stream 接入通用 Agent Runtime，当前 Runtime 实现为 Pi Agent Core。Backend 决定认证和计费通道，阶段 Runtime 决定直接生成还是 Agent loop，两者不混为一个概念。
 
 Debug Trace 不是新的知识层或审计日志，不持久化到 Repository。完整链路与阶段调试各自只保留最近一次真正开始的轨迹。失败或取消会保留已经完成的预处理输出，并把正在执行的条目标记为失败或取消，以便复盘。每次调用的调试输出副本具有独立于实际处理结果的字符上限，截断只影响界面展示；预处理的分段与调用数量、维护 Agent 的模型轮次与工具调用数量都反映实际运行，不作为处理配额。轨迹中的条目表示应用观察到的处理尝试，不等同于 Provider 账单。
+
+界面只展示用户做出选择、理解运行影响和判断结果所需的信息。Session 标题、来源、项目、时间范围和原始记录大小用于识别输入；阶段、模型配置、进度、模型输出、候选裁决和 Statement 正文用于调试链路。EvidenceLocation、`sourceRef`、revision、Sandbox ID、Run ID 与格式版本仍可在内部协议中存在，但不因实现方便而暴露为产品信息。
 
 ## 5. 运行边界
 

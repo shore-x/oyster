@@ -171,10 +171,6 @@ function installApi(
     runKnowledgeMaintenance: async () => maintenanceResult(),
     runFullChain: async () => fullChainResult(),
     cancelFullChain: async () => undefined,
-    clearKnowledge: async () => ({
-      deletedStatementCount: 0,
-      deletedContributionCount: 0
-    }),
     discardSandbox: async () => undefined,
     cancelRun: async () => undefined,
     subscribe: () => () => undefined,
@@ -318,12 +314,8 @@ describe('knowledge processing controller', () => {
     })
   })
 
-  it('clears the completed result after the knowledge Store is cleared', async () => {
-    const clearKnowledge = vi.fn(async () => ({
-      deletedStatementCount: 3,
-      deletedContributionCount: 2
-    }))
-    installApi({ clearKnowledge })
+  it('drops a completed sandbox result when the knowledge reset discards its Store', async () => {
+    installApi()
 
     await createRoot(async (dispose) => {
       try {
@@ -333,14 +325,9 @@ describe('knowledge processing controller', () => {
           expectedRevision: 'a'.repeat(64)
         })
 
-        await expect(controller.clearKnowledge()).resolves.toBe(true)
-        expect(clearKnowledge).toHaveBeenCalledOnce()
+        expect(controller.fullChainResult()).toBeDefined()
+        controller.resetFullChainResult()
         expect(controller.fullChainResult()).toBeUndefined()
-        expect(controller.knowledgeClearResult()).toEqual({
-          deletedStatementCount: 3,
-          deletedContributionCount: 2
-        })
-        expect(controller.clearingKnowledge()).toBe(false)
       } finally {
         dispose()
       }

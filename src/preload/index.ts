@@ -1,11 +1,17 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { aiBackendChannels, discoveryChannels, knowledgeProcessingChannels } from '../shared/channels'
+import {
+  aiBackendChannels,
+  discoveryChannels,
+  knowledgeChannels,
+  knowledgeProcessingChannels
+} from '../shared/channels'
 import type { AiBackendApi, AiBackendSnapshot } from '../shared/ai-backends'
 import type { DiscoveryApi, DiscoverySnapshot } from '../shared/discovery'
 import type {
   KnowledgeProcessingApi,
   KnowledgeProcessingSnapshot
 } from '../shared/knowledge-processing'
+import type { KnowledgeApi } from '../shared/knowledge'
 
 const api: DiscoveryApi = {
   getSnapshot: () => ipcRenderer.invoke(discoveryChannels.getSnapshot),
@@ -54,7 +60,6 @@ const knowledgeProcessing: KnowledgeProcessingApi = {
   ),
   runFullChain: (input) => ipcRenderer.invoke(knowledgeProcessingChannels.runFullChain, input),
   cancelFullChain: () => ipcRenderer.invoke(knowledgeProcessingChannels.cancelFullChain),
-  clearKnowledge: () => ipcRenderer.invoke(knowledgeProcessingChannels.clearKnowledge),
   discardSandbox: (sandboxId) => ipcRenderer.invoke(
     knowledgeProcessingChannels.discardSandbox,
     sandboxId
@@ -70,4 +75,10 @@ const knowledgeProcessing: KnowledgeProcessingApi = {
   }
 }
 
-contextBridge.exposeInMainWorld('oyster', { discovery: api, aiBackends, knowledgeProcessing })
+const knowledge: KnowledgeApi = {
+  browse: (input) => ipcRenderer.invoke(knowledgeChannels.browse, input),
+  read: (title) => ipcRenderer.invoke(knowledgeChannels.read, title),
+  clear: () => ipcRenderer.invoke(knowledgeChannels.clear)
+}
+
+contextBridge.exposeInMainWorld('oyster', { discovery: api, aiBackends, knowledge, knowledgeProcessing })

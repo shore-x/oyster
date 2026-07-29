@@ -41,6 +41,50 @@ for (const removedCopy of ['KNOWLEDGE SOURCES', '数据仅保存在本机', 'LOC
   if (semantics.bodyText.includes(removedCopy)) throw new Error(`Redundant copy is still rendered: ${removedCopy}`)
 }
 
+const knowledge = semantics.knowledge
+if (knowledge.browse.title !== '知识库') throw new Error('Knowledge browser page was not rendered')
+if (knowledge.browse.statementCount !== 2) {
+  throw new Error(`Expected 2 fixture knowledge Statements, got ${knowledge.browse.statementCount}`)
+}
+if (!knowledge.browse.selectedTitle || knowledge.browse.detailTitle !== knowledge.browse.selectedTitle) {
+  throw new Error('Knowledge browser did not load the selected Statement detail')
+}
+if (!knowledge.browse.detailContent?.includes('Knowledge Maintenance Agent')) {
+  throw new Error('Knowledge browser did not render the current Statement body')
+}
+if (knowledge.browse.searchPlaceholder !== '搜索标题或正文') {
+  throw new Error('Knowledge browser search is missing')
+}
+if (knowledge.browse.clearButtonDisabled !== false) {
+  throw new Error('Knowledge clear action is unavailable for a non-empty Store')
+}
+if (knowledge.browse.overflowX) throw new Error('Knowledge browser has unexpected horizontal overflow')
+if (
+  !knowledge.clear?.exists
+  || knowledge.clear.role !== 'alertdialog'
+  || knowledge.clear.modal !== 'true'
+) {
+  throw new Error('Clearing knowledge does not use an in-app modal confirmation dialog')
+}
+if (knowledge.clear.title !== '清空知识？') {
+  throw new Error('The clear-knowledge confirmation title is missing')
+}
+if (!knowledge.clear.description?.includes('无法撤销')) {
+  throw new Error('The irreversible clear-knowledge impact is not explained')
+}
+if (knowledge.clear.actions?.join(',') !== '取消,清空知识') {
+  throw new Error('Clear-knowledge confirmation actions are not ordered cancel then confirm')
+}
+if (!knowledge.clear.cancelled) {
+  throw new Error('The clear-knowledge confirmation cannot be cancelled')
+}
+if (!knowledge.clear.completed || !knowledge.clear.closedAfterCompletion || knowledge.clear.statementCountAfterClear !== 0) {
+  throw new Error(`Knowledge was not cleared through the confirmed action: ${knowledge.clear.error || 'unknown error'}`)
+}
+if (!knowledge.clear.result?.includes('已清空 2 条知识')) {
+  throw new Error('The knowledge browser does not report the completed reset')
+}
+
 if (semantics.ai.agent.title !== 'AI 后端') throw new Error('AI backend page was not rendered')
 if (semantics.ai.agent.backendKind !== 'coding_plan') throw new Error('Coding Plan is not the default backend')
 if (semantics.ai.agent.provider !== 'openai_codex') throw new Error('OpenAI Codex is not selected for the Coding Plan backend')
@@ -68,7 +112,7 @@ if (!semantics.ai.model.configuredSummary?.includes('fixture-model')) throw new 
 if (!semantics.ai.model.bodyText.includes('OpenAI-compatible')) throw new Error('Custom compatible provider choice is missing')
 
 const processing = semantics.processing
-if (processing.title !== '知识加工') throw new Error('Knowledge processing page was not rendered')
+if (processing.title !== '加工测试') throw new Error('Knowledge processing page was not rendered')
 if (processing.fullChain.fullChainSelected !== 'true' || !processing.fullChain.workspaceExists) {
   throw new Error('Full-chain Sandbox workspace is not the default knowledge processing view')
 }
@@ -97,50 +141,21 @@ if (!selectedSessionDetails?.size?.match(/\d+(\.\d+)? (B|KB|MB|GB)/)) {
 if (selectedSessionDetails?.project !== '/Users/demo/projects/oyster') {
   throw new Error('The selected Session project is not visible in the full-chain details')
 }
-if (!processing.fullChain.readyReason?.includes('配置完整')) {
+if (!processing.fullChain.readyReason?.includes('准备完成')) {
   throw new Error('Full-chain view does not report that the selected configuration is runnable')
 }
-if (processing.fullChain.stageConfigurations.length !== 2) {
-  throw new Error('Full-chain view must show the exact configuration of both stages')
-}
-const fullChainConfiguration = processing.fullChain.stageConfigurations.join('\n')
-for (const requiredCopy of ['API', 'OpenAI-compatible', 'fixture-model', '模型默认', '可用']) {
-  if (!fullChainConfiguration.includes(requiredCopy)) {
+for (const requiredCopy of ['预处理', '知识维护', 'API', 'OpenAI-compatible', 'Fixture Model', '模型默认']) {
+  if (!processing.fullChain.modelSummary?.includes(requiredCopy)) {
     throw new Error(`Full-chain stage configuration is missing: ${requiredCopy}`)
   }
 }
-if (!processing.fullChain.bodyText.includes('Knowledge Sandbox')) {
+if (!processing.fullChain.bodyText.includes('Sandbox 链路测试')) {
   throw new Error('Knowledge Sandbox boundary is not visible in the full-chain view')
 }
-if (!processing.fullChain.bodyText.includes('运行时从 Agent 的原始位置读取内容')) {
-  throw new Error('Full-chain view does not explain on-demand Session reading')
+if (!processing.fullChain.bodyText.includes('不会写回知识库')) {
+  throw new Error('Full-chain view does not explain its isolated write boundary')
 }
-if (
-  !processing.clearKnowledge?.exists
-  || processing.clearKnowledge.role !== 'alertdialog'
-  || processing.clearKnowledge.modal !== 'true'
-) {
-  throw new Error('Clearing knowledge does not use an in-app modal confirmation dialog')
-}
-if (processing.clearKnowledge.title !== '清空知识？') {
-  throw new Error('The clear-knowledge confirmation title is missing')
-}
-if (!processing.clearKnowledge.description?.includes('无法撤销')) {
-  throw new Error('The irreversible clear-knowledge impact is not explained')
-}
-if (processing.clearKnowledge.actions?.join(',') !== '取消,清空知识') {
-  throw new Error('Clear-knowledge confirmation actions are not ordered cancel then confirm')
-}
-if (!processing.clearKnowledge.cancelled) {
-  throw new Error('The clear-knowledge confirmation cannot be cancelled')
-}
-if (!processing.clearKnowledge.completed || !processing.clearKnowledge.closedAfterCompletion) {
-  throw new Error(`Knowledge was not cleared through the confirmed action: ${processing.clearKnowledge.error || 'unknown error'}`)
-}
-if (!processing.clearKnowledge.result?.includes('下一次完整链路将从空的基础知识开始')) {
-  throw new Error('The page does not report the completed knowledge reset')
-}
-if (!processing.fullChainRun?.impactVisible || !processing.fullChainRun?.completed) {
+if (!processing.fullChainRun?.runningStateVisible || !processing.fullChainRun?.completed) {
   throw new Error(`Full-chain run did not complete without a native confirmation dialog: ${processing.fullChainRun?.error || 'unknown error'}`)
 }
 if (processing.fullChainRun.candidateCount !== 1 || processing.fullChainRun.resolutionCount !== 1) {
@@ -148,6 +163,9 @@ if (processing.fullChainRun.candidateCount !== 1 || processing.fullChainRun.reso
 }
 if (processing.fullChainRun.statementCount !== 1) {
   throw new Error('Full-chain result does not expose the committed Knowledge Statement')
+}
+if (/来源范围\s+L\d|Raw source|sourceRef|revision|Run ID|扫描版本/.test(processing.fullChainRun.bodyText || '')) {
+  throw new Error('The full-chain result exposes internal source coordinates or implementation identifiers')
 }
 if (processing.fullChain.bodyText.includes('已导入 Session')) {
   throw new Error('Full-chain view still exposes the removed import model')
@@ -216,7 +234,7 @@ if (!processing.maintainerButtonExists || processing.maintainerDisabled !== true
 }
 if (processing.resultCount !== 0) throw new Error('Knowledge processing produced a candidate without an explicit run')
 if (processing.overflowX) throw new Error('Knowledge processing page has unexpected horizontal overflow')
-if (processing.buttonCount !== processing.sharedButtonCount + processing.tabButtonCount + processing.sourceSwitchButtonCount + processing.statementButtonCount) {
+if (processing.buttonCount !== processing.sharedButtonCount + processing.tabButtonCount + processing.sourceSwitchButtonCount + processing.statementButtonCount + processing.chainStatementButtonCount) {
   throw new Error('A knowledge processing action button bypasses the shared UI component')
 }
 if (processing.buttonIconCount !== processing.sharedButtonCount) {
@@ -235,6 +253,9 @@ if (
   || !processing.trace.preprocessingOutput?.includes('知识加工链路')
 ) {
   throw new Error('The preprocessing model output is not visible in the debug trace')
+}
+if (processing.trace.preprocessingOutput.includes('"locations"') || /L\d{6}/.test(processing.trace.preprocessingOutput)) {
+  throw new Error('The preprocessing trace exposes internal evidence coordinates')
 }
 if (processing.trace.maintenanceEventCount !== 3) {
   throw new Error(`Expected 3 safe maintenance trace events, got ${processing.trace.maintenanceEventCount}`)
@@ -262,7 +283,9 @@ const preprocessingTraceImage = await readFile(join(dirname(capturePath), 'knowl
 if (preprocessingTraceImage.length === 0) throw new Error('Preprocessing trace screenshot is empty')
 const maintenanceTraceImage = await readFile(join(dirname(capturePath), 'knowledge-processing-trace-maintenance.png'))
 if (maintenanceTraceImage.length === 0) throw new Error('Maintenance trace screenshot is empty')
-const clearKnowledgeImage = await readFile(join(dirname(capturePath), 'knowledge-processing-clear-confirmation.png'))
+const knowledgeImage = await readFile(join(dirname(capturePath), 'knowledge.png'))
+if (knowledgeImage.length === 0) throw new Error('Knowledge browser screenshot is empty')
+const clearKnowledgeImage = await readFile(join(dirname(capturePath), 'knowledge-clear-confirmation.png'))
 if (clearKnowledgeImage.length === 0) throw new Error('Clear-knowledge confirmation screenshot is empty')
 
 console.log(`UI smoke test passed: ${capturePath}`)

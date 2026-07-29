@@ -39,6 +39,7 @@ import { KnowledgeProcessingService } from './knowledge-processing/knowledge-pro
 import { PiKnowledgeMaintenanceAgent } from './knowledge-processing/pi-knowledge-agent'
 import { JsonKnowledgeProcessingRepository } from './knowledge-processing/repository'
 import { SqliteKnowledgeStoreManager } from './knowledge-store/knowledge-store-manager'
+import { registerKnowledgeIpc } from './knowledge-store/ipc'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 let mainWindow: BrowserWindow | undefined
@@ -153,47 +154,39 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       bodyText: page.innerText
     }
   })()`)
-  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-knowledge-processing"]').click()`)
-  await new Promise((resolve) => setTimeout(resolve, 200))
-  const processingImage = await window.webContents.capturePage()
-  await writeFile(join(dirname(capturePath), 'knowledge-processing.png'), processingImage.toPNG())
-  const fullChainSemantics = await window.webContents.executeJavaScript(`(() => {
-    const page = document.querySelector('[data-testid="page-knowledge-processing"]')
-    const select = page.querySelector('[data-testid="full-chain-session-select"]')
-    const initialButton = page.querySelector('[data-testid="run-full-chain"]')
-    const result = {
-      fullChainSelected: page.querySelector('[data-testid="processing-view-full-chain"]')?.getAttribute('aria-selected'),
-      workspaceExists: Boolean(page.querySelector('[data-testid="full-chain-workspace"]')),
-      sessionOptionCount: select?.options.length,
-      fullChainButtonExists: Boolean(initialButton),
-      fullChainButtonDisabled: initialButton?.disabled,
-      initialDisabledReason: page.querySelector('[data-testid="full-chain-disabled-reason"]')?.textContent?.trim(),
-      stageConfigurations: Array.from(page.querySelectorAll('[data-testid^="full-chain-config-"]')).map((node) => node.textContent?.trim()),
-      bodyText: page.innerText,
-      overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
-    }
-    if (select?.options[1]) {
-      select.value = select.options[1].value
-      select.dispatchEvent(new Event('change', { bubbles: true }))
-    }
-    return new Promise((resolve) => requestAnimationFrame(() => resolve({
-      ...result,
-      selectedSession: select?.value,
-      selectedSessionDetails: {
-        title: page.querySelector('[data-testid="full-chain-session-meta-title"]')?.textContent?.trim(),
-        timeRange: page.querySelector('[data-testid="full-chain-session-meta-time-range"]')?.textContent?.trim(),
-        size: page.querySelector('[data-testid="full-chain-session-meta-size"]')?.textContent?.trim(),
-        project: page.querySelector('[data-testid="full-chain-session-meta-project"]')?.textContent?.trim()
-      },
-      fullChainButtonEnabledAfterSelection: page.querySelector('[data-testid="run-full-chain"]')?.disabled === false,
-      readyReason: page.querySelector('[data-testid="full-chain-disabled-reason"]')?.textContent?.trim()
-    })))
-  })()`)
+
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-knowledge"]').click()`)
   await window.webContents.executeJavaScript(`(async () => {
-    document.querySelector('[data-testid="clear-knowledge"]')?.click()
     const deadline = Date.now() + 2_000
     while (
-      !document.querySelector('[data-testid="clear-knowledge-dialog"]')
+      !document.querySelector('[data-testid="page-knowledge"] .knowledge-browser__item')
+      && Date.now() < deadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  })()`)
+  const knowledgeImage = await window.webContents.capturePage()
+  await writeFile(join(dirname(capturePath), 'knowledge.png'), knowledgeImage.toPNG())
+  const knowledgeBrowseSemantics = await window.webContents.executeJavaScript(`(() => {
+    const page = document.querySelector('[data-testid="page-knowledge"]')
+    return {
+      title: page.querySelector('h1')?.textContent?.trim(),
+      statementCount: page.querySelectorAll('.knowledge-browser__item').length,
+      selectedTitle: page.querySelector('.knowledge-browser__item[aria-selected="true"] strong')?.textContent?.trim(),
+      detailTitle: page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim(),
+      detailContent: page.querySelector('[data-testid="knowledge-statement-detail"]')?.textContent?.trim(),
+      searchPlaceholder: page.querySelector('[data-testid="knowledge-search"]')?.getAttribute('placeholder'),
+      clearButtonDisabled: page.querySelector('[data-testid="clear-knowledge"]')?.disabled,
+      overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      bodyText: page.innerText
+    }
+  })()`)
+  await window.webContents.executeJavaScript(`(async () => {
+    document.querySelector('[data-testid="page-knowledge"] [data-testid="clear-knowledge"]')?.click()
+    const deadline = Date.now() + 2_000
+    while (
+      !document.querySelector('[data-testid="page-knowledge"] [data-testid="clear-knowledge-dialog"]')
       && Date.now() < deadline
     ) {
       await new Promise((resolve) => setTimeout(resolve, 25))
@@ -201,12 +194,9 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   })()`)
   await new Promise((resolve) => setTimeout(resolve, 80))
   const clearKnowledgeImage = await window.webContents.capturePage()
-  await writeFile(
-    join(dirname(capturePath), 'knowledge-processing-clear-confirmation.png'),
-    clearKnowledgeImage.toPNG()
-  )
+  await writeFile(join(dirname(capturePath), 'knowledge-clear-confirmation.png'), clearKnowledgeImage.toPNG())
   const clearKnowledgeSemantics = await window.webContents.executeJavaScript(`(async () => {
-    const page = document.querySelector('[data-testid="page-knowledge-processing"]')
+    const page = document.querySelector('[data-testid="page-knowledge"]')
     const dialog = page.querySelector('[data-testid="clear-knowledge-dialog"]')
     const initial = {
       exists: Boolean(dialog),
@@ -232,32 +222,72 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
         completed: Boolean(result),
         result,
         error,
+        statementCountAfterClear: page.querySelectorAll('.knowledge-browser__item').length,
         closedAfterCompletion: !page.querySelector('[data-testid="clear-knowledge-dialog"]')
       }
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
     return { ...initial, cancelled, completed: false, error: 'Timed out clearing knowledge' }
   })()`)
+
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-knowledge-processing"]').click()`)
+  await window.webContents.executeJavaScript(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  const processingImage = await window.webContents.capturePage()
+  await writeFile(join(dirname(capturePath), 'knowledge-processing.png'), processingImage.toPNG())
+  const fullChainSemantics = await window.webContents.executeJavaScript(`(() => {
+    const page = document.querySelector('[data-testid="page-knowledge-processing"]')
+    const select = page.querySelector('[data-testid="full-chain-session-select"]')
+    const initialButton = page.querySelector('[data-testid="run-full-chain"]')
+    const result = {
+      fullChainSelected: page.querySelector('[data-testid="processing-view-full-chain"]')?.getAttribute('aria-selected'),
+      workspaceExists: Boolean(page.querySelector('[data-testid="full-chain-workspace"]')),
+      sessionOptionCount: select?.options.length,
+      fullChainButtonExists: Boolean(initialButton),
+      fullChainButtonDisabled: initialButton?.disabled,
+      initialDisabledReason: page.querySelector('[data-testid="full-chain-disabled-reason"]')?.textContent?.trim(),
+      modelSummary: page.querySelector('.chain-test__models')?.textContent?.trim(),
+      bodyText: page.innerText,
+      overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
+    }
+    if (select?.options[1]) {
+      select.value = select.options[1].value
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+    return new Promise((resolve) => requestAnimationFrame(() => resolve({
+      ...result,
+      selectedSession: select?.value,
+      selectedSessionDetails: {
+        title: page.querySelector('[data-testid="full-chain-session-meta-title"]')?.textContent?.trim(),
+        timeRange: page.querySelector('[data-testid="full-chain-session-meta-time-range"]')?.textContent?.trim(),
+        size: page.querySelector('[data-testid="full-chain-session-meta-size"]')?.textContent?.trim(),
+        project: page.querySelector('[data-testid="full-chain-session-meta-project"]')?.textContent?.trim()
+      },
+      fullChainButtonEnabledAfterSelection: page.querySelector('[data-testid="run-full-chain"]')?.disabled === false,
+      readyReason: page.querySelector('[data-testid="full-chain-disabled-reason"]')?.textContent?.trim()
+    })))
+  })()`)
   const fullChainRunSemantics = await window.webContents.executeJavaScript(`(async () => {
     const page = document.querySelector('[data-testid="page-knowledge-processing"]')
     page.querySelector('[data-testid="run-full-chain"]')?.click()
     const deadline = Date.now() + 5_000
-    let impactVisible = false
+    let runningStateVisible = false
     while (Date.now() < deadline) {
-      impactVisible ||= Boolean(page.querySelector('[data-testid="full-chain-running-impact"]'))
+      runningStateVisible ||= !page.querySelector('[data-testid="run-full-chain"]')
       const completed = Boolean(page.querySelector('[data-testid="full-chain-run-result"]'))
       const error = page.querySelector('.page-error')?.textContent?.trim()
       if (completed || error) return {
         completed,
-        impactVisible,
+        runningStateVisible,
         error,
-        candidateCount: page.querySelectorAll('#full-chain-panel-result .statement-candidate').length,
-        resolutionCount: page.querySelectorAll('#full-chain-panel-result .statement-candidate__resolution').length,
-        statementCount: page.querySelectorAll('#full-chain-panel-result .sandbox-statement').length
+        candidateCount: page.querySelectorAll('.chain-test__candidates .statement-candidate').length,
+        resolutionCount: page.querySelectorAll('.chain-test__candidates .statement-candidate__resolution').length,
+        statementCount: page.querySelectorAll('.chain-test__knowledge aside button').length,
+        bodyText: page.innerText
       }
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
-    return { completed: false, impactVisible, error: 'Timed out waiting for full-chain result' }
+    return { completed: false, runningStateVisible, error: 'Timed out waiting for full-chain result' }
   })()`)
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="processing-view-stage-debug"]').click()`)
   await new Promise((resolve) => setTimeout(resolve, 120))
@@ -298,6 +328,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       tabButtonCount: page.querySelectorAll('button[role="tab"]').length,
       sourceSwitchButtonCount: page.querySelectorAll('.processing-input-source button').length,
       statementButtonCount: page.querySelectorAll('.sandbox-statement').length,
+      chainStatementButtonCount: page.querySelectorAll('.chain-test__knowledge aside button').length,
       buttonIconCount: buttons.filter((button) => button.querySelector('.ui-button__icon .ui-icon')?.childElementCount > 0).length,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
       bodyText: page.innerText
@@ -421,9 +452,12 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     `${JSON.stringify({
       ...semantics,
       ai: { ...aiSemantics, directTest: aiDirectTestSemantics },
+      knowledge: {
+        browse: knowledgeBrowseSemantics,
+        clear: clearKnowledgeSemantics
+      },
       processing: {
         fullChain: fullChainSemantics,
-        clearKnowledge: clearKnowledgeSemantics,
         fullChainRun: fullChainRunSemantics,
         ...processingSemantics,
         promptRestore: promptRestoreSemantics,
@@ -495,11 +529,31 @@ app.whenReady().then(async () => {
     aiBackendService.initialize(),
     knowledgeProcessingService.initialize()
   ])
+  if (fixtureMode() && knowledgeStoreManager.production.listStatements().length === 0) {
+    knowledgeStoreManager.production.commit({
+      runRef: 'fixture:knowledge-browser',
+      statements: [
+        {
+          title: 'Oyster 知识加工链路',
+          content: '将外部 Agent 对话中的候选概念交给 [[Knowledge Maintenance Agent]] 判断，并在隔离空间中验证写入结果。'
+        },
+        {
+          title: 'Knowledge Maintenance Agent',
+          content: '负责读取候选清单、按需回溯原始证据，并让知识层中的 Statement 可以互相解释。'
+        }
+      ]
+    })
+  }
   registerIpc(service)
   registerAiBackendIpc(aiBackendService, () => mainWindow)
   registerKnowledgeProcessingIpc(
     knowledgeProcessingService,
     new SessionPreprocessor(service, knowledgeProcessingService),
+    knowledgeFullChainService,
+    () => mainWindow
+  )
+  registerKnowledgeIpc(
+    knowledgeStoreManager.production,
     knowledgeFullChainService,
     () => mainWindow
   )

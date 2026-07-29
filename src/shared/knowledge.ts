@@ -36,3 +36,29 @@ export interface ListKnowledgeStatementsOptions {
   limit?: number
   offset?: number
 }
+
+export interface BrowseKnowledgeInput extends ListKnowledgeStatementsOptions {
+  query?: string
+}
+
+export interface KnowledgeStatementSummary {
+  title: string
+  preview: string
+}
+
+export interface KnowledgeBrowseResult {
+  statements: KnowledgeStatementSummary[]
+  total: number
+  nextOffset?: number
+}
+
+export interface ClearKnowledgeResult {
+  deletedStatementCount: number
+  deletedContributionCount: number
+}
+
+export interface KnowledgeApi {
+  browse(input?: BrowseKnowledgeInput): Promise<KnowledgeBrowseResult>
+  read(title: string): Promise<KnowledgeStatement | undefined>
+  clear(): Promise<ClearKnowledgeResult>
+}

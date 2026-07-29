@@ -2,12 +2,14 @@ import { For, Show, createMemo, createSignal } from 'solid-js'
 import { createDiscoveryController } from './discovery-controller'
 import { AiBackendsPage } from './components/AiBackendsPage'
 import { KnowledgeProcessingPage } from './components/KnowledgeProcessingPage'
+import { KnowledgeBrowserPage } from './components/KnowledgeBrowserPage'
 import { SourceCard } from './components/SourceCard'
 import { Button, Icon } from './ui'
 
 export function App() {
   const controller = createDiscoveryController()
-  const [page, setPage] = createSignal<'sources' | 'knowledge-processing' | 'ai-backends'>('sources')
+  const [page, setPage] = createSignal<'sources' | 'knowledge' | 'knowledge-processing' | 'ai-backends'>('sources')
+  const [knowledgeResetVersion, setKnowledgeResetVersion] = createSignal(0)
   const foundCount = createMemo(
     () => controller.snapshot().sources.filter((source) => source.discoveryState === 'found').length
   )
@@ -26,11 +28,17 @@ export function App() {
             onClick={(event) => { event.preventDefault(); setPage('sources') }}
           ><Icon name="archive" /><span>数据来源</span></a>
           <a
+            href="#knowledge"
+            data-testid="nav-knowledge"
+            class={`nav-item${page() === 'knowledge' ? ' nav-item--active' : ''}`}
+            onClick={(event) => { event.preventDefault(); setPage('knowledge') }}
+          ><Icon name="layers" /><span>知识库</span></a>
+          <a
             href="#knowledge-processing"
             data-testid="nav-knowledge-processing"
             class={`nav-item${page() === 'knowledge-processing' ? ' nav-item--active' : ''}`}
             onClick={(event) => { event.preventDefault(); setPage('knowledge-processing') }}
-          ><Icon name="layers" /><span>知识加工</span></a>
+          ><Icon name="play" /><span>加工测试</span></a>
           <a
             href="#ai-backends"
             data-testid="nav-ai-backends"
@@ -40,7 +48,7 @@ export function App() {
         </nav>
       </aside>
 
-      <main class={`content${page() === 'knowledge-processing' ? ' content--wide' : ''}`}>
+      <main class={`content${page() === 'knowledge-processing' || page() === 'knowledge' ? ' content--wide' : ''}`}>
         <div class="window-drag-region" data-testid="window-drag-region" aria-hidden="true" />
         {/* Navigation changes visibility; mounted page state and active runs remain intact. */}
         <div data-testid="page-sources" hidden={page() !== 'sources'}>
@@ -87,8 +95,14 @@ export function App() {
             }}</For>
           </section>
         </div>
+        <div data-testid="page-knowledge" hidden={page() !== 'knowledge'}>
+          <KnowledgeBrowserPage
+            active={page() === 'knowledge'}
+            onKnowledgeCleared={() => setKnowledgeResetVersion((version) => version + 1)}
+          />
+        </div>
         <div data-testid="page-knowledge-processing" hidden={page() !== 'knowledge-processing'}>
-          <KnowledgeProcessingPage />
+          <KnowledgeProcessingPage knowledgeResetVersion={knowledgeResetVersion()} />
         </div>
         <div data-testid="page-ai-backends" hidden={page() !== 'ai-backends'}>
           <AiBackendsPage />

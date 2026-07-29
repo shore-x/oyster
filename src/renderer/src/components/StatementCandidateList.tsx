@@ -11,17 +11,6 @@ export interface StatementCandidateListProps {
   emptyText?: string
 }
 
-function candidateRef(candidate: DisplayStatementCandidate, index: number): string {
-  return 'ref' in candidate ? candidate.ref : `候选 ${index + 1}`
-}
-
-function candidateLocations(candidate: DisplayStatementCandidate): string[] {
-  if ('evidenceLocations' in candidate) return candidate.evidenceLocations
-  return candidate.locations.map(
-    (location) => `L${String(location.line).padStart(6, '0')}:C${location.offset}`
-  )
-}
-
 export function StatementCandidateList(props: StatementCandidateListProps) {
   return (
     <Show
@@ -43,14 +32,9 @@ export function StatementCandidateList(props: StatementCandidateListProps) {
             >
               <div class="statement-candidate__heading">
                 <strong>{candidate.expression}</strong>
-                <span>{candidateRef(candidate, index())} · {status() === 'resolved' ? '已裁决' : '待裁决'}</span>
+                <span>{status() === 'resolved' ? '已裁决' : '待裁决'}</span>
               </div>
               <p>{candidate.question}</p>
-              <Show when={candidateLocations(candidate).length}>
-                <div class="statement-candidate__locations" aria-label="原始证据位置">
-                  <For each={candidateLocations(candidate)}>{(location) => <code>{location}</code>}</For>
-                </div>
-              </Show>
               <Show when={resolution()}>
                 {(value) => (
                   <div class="statement-candidate__resolution">

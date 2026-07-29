@@ -123,10 +123,6 @@ export function registerKnowledgeProcessingIpc(
     assertTrustedSender(event)
     fullChain.cancel()
   })
-  ipcMain.handle(knowledgeProcessingChannels.clearKnowledge, (event) => {
-    assertTrustedSender(event)
-    return fullChain.clearKnowledge()
-  })
   ipcMain.handle(
     knowledgeProcessingChannels.discardSandbox,
     (event, sandboxId: string) => {

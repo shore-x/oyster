@@ -8,7 +8,6 @@ import type {
   ProcessingStageView
 } from '../../../shared/knowledge-processing'
 import type { ReasoningEffort } from '../../../shared/ai-backends'
-import type { KnowledgeContributionDraft } from '../../../shared/knowledge'
 import { createKnowledgeProcessingController } from '../knowledge-processing-controller'
 import {
   REASONING_LABELS,
@@ -36,19 +35,8 @@ function formatTime(value: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN')
 }
 
-function contributionText(contribution: KnowledgeContributionDraft): string {
-  if (!contribution.statements.length) return '本次运行没有需要持久化的 Knowledge Statement。'
-  return contribution.statements
-    .map((statement) => `## ${statement.title}\n\n${statement.content}`)
-    .join('\n\n---\n\n')
-}
-
 function fullChainResultView(result: KnowledgeFullChainResult): FullChainResultView {
   return {
-    runId: result.runId,
-    sandboxId: result.sandbox.id,
-    session: result.session,
-    baselineCreatedAt: result.sandbox.baselineCreatedAt,
     completedAt: result.completedAt,
     durationMs: result.durationMs,
     statementCandidates: result.maintenance.statementCandidates,
@@ -57,7 +45,7 @@ function fullChainResultView(result: KnowledgeFullChainResult): FullChainResultV
       {
         id: 'session',
         label: '读取 Session',
-        detail: `${result.session.sourceDisplayName} · ${result.session.revision.slice(0, 12)}`,
+        detail: result.session.sourceDisplayName,
         state: 'completed'
       },
       {
@@ -73,11 +61,6 @@ function fullChainResultView(result: KnowledgeFullChainResult): FullChainResultV
         state: 'completed'
       }
     ],
-    contributions: [{
-      id: result.commit.contribution.runRef,
-      content: contributionText(result.maintenance.contribution),
-      createdAt: result.commit.contribution.createdAt
-    }],
     statements: result.knowledge.statements.map((statement) => ({
       title: statement.title,
       content: statement.content
@@ -103,7 +86,7 @@ function ExecutionDetails(props: {
       <Show when={props.segmentCount !== undefined}>
         <div><dt>Observation 分段</dt><dd>{props.segmentCount} 个</dd></div>
       </Show>
-      <div><dt>工具调用</dt><dd>{props.execution.toolCalls.length ? props.execution.toolCalls.join('、') : '无'}</dd></div>
+      <div><dt>工具活动</dt><dd>{props.execution.toolCalls.length} 类</dd></div>
       <div><dt>耗时</dt><dd>{formatDuration(props.durationMs)}</dd></div>
       <div><dt>完成时间</dt><dd>{formatTime(props.completedAt)}</dd></div>
     </dl>
@@ -300,10 +283,6 @@ function PreprocessingResult(props: { result: ObservationPreprocessingResult }) 
         这是预处理器发现的开放候选清单，不是知识结论；知识维护 Agent 会结合原始证据逐项裁决。
       </p>
       <StatementCandidateList candidates={props.result.statementCandidates} />
-      <div class="processing-result__reference">
-        <span>Run ID</span><code>{props.result.runId}</code>
-        <span>来源</span><code>{props.result.sourceRef}</code>
-      </div>
       <ExecutionDetails
         execution={props.result.execution}
         segmentCount={props.result.segmentCount}
@@ -332,7 +311,7 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
   return (
     <section class="processing-result" data-testid="processing-result-knowledge_maintenance_agent">
       <div class="processing-result__heading">
-        <div><Icon name="check" /><h3>Knowledge Contribution</h3></div>
+        <div><Icon name="check" /><h3>知识维护结果</h3></div>
         <span>{resolvedCandidates()} / {props.result.statementCandidates.length} 个候选已裁决 · 尚未写入知识层</span>
       </div>
       <Show
@@ -353,7 +332,7 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
                 onClick={() => setSelectedTitle(statement.title)}
               >
                 <strong>{statement.title}</strong>
-                <span>canonical title</span>
+                <span>知识名称</span>
               </button>
             )}</For>
           </aside>
@@ -362,7 +341,7 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
               <article class="sandbox-knowledge__detail">
                 <h3>{statement().title}</h3>
                 <div class="sandbox-knowledge__detail-meta">
-                  <span>按 canonical title 创建或覆盖</span>
+                  <span>按标题创建或更新</span>
                 </div>
                 <div class="sandbox-knowledge__content">{statement().content}</div>
               </article>
@@ -374,7 +353,7 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
         <div class="processing-candidate-agenda__heading">
           <div>
             <h4>Statement Candidate Agenda</h4>
-            <p>查看每个名称或指代问题的最终裁决及其原始证据位置。</p>
+            <p>查看每个名称或指代问题的最终处理结果。</p>
           </div>
           <strong>{resolvedCandidates()} / {props.result.statementCandidates.length}</strong>
         </div>
@@ -383,9 +362,6 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
           emptyText="本次预处理没有发现需要裁决的 Statement 候选。"
         />
       </section>
-      <div class="processing-result__reference">
-        <span>Preprocessing Run</span><code>{props.result.preprocessingRunId}</code>
-      </div>
       <ExecutionDetails
         execution={props.result.execution}
         durationMs={props.result.durationMs}
@@ -395,40 +371,10 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
   )
 }
 
-type DebugWorkspace = 'input' | 'configuration' | 'process' | 'output'
-
-function DebugWorkspaceTabs(props: {
-  stageId: string
-  selected: DebugWorkspace
-  onSelect(tab: DebugWorkspace): void
-}) {
-  const tabs: Array<{ id: DebugWorkspace; label: string }> = [
-    { id: 'input', label: '运行输入' },
-    { id: 'configuration', label: '模型与提示词' },
-    { id: 'process', label: '调用过程' },
-    { id: 'output', label: '输出结果' }
-  ]
-  return (
-    <div class="processing-workspace-tabs" role="tablist" aria-label="阶段调试工作区">
-      <For each={tabs}>{(tab) => (
-        <button
-          type="button"
-          role="tab"
-          aria-selected={props.selected === tab.id}
-          aria-controls={`${props.stageId}-panel-${tab.id}`}
-          data-testid={`${props.stageId}-tab-${tab.id}`}
-          onClick={() => props.onSelect(tab.id)}
-        >{tab.label}</button>
-      )}</For>
-    </div>
-  )
-}
-
-export function KnowledgeProcessingPage() {
+export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }) {
   const controller = createKnowledgeProcessingController()
   const [view, setView] = createSignal<'full_chain' | 'stage_debug'>('full_chain')
   const [debugStage, setDebugStage] = createSignal<'preprocessor' | 'maintainer'>('preprocessor')
-  const [debugWorkspace, setDebugWorkspace] = createSignal<DebugWorkspace>('input')
   const [selectedSessionId, setSelectedSessionId] = createSignal<string>()
   const [fullChainAttention, setFullChainAttention] = createSignal('')
   const [preprocessorInputSource, setPreprocessorInputSource] = createSignal<'session' | 'manual'>('session')
@@ -436,6 +382,10 @@ export function KnowledgeProcessingPage() {
   const [attention, setAttention] = createSignal('')
   const [preprocessorPrompt, setPreprocessorPrompt] = createSignal('')
   const [maintenancePrompt, setMaintenancePrompt] = createSignal('')
+
+  createEffect(() => {
+    if (props.knowledgeResetVersion > 0) controller.resetFullChainResult()
+  })
 
   const preprocessor = createMemo(() => controller.snapshot().stages.find(
     (stage) => stage.id === 'observation_preprocessor'
@@ -555,7 +505,6 @@ export function KnowledgeProcessingPage() {
     if (!stageId || stageId === previousDebugStage) return
     previousDebugStage = stageId
     setDebugStage(stageId === 'knowledge_maintenance_agent' ? 'maintainer' : 'preprocessor')
-    setDebugWorkspace('process')
   })
 
   function storedInstructions(stage: ProcessingStageView): string | null {
@@ -664,17 +613,28 @@ export function KnowledgeProcessingPage() {
     <>
       <header class="page-header">
         <div>
-          <h1>知识加工</h1>
+          <h1>加工测试</h1>
           <div class="page-summary">
-            <Show
-              when={view() === 'full_chain'}
-              fallback={<span><strong>2</strong> 个固定阶段</span>}
-            >
-              <span>在隔离的 <strong>Knowledge Sandbox</strong> 中验证完整链路</span>
-            </Show>
+            <span>所有运行均为显式测试</span>
             <span class="page-summary__separator">·</span>
-            <span>{view() === 'full_chain' ? '不影响正式知识库' : '每个阶段仅在显式点击后运行'}</span>
+            <span>不会写入当前知识库</span>
           </div>
+        </div>
+        <div class="processing-mode-nav" role="tablist" aria-label="加工测试工作面">
+          <button
+            type="button"
+            role="tab"
+            data-testid="processing-view-full-chain"
+            aria-selected={view() === 'full_chain'}
+            onClick={() => setView('full_chain')}
+          >链路测试</button>
+          <button
+            type="button"
+            role="tab"
+            data-testid="processing-view-stage-debug"
+            aria-selected={view() === 'stage_debug'}
+            onClick={() => setView('stage_debug')}
+          >高级调试</button>
         </div>
       </header>
 
@@ -684,23 +644,6 @@ export function KnowledgeProcessingPage() {
       <Show when={controller.snapshot().configurationError}>
         <div class="page-error"><Icon name="warning" />{controller.snapshot().configurationError}</div>
       </Show>
-
-      <div class="processing-view-switch" role="tablist" aria-label="知识加工模式">
-        <button
-          type="button"
-          role="tab"
-          data-testid="processing-view-full-chain"
-          aria-selected={view() === 'full_chain'}
-          onClick={() => setView('full_chain')}
-        >完整链路</button>
-        <button
-          type="button"
-          role="tab"
-          data-testid="processing-view-stage-debug"
-          aria-selected={view() === 'stage_debug'}
-          onClick={() => setView('stage_debug')}
-        >阶段调试</button>
-      </div>
 
       <div
         class="processing-page-panel processing-tab-panel"
@@ -724,11 +667,9 @@ export function KnowledgeProcessingPage() {
             && controller.snapshot().runningStageIds.includes('knowledge_maintenance_agent')}
           debugTrace={fullChainDebugTrace()}
           locked={anyStageRunning()}
-          clearingKnowledge={controller.clearingKnowledge()}
-          knowledgeClearResult={controller.knowledgeClearResult()}
           discarding={Boolean(
-            fullChainResult()
-            && controller.isDiscardingSandbox(fullChainResult()!.sandboxId)
+            controller.fullChainResult()
+            && controller.isDiscardingSandbox(controller.fullChainResult()!.sandbox.id)
           )}
           result={fullChainResult()}
           onSelectSession={updateSelectedSession}
@@ -745,7 +686,6 @@ export function KnowledgeProcessingPage() {
             })
           }}
           onCancel={() => void controller.cancelFullChain()}
-          onClearKnowledge={() => controller.clearKnowledge()}
           onDiscardSandbox={() => {
             const result = controller.fullChainResult()
             if (result) void controller.discardSandbox(result.sandbox.id)
@@ -760,7 +700,7 @@ export function KnowledgeProcessingPage() {
       >
         <div class="processing-notice">
           <Icon name="warning" />
-          <span>这是显式阶段调试工作面。点击运行后会直接调用所选 Connection，可能消耗额度；发送范围、实时进度、错误和结果都在当前页面展示。两个阶段不会自动串联。</span>
+          <span>这是显式阶段调试工作面。点击运行后会直接调用所选 Connection，可能消耗额度；输入、实时进度、错误和结果都在当前页面展示。两个阶段不会自动串联。</span>
         </div>
 
         <div class="processing-stage-switch" role="tablist" aria-label="调试阶段">
@@ -793,7 +733,7 @@ export function KnowledgeProcessingPage() {
           {(stage) => (
             <article
               id="processing-stage-observation_preprocessor"
-              class="processing-stage"
+              class="processing-stage stage-debug-workspace"
               data-testid="processing-stage-observation_preprocessor"
               hidden={debugStage() !== 'preprocessor'}
             >
@@ -809,17 +749,10 @@ export function KnowledgeProcessingPage() {
                 <For each={stage().capabilities}>{(capability) => <span>{capability}</span>}</For>
               </div>
 
-              <DebugWorkspaceTabs
-                stageId="observation-preprocessor"
-                selected={debugWorkspace()}
-                onSelect={setDebugWorkspace}
-              />
-
               <div
                 id="observation-preprocessor-panel-configuration"
-                class="processing-workspace-panel processing-tab-panel"
-                role="tabpanel"
-                hidden={debugWorkspace() !== 'configuration'}
+                class="processing-workspace-panel stage-debug__configuration"
+                aria-label="模型与提示词"
               >
                 <ConnectionConfiguration
                   stage={stage()}
@@ -844,9 +777,8 @@ export function KnowledgeProcessingPage() {
 
               <div
                 id="observation-preprocessor-panel-input"
-                class="processing-workspace-panel processing-tab-panel"
-                role="tabpanel"
-                hidden={debugWorkspace() !== 'input'}
+                class="processing-workspace-panel stage-debug__input"
+                aria-label="运行输入"
               >
               <section class="processing-input" aria-label="观察预处理输入">
                 <div class="processing-input__heading">
@@ -960,7 +892,6 @@ export function KnowledgeProcessingPage() {
                           const session = selectedSession()
                           if (preprocessorInputSource() === 'session') {
                             if (!session) return
-                            setDebugWorkspace('process')
                             void controller.runSessionPreprocessor({
                               artifactId: session.artifactId,
                               expectedRevision: session.revision,
@@ -968,7 +899,6 @@ export function KnowledgeProcessingPage() {
                             })
                             return
                           }
-                          setDebugWorkspace('process')
                           void controller.runObservationPreprocessor({
                             observation: observation(),
                             attention: runAttention()
@@ -990,9 +920,8 @@ export function KnowledgeProcessingPage() {
 
               <div
                 id="observation-preprocessor-panel-process"
-                class="processing-workspace-panel processing-tab-panel"
-                role="tabpanel"
-                hidden={debugWorkspace() !== 'process'}
+                class="processing-workspace-panel stage-debug__process"
+                aria-label="调用过程"
               >
                 <Show
                   when={stageDebugTrace()?.preprocessing ? stageDebugTrace() : undefined}
@@ -1021,9 +950,8 @@ export function KnowledgeProcessingPage() {
 
               <div
                 id="observation-preprocessor-panel-output"
-                class="processing-workspace-panel processing-tab-panel"
-                role="tabpanel"
-                hidden={debugWorkspace() !== 'output'}
+                class="processing-workspace-panel stage-debug__output"
+                aria-label="输出结果"
               >
                 <Show
                   when={!controller.isRunning(stage().id) ? currentPreprocessingResult() : undefined}
@@ -1040,7 +968,7 @@ export function KnowledgeProcessingPage() {
           {(stage) => (
             <article
               id="processing-stage-knowledge_maintenance_agent"
-              class="processing-stage"
+              class="processing-stage stage-debug-workspace"
               data-testid="processing-stage-knowledge_maintenance_agent"
               hidden={debugStage() !== 'maintainer'}
             >
@@ -1056,17 +984,10 @@ export function KnowledgeProcessingPage() {
                 <For each={stage().capabilities}>{(capability) => <span>{capability}</span>}</For>
               </div>
 
-              <DebugWorkspaceTabs
-                stageId="knowledge-maintainer"
-                selected={debugWorkspace()}
-                onSelect={setDebugWorkspace}
-              />
-
               <div
                 id="knowledge-maintainer-panel-configuration"
-                class="processing-workspace-panel processing-tab-panel"
-                role="tabpanel"
-                hidden={debugWorkspace() !== 'configuration'}
+                class="processing-workspace-panel stage-debug__configuration"
+                aria-label="模型与提示词"
               >
                 <ConnectionConfiguration
                   stage={stage()}
@@ -1091,9 +1012,8 @@ export function KnowledgeProcessingPage() {
 
               <div
                 id="knowledge-maintainer-panel-input"
-                class="processing-workspace-panel processing-tab-panel"
-                role="tabpanel"
-                hidden={debugWorkspace() !== 'input'}
+                class="processing-workspace-panel stage-debug__input"
+                aria-label="运行输入"
               >
               <section class="processing-dependency" aria-label="知识维护输入">
                 <div>
@@ -1103,7 +1023,7 @@ export function KnowledgeProcessingPage() {
                     fallback={<p>等待一次成功的观察预处理运行。</p>}
                   >
                     {(result) => (
-                      <p>将使用 Preprocessing Run <code>{result().runId}</code> 的 {result().statementCandidates.length} 个开放候选，并按需回溯原始观察材料。</p>
+                      <p>将使用预处理产生的 {result().statementCandidates.length} 个开放候选，并按需回溯原始观察材料。</p>
                     )}
                   </Show>
                 </div>
@@ -1136,7 +1056,6 @@ export function KnowledgeProcessingPage() {
                       onClick={() => {
                         const result = currentPreprocessingResult()
                         if (!result) return
-                        setDebugWorkspace('process')
                         void controller.runKnowledgeMaintenance({
                           preprocessingRunId: result.runId,
                           attention: runAttention()
@@ -1157,9 +1076,8 @@ export function KnowledgeProcessingPage() {
 
               <div
                 id="knowledge-maintainer-panel-process"
-                class="processing-workspace-panel processing-tab-panel"
-                role="tabpanel"
-                hidden={debugWorkspace() !== 'process'}
+                class="processing-workspace-panel stage-debug__process"
+                aria-label="调用过程"
               >
                 <Show
                   when={stageDebugTrace()?.maintenance ? stageDebugTrace() : undefined}
@@ -1191,9 +1109,8 @@ export function KnowledgeProcessingPage() {
 
               <div
                 id="knowledge-maintainer-panel-output"
-                class="processing-workspace-panel processing-tab-panel"
-                role="tabpanel"
-                hidden={debugWorkspace() !== 'output'}
+                class="processing-workspace-panel stage-debug__output"
+                aria-label="输出结果"
               >
                 <Show
                   when={

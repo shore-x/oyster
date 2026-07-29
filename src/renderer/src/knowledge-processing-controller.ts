@@ -1,7 +1,6 @@
 import { createSignal, onCleanup } from 'solid-js'
 import type { AvailableSessionSummary, DiscoverySnapshot } from '../../shared/discovery'
 import type {
-  ClearKnowledgeResult,
   KnowledgeFullChainResult,
   KnowledgeMaintenanceResult,
   KnowledgeProcessingDebugTrace,
@@ -48,8 +47,6 @@ export function createKnowledgeProcessingController() {
   const [fullChainPending, setFullChainPending] = createSignal(false)
   const [fullChainResult, setFullChainResult] = createSignal<KnowledgeFullChainResult>()
   const [discardingSandboxId, setDiscardingSandboxId] = createSignal<string>()
-  const [clearingKnowledge, setClearingKnowledge] = createSignal(false)
-  const [knowledgeClearResult, setKnowledgeClearResult] = createSignal<ClearKnowledgeResult>()
   const [hiddenStageDebugTraceId, setHiddenStageDebugTraceId] = createSignal<string>()
   let sessionLoadRevision = 0
 
@@ -80,6 +77,10 @@ export function createKnowledgeProcessingController() {
     setHiddenStageDebugTraceId(currentTrace?.id)
     setPreprocessingResult(undefined)
     setMaintenanceResult(undefined)
+  }
+
+  function resetFullChainResult(): void {
+    setFullChainResult(undefined)
   }
 
   function debugTrace(origin: ProcessingDebugTraceOrigin): KnowledgeProcessingDebugTrace | undefined {
@@ -217,7 +218,6 @@ export function createKnowledgeProcessingController() {
     try {
       setFullChainPending(true)
       setError(undefined)
-      setKnowledgeClearResult(undefined)
       const result = await window.oyster.knowledgeProcessing.runFullChain(input)
       if (result) setFullChainResult(result)
     } catch (cause) {
@@ -249,22 +249,6 @@ export function createKnowledgeProcessingController() {
     }
   }
 
-  async function clearKnowledge(): Promise<boolean> {
-    try {
-      setClearingKnowledge(true)
-      setError(undefined)
-      const result = await window.oyster.knowledgeProcessing.clearKnowledge()
-      setKnowledgeClearResult(result)
-      setFullChainResult(undefined)
-      return true
-    } catch (cause) {
-      setError(errorMessage(cause))
-      return false
-    } finally {
-      setClearingKnowledge(false)
-    }
-  }
-
   return {
     snapshot,
     isSaving: (stageId: ProcessingStageId) => savingStageIds().includes(stageId),
@@ -277,9 +261,8 @@ export function createKnowledgeProcessingController() {
     debugTrace,
     isFullChainRunning: fullChainPending,
     isDiscardingSandbox: (sandboxId: string) => discardingSandboxId() === sandboxId,
-    clearingKnowledge,
-    knowledgeClearResult,
     invalidateInputResults,
+    resetFullChainResult,
     isRunning,
     saveStage,
     runObservationPreprocessor,
@@ -289,7 +272,6 @@ export function createKnowledgeProcessingController() {
     loadAvailableSessions,
     runFullChain,
     cancelFullChain,
-    clearKnowledge,
     discardSandbox
   }
 }

@@ -58,7 +58,7 @@ export const PROCESSING_STAGE_DEFINITIONS: readonly ProcessingStageDefinition[] 
     inputDescription: '本地 Session（默认）或手工 Observation（调试）',
     outputDescription: 'Statement Candidate Agenda Seed（可丢弃工作材料）',
     runtime: 'direct_model_call',
-    capabilities: ['有界分段发现', '开放候选清单', '原始证据位置', '不写入知识层'],
+    capabilities: ['有界分段发现', '开放候选清单', '保留回溯线索', '不写入知识层'],
     defaultInstructions: OBSERVATION_PREPROCESSOR_PROMPT
   },
   {
