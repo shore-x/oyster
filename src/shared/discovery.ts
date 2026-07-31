@@ -1,7 +1,7 @@
 export const AGENT_TYPES = ['claude', 'pi', 'codex'] as const
 
 export type AgentType = (typeof AGENT_TYPES)[number]
-export type ArtifactKind = 'conversation' | 'human_instruction'
+export type SourceRecordKind = 'conversation' | 'human_instruction'
 export type InstructionScope = 'user' | 'project' | 'managed'
 export type DiscoveryState = 'not_found' | 'found' | 'needs_permission' | 'error'
 export type ScanState = 'idle' | 'scanning' | 'ready' | 'error'
@@ -26,10 +26,10 @@ export interface AgentSource {
   lastScannedAt?: string
   errorMessage?: string
 }
-export interface HistoryArtifact {
+export interface SourceRecord {
   id: string
   sourceId: string
-  kind: ArtifactKind
+  kind: SourceRecordKind
   externalId: string
   relativePath: string
   sourcePath?: string
@@ -67,7 +67,7 @@ export interface DiscoverySnapshot {
 
 /** A path-free reference to one discovered conversation revision. */
 export interface AvailableSessionSummary {
-  artifactId: string
+  sourceRecordId: string
   sourceId: string
   agentType: AgentType
   sourceDisplayName: string

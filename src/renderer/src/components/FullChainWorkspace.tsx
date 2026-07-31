@@ -111,7 +111,7 @@ function progressText(
 export function FullChainWorkspace(props: FullChainWorkspaceProps) {
   const [page, setPage] = createSignal<'overview' | 'activity' | 'result'>('overview')
   const selectedSession = createMemo(() => props.sessions.find(
-    (session) => session.artifactId === props.selectedSessionId
+    (session) => session.sourceRecordId === props.selectedSessionId
   ))
   const preprocessor = createMemo(() => stageSummary(props.preprocessor, props.preprocessorConnection))
   const maintainer = createMemo(() => stageSummary(props.maintainer, props.maintainerConnection))
@@ -163,7 +163,7 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
                   {props.sessionsLoading ? '正在读取 Session…' : props.sessions.length ? '选择一个 Session' : '暂无可用 Session'}
                 </option>
                 <For each={props.sessions}>{(session) => (
-                  <option value={session.artifactId}>{sessionOptionLabel(session)}</option>
+                  <option value={session.sourceRecordId}>{sessionOptionLabel(session)}</option>
                 )}</For>
               </select>
             </label>

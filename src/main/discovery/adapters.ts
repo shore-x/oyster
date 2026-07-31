@@ -1,10 +1,10 @@
 import { constants } from 'node:fs'
 import { access, lstat, open, opendir, readFile, stat } from 'node:fs/promises'
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import type { HistoryArtifact, InstructionScope } from '../../shared/discovery'
+import type { InstructionScope, SourceRecord } from '../../shared/discovery'
 import type {
   AgentHistoryAdapter,
-  ArtifactCandidate,
+  SourceRecordCandidate,
   DetectionContext,
   DetectionResult,
   ScanEntry
@@ -194,8 +194,8 @@ function candidateFromFile(
   filePath: string,
   externalId: string,
   metadata: { size: number; mtime: Date },
-  extra: Partial<ArtifactCandidate> = {}
-): ArtifactCandidate {
+  extra: Partial<SourceRecordCandidate> = {}
+): SourceRecordCandidate {
   return {
     kind: 'conversation',
     externalId,
@@ -234,7 +234,7 @@ async function instructionCandidate(
   filePath: string,
   instructionScope: InstructionScope,
   projectPath?: string
-): Promise<ArtifactCandidate | undefined> {
+): Promise<SourceRecordCandidate | undefined> {
   try {
     const metadata = await lstat(filePath)
     if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size === 0) return undefined
@@ -269,7 +269,7 @@ async function* instructionCandidates(
     const candidate = await instructionCandidate(rootPath, entry.path, entry.scope, entry.projectPath)
     if (!candidate || seen.has(candidate.sourcePath)) continue
     seen.add(candidate.sourcePath)
-    yield { kind: 'artifact', candidate }
+    yield { kind: 'record', candidate }
   }
 }
 
@@ -308,7 +308,7 @@ async function firstInstructionCandidate(
   paths: string[],
   scope: InstructionScope,
   projectPath?: string
-): Promise<ArtifactCandidate | undefined> {
+): Promise<SourceRecordCandidate | undefined> {
   for (const filePath of paths) {
     const candidate = await instructionCandidate(rootPath, filePath, scope, projectPath)
     if (candidate) return candidate
@@ -329,21 +329,21 @@ async function codexFallbackNames(rootPath: string): Promise<string[]> {
   }
 }
 
-function resolveArtifactPath(rootPath: string, artifact: HistoryArtifact): string {
-  if (artifact.kind === 'conversation') return safeResolve(rootPath, artifact.relativePath)
-  if (!artifact.sourcePath || !isAbsolute(artifact.sourcePath)) {
-    throw new Error('Instruction artifact is missing its absolute source path')
+function resolveRecordPath(rootPath: string, record: SourceRecord): string {
+  if (record.kind === 'conversation') return safeResolve(rootPath, record.relativePath)
+  if (!record.sourcePath || !isAbsolute(record.sourcePath)) {
+    throw new Error('Instruction source record is missing its absolute source path')
   }
-  return resolve(artifact.sourcePath)
+  return resolve(record.sourcePath)
 }
 
 async function refreshConversationFromScan(
   entries: AsyncGenerator<ScanEntry>,
   externalId: string
-): Promise<ArtifactCandidate | undefined> {
+): Promise<SourceRecordCandidate | undefined> {
   for await (const entry of entries) {
     if (
-      entry.kind === 'artifact'
+      entry.kind === 'record'
       && entry.candidate.kind === 'conversation'
       && entry.candidate.externalId === externalId
     ) {
@@ -368,15 +368,15 @@ export class ClaudeHistoryAdapter implements AgentHistoryAdapter {
 
   refreshConversation(
     rootPath: string,
-    artifact: HistoryArtifact,
+    record: SourceRecord,
     signal: AbortSignal,
     context?: DetectionContext
-  ): Promise<ArtifactCandidate | undefined> {
-    return refreshConversationFromScan(this.scan(rootPath, signal, context), artifact.externalId)
+  ): Promise<SourceRecordCandidate | undefined> {
+    return refreshConversationFromScan(this.scan(rootPath, signal, context), record.externalId)
   }
 
-  resolveArtifactPath(rootPath: string, artifact: HistoryArtifact): string {
-    return resolveArtifactPath(rootPath, artifact)
+  resolveRecordPath(rootPath: string, record: SourceRecord): string {
+    return resolveRecordPath(rootPath, record)
   }
 
   createObservationView(rawContent: string): ObservationView {
@@ -400,7 +400,7 @@ export class ClaudeHistoryAdapter implements AgentHistoryAdapter {
       }
       const message = asRecord(header.message)
       yield {
-        kind: 'artifact',
+        kind: 'record',
         candidate: candidateFromFile(rootPath, filePath, externalId, metadata, {
           title: stringValue(
             header.slug,
@@ -496,15 +496,15 @@ export class PiHistoryAdapter implements AgentHistoryAdapter {
 
   refreshConversation(
     rootPath: string,
-    artifact: HistoryArtifact,
+    record: SourceRecord,
     signal: AbortSignal,
     context?: DetectionContext
-  ): Promise<ArtifactCandidate | undefined> {
-    return refreshConversationFromScan(this.scan(rootPath, signal, context), artifact.externalId)
+  ): Promise<SourceRecordCandidate | undefined> {
+    return refreshConversationFromScan(this.scan(rootPath, signal, context), record.externalId)
   }
 
-  resolveArtifactPath(rootPath: string, artifact: HistoryArtifact): string {
-    return resolveArtifactPath(rootPath, artifact)
+  resolveRecordPath(rootPath: string, record: SourceRecord): string {
+    return resolveRecordPath(rootPath, record)
   }
 
   createObservationView(rawContent: string): ObservationView {
@@ -527,7 +527,7 @@ export class PiHistoryAdapter implements AgentHistoryAdapter {
         continue
       }
       yield {
-        kind: 'artifact',
+        kind: 'record',
         candidate: candidateFromFile(rootPath, filePath, externalId, metadata, {
           title: stringValue(header.title, piUserTitle(records), basename(filePath, '.jsonl')),
           projectPath: stringValue(header.cwd, header.projectPath),
@@ -591,15 +591,15 @@ export class CodexHistoryAdapter implements AgentHistoryAdapter {
 
   refreshConversation(
     rootPath: string,
-    artifact: HistoryArtifact,
+    record: SourceRecord,
     signal: AbortSignal,
     context?: DetectionContext
-  ): Promise<ArtifactCandidate | undefined> {
-    return refreshConversationFromScan(this.scan(rootPath, signal, context), artifact.externalId)
+  ): Promise<SourceRecordCandidate | undefined> {
+    return refreshConversationFromScan(this.scan(rootPath, signal, context), record.externalId)
   }
 
-  resolveArtifactPath(rootPath: string, artifact: HistoryArtifact): string {
-    return resolveArtifactPath(rootPath, artifact)
+  resolveRecordPath(rootPath: string, record: SourceRecord): string {
+    return resolveRecordPath(rootPath, record)
   }
 
   createObservationView(rawContent: string): ObservationView {
@@ -629,7 +629,7 @@ export class CodexHistoryAdapter implements AgentHistoryAdapter {
           if (visited.has(externalId)) continue
           visited.add(externalId)
           yield {
-            kind: 'artifact',
+            kind: 'record',
             candidate: candidateFromFile(rootPath, filePath, externalId, metadata, {
               title: stringValue(
                 payload.title,
@@ -657,7 +657,7 @@ export class CodexHistoryAdapter implements AgentHistoryAdapter {
     )
     if (globalInstruction) {
       seen.add(globalInstruction.sourcePath)
-      yield { kind: 'artifact', candidate: globalInstruction }
+      yield { kind: 'record', candidate: globalInstruction }
     }
 
     const fallbackNames = await codexFallbackNames(rootPath)
@@ -677,7 +677,7 @@ export class CodexHistoryAdapter implements AgentHistoryAdapter {
         )
         if (!candidate || seen.has(candidate.sourcePath)) continue
         seen.add(candidate.sourcePath)
-        yield { kind: 'artifact', candidate }
+        yield { kind: 'record', candidate }
       }
     }
   }

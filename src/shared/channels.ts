@@ -43,6 +43,14 @@ export const knowledgeChannels = {
   clear: 'knowledge:clear'
 } as const
 
+export const artifactChannels = {
+  getSnapshot: 'artifacts:get-snapshot',
+  refresh: 'artifacts:refresh',
+  createArtifact: 'artifacts:create',
+  openRepository: 'artifacts:open-repository',
+  openArtifact: 'artifacts:open-artifact'
+} as const
+
 export const chatChannels = {
   event: 'chat:event',
   getSnapshot: 'chat:get-snapshot',

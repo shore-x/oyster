@@ -21,8 +21,7 @@ import {
   providerLabel,
   reasoningLabel
 } from '../processing-configuration'
-import { parseStatementContent } from './KnowledgeStatementBrowser'
-import { Button, Icon } from '../ui'
+import { Button, Icon, Markdown } from '../ui'
 
 export interface ChatPageProps {
   onOpenKnowledge?(title: string): void
@@ -54,27 +53,6 @@ function stopLabel(reason: Extract<ChatMessageView, { role: 'assistant' }>['stop
   if (reason === 'aborted') return '回答已停止'
   if (reason === 'error') return '回答失败'
   return undefined
-}
-
-function WikiText(props: { text: string; onOpenKnowledge?(title: string): void }) {
-  return (
-    <span class="chat-message__text">
-      <For each={parseStatementContent(props.text)}>{(part) => (
-        part.kind === 'text'
-          ? part.value
-          : props.onOpenKnowledge
-            ? (
-                <button
-                  type="button"
-                  class="chat-statement-link"
-                  title={`在知识库中打开 ${part.target}`}
-                  onClick={() => props.onOpenKnowledge?.(part.target)}
-                >{part.label}</button>
-              )
-            : <span class="chat-statement-link chat-statement-link--static">{part.label}</span>
-      )}</For>
-    </span>
-  )
 }
 
 function ToolActivity(props: {
@@ -153,7 +131,11 @@ function AssistantMessage(props: {
     <article class={`chat-message chat-message--assistant${props.streaming ? ' chat-message--streaming' : ''}`}>
       <div class="chat-message__role">Oyster</div>
       <Show when={props.message.text}>
-        <WikiText text={props.message.text} onOpenKnowledge={props.onOpenKnowledge} />
+        <Markdown
+          class="chat-message__text"
+          text={props.message.text}
+          onOpenKnowledge={props.onOpenKnowledge}
+        />
       </Show>
       <Show when={calls().length}>
         <div class="chat-message__tools" aria-label="Agent 工具活动">
@@ -308,7 +290,7 @@ export function ChatPage(props: ChatPageProps) {
           <div class="page-summary">
             <span><strong>{controller.snapshot().sessions.length}</strong> 个会话</span>
             <span class="page-summary__separator">·</span>
-            <span>查询和维护正式知识库</span>
+            <span>管理知识与协作产物</span>
           </div>
         </div>
         <Button variant="primary" icon="plus" onClick={startNew}>新对话</Button>
@@ -445,9 +427,11 @@ export function ChatPage(props: ChatPageProps) {
                   fallback={(
                     <article class="chat-message chat-message--user">
                       <div class="chat-message__role">你</div>
-                      <span class="chat-message__text">
-                        {entry.message.role === 'user' ? entry.message.text : ''}
-                      </span>
+                      <Markdown
+                        class="chat-message__text"
+                        text={entry.message.role === 'user' ? entry.message.text : ''}
+                        onOpenKnowledge={props.onOpenKnowledge}
+                      />
                     </article>
                   )}
                 >{(assistant) => (

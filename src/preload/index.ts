@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import {
   aiBackendChannels,
+  artifactChannels,
   chatChannels,
   discoveryChannels,
   knowledgeChannels,
@@ -14,6 +15,7 @@ import type {
 } from '../shared/knowledge-processing'
 import type { KnowledgeApi } from '../shared/knowledge'
 import type { ChatApi, ChatEvent } from '../shared/chat'
+import type { ArtifactApi } from '../shared/artifacts'
 
 const api: DiscoveryApi = {
   getSnapshot: () => ipcRenderer.invoke(discoveryChannels.getSnapshot),
@@ -96,6 +98,17 @@ const knowledge: KnowledgeApi = {
   clear: () => ipcRenderer.invoke(knowledgeChannels.clear)
 }
 
+const artifacts: ArtifactApi = {
+  getSnapshot: () => ipcRenderer.invoke(artifactChannels.getSnapshot),
+  refresh: () => ipcRenderer.invoke(artifactChannels.refresh),
+  createArtifact: (input) => ipcRenderer.invoke(artifactChannels.createArtifact, input),
+  openRepository: () => ipcRenderer.invoke(artifactChannels.openRepository),
+  openArtifact: (directoryName) => ipcRenderer.invoke(
+    artifactChannels.openArtifact,
+    directoryName
+  )
+}
+
 const chat: ChatApi = {
   getSnapshot: () => ipcRenderer.invoke(chatChannels.getSnapshot),
   createSession: (input) => ipcRenderer.invoke(chatChannels.createSession, input),
@@ -118,6 +131,7 @@ contextBridge.exposeInMainWorld('oyster', {
   discovery: api,
   aiBackends,
   knowledge,
+  artifacts,
   knowledgeProcessing,
   chat
 })

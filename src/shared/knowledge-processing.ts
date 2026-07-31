@@ -213,7 +213,7 @@ export interface RunObservationPreprocessorInput {
 
 /** Selects one discovered Session revision without exposing its path or raw content to the renderer. */
 export interface RunSessionPreprocessorInput {
-  artifactId: string
+  sourceRecordId: string
   expectedRevision: string
   attention?: string
 }
@@ -259,7 +259,7 @@ export interface KnowledgeMaintenanceResult {
 }
 
 export interface RunKnowledgeFullChainInput {
-  artifactId: string
+  sourceRecordId: string
   expectedRevision: string
   attention?: string
 }

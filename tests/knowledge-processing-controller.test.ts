@@ -141,7 +141,7 @@ function maintenanceResult(): KnowledgeMaintenanceResult {
 
 function fullChainResult(): KnowledgeFullChainResult {
   const session = {
-    artifactId: 'artifact-1',
+    sourceRecordId: 'source-record-1',
     sourceId: 'source-1',
     agentType: 'codex' as const,
     sourceDisplayName: 'Codex',
@@ -156,7 +156,7 @@ function fullChainResult(): KnowledgeFullChainResult {
     runId: 'full-chain-1',
     session,
     sandbox: { id: 'sandbox-1', baselineCreatedAt: '2026-07-26T00:00:00.000Z' },
-    sourceRef: 'raw-evidence:artifact-1',
+    sourceRef: 'raw-evidence:source-record-1',
     preprocessing,
     maintenance,
     commit: {
@@ -273,13 +273,13 @@ describe('knowledge processing controller', () => {
         const controller = createKnowledgeProcessingController()
         await controller.runKnowledgeMaintenance({ preprocessingRunId: 'preprocess-1' })
         await controller.runSessionPreprocessor({
-          artifactId: 'artifact-1',
+          sourceRecordId: 'source-record-1',
           expectedRevision: 'a'.repeat(64),
           attention: 'Focus on explicit decisions'
         })
 
         expect(runSessionPreprocessor).toHaveBeenCalledWith({
-          artifactId: 'artifact-1',
+          sourceRecordId: 'source-record-1',
           expectedRevision: 'a'.repeat(64),
           attention: 'Focus on explicit decisions'
         })
@@ -321,7 +321,7 @@ describe('knowledge processing controller', () => {
       try {
         const controller = createKnowledgeProcessingController()
         await controller.runFullChain({
-          artifactId: 'artifact-1',
+          sourceRecordId: 'source-record-1',
           expectedRevision: 'a'.repeat(64)
         })
 
@@ -455,7 +455,7 @@ describe('knowledge processing controller', () => {
       try {
         const controller = createKnowledgeProcessingController()
         await controller.runFullChain({
-          artifactId: 'artifact-1',
+          sourceRecordId: 'source-record-1',
           expectedRevision: 'a'.repeat(64)
         })
 

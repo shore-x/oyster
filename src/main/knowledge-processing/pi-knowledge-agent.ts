@@ -154,7 +154,7 @@ function safeTraceDetails(toolName: string, result: unknown, isError: boolean): 
     const count = safeTraceInteger(record.count)
     return count === undefined ? undefined : `返回 ${count} 条候选知识`
   }
-  if (toolName === 'read_knowledge_statement') {
+  if (toolName === 'read_knowledge') {
     return typeof record.found === 'boolean' ? (record.found ? '已找到 Statement' : '未找到 Statement') : undefined
   }
   if (
@@ -519,7 +519,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         }
       } as AgentTool<typeof searchKnowledgeParameters>,
       {
-        ...knowledgeMaintenanceToolDefinition('read_knowledge_statement'),
+        ...knowledgeMaintenanceToolDefinition('read_knowledge'),
         executionMode: 'sequential',
         execute: async (_toolCallId, parameters, signal) => {
           signal?.throwIfAborted()

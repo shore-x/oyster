@@ -5,6 +5,7 @@ import type {
   PreprocessingModelCallTrace,
   ProcessingDebugStatus
 } from '../../../shared/knowledge-processing'
+import { Markdown } from '../ui'
 
 function formatDuration(durationMs?: number): string {
   if (durationMs === undefined) return '进行中'
@@ -393,7 +394,15 @@ export function ProcessingTraceExplorer(props: { trace: KnowledgeProcessingDebug
                     when={entry().output}
                     fallback={<div class="trace-explorer__payload-empty">{entry().status === 'running' ? '正在等待本次调用返回…' : '本次调用没有文本输出。'}</div>}
                   >
-                    {(output) => <pre data-testid="trace-explorer-event-output">{output()}</pre>}
+                    {(output) => entry().kind === '模型调用'
+                      ? (
+                          <Markdown
+                            class="trace-explorer__markdown-output"
+                            text={output()}
+                            testId="trace-explorer-event-output"
+                          />
+                        )
+                      : <pre data-testid="trace-explorer-event-output">{output()}</pre>}
                   </Show>
                   <Show when={entry().outputTruncated}>
                     <p>调试副本已在单次 I/O 边界截断；Agent 实际收到的内容未受影响。</p>

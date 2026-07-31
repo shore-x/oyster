@@ -3,11 +3,11 @@ import { homedir } from 'node:os'
 import type {
   AgentSource,
   AgentType,
-  ArtifactKind,
   AvailableSessionSummary,
   DiscoverySnapshot,
-  HistoryArtifact,
-  ScanRun
+  ScanRun,
+  SourceRecord,
+  SourceRecordKind
 } from '../../shared/discovery'
 import { AGENT_TYPES } from '../../shared/discovery'
 import { createDetectionContext } from './adapters'
@@ -16,7 +16,7 @@ import type {
   DetectionContext,
   DiscoveryRepository,
   DiscoveryStateData,
-  ArtifactCandidate
+  SourceRecordCandidate
 } from './model'
 import {
   SourceSessionRevisionChangedError,
@@ -39,20 +39,20 @@ interface DiscoveryServiceOptions {
 }
 
 export interface ReadAvailableSessionInput {
-  artifactId: string
+  sourceRecordId: string
   expectedRevision: string
 }
 
 export interface AvailableSessionEvidence {
-  artifactId: string
+  sourceRecordId: string
   revision: string
   contentHash: string
   sizeBytes: number
   observationView: ObservationView
 }
 
-interface RefreshedConversationArtifact {
-  artifact?: HistoryArtifact
+interface RefreshedConversationRecord {
+  record?: SourceRecord
   grew: boolean
 }
 
@@ -64,13 +64,13 @@ function clone<T>(value: T): T {
   return structuredClone(value)
 }
 
-function fingerprint(sourceId: string, candidate: ArtifactCandidate): string {
+function fingerprint(sourceId: string, candidate: SourceRecordCandidate): string {
   return createHash('sha256')
     .update(`${sourceId}\0${candidate.externalId}\0${candidate.sizeBytes}\0${candidate.modifiedAt}`)
     .digest('hex')
 }
 
-function artifactId(sourceId: string, kind: ArtifactKind, externalId: string): string {
+function sourceRecordId(sourceId: string, kind: SourceRecordKind, externalId: string): string {
   const key = kind === 'conversation' ? `${sourceId}\0${externalId}` : `${sourceId}\0${kind}\0${externalId}`
   return createHash('sha256').update(key).digest('hex').slice(0, 32)
 }
@@ -84,33 +84,33 @@ function isAbortError(error: unknown): boolean {
 }
 
 function sessionSummary(
-  artifact: HistoryArtifact,
+  record: SourceRecord,
   source: AgentSource
 ): AvailableSessionSummary {
   return {
-    artifactId: artifact.id,
+    sourceRecordId: record.id,
     sourceId: source.id,
     agentType: source.agentType,
     sourceDisplayName: source.displayName,
-    externalId: artifact.externalId,
-    title: artifact.title,
-    projectPath: artifact.projectPath,
-    startedAt: artifact.startedAt,
-    endedAt: artifact.endedAt,
-    updatedAt: artifact.updatedAt,
-    sizeBytes: artifact.sizeBytes,
-    revision: artifact.fingerprint
+    externalId: record.externalId,
+    title: record.title,
+    projectPath: record.projectPath,
+    startedAt: record.startedAt,
+    endedAt: record.endedAt,
+    updatedAt: record.updatedAt,
+    sizeBytes: record.sizeBytes,
+    revision: record.fingerprint
   }
 }
 
-function historyArtifact(
+function sourceRecord(
   sourceId: string,
-  candidate: ArtifactCandidate,
-  existing?: HistoryArtifact
-): HistoryArtifact {
+  candidate: SourceRecordCandidate,
+  existing?: SourceRecord
+): SourceRecord {
   const nextFingerprint = fingerprint(sourceId, candidate)
   return {
-    id: artifactId(sourceId, candidate.kind, candidate.externalId),
+    id: sourceRecordId(sourceId, candidate.kind, candidate.externalId),
     sourceId,
     kind: candidate.kind,
     externalId: candidate.externalId,
@@ -129,9 +129,13 @@ function historyArtifact(
   }
 }
 
-function assertSessionReference(input: { artifactId: string; expectedRevision: string }): void {
-  if (typeof input.artifactId !== 'string' || input.artifactId.length === 0 || input.artifactId.length > 256) {
-    throw new Error('Invalid Session artifact ID')
+function assertSessionReference(input: { sourceRecordId: string; expectedRevision: string }): void {
+  if (
+    typeof input.sourceRecordId !== 'string'
+    || input.sourceRecordId.length === 0
+    || input.sourceRecordId.length > 256
+  ) {
+    throw new Error('Invalid Session source record ID')
   }
   if (!/^[a-f0-9]{64}$/i.test(input.expectedRevision)) {
     throw new Error('Invalid Session revision')
@@ -139,7 +143,7 @@ function assertSessionReference(input: { artifactId: string; expectedRevision: s
 }
 
 export class DiscoveryService {
-  private state: DiscoveryStateData = { sources: [], artifacts: [], runs: [] }
+  private state: DiscoveryStateData = { sources: [], records: [], runs: [] }
   private readonly listeners = new Set<SnapshotListener>()
   private readonly activeOperations = new Map<string, ActiveOperation>()
   private readonly adapterByType = new Map<AgentType, AgentHistoryAdapter>()
@@ -210,17 +214,17 @@ export class DiscoveryService {
   }
 
   listAvailableSessions(): AvailableSessionSummary[] {
-    return this.state.artifacts
-      .filter((artifact) => artifact.kind === 'conversation')
-      .flatMap<AvailableSessionSummary>((artifact) => {
-        const source = this.state.sources.find((candidate) => candidate.id === artifact.sourceId)
+    return this.state.records
+      .filter((record) => record.kind === 'conversation')
+      .flatMap<AvailableSessionSummary>((record) => {
+        const source = this.state.sources.find((candidate) => candidate.id === record.sourceId)
         if (!source || source.discoveryState !== 'found') return []
-        return [sessionSummary(artifact, source)]
+        return [sessionSummary(record, source)]
       })
       .sort((left, right) => {
         const leftDate = left.endedAt || left.updatedAt || left.startedAt || ''
         const rightDate = right.endedAt || right.updatedAt || right.startedAt || ''
-        return rightDate.localeCompare(leftDate) || left.artifactId.localeCompare(right.artifactId)
+        return rightDate.localeCompare(leftDate) || left.sourceRecordId.localeCompare(right.sourceRecordId)
       })
       .map((session) => clone(session))
   }
@@ -230,20 +234,20 @@ export class DiscoveryService {
     maxBytes?: number
   ): Promise<AvailableSessionEvidence> {
     assertSessionReference(input)
-    const artifact = this.state.artifacts.find((candidate) => candidate.id === input.artifactId)
-    if (!artifact || artifact.kind !== 'conversation') {
+    const record = this.state.records.find((candidate) => candidate.id === input.sourceRecordId)
+    if (!record || record.kind !== 'conversation') {
       throw new SourceSessionUnavailableError()
     }
-    if (artifact.fingerprint !== input.expectedRevision) {
+    if (record.fingerprint !== input.expectedRevision) {
       throw new SourceSessionRevisionChangedError()
     }
-    const source = this.state.sources.find((candidate) => candidate.id === artifact.sourceId)
+    const source = this.state.sources.find((candidate) => candidate.id === record.sourceId)
     if (!source) throw new SourceSessionUnavailableError()
     const adapter = this.requireAdapter(source.agentType)
-    let currentArtifact = artifact
+    let currentRecord = record
     let evidence: SourceEvidenceReadResult
     try {
-      evidence = await this.readArtifactEvidence(source, adapter, currentArtifact, maxBytes)
+      evidence = await this.readRecordEvidence(source, adapter, currentRecord, maxBytes)
     } catch (error) {
       if (
         !(error instanceof SourceSessionUnavailableError)
@@ -252,58 +256,58 @@ export class DiscoveryService {
         throw error
       }
 
-      const refreshed = await this.refreshConversationArtifact(source, adapter, currentArtifact)
-      if (!refreshed.artifact) throw new SourceSessionUnavailableError()
-      currentArtifact = refreshed.artifact
-      if (currentArtifact.fingerprint !== input.expectedRevision) {
+      const refreshed = await this.refreshConversationRecord(source, adapter, currentRecord)
+      if (!refreshed.record) throw new SourceSessionUnavailableError()
+      currentRecord = refreshed.record
+      if (currentRecord.fingerprint !== input.expectedRevision) {
         throw new SourceSessionRevisionChangedError(
           refreshed.grew
             ? 'The source Session has grown since it was selected; retry with the refreshed Session revision'
             : 'The source Session revision has changed'
         )
       }
-      evidence = await this.readArtifactEvidence(source, adapter, currentArtifact, maxBytes)
+      evidence = await this.readRecordEvidence(source, adapter, currentRecord, maxBytes)
     }
     const content = new TextDecoder('utf-8', { fatal: true }).decode(evidence.content)
     return {
-      artifactId: currentArtifact.id,
-      revision: currentArtifact.fingerprint,
+      sourceRecordId: currentRecord.id,
+      revision: currentRecord.fingerprint,
       contentHash: evidence.contentHash,
       sizeBytes: evidence.sizeBytes,
       observationView: adapter.createObservationView(content)
     }
   }
 
-  private readArtifactEvidence(
+  private readRecordEvidence(
     source: AgentSource,
     adapter: AgentHistoryAdapter,
-    artifact: HistoryArtifact,
+    record: SourceRecord,
     maxBytes?: number
   ): Promise<SourceEvidenceReadResult> {
     return this.sourceEvidenceReader.read({
-      artifactId: artifact.id,
-      absolutePath: adapter.resolveArtifactPath(source.rootPath, artifact),
-      expectedSizeBytes: artifact.sizeBytes,
-      expectedModifiedAt: artifact.modifiedAt,
+      sourceRecordId: record.id,
+      absolutePath: adapter.resolveRecordPath(source.rootPath, record),
+      expectedSizeBytes: record.sizeBytes,
+      expectedModifiedAt: record.modifiedAt,
       ...(maxBytes === undefined ? {} : { maxBytes })
     })
   }
 
-  private async refreshConversationArtifact(
+  private async refreshConversationRecord(
     source: AgentSource,
     adapter: AgentHistoryAdapter,
-    previous: HistoryArtifact
-  ): Promise<RefreshedConversationArtifact> {
+    previous: SourceRecord
+  ): Promise<RefreshedConversationRecord> {
     const candidate = await adapter.refreshConversation(
       source.rootPath,
       clone(previous),
       new AbortController().signal,
       this.detectionContext
     )
-    const current = this.state.artifacts.find((artifact) => artifact.id === previous.id)
+    const current = this.state.records.find((record) => record.id === previous.id)
     if (!candidate) {
-      this.state.artifacts = this.state.artifacts.filter((artifact) => artifact.id !== previous.id)
-      this.updateSourceArtifactSummary(source)
+      this.state.records = this.state.records.filter((record) => record.id !== previous.id)
+      this.updateSourceRecordSummary(source)
       this.sessionCatalogVersion++
       await this.persistAndEmit()
       return { grew: false }
@@ -313,30 +317,30 @@ export class DiscoveryService {
     }
 
     const previousSizeBytes = current?.sizeBytes ?? previous.sizeBytes
-    const next = historyArtifact(source.id, candidate, current)
+    const next = sourceRecord(source.id, candidate, current)
     if (next.id !== previous.id) {
       throw new Error(`History adapter changed the stable Session identity for ${previous.externalId}`)
     }
     if (current) Object.assign(current, next)
-    else this.state.artifacts.push(next)
-    this.updateSourceArtifactSummary(source)
+    else this.state.records.push(next)
+    this.updateSourceRecordSummary(source)
     this.sessionCatalogVersion++
     await this.persistAndEmit()
     return {
-      artifact: current ?? next,
+      record: current ?? next,
       grew: next.sizeBytes > previousSizeBytes
     }
   }
 
-  private updateSourceArtifactSummary(source: AgentSource): void {
-    const artifacts = this.currentArtifacts(source.id)
-    const conversations = artifacts.filter((artifact) => artifact.kind === 'conversation')
-    source.fileCount = artifacts.length + source.invalidFileCount
+  private updateSourceRecordSummary(source: AgentSource): void {
+    const records = this.currentRecords(source.id)
+    const conversations = records.filter((record) => record.kind === 'conversation')
+    source.fileCount = records.length + source.invalidFileCount
     source.sessionCount = conversations.length
-    source.instructionFileCount = artifacts.length - conversations.length
-    source.totalBytes = artifacts.reduce((total, artifact) => total + artifact.sizeBytes, 0)
+    source.instructionFileCount = records.length - conversations.length
+    source.totalBytes = records.reduce((total, record) => total + record.sizeBytes, 0)
     const dates = conversations
-      .map((artifact) => artifact.startedAt || artifact.modifiedAt)
+      .map((record) => record.startedAt || record.modifiedAt)
       .sort()
     source.oldestSessionAt = dates[0]
     source.latestSessionAt = dates.at(-1)
@@ -391,9 +395,9 @@ export class DiscoveryService {
     source.oldestSessionAt = undefined
     source.latestSessionAt = undefined
     source.lastScannedAt = undefined
-    const previousArtifactCount = this.state.artifacts.length
-    this.state.artifacts = this.state.artifacts.filter((artifact) => artifact.sourceId !== sourceId)
-    if (this.state.artifacts.length !== previousArtifactCount) this.sessionCatalogVersion++
+    const previousRecordCount = this.state.records.length
+    this.state.records = this.state.records.filter((record) => record.sourceId !== sourceId)
+    if (this.state.records.length !== previousRecordCount) this.sessionCatalogVersion++
 
     const detection = await adapter.detect(this.detectionContext, rootPath)
     source.executablePath = detection.executablePath
@@ -465,19 +469,19 @@ export class DiscoveryService {
         signal.throwIfAborted()
         run.totalFiles += 1
         run.processedFiles += 1
-        const bytes = entry.kind === 'artifact' ? entry.candidate.sizeBytes : entry.sizeBytes
+        const bytes = entry.kind === 'record' ? entry.candidate.sizeBytes : entry.sizeBytes
         run.totalBytes += bytes
         run.processedBytes += bytes
         if (entry.kind === 'invalid') {
           run.invalidFiles += 1
         } else {
           const candidate = entry.candidate
-          const id = artifactId(source.id, candidate.kind, candidate.externalId)
+          const id = sourceRecordId(source.id, candidate.kind, candidate.externalId)
           observed.add(id)
-          const existing = this.state.artifacts.find((artifact) => artifact.id === id)
-          const artifact = historyArtifact(source.id, candidate, existing)
-          if (existing) Object.assign(existing, artifact)
-          else this.state.artifacts.push(artifact)
+          const existing = this.state.records.find((record) => record.id === id)
+          const record = sourceRecord(source.id, candidate, existing)
+          if (existing) Object.assign(existing, record)
+          else this.state.records.push(record)
 
           if (candidate.kind === 'conversation') {
             const sessionDate = candidate.startedAt || candidate.modifiedAt
@@ -488,16 +492,16 @@ export class DiscoveryService {
         if (run.processedFiles % 25 === 0) this.emit()
       }
 
-      this.state.artifacts = this.state.artifacts.filter(
-        (artifact) => artifact.sourceId !== source.id || observed.has(artifact.id)
+      this.state.records = this.state.records.filter(
+        (record) => record.sourceId !== source.id || observed.has(record.id)
       )
-      const currentArtifacts = this.currentArtifacts(source.id)
+      const currentRecords = this.currentRecords(source.id)
       source.fileCount = run.totalFiles
-      source.sessionCount = currentArtifacts.filter((artifact) => artifact.kind === 'conversation').length
-      source.instructionFileCount = currentArtifacts.filter(
-        (artifact) => artifact.kind === 'human_instruction'
+      source.sessionCount = currentRecords.filter((record) => record.kind === 'conversation').length
+      source.instructionFileCount = currentRecords.filter(
+        (record) => record.kind === 'human_instruction'
       ).length
-      source.totalBytes = currentArtifacts.reduce((total, artifact) => total + artifact.sizeBytes, 0)
+      source.totalBytes = currentRecords.reduce((total, record) => total + record.sizeBytes, 0)
       source.invalidFileCount = run.invalidFiles
       source.oldestSessionAt = oldest
       source.latestSessionAt = latest
@@ -522,8 +526,8 @@ export class DiscoveryService {
     }
   }
 
-  private currentArtifacts(sourceId: string): HistoryArtifact[] {
-    return this.state.artifacts.filter((artifact) => artifact.sourceId === sourceId)
+  private currentRecords(sourceId: string): SourceRecord[] {
+    return this.state.records.filter((record) => record.sourceId === sourceId)
   }
 
   private addRun(run: ScanRun): void {

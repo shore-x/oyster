@@ -26,7 +26,7 @@ import type { KnowledgeStatement, KnowledgeStatementDraft } from '../src/shared/
 
 const TOOL_NAMES = [
   'search_knowledge',
-  'read_knowledge_statement',
+  'read_knowledge',
   'list_statement_candidates',
   'add_statement_candidates',
   'resolve_statement_candidates',
@@ -381,7 +381,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       (context) => {
         expect(textContent(lastToolResult(context))).toContain('标题: C')
         return fauxAssistantMessage(
-          fauxToolCall('read_knowledge_statement', { title: 'B' }),
+          fauxToolCall('read_knowledge', { title: 'B' }),
           { stopReason: 'toolUse' }
         )
       },

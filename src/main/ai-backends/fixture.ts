@@ -77,7 +77,15 @@ function fixtureRuntime(modelId: string): ModelRuntime {
       const aborted = Boolean(options?.signal?.aborted)
       const output: AssistantMessage = {
         role: 'assistant',
-        content: aborted ? [] : [{ type: 'text', text: '这是 Fixture 对话 Agent 的回复。' }],
+        content: aborted ? [] : [{
+          type: 'text',
+          text: [
+            '**这是 Fixture 对话 Agent 的回复。**',
+            '',
+            '- 搜索并读取知识',
+            '- 按明确请求更新知识'
+          ].join('\n')
+        }],
         api: requestedModel.api,
         provider: requestedModel.provider,
         model: requestedModel.id,

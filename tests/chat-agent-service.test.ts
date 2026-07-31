@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -17,7 +17,11 @@ import type { ChatAiBackendPort, ChatConfigurationRepository } from '../src/main
 import { ChatAgentService } from '../src/main/chat/chat-agent-service'
 import { InMemoryChatConfigurationRepository } from '../src/main/chat/chat-configuration-repository'
 import { PiChatSessionRepository } from '../src/main/chat/pi-chat-session-repository'
-import { DEFAULT_CHAT_AGENT_SYSTEM_PROMPT } from '../src/main/chat/prompt'
+import {
+  DEFAULT_CHAT_AGENT_SYSTEM_PROMPT,
+  chatAgentSystemPrompt
+} from '../src/main/chat/prompt'
+import { ARTIFACT_GIT_BINARY_PATH } from '../src/main/artifacts/git-runtime'
 import { SqliteKnowledgeStore } from '../src/main/knowledge-store/sqlite-knowledge-store'
 import type { ChatEvent } from '../src/shared/chat'
 
@@ -70,43 +74,66 @@ class FauxAiBackend implements ChatAiBackendPort {
 }
 
 async function serviceFixture(
-  responses: FauxResponseStep[],
+  responses: FauxResponseStep[] | ((paths: {
+    rootPath: string
+    artifactRepositoryPath: string
+  }) => FauxResponseStep[]),
   configuration: ChatConfigurationRepository = new InMemoryChatConfigurationRepository()
 ) {
   const rootPath = await mkdtemp(join(tmpdir(), 'oyster-chat-service-'))
   temporaryPaths.push(rootPath)
+  const artifactRepositoryPath = join(rootPath, 'artifacts')
+  await mkdir(artifactRepositoryPath)
   const sessions = new PiChatSessionRepository(join(rootPath, 'sessions'))
   const knowledgeStore = new SqliteKnowledgeStore(join(rootPath, 'knowledge.sqlite'))
-  const prepared = fauxRuntime(responses)
+  const prepared = fauxRuntime(typeof responses === 'function'
+    ? responses({ rootPath, artifactRepositoryPath })
+    : responses)
   const service = new ChatAgentService({
     sessions,
     configuration,
     aiBackend: new FauxAiBackend(prepared.runtime),
-    knowledgeStore
+    knowledgeStore,
+    artifactRepositoryPath
   })
   await service.initialize()
-  return { rootPath, sessions, knowledgeStore, configuration, service, ...prepared }
+  return {
+    rootPath,
+    artifactRepositoryPath,
+    sessions,
+    knowledgeStore,
+    configuration,
+    service,
+    ...prepared
+  }
 }
 
 describe('ChatAgentService', () => {
   it('freezes the configured prompt and runs a persisted Pi conversation with direct Knowledge Store writes', async () => {
     const customPrompt = 'Use local knowledge and reply briefly.'
-    const fixture = await serviceFixture([
+    const fixture = await serviceFixture(({ artifactRepositoryPath }) => [
       (context) => {
-        expect(context.systemPrompt).toBe(customPrompt)
+        expect(context.systemPrompt).toBe(chatAgentSystemPrompt(
+          customPrompt,
+          artifactRepositoryPath
+        ))
         expect(context.tools?.map((tool) => tool.name)).toEqual([
+          'read',
+          'bash',
+          'edit',
+          'write',
           'search_knowledge',
-          'read_knowledge_statement',
-          'upsert_knowledge_statements'
+          'read_knowledge',
+          'upsert_knowledge'
         ])
         return fauxAssistantMessage(fauxToolCall('search_knowledge', { query: 'Project P' }), {
           stopReason: 'toolUse'
         })
       },
-      fauxAssistantMessage(fauxToolCall('read_knowledge_statement', { title: 'Project P' }), {
+      fauxAssistantMessage(fauxToolCall('read_knowledge', { title: 'Project P' }), {
         stopReason: 'toolUse'
       }),
-      fauxAssistantMessage(fauxToolCall('upsert_knowledge_statements', {
+      fauxAssistantMessage(fauxToolCall('upsert_knowledge', {
         statements: [
           { title: 'Project P', content: '[[Project P]] now uses SQLite.' },
           { title: 'SQLite', content: 'SQLite is the database used by [[Project P]].' }
@@ -145,7 +172,7 @@ describe('ChatAgentService', () => {
       'assistant'
     ])
     expect(detail.messages.find((entry) => entry.message.role === 'tool' && (
-      entry.message.toolName === 'upsert_knowledge_statements'
+      entry.message.toolName === 'upsert_knowledge'
     ))?.message).toMatchObject({
       details: {
         statementCount: 2,
@@ -166,7 +193,7 @@ describe('ChatAgentService', () => {
     }))
     expect(events).toContainEqual(expect.objectContaining({
       type: 'tool_completed',
-      toolName: 'upsert_knowledge_statements',
+      toolName: 'upsert_knowledge',
       isError: false
     }))
 
@@ -176,11 +203,96 @@ describe('ChatAgentService', () => {
       defaultInstructions: DEFAULT_CHAT_AGENT_SYSTEM_PROMPT,
       isDefaultCustomized: false
     })
-    expect(snapshot.agent.tools).toHaveLength(3)
-    expect(snapshot.agent.tools[2].parameters).toMatchObject({
+    expect(snapshot.agent.tools.map((tool) => tool.name)).toEqual([
+      'read',
+      'bash',
+      'edit',
+      'write',
+      'search_knowledge',
+      'read_knowledge',
+      'upsert_knowledge'
+    ])
+    expect(snapshot.agent.tools[6].parameters).toMatchObject({
       type: 'object',
       properties: { statements: { type: 'array', minItems: 1 } }
     })
+    fixture.knowledgeStore.close()
+    await fixture.sessions.dispose()
+  })
+
+  it('starts unrestricted coding tools in the shared Artifact Repository', async () => {
+    let outsideRepositoryPath = ''
+    const relativeRepositoryPath = 'relative-repository.txt'
+    const fixture = await serviceFixture(({ rootPath }) => {
+      outsideRepositoryPath = join(rootPath, 'outside-repository.txt')
+      return [
+        fauxAssistantMessage(fauxToolCall('write', {
+          path: relativeRepositoryPath,
+          content: 'first version\n'
+        }), { stopReason: 'toolUse' }),
+        fauxAssistantMessage(fauxToolCall('edit', {
+          path: relativeRepositoryPath,
+          edits: [{ oldText: 'first version', newText: 'second version' }]
+        }), { stopReason: 'toolUse' }),
+        fauxAssistantMessage(fauxToolCall('read', {
+          path: relativeRepositoryPath
+        }), { stopReason: 'toolUse' }),
+        fauxAssistantMessage(fauxToolCall('write', {
+          path: outsideRepositoryPath,
+          content: 'outside repository\n'
+        }), { stopReason: 'toolUse' }),
+        fauxAssistantMessage(fauxToolCall('bash', {
+          command: 'pwd && command -v git'
+        }), { stopReason: 'toolUse' }),
+        fauxAssistantMessage('Finished.')
+      ]
+    })
+    const events: ChatEvent[] = []
+    fixture.service.subscribe((event) => events.push(event))
+    const session = await fixture.service.createSession({
+      binding: { connectionId: 'connection:test', modelId: fixture.runtime.model.id }
+    })
+
+    const detail = await fixture.service.sendMessage({
+      sessionId: session.id,
+      text: 'Exercise the filesystem tools.'
+    })
+
+    expect(await readFile(
+      join(fixture.artifactRepositoryPath, relativeRepositoryPath),
+      'utf8'
+    )).toBe('second version\n')
+    expect(await readFile(outsideRepositoryPath, 'utf8')).toBe('outside repository\n')
+    const toolMessages = detail.messages
+      .map((entry) => entry.message)
+      .filter((message) => message.role === 'tool')
+    expect(toolMessages.map((message) => message.toolName)).toEqual([
+      'write',
+      'edit',
+      'read',
+      'write',
+      'bash'
+    ])
+    expect(toolMessages[2]).toMatchObject({ text: expect.stringContaining('second version') })
+    expect(toolMessages[4]).toMatchObject({
+      text: expect.stringContaining(fixture.artifactRepositoryPath)
+    })
+    expect(toolMessages[4]).toMatchObject({
+      text: expect.stringContaining(ARTIFACT_GIT_BINARY_PATH)
+    })
+    for (const toolName of ['write', 'edit', 'read', 'bash']) {
+      expect(events).toContainEqual(expect.objectContaining({
+        type: 'tool_started',
+        toolName
+      }))
+      expect(events).toContainEqual(expect.objectContaining({
+        type: 'tool_completed',
+        toolName,
+        isError: false
+      }))
+    }
+
+    fixture.service.dispose()
     fixture.knowledgeStore.close()
     await fixture.sessions.dispose()
   })
@@ -276,7 +388,8 @@ describe('ChatAgentService', () => {
       sessions,
       configuration: new InMemoryChatConfigurationRepository(),
       aiBackend: new FauxAiBackend(runtime),
-      knowledgeStore
+      knowledgeStore,
+      artifactRepositoryPath: join(rootPath, 'artifacts')
     })
     await service.initialize()
     const session = await service.createSession({

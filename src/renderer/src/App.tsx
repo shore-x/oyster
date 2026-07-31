@@ -3,12 +3,13 @@ import { createDiscoveryController } from './discovery-controller'
 import { AiBackendsPage } from './components/AiBackendsPage'
 import { AgentConfigurationPage } from './components/AgentConfigurationPage'
 import { ChatPage } from './components/ChatPage'
+import { ArtifactsPage } from './components/ArtifactsPage'
 import { KnowledgeProcessingPage } from './components/KnowledgeProcessingPage'
 import { KnowledgeBrowserPage } from './components/KnowledgeBrowserPage'
 import { SourceCard } from './components/SourceCard'
 import { Button, Icon } from './ui'
 
-type PageId = 'sources' | 'knowledge' | 'chat' | 'knowledge-processing' | 'agent-configuration' | 'ai-backends'
+type PageId = 'sources' | 'knowledge' | 'artifacts' | 'chat' | 'knowledge-processing' | 'agent-configuration' | 'ai-backends'
 
 export function App() {
   const controller = createDiscoveryController()
@@ -42,6 +43,12 @@ export function App() {
             class={`nav-item${page() === 'knowledge' ? ' nav-item--active' : ''}`}
             onClick={(event) => { event.preventDefault(); navigateTo('knowledge') }}
           ><Icon name="layers" /><span>知识库</span></a>
+          <a
+            href="#artifacts"
+            data-testid="nav-artifacts"
+            class={`nav-item${page() === 'artifacts' ? ' nav-item--active' : ''}`}
+            onClick={(event) => { event.preventDefault(); navigateTo('artifacts') }}
+          ><Icon name="folder" /><span>协作产物</span></a>
           <a
             href="#chat"
             data-testid="nav-chat"
@@ -122,6 +129,9 @@ export function App() {
             navigationRequest={knowledgeNavigation()}
             onKnowledgeCleared={() => setKnowledgeResetVersion((version) => version + 1)}
           />
+        </div>
+        <div data-testid="page-artifacts" hidden={page() !== 'artifacts'}>
+          <ArtifactsPage />
         </div>
         <div data-testid="page-chat" hidden={page() !== 'chat'}>
           <ChatPage onOpenKnowledge={(title) => {

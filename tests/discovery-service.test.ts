@@ -75,13 +75,13 @@ describe('DiscoveryService', () => {
     const selected = availableSessions.find((session) => session.externalId === 'one')!
     const sourceContent = await readFile(join(historyRoot, 'one.jsonl'))
     const evidence = await service.readAvailableSession({
-      artifactId: selected.artifactId,
+      sourceRecordId: selected.sourceRecordId,
       expectedRevision: selected.revision
     })
     expect(readEvidence).toHaveBeenCalledOnce()
     expect(readEvidence).toHaveBeenCalledWith(expect.not.objectContaining({ maxBytes: expect.anything() }))
     expect(evidence).toMatchObject({
-      artifactId: selected.artifactId,
+      sourceRecordId: selected.sourceRecordId,
       revision: selected.revision,
       contentHash: createHash('sha256').update(sourceContent).digest('hex'),
       sizeBytes: selected.sizeBytes
@@ -93,12 +93,12 @@ describe('DiscoveryService', () => {
       units: expect.any(Array)
     })
     await expect(service.readAvailableSession({
-      artifactId: selected.artifactId,
+      sourceRecordId: selected.sourceRecordId,
       expectedRevision: '0'.repeat(64)
     }, selected.sizeBytes)).rejects.toThrow('revision has changed')
     expect(readEvidence).toHaveBeenCalledOnce()
     await expect(service.readAvailableSession({
-      artifactId: selected.artifactId,
+      sourceRecordId: selected.sourceRecordId,
       expectedRevision: selected.revision
     }, selected.sizeBytes - 1)).rejects.toThrow('read limit')
     expect(service.snapshot().runs[0]).not.toHaveProperty('kind')
@@ -126,26 +126,26 @@ describe('DiscoveryService', () => {
     expect(selected).toBeDefined()
     await writeFile(sessionPath, '{"sessionId":"one","timestamp":"2026-07-01T00:00:00.000Z","changed":true}\n')
     await expect(service.readAvailableSession({
-      artifactId: selected.artifactId,
+      sourceRecordId: selected.sourceRecordId,
       expectedRevision: selected.revision
     }, 1_024)).rejects.toThrow('has grown')
 
     const changed = service.listAvailableSessions()[0]
-    expect(changed.artifactId).toBe(selected.artifactId)
+    expect(changed.sourceRecordId).toBe(selected.sourceRecordId)
     expect(changed.revision).not.toBe(selected.revision)
     expect(changed.sizeBytes).toBeGreaterThan(selected.sizeBytes)
     await expect(service.readAvailableSession({
-      artifactId: selected.artifactId,
+      sourceRecordId: selected.sourceRecordId,
       expectedRevision: selected.revision
     }, 1_024)).rejects.toThrow('revision has changed')
     await expect(service.readAvailableSession({
-      artifactId: changed.artifactId,
+      sourceRecordId: changed.sourceRecordId,
       expectedRevision: changed.revision
     }, 1_024)).resolves.toMatchObject({ revision: changed.revision })
 
     await rm(sessionPath)
     await expect(service.readAvailableSession({
-      artifactId: changed.artifactId,
+      sourceRecordId: changed.sourceRecordId,
       expectedRevision: changed.revision
     }, 1_024)).rejects.toThrow('no longer available')
     expect(service.listAvailableSessions()).toEqual([])
@@ -182,7 +182,7 @@ describe('DiscoveryService', () => {
 
     await rename(originalPath, archivedPath)
     const evidence = await service.readAvailableSession({
-      artifactId: selected.artifactId,
+      sourceRecordId: selected.sourceRecordId,
       expectedRevision: selected.revision
     })
 

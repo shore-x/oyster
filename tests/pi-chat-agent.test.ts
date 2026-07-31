@@ -57,7 +57,7 @@ describe('PiChatAgent', () => {
       }
     }
     const metadata = await opened.session.getMetadata()
-    await new PiChatAgent(knowledgeStore).run({
+    await new PiChatAgent(knowledgeStore, join(rootPath, 'artifacts')).run({
       sessionId: metadata.id,
       session: opened.session,
       binding,

@@ -35,7 +35,7 @@ describe('PiChatSessionRepository', () => {
       timestamp: 1
     })
     await opened.session.appendMessage(fauxAssistantMessage(
-      fauxToolCall('upsert_knowledge_statements', {
+      fauxToolCall('upsert_knowledge', {
         statements: [{ title: 'Project P', content: 'A local project.' }]
       }),
       { stopReason: 'toolUse', timestamp: 2 }
@@ -43,7 +43,7 @@ describe('PiChatSessionRepository', () => {
     const toolResult: ToolResultMessage = {
       role: 'toolResult',
       toolCallId: 'tool-1',
-      toolName: 'upsert_knowledge_statements',
+      toolName: 'upsert_knowledge',
       content: [{ type: 'text', text: 'Committed Project P.' }],
       details: { createdTitles: ['Project P'] },
       isError: false,
@@ -61,14 +61,19 @@ describe('PiChatSessionRepository', () => {
         reasoningEffort: 'low'
       }
     })
+    expect(detail.binding).toEqual({
+      connectionId: 'connection:one',
+      modelId: 'model-small',
+      reasoningEffort: 'low'
+    })
     expect((await repository.open(metadata.id)).binding.systemPrompt).toBe('Use the Knowledge Store.')
     expect(detail.messages[1].message).toMatchObject({
       role: 'assistant',
-      toolCalls: [{ name: 'upsert_knowledge_statements' }]
+      toolCalls: [{ name: 'upsert_knowledge' }]
     })
     expect(detail.messages[2].message).toMatchObject({
       role: 'tool',
-      toolName: 'upsert_knowledge_statements',
+      toolName: 'upsert_knowledge',
       details: { createdTitles: ['Project P'] }
     })
 

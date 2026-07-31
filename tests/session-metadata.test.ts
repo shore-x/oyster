@@ -8,7 +8,7 @@ import {
 
 function session(overrides: Partial<AvailableSessionSummary> = {}): AvailableSessionSummary {
   return {
-    artifactId: 'artifact-1',
+    sourceRecordId: 'source-record-1',
     sourceId: 'source:codex',
     agentType: 'codex',
     sourceDisplayName: 'Codex',

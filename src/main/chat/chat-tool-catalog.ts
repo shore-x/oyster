@@ -1,4 +1,5 @@
 import { Type } from '@earendil-works/pi-ai'
+import { createCodingTools } from '@earendil-works/pi-coding-agent'
 import {
   MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH,
   MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH
@@ -10,7 +11,7 @@ import {
   searchKnowledgeParameters
 } from '../knowledge-processing/knowledge-maintenance-tool-catalog'
 
-export const upsertKnowledgeStatementsParameters = Type.Object({
+export const upsertKnowledgeParameters = Type.Object({
   statements: Type.Array(Type.Object({
     title: Type.String({
       minLength: 1,
@@ -26,10 +27,9 @@ export const upsertKnowledgeStatementsParameters = Type.Object({
 }, { additionalProperties: false })
 
 const searchKnowledgeDefinition = knowledgeMaintenanceToolDefinition('search_knowledge')
-const readKnowledgeDefinition = knowledgeMaintenanceToolDefinition('read_knowledge_statement')
+const readKnowledgeDefinition = knowledgeMaintenanceToolDefinition('read_knowledge')
 
-/** The exact definitions supplied to the conversational Pi Agent. */
-export const CHAT_AGENT_TOOL_CATALOG = [
+const CHAT_AGENT_KNOWLEDGE_TOOL_CATALOG = [
   {
     ...searchKnowledgeDefinition,
     parameters: searchKnowledgeParameters
@@ -39,31 +39,41 @@ export const CHAT_AGENT_TOOL_CATALOG = [
     parameters: readKnowledgeParameters
   },
   {
-    name: 'upsert_knowledge_statements',
+    name: 'upsert_knowledge',
     label: '写入 Knowledge Statements',
     description: 'Atomically create or replace one or more Statements in the authoritative Knowledge Store. A canonical title is the identity key; existing content is replaced in full.',
-    parameters: upsertKnowledgeStatementsParameters
+    parameters: upsertKnowledgeParameters
   }
 ] as const
 
-export type ChatAgentToolName = (typeof CHAT_AGENT_TOOL_CATALOG)[number]['name']
+export type ChatAgentKnowledgeToolName = (typeof CHAT_AGENT_KNOWLEDGE_TOOL_CATALOG)[number]['name']
 
-export function chatAgentToolDefinition<TName extends ChatAgentToolName>(name: TName): Extract<
-  (typeof CHAT_AGENT_TOOL_CATALOG)[number],
+export function chatAgentToolDefinition<TName extends ChatAgentKnowledgeToolName>(name: TName): Extract<
+  (typeof CHAT_AGENT_KNOWLEDGE_TOOL_CATALOG)[number],
   { name: TName }
 > {
-  const definition = CHAT_AGENT_TOOL_CATALOG.find((tool) => tool.name === name)
+  const definition = CHAT_AGENT_KNOWLEDGE_TOOL_CATALOG.find((tool) => tool.name === name)
   if (!definition) throw new Error(`未知的对话 Agent 工具：${name}`)
-  return definition as Extract<(typeof CHAT_AGENT_TOOL_CATALOG)[number], { name: TName }>
+  return definition as Extract<(typeof CHAT_AGENT_KNOWLEDGE_TOOL_CATALOG)[number], { name: TName }>
 }
 
 function serializableParameters(parameters: object): ProcessingToolView['parameters'] {
   return JSON.parse(JSON.stringify(parameters)) as ProcessingToolView['parameters']
 }
 
-export const CHAT_AGENT_TOOL_VIEWS: readonly ProcessingToolView[] = CHAT_AGENT_TOOL_CATALOG.map((tool) => ({
-  name: tool.name,
-  label: tool.label,
-  description: tool.description,
-  parameters: serializableParameters(tool.parameters)
-}))
+export function chatAgentToolViews(artifactRepositoryPath: string): readonly ProcessingToolView[] {
+  return [
+    ...createCodingTools(artifactRepositoryPath).map((tool) => ({
+      name: tool.name,
+      label: tool.label,
+      description: tool.description,
+      parameters: serializableParameters(tool.parameters)
+    })),
+    ...CHAT_AGENT_KNOWLEDGE_TOOL_CATALOG.map((tool) => ({
+      name: tool.name,
+      label: tool.label,
+      description: tool.description,
+      parameters: serializableParameters(tool.parameters)
+    }))
+  ]
+}

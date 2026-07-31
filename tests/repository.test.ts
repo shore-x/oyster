@@ -83,7 +83,7 @@ describe('JsonDiscoveryRepository', () => {
     expect(state.sources[0]).not.toHaveProperty('syncedSessionCount')
     expect(state.sources[0]).not.toHaveProperty('syncedInstructionFileCount')
     expect(state.sources[0]).not.toHaveProperty('lastSyncedAt')
-    expect(state.artifacts).toEqual([
+    expect(state.records).toEqual([
       {
         id: 'legacy-session',
         sourceId: 'source:claude',
@@ -99,6 +99,32 @@ describe('JsonDiscoveryRepository', () => {
     expect(state.runs[0]).not.toHaveProperty('kind')
   })
 
+  it('loads the previous artifacts catalog as source records', async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), 'oyster-repository-artifacts-'))
+    temporaryDirectories.push(temporaryDirectory)
+    const statePath = join(temporaryDirectory, 'discovery-state.json')
+    await writeFile(
+      statePath,
+      JSON.stringify({
+        artifacts: [{
+          id: 'prior-record',
+          sourceId: 'source:codex',
+          kind: 'conversation',
+          externalId: 'upstream-record',
+          relativePath: 'sessions/record.jsonl',
+          sizeBytes: 20,
+          modifiedAt: '2026-07-26T00:00:00.000Z',
+          fingerprint: 'b'.repeat(64)
+        }]
+      })
+    )
+
+    const state = await new JsonDiscoveryRepository(statePath).load()
+    expect(state.records).toEqual([
+      expect.objectContaining({ id: 'prior-record', kind: 'conversation' })
+    ])
+  })
+
   it('persists only the current scan catalog shape', async () => {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), 'oyster-repository-save-'))
     temporaryDirectories.push(temporaryDirectory)
@@ -107,7 +133,7 @@ describe('JsonDiscoveryRepository', () => {
 
     await repository.save({
       sources: [],
-      artifacts: [{
+      records: [{
         id: 'session-one',
         sourceId: 'source:codex',
         kind: 'conversation',
@@ -130,6 +156,8 @@ describe('JsonDiscoveryRepository', () => {
     })
 
     const stored = await readFile(statePath, 'utf8')
+    expect(stored).toContain('"records"')
+    expect(stored).not.toMatch(/"artifacts"|"sessions"/)
     expect(stored).not.toMatch(/rawEvidence|rawContentHash|syncState|syncedFingerprint|"kind": "import"/)
   })
 })

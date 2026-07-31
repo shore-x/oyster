@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import electron from 'electron'
@@ -39,6 +39,37 @@ for (const removedCopy of ['打开导入目录', '正在导入原始记录', '�
 }
 for (const removedCopy of ['KNOWLEDGE SOURCES', '数据仅保存在本机', 'LOCAL KNOWLEDGE HUB']) {
   if (semantics.bodyText.includes(removedCopy)) throw new Error(`Redundant copy is still rendered: ${removedCopy}`)
+}
+
+const artifacts = semantics.artifacts
+const expectedArtifactRepositoryPath = join(userDataPath, 'artifacts')
+if (artifacts?.title !== '协作产物') throw new Error('Artifact page was not rendered')
+if (artifacts.repositoryPath !== expectedArtifactRepositoryPath) {
+  throw new Error(`Artifact Repository is not fixed under userData: ${artifacts.repositoryPath}`)
+}
+if (
+  artifacts.cardCountAfterCreate !== 1
+  || artifacts.cardCountAfterRefresh !== 1
+  || artifacts.directoryName !== 'attention-tracking'
+) {
+  throw new Error('Artifact creation or filesystem refresh did not preserve the Artifact')
+}
+if (artifacts.attentionHeading !== 'Attention' || artifacts.attentionStrong !== 'Attention 测试') {
+  throw new Error('Artifact AGENTS.md Markdown was not rendered')
+}
+if (artifacts.repositoryOpenDisabled !== false || artifacts.artifactOpenDisabled !== false) {
+  throw new Error('Artifact folder open actions are unavailable')
+}
+if (artifacts.pageError) throw new Error(`Artifact page reported an error: ${artifacts.pageError}`)
+if (artifacts.overflowX) throw new Error('Artifact page has unexpected horizontal overflow at 900px')
+if (!(await stat(join(expectedArtifactRepositoryPath, '.git'))).isDirectory()) {
+  throw new Error('Artifact Repository was not initialized as Git')
+}
+if (
+  await readFile(join(expectedArtifactRepositoryPath, 'attention-tracking', 'AGENTS.md'), 'utf8')
+  !== '# Attention\n\n持续维护 **Attention 测试**。\n'
+) {
+  throw new Error('Artifact AGENTS.md was not persisted with the expected content')
 }
 
 const knowledge = semantics.knowledge
@@ -188,13 +219,13 @@ if (
 if (agentConfiguration.restoredBadge !== 'Built-in default' || !agentConfiguration.restoredMatchesBuiltIn) {
   throw new Error('The configured default System Prompt cannot be restored to the code default')
 }
-if (!agentConfiguration.chatRoleText?.includes('对话 Agent')) {
-  throw new Error('The conversational Agent is missing from Agent configuration')
+if (!agentConfiguration.chatRoleText?.includes('通用 Agent')) {
+  throw new Error('The general Agent is missing from Agent configuration')
 }
 if (
   agentConfiguration.chatToolNames?.join(',')
-    !== 'search_knowledge,read_knowledge_statement,upsert_knowledge_statements'
-  || agentConfiguration.chatSchemaPanelCount !== 3
+    !== 'read,bash,edit,write,search_knowledge,read_knowledge,upsert_knowledge'
+  || agentConfiguration.chatSchemaPanelCount !== 7
 ) {
   throw new Error('The conversational Agent tool catalog is incomplete')
 }
@@ -224,6 +255,9 @@ if (!chat.selectedModel || !chat.binding?.includes(chat.selectedModel)) {
 }
 if (!chat.userText?.includes('使用知识库') || !chat.assistantText?.includes('Fixture 对话 Agent')) {
   throw new Error(`The conversational Agent did not complete a real fixture turn: ${chat.pageError || 'no response'}`)
+}
+if (!chat.assistantStrongText?.includes('Fixture 对话 Agent') || chat.assistantListItems !== 2) {
+  throw new Error('The conversational Agent response was not rendered as Markdown')
 }
 if (!chat.composerVisible || !chat.workspaceWithinViewport || chat.overflowX) {
   throw new Error('The conversational workspace does not remain within the viewport')

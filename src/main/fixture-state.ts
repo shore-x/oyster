@@ -6,7 +6,7 @@ export const FIXTURE_SESSION_CONTENT = [
   '{"type":"user","message":"测试写入必须与正式知识库隔离，且可以随时重复运行。"}'
 ].join('\n')
 
-export const FIXTURE_SESSION_ARTIFACT_ID = 'fixture-session-001'
+export const FIXTURE_SESSION_SOURCE_RECORD_ID = 'fixture-session-001'
 
 export function createFixtureState(): DiscoveryStateData {
   return {
@@ -63,8 +63,8 @@ export function createFixtureState(): DiscoveryStateData {
         errorMessage: '无法读取历史记录目录'
       }
     ],
-    artifacts: [{
-      id: FIXTURE_SESSION_ARTIFACT_ID,
+    records: [{
+      id: FIXTURE_SESSION_SOURCE_RECORD_ID,
       sourceId: 'source:claude',
       kind: 'conversation',
       externalId: 'fixture-session-2026-07-21',

@@ -23,7 +23,7 @@ import {
 import { InMemoryDiscoveryRepository, JsonDiscoveryRepository } from './discovery/repository'
 import {
   createFixtureState,
-  FIXTURE_SESSION_ARTIFACT_ID,
+  FIXTURE_SESSION_SOURCE_RECORD_ID,
   FIXTURE_SESSION_CONTENT
 } from './fixture-state'
 import {
@@ -45,6 +45,8 @@ import { ChatAgentService } from './chat/chat-agent-service'
 import { JsonChatConfigurationRepository } from './chat/chat-configuration-repository'
 import { registerChatIpc } from './chat/ipc'
 import { PiChatSessionRepository } from './chat/pi-chat-session-repository'
+import { ArtifactRepository } from './artifacts/artifact-repository'
+import { registerArtifactIpc } from './artifacts/ipc'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 let mainWindow: BrowserWindow | undefined
@@ -70,7 +72,7 @@ function createService(): DiscoveryService {
     : new JsonDiscoveryRepository(join(app.getPath('userData'), 'discovery-state.json'))
   const evidenceReader = useFixtures
     ? new MemorySourceEvidenceReader([{
-        artifactId: FIXTURE_SESSION_ARTIFACT_ID,
+        sourceRecordId: FIXTURE_SESSION_SOURCE_RECORD_ID,
         content: FIXTURE_SESSION_CONTENT
       }])
     : new FileSourceEvidenceReader()
@@ -728,7 +730,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const chatToolNames = Array.from(page.querySelectorAll('.agent-config-tool code'))
       .map((node) => node.textContent?.trim())
     const chatSchemaPanelCount = page.querySelectorAll('.agent-config-tool__schema').length
-    const upsertSchemaDetails = page.querySelector('[data-testid="agent-tool-schema-upsert_knowledge_statements"]')
+    const upsertSchemaDetails = page.querySelector('[data-testid="agent-tool-schema-upsert_knowledge"]')
     upsertSchemaDetails.open = true
     await new Promise((resolve) => requestAnimationFrame(resolve))
     const chatUpsertSchema = JSON.parse(upsertSchemaDetails.querySelector('pre')?.textContent || '{}')
@@ -830,6 +832,8 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       binding: page.querySelector('[data-testid="chat-current-binding"]')?.textContent?.trim(),
       userText: page.querySelector('.chat-message--user')?.textContent?.trim(),
       assistantText: page.querySelector('.chat-message--assistant')?.textContent?.trim(),
+      assistantStrongText: page.querySelector('.chat-message--assistant strong')?.textContent?.trim(),
+      assistantListItems: page.querySelectorAll('.chat-message--assistant li').length,
       composerVisible: Boolean(composer),
       pageError: page.querySelector('.page-error')?.textContent?.trim(),
       workspaceWithinViewport: Boolean(workspace && workspace.bottom <= window.innerHeight + 1),
@@ -839,6 +843,61 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   await new Promise((resolve) => setTimeout(resolve, 80))
   const chatImage = await window.webContents.capturePage()
   await writeFile(join(dirname(capturePath), 'chat.png'), chatImage.toPNG())
+
+  window.setSize(900, 780)
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-artifacts"]').click()`)
+  const artifactSemantics = await window.webContents.executeJavaScript(`(async () => {
+    const page = document.querySelector('[data-testid="page-artifacts"]')
+    const path = page.querySelector('[data-testid="artifact-repository-path"]')
+    let deadline = Date.now() + 2_000
+    while (
+      (!path?.textContent?.trim() || path.textContent.trim() === '正在读取…' || path.textContent.trim() === '—')
+      && !page.querySelector('.page-error')
+      && Date.now() < deadline
+    ) await new Promise((resolve) => setTimeout(resolve, 25))
+
+    const directoryInput = page.querySelector('[data-testid="artifact-directory-name"]')
+    const attentionInput = page.querySelector('[data-testid="artifact-attention"]')
+    directoryInput.value = 'attention-tracking'
+    directoryInput.dispatchEvent(new Event('input', { bubbles: true }))
+    attentionInput.value = '持续维护 **Attention 测试**。'
+    attentionInput.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    page.querySelector('[data-testid="create-artifact"]')?.click()
+
+    deadline = Date.now() + 2_000
+    while (!page.querySelector('[data-testid="artifact-card"]') && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    const cardCountAfterCreate = page.querySelectorAll('[data-testid="artifact-card"]').length
+    const refresh = page.querySelector('[data-testid="refresh-artifacts"]')
+    refresh?.click()
+    deadline = Date.now() + 2_000
+    while (refresh?.textContent?.includes('正在刷新') && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+
+    return {
+      title: page.querySelector('h1')?.textContent?.trim(),
+      repositoryPath: path?.textContent?.trim(),
+      cardCountAfterCreate,
+      cardCountAfterRefresh: page.querySelectorAll('[data-testid="artifact-card"]').length,
+      directoryName: page.querySelector('.artifact-card__identity h2')?.textContent?.trim(),
+      attentionHeading: page.querySelector('.artifact-card__attention h1')?.textContent?.trim(),
+      attentionStrong: page.querySelector('.artifact-card__attention strong')?.textContent?.trim(),
+      repositoryOpenDisabled: page.querySelector('[data-testid="open-artifact-repository"]')?.disabled,
+      artifactOpenDisabled: page.querySelector('[data-testid="open-artifact"]')?.disabled,
+      pageError: page.querySelector('.page-error')?.textContent?.trim(),
+      overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
+    }
+  })()`)
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  const artifactImage = await window.webContents.capturePage()
+  await writeFile(join(dirname(capturePath), 'artifacts.png'), artifactImage.toPNG())
+
+  window.setSize(1160, 780)
+  await new Promise((resolve) => setTimeout(resolve, 80))
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-knowledge-processing"]').click()`)
   await new Promise((resolve) => setTimeout(resolve, 120))
   const processingStateAfterNavigation = await window.webContents.executeJavaScript(`(() => {
@@ -854,6 +913,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       ...semantics,
       ai: { ...aiSemantics, directTest: aiDirectTestSemantics },
       agentConfiguration: agentConfigurationSemantics,
+      artifacts: artifactSemantics,
       chat: chatSemantics,
       knowledge: {
         browse: knowledgeBrowseSemantics,
@@ -895,7 +955,17 @@ async function createMainWindow(): Promise<void> {
     }
   })
 
-  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const protocol = new URL(url).protocol
+      if (protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:') {
+        void shell.openExternal(url)
+      }
+    } catch {
+      // Invalid or relative model-authored links remain inside the renderer boundary.
+    }
+    return { action: 'deny' }
+  })
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault())
   mainWindow.once('ready-to-show', () => mainWindow?.show())
 
@@ -915,6 +985,9 @@ async function createMainWindow(): Promise<void> {
 
 app.whenReady().then(async () => {
   const service = createService()
+  const artifactRepository = new ArtifactRepository(
+    join(app.getPath('userData'), 'artifacts')
+  )
   aiBackendService = createBackendService()
   knowledgeStoreManager = await SqliteKnowledgeStoreManager.open(
     join(app.getPath('userData'), 'knowledge-store')
@@ -933,7 +1006,8 @@ app.whenReady().then(async () => {
       join(app.getPath('userData'), 'chat-agent.json')
     ),
     aiBackend: aiBackendService,
-    knowledgeStore: knowledgeStoreManager.production
+    knowledgeStore: knowledgeStoreManager.production,
+    artifactRepositoryPath: artifactRepository.repositoryPath
   })
   knowledgeFullChainService = new KnowledgeFullChainService(
     service,
@@ -944,8 +1018,12 @@ app.whenReady().then(async () => {
       : new PiKnowledgeMaintenanceAgent(reader),
     knowledgeFullChainRunRepository
   )
+  const artifactInitialization = artifactRepository.initialize().catch((error: unknown) => {
+    console.error('Artifact Repository 初始化失败；可在协作产物页面重试。', error)
+  })
   await Promise.all([
     service.initialize(),
+    artifactInitialization,
     aiBackendService.initialize(),
     knowledgeProcessingService.initialize(),
     chatAgentService.initialize()
@@ -966,6 +1044,7 @@ app.whenReady().then(async () => {
     })
   }
   registerIpc(service)
+  registerArtifactIpc(artifactRepository, () => mainWindow)
   registerAiBackendIpc(aiBackendService, () => mainWindow)
   registerKnowledgeProcessingIpc(
     knowledgeProcessingService,

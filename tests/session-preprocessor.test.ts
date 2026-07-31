@@ -10,7 +10,7 @@ import type {
   ProcessingStageRunBinding
 } from '../src/main/knowledge-processing/knowledge-processing-service'
 
-const ARTIFACT_ID = 'artifact-session-1'
+const SOURCE_RECORD_ID = 'source-record-session-1'
 const CONTENT = [
   '{"role":"user","content":"Please keep summaries concise."}',
   '{"role":"assistant","content":"Understood."}'
@@ -22,7 +22,7 @@ function sha256(content: string): string {
 
 function session(content = CONTENT): AvailableSessionSummary {
   return {
-    artifactId: ARTIFACT_ID,
+    sourceRecordId: SOURCE_RECORD_ID,
     sourceId: 'source:codex',
     agentType: 'codex',
     sourceDisplayName: 'OpenAI Codex',
@@ -86,13 +86,13 @@ function createHarness(options: {
   const observationView = new CodexHistoryAdapter().createObservationView(content)
   const listAvailableSessions = vi.fn(() => structuredClone(sessions))
   const readAvailableSession = vi.fn(async (
-    input: { artifactId: string; expectedRevision: string }
+    input: { sourceRecordId: string; expectedRevision: string }
   ) => {
-    if (input.artifactId !== availableSession.artifactId) throw new Error('Unknown Session')
+    if (input.sourceRecordId !== availableSession.sourceRecordId) throw new Error('Unknown Session')
     if (input.expectedRevision !== availableSession.revision) throw new Error('Stale Session')
     const sizeBytes = Buffer.byteLength(content)
     return {
-      artifactId: availableSession.artifactId,
+      sourceRecordId: availableSession.sourceRecordId,
       revision: availableSession.revision,
       contentHash,
       sizeBytes,
@@ -133,17 +133,17 @@ describe('SessionPreprocessor', () => {
   it('loads the exact Session revision and passes its evidence, provenance, and attention to preprocessing', async () => {
     const harness = createHarness()
     const attention = 'Preserve explicit preferences and rejections.'
-    const sourceRef = `raw:${ARTIFACT_ID}@sha256:${harness.contentHash}`
+    const sourceRef = `raw:${SOURCE_RECORD_ID}@sha256:${harness.contentHash}`
 
     const result = await harness.service.run({
-      artifactId: ARTIFACT_ID,
+      sourceRecordId: SOURCE_RECORD_ID,
       expectedRevision: harness.availableSession.revision,
       attention
     }, binding)
 
     expect(harness.listAvailableSessions).toHaveBeenCalledOnce()
     expect(harness.readAvailableSession).toHaveBeenCalledWith({
-      artifactId: ARTIFACT_ID,
+      sourceRecordId: SOURCE_RECORD_ID,
       expectedRevision: harness.availableSession.revision
     })
     expect(harness.runObservationPreprocessorView).toHaveBeenCalledWith(
@@ -166,21 +166,21 @@ describe('SessionPreprocessor', () => {
   it.each([
     {
       name: 'a stale revision',
-      artifactId: ARTIFACT_ID,
+      sourceRecordId: SOURCE_RECORD_ID,
       expectedRevision: '0'.repeat(64)
     },
     {
       name: 'a missing Session',
-      artifactId: 'artifact-session-missing',
+      sourceRecordId: 'source-record-session-missing',
       expectedRevision: session().revision
     }
   ])('rejects $name before reading evidence or invoking preprocessing', async ({
-    artifactId,
+    sourceRecordId,
     expectedRevision
   }) => {
     const harness = createHarness()
 
-    await expect(harness.service.run({ artifactId, expectedRevision }, binding))
+    await expect(harness.service.run({ sourceRecordId, expectedRevision }, binding))
       .rejects.toThrow()
 
     expect(harness.readAvailableSession).not.toHaveBeenCalled()
@@ -193,7 +193,7 @@ describe('SessionPreprocessor', () => {
     const harness = createHarness({ content })
 
     await expect(harness.service.run({
-      artifactId: harness.availableSession.artifactId,
+      sourceRecordId: harness.availableSession.sourceRecordId,
       expectedRevision: harness.availableSession.revision
     }, binding)).resolves.toMatchObject({ segmentCount: 1 })
 
@@ -211,9 +211,9 @@ describe('SessionPreprocessor', () => {
     const harness = createHarness({ content })
 
     await expect(harness.service.run({
-      artifactId: harness.availableSession.artifactId,
+      sourceRecordId: harness.availableSession.sourceRecordId,
       expectedRevision: harness.availableSession.revision
-    }, binding)).resolves.toMatchObject({ sourceRef: `raw:${ARTIFACT_ID}@sha256:${harness.contentHash}` })
+    }, binding)).resolves.toMatchObject({ sourceRef: `raw:${SOURCE_RECORD_ID}@sha256:${harness.contentHash}` })
 
     expect(harness.readAvailableSession).toHaveBeenCalledWith(expect.any(Object))
     expect(harness.runObservationPreprocessorView).toHaveBeenCalledWith(

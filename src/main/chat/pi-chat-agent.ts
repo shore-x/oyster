@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { Agent, type AgentTool } from '@earendil-works/pi-agent-core'
+import { createCodingTools } from '@earendil-works/pi-coding-agent'
 import { ModelConnectionFailureError } from '../ai-backends/model'
 import {
   createPiContextCompactor,
@@ -11,12 +12,14 @@ import type { PiChatAgentRunInput, ChatKnowledgeStore } from './model'
 import { chatMessageView, serializableChatValue } from './chat-message-view'
 import {
   chatAgentToolDefinition,
-  upsertKnowledgeStatementsParameters
+  upsertKnowledgeParameters
 } from './chat-tool-catalog'
 import {
   readKnowledgeParameters,
   searchKnowledgeParameters
 } from '../knowledge-processing/knowledge-maintenance-tool-catalog'
+import { createArtifactGitEnvironment } from '../artifacts/git-runtime'
+import { chatAgentSystemPrompt } from './prompt'
 
 function asError(value: unknown, fallback: string): Error {
   if (value instanceof Error) return value
@@ -82,7 +85,7 @@ function knowledgeTools(
       }
     } as AgentTool<typeof searchKnowledgeParameters>,
     {
-      ...chatAgentToolDefinition('read_knowledge_statement'),
+      ...chatAgentToolDefinition('read_knowledge'),
       executionMode: 'sequential',
       execute: async (_toolCallId, parameters, signal) => {
         signal?.throwIfAborted()
@@ -99,7 +102,7 @@ function knowledgeTools(
       }
     } as AgentTool<typeof readKnowledgeParameters>,
     {
-      ...chatAgentToolDefinition('upsert_knowledge_statements'),
+      ...chatAgentToolDefinition('upsert_knowledge'),
       executionMode: 'sequential',
       execute: async (_toolCallId, parameters, signal) => {
         signal?.throwIfAborted()
@@ -124,13 +127,27 @@ function knowledgeTools(
           }
         }
       }
-    } as AgentTool<typeof upsertKnowledgeStatementsParameters>
+    } as AgentTool<typeof upsertKnowledgeParameters>
   ]
 }
 
-/** A regular, unrestricted Pi Agent loop with three Knowledge Store tools. */
+function codingTools(artifactRepositoryPath: string): AgentTool[] {
+  return createCodingTools(artifactRepositoryPath, {
+    bash: {
+      spawnHook: (context) => ({
+        ...context,
+        env: createArtifactGitEnvironment(context.env)
+      })
+    }
+  })
+}
+
+/** A regular, unrestricted Pi Agent loop with filesystem, shell, and Knowledge tools. */
 export class PiChatAgent {
-  constructor(private readonly knowledgeStore: ChatKnowledgeStore) {}
+  constructor(
+    private readonly knowledgeStore: ChatKnowledgeStore,
+    private readonly artifactRepositoryPath: string
+  ) {}
 
   async run(input: PiChatAgentRunInput): Promise<void> {
     if (!input.text.trim()) throw new Error('消息不能为空')
@@ -138,7 +155,14 @@ export class PiChatAgent {
 
     const context = await input.session.buildContext()
     input.signal.throwIfAborted()
-    const tools = knowledgeTools(this.knowledgeStore, input)
+    const tools = [
+      ...codingTools(this.artifactRepositoryPath),
+      ...knowledgeTools(this.knowledgeStore, input)
+    ]
+    const systemPrompt = chatAgentSystemPrompt(
+      input.binding.systemPrompt,
+      this.artifactRepositoryPath
+    )
     const thinkingLevel = input.runtime.model.reasoning
       ? (input.binding.reasoningEffort ?? 'off')
       : 'off'
@@ -146,7 +170,7 @@ export class PiChatAgent {
     const compactContext = createPiContextCompactor({
       model: input.runtime.model,
       streamFn: input.runtime.streamFn,
-      systemPrompt: input.binding.systemPrompt,
+      systemPrompt,
       tools,
       thinkingLevel,
       onModelCall: (event) => {
@@ -157,7 +181,7 @@ export class PiChatAgent {
     })
     const agent = new Agent({
       initialState: {
-        systemPrompt: input.binding.systemPrompt,
+        systemPrompt,
         model: input.runtime.model,
         thinkingLevel,
         tools,

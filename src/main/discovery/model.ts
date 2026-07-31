@@ -1,8 +1,8 @@
 import type {
   AgentSource,
   AgentType,
-  ArtifactKind,
-  HistoryArtifact,
+  SourceRecord,
+  SourceRecordKind,
   InstructionScope,
   ScanRun
 } from '../../shared/discovery'
@@ -10,7 +10,7 @@ import type { ObservationView } from '../observation/model'
 
 export interface DiscoveryStateData {
   sources: AgentSource[]
-  artifacts: HistoryArtifact[]
+  records: SourceRecord[]
   runs: ScanRun[]
 }
 
@@ -28,8 +28,8 @@ export interface DetectionResult {
   errorMessage?: string
 }
 
-export interface ArtifactCandidate {
-  kind: ArtifactKind
+export interface SourceRecordCandidate {
+  kind: SourceRecordKind
   externalId: string
   relativePath: string
   sourcePath: string
@@ -44,7 +44,7 @@ export interface ArtifactCandidate {
 }
 
 export type ScanEntry =
-  | { kind: 'artifact'; candidate: ArtifactCandidate }
+  | { kind: 'record'; candidate: SourceRecordCandidate }
   | { kind: 'invalid'; relativePath: string; sizeBytes: number }
 
 export interface AgentHistoryAdapter {
@@ -56,11 +56,11 @@ export interface AgentHistoryAdapter {
   /** Re-discovers one conversation by its stable Agent-owned identity. Paths are only hints. */
   refreshConversation(
     rootPath: string,
-    artifact: HistoryArtifact,
+    record: SourceRecord,
     signal: AbortSignal,
     context?: DetectionContext
-  ): Promise<ArtifactCandidate | undefined>
-  resolveArtifactPath(rootPath: string, artifact: HistoryArtifact): string
+  ): Promise<SourceRecordCandidate | undefined>
+  resolveRecordPath(rootPath: string, record: SourceRecord): string
   /** Builds the deterministic, format-specific model view while preserving raw-line provenance. */
   createObservationView(rawContent: string): ObservationView
 }

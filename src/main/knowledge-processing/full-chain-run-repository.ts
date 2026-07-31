@@ -34,6 +34,24 @@ type StoredKnowledgeFullChainRunRecordV1 = Omit<KnowledgeFullChainRunRecord, 're
   }
 }
 
+type StoredSessionV1 = Omit<
+  KnowledgeFullChainRunRecord['result']['session'],
+  'sourceRecordId'
+> & {
+  sourceRecordId?: unknown
+  /** Legacy field written before source records were distinguished from user-facing Artifacts. */
+  artifactId?: unknown
+}
+
+type ReadableStoredKnowledgeFullChainRunRecordV1 = Omit<
+  StoredKnowledgeFullChainRunRecordV1,
+  'result'
+> & {
+  result: Omit<StoredKnowledgeFullChainRunRecordV1['result'], 'session'> & {
+    session: StoredSessionV1
+  }
+}
+
 export interface KnowledgeFullChainRunHistory {
   save(record: KnowledgeFullChainRunRecord): void
   list(): KnowledgeFullChainRunSummary[]
@@ -65,7 +83,14 @@ function summaryFromRow(row: FullChainRunSummaryRow): KnowledgeFullChainRunSumma
 }
 
 function parseRecord(payload: string, expectedRunId: string): KnowledgeFullChainRunRecord {
-  const stored = JSON.parse(payload) as StoredKnowledgeFullChainRunRecordV1
+  const stored = JSON.parse(payload) as ReadableStoredKnowledgeFullChainRunRecordV1
+  const storedSourceRecordId = stored?.result?.session?.sourceRecordId
+  const legacyArtifactId = stored?.result?.session?.artifactId
+  const sourceRecordId = typeof storedSourceRecordId === 'string' && storedSourceRecordId
+    ? storedSourceRecordId
+    : typeof legacyArtifactId === 'string' && legacyArtifactId
+      ? legacyArtifactId
+      : undefined
   if (
     !stored
     || stored.formatVersion !== 1
@@ -73,13 +98,23 @@ function parseRecord(payload: string, expectedRunId: string): KnowledgeFullChain
     || stored.result?.runId !== expectedRunId
     || !stored.result.completedAt
     || !stored.result.maintenance?.debugTrace
+    || !sourceRecordId
   ) {
     throw new Error(`加工测试历史记录格式无效：${expectedRunId}`)
   }
+  const {
+    artifactId: _legacyArtifactId,
+    sourceRecordId: _storedSourceRecordId,
+    ...storedSession
+  } = stored.result.session
   return {
     ...stored,
     result: {
       ...stored.result,
+      session: {
+        ...storedSession,
+        sourceRecordId
+      },
       preprocessing: {
         ...stored.result.preprocessing,
         debugTrace: stored.result.maintenance.debugTrace

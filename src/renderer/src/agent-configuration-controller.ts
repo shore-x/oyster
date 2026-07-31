@@ -17,7 +17,7 @@ const EMPTY_PROCESSING_SNAPSHOT: KnowledgeProcessingSnapshot = {
 const EMPTY_CHAT_SNAPSHOT: ChatSnapshot = {
   agent: {
     id: CHAT_AGENT_ID,
-    displayName: '对话 Agent',
+    displayName: '通用 Agent',
     description: '',
     runtime: 'pi_agent_core',
     tools: [],

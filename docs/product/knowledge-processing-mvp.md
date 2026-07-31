@@ -2,7 +2,7 @@
 
 > 状态：当前实现规格
 >
-> 日期：2026-07-29
+> 日期：2026-07-30
 >
 > 范围：验证“外部 Session 的确定版本 → Candidate 发现 → Knowledge Maintenance Agent 裁决 → Knowledge Contribution → 隔离 Knowledge Sandbox 写入与回读”的最小闭环，以及测试结果的本地复盘与显式导入。Sandbox 不代表正式知识生产。
 
@@ -23,7 +23,7 @@
   -> 从 Sandbox 按 canonical title 回读 Statement
 ```
 
-用户从 discovery catalog 选择 Session 及其当前版本。运行时，主进程通过对应 Source Adapter 从原始位置读取该记录，并以稳定 artifact 身份和实际内容哈希固定本次使用的 `sourceRef`；扫描后已经变化或失效的记录会被拒绝，不会静默切换。Reader 不为单个 Session 预设产品长度上限，也不会把记录复制进应用管理的数据目录。Claude、Pi 与 Codex Adapter 分别按自身历史格式生成带版本的 Observation View；它们负责确定性选择对话主线、折叠可按需展开的执行详情，并为每个模型可读单元保留原始全局 `L` 行号、超长单行的 `Cstart:end/total` 窗口和必要的格式语境。共享文本原语只保证 Unicode 与 UTF-8 字节边界，不理解任何 Agent 的 JSONL Schema。通用 planner 只按所选模型预算组合 Adapter 已生成的单元，不以物理 JSONL 行作为调用边界。分段数、预处理调用数和整次运行时间不设固定上限，实际工作量随选择后的材料增长，用户可以随时取消。未进入预处理视图的原文没有被截断或删除，仍可由维护 Agent 按需回源。
+用户从 discovery catalog 选择 Session 及其当前版本。运行时，主进程通过对应 Source Adapter 从原始位置读取该 Source Record，并以稳定的 Source Record 身份和实际内容哈希固定本次使用的 `sourceRef`；扫描后已经变化或失效的记录会被拒绝，不会静默切换。Reader 不为单个 Session 预设产品长度上限，也不会把记录复制进应用管理的数据目录。Claude、Pi 与 Codex Adapter 分别按自身历史格式生成带版本的 Observation View；它们负责确定性选择对话主线、折叠可按需展开的执行详情，并为每个模型可读单元保留原始全局 `L` 行号、超长单行的 `Cstart:end/total` 窗口和必要的格式语境。共享文本原语只保证 Unicode 与 UTF-8 字节边界，不理解任何 Agent 的 JSONL Schema。通用 planner 只按所选模型预算组合 Adapter 已生成的单元，不以物理 JSONL 行作为调用边界。分段数、预处理调用数和整次运行时间不设固定上限，实际工作量随选择后的材料增长，用户可以随时取消。未进入预处理视图的原文没有被截断或删除，仍可由维护 Agent 按需回源。
 
 页面同时保留独立的**高级调试**工作面，用于分别观察预处理器和维护 Agent 的行为。它以阶段为主要切换层级，并在同一工作面直接呈现配置、输入、运行过程和输出，不再为这些内容继续嵌套页签。预处理调试默认直接选择一条 catalog 中可用的 Session；手工粘贴只作为排查特殊输入的显式 fallback。两个阶段分别触发，其 Knowledge Contribution 只用于预览，不提交到任何 Knowledge Store。每次实际启动的运行都会生成 Debug Trace：预处理展示输入规模、总分段、每次 Candidate 发现调用的状态和输出；维护阶段展示 Candidate Agenda、Contribution Draft 的最新规模、模型轮次和工具活动。独立阶段调试只在内存中保留最近一次轨迹；成功的完整链路会把有界轨迹连同结果保存为本地测试快照。原始行号、内部运行 ID、版本指纹与本地路径不作为常规用户界面信息展示。
 
@@ -32,6 +32,8 @@
 ## 2. Knowledge Sandbox
 
 **Knowledge Sandbox** 是当前验证 Store 的一次物理隔离快照，使用相同的 SQLite Schema 和读写实现。完整链路开始时，Oyster Core 先创建独立 Sandbox，再把本次运行绑定到该 Store：Knowledge Maintenance Agent 可以搜索其基线知识，但不能选择、切换或感知其他写入目标。SQLite 只是当前 MVP 的验证介质，不决定正式知识层最终使用数据库还是本地文件。
+
+这里的 Sandbox 只表示知识加工测试使用隔离的目标 Store，不是文件系统或 Shell Sandbox，也不适用于通用管理 Agent 的 Coding 工具。
 
 Agent 最终提交一份结构化 Knowledge Contribution，其中可以包含多条 Knowledge Statement。Statement 使用当前知识视图中唯一、能够以专名、术语或自然名词短语指称一个知识主体的 canonical title；标题不概括场景或结论，主体的语境、含义、属性和关系由 Markdown 兼容的自由文本正文表达。目标知识模型允许正文使用 `[[canonical title]]` 或 `[[canonical title|local display text]]` 表达任意多元关系；名称在读取时动态指向当前知识视图中的同名 Statement，不永久绑定写作时的记录。
 
@@ -44,7 +46,7 @@ Core 在一个事务中按 title 写入整份 Contribution，再回读实际 Sta
 
 Sandbox 的写入不会自动影响正式知识库。失败或取消会丢弃本次 Sandbox；成功重跑会用同一正式知识基线创建新的 Sandbox，并替换当前运行持有的旧 Sandbox。应用启动时会清理上一次进程遗留的 Sandbox。
 
-每次成功的完整链路另存为自包含、不可变的本地测试快照。快照保存所选 Session 的识别信息、两个阶段当时生效的配置、候选裁决、最终 Statement 和有界 Debug Trace，不依赖临时 Sandbox 或外部 Session 继续存在。历史列表只读取轻量摘要，结果与调用轨迹在打开二级页时按需加载。快照是调试产物，不是新的知识层。
+每次成功的完整链路另存为自包含、不可变的本地测试快照。快照保存所选 Session 的识别信息、两个阶段当时生效的配置、候选裁决、最终 Statement 和有界 Debug Trace，不依赖临时 Sandbox 或外部 Session 继续存在。历史列表只读取轻量摘要，结果与调用轨迹在打开二级页时按需加载。快照是调试材料，不构成新的状态与权威域。
 
 用户可以从当前结果或任意历史快照显式导入正式知识库。当前 MVP 直接取快照中的最终 Statement，以 canonical title 为键在一个事务中写入：不存在的名称创建，已有的名称覆盖正文，不执行冲突判断、自动合并或隐式同步。重复导入同一次结果也是合法操作。这个入口只用于早期验证，不等同于已经设计了正式知识加工调度链路。
 
@@ -91,7 +93,7 @@ Agenda、Draft、来源授权和提交状态由 Host 持有，不依赖 transcri
 
 当前工具按五类职责组织：
 
-- 当前知识：`search_knowledge` 按标题和正文文本分页发现 Statement，`read_knowledge_statement` 按完整 canonical title 精确读取；
+- 当前知识：`search_knowledge` 按标题和正文文本分页发现 Statement，`read_knowledge` 按完整 canonical title 精确读取；
 - Candidate Agenda：`list_statement_candidates` 分页读取，`add_statement_candidates` 补充调查问题，`resolve_statement_candidates` 记录明确处置；
 - Contribution Draft：`upsert_contribution_statement` 按 title 暂存或替换草稿，`read_contribution_statement` 与 `list_contribution_statements` 回读，`remove_contribution_statement` 移除草稿；
 - 原始证据：`read_evidence` 从 Candidate 的位置开始有界读取 Raw Evidence，并返回 continuation；
@@ -105,7 +107,7 @@ Knowledge Maintenance Agent 的 Debug Trace 按模型轮次记录有界的模型
 
 ## 4. 配置与结果界面
 
-“Agent 配置”页面列出代码中实际注册的 AI 运行角色，展示每个角色的 Runtime、System Prompt 和工具。Observation Preprocessor 明确显示为不带工具的直接模型调用；Knowledge Maintenance Agent 和对话 Agent 分别显示运行时实际提供的工具名称、描述和可展开的参数 JSON Schema，包括必填字段、嵌套结构与约束。参数 Schema 与 AgentTool 由同一工具目录生成，向 Renderer 只投影可序列化的只读信息，不在 UI 中另行启停或编辑。尚未接入运行时的概念角色不作为占位配置出现。
+“Agent 配置”页面列出代码中实际注册的 AI 运行角色，展示每个角色的 Runtime、System Prompt 和工具。Observation Preprocessor 明确显示为不带工具的直接模型调用；Knowledge Maintenance Agent 和通用管理 Agent 分别显示运行时实际提供的工具名称、描述和可展开的参数 JSON Schema，包括必填字段、嵌套结构与约束。参数 Schema 与 AgentTool 由同一工具目录生成，向 Renderer 只投影可序列化的只读信息，不在 UI 中另行启停或编辑。尚未接入运行时的概念角色不作为占位配置出现。
 
 System Prompt 有三个清晰层次：代码内置 Prompt 是始终存在的 fallback；用户可以在 Agent 配置页保存一个默认 Prompt；加工测试页还可以保存该阶段的调试覆盖。实际运行依次选择“阶段覆盖、用户默认、代码内置”中第一个存在的值，并在运行开始时固化到本次配置和成功历史中。在 Agent 配置页恢复代码默认会删除用户默认覆盖；在加工测试页恢复当前默认会删除阶段覆盖，二者都不复制内置文本。Host 动态注入的输入材料、Workspace 状态和 follow-up 不属于 System Prompt，也不由该页面配置。
 
@@ -152,7 +154,7 @@ Model Connection 会在 Provider 能声明时保留 `contextWindowTokens` 和最
 - 正式知识生产的自动调度、批量和流式处理；
 - Canonical Activity 作为跨 Harness 的标准化 Observation 视图；
 - 持久 Workspace 与作业恢复；
-- Projection Agent 与投影文档生成；
+- 独立调度的 Projection Pipeline、临时消费视图构建，以及 Artifact 依赖或自动同步；通用管理 Agent 对普通文件执行的直接维护不属于这里的未实现项；
 - 更多消费者 Coding Plan Provider。
 
 当前实现先验证 Candidate 发现、开放 Agenda 的调查覆盖、Raw Evidence 按需读取、Contribution Draft、提交门和隔离提交。测试结果默认不进入正式知识，只有用户从当前结果或持久历史中显式导入时才按 title 写入。对抗式盲审仍只是未来方向，不参与当前运行。

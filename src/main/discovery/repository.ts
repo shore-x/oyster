@@ -1,12 +1,12 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import type { AgentSource, HistoryArtifact, ScanRun } from '../../shared/discovery'
+import type { AgentSource, ScanRun, SourceRecord } from '../../shared/discovery'
 import type { DiscoveryStateData, DiscoveryRepository } from './model'
 
-const EMPTY_STATE: DiscoveryStateData = { sources: [], artifacts: [], runs: [] }
+const EMPTY_STATE: DiscoveryStateData = { sources: [], records: [], runs: [] }
 
-type LegacyHistorySession = Omit<HistoryArtifact, 'kind'> & {
-  kind?: HistoryArtifact['kind']
+type StoredSourceRecord = Omit<SourceRecord, 'kind'> & {
+  kind?: SourceRecord['kind']
   syncState?: string
   rawEvidenceId?: string
   rawContentHash?: string
@@ -20,8 +20,9 @@ type StoredAgentSource = AgentSource & {
 }
 type StoredDiscoveryState = {
   sources?: StoredAgentSource[]
-  artifacts?: LegacyHistorySession[]
-  sessions?: LegacyHistorySession[]
+  records?: StoredSourceRecord[]
+  artifacts?: StoredSourceRecord[]
+  sessions?: StoredSourceRecord[]
   runs?: Array<ScanRun & { kind?: 'scan' | 'import' }>
 }
 
@@ -34,14 +35,14 @@ function currentSource(value: StoredAgentSource): AgentSource {
   return copy as unknown as AgentSource
 }
 
-function currentArtifact(value: LegacyHistorySession): HistoryArtifact {
+function currentRecord(value: StoredSourceRecord): SourceRecord {
   const copy = { ...value, kind: value.kind ?? 'conversation' } as Record<string, unknown>
   delete copy.syncState
   delete copy.rawEvidenceId
   delete copy.rawContentHash
   delete copy.syncedFingerprint
   delete copy.errorMessage
-  return copy as unknown as HistoryArtifact
+  return copy as unknown as SourceRecord
 }
 
 function currentRun(value: ScanRun & { kind?: 'scan' | 'import' }): ScanRun | undefined {
@@ -63,10 +64,10 @@ export class JsonDiscoveryRepository implements DiscoveryRepository {
   async load(): Promise<DiscoveryStateData> {
     try {
       const value = JSON.parse(await readFile(this.filePath, 'utf8')) as StoredDiscoveryState
-      const storedArtifacts = value.artifacts ?? value.sessions ?? []
+      const storedRecords = value.records ?? value.artifacts ?? value.sessions ?? []
       return {
         sources: (value.sources ?? []).map(currentSource),
-        artifacts: storedArtifacts.map(currentArtifact),
+        records: storedRecords.map(currentRecord),
         runs: (value.runs ?? []).map(currentRun).filter((run): run is ScanRun => Boolean(run))
       }
     } catch (error) {

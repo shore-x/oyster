@@ -95,7 +95,7 @@ export const KNOWLEDGE_MAINTENANCE_TOOL_CATALOG = [
     parameters: searchKnowledgeParameters
   },
   {
-    name: 'read_knowledge_statement',
+    name: 'read_knowledge',
     label: '读取 Knowledge Statement',
     description: '按完整 canonical title 精确读取当前 Knowledge Statement。正文中的 [[canonical title]] 引用可用同一工具继续展开。',
     parameters: readKnowledgeParameters

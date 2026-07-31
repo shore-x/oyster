@@ -425,7 +425,7 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
       : undefined
   })
   const selectedSession = createMemo(() => controller.availableSessions().find(
-    (session) => session.artifactId === selectedSessionId()
+    (session) => session.sourceRecordId === selectedSessionId()
   ))
   const anyStageRunning = createMemo(
     () => controller.isFullChainRunning()
@@ -567,8 +567,8 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
   }
 
   function updateSelectedSession(value: string): void {
-    const artifactId = value || undefined
-    setSelectedSessionId(artifactId)
+    const sourceRecordId = value || undefined
+    setSelectedSessionId(sourceRecordId)
     controller.invalidateInputResults()
   }
 
@@ -658,11 +658,11 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
           onAttentionInput={setFullChainAttention}
           onRun={() => {
             const session = controller.availableSessions().find(
-              (candidate) => candidate.artifactId === selectedSessionId()
+              (candidate) => candidate.sourceRecordId === selectedSessionId()
             )
             if (!session) return
             void controller.runFullChain({
-              artifactId: session.artifactId,
+              sourceRecordId: session.sourceRecordId,
               expectedRevision: session.revision,
               attention: fullChainAttention().trim() || undefined
             })
@@ -843,7 +843,7 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
                             : '暂无可用 Session'}
                       </option>
                       <For each={controller.availableSessions()}>{(session) => (
-                        <option value={session.artifactId}>{sessionOptionLabel(session)}</option>
+                        <option value={session.sourceRecordId}>{sessionOptionLabel(session)}</option>
                       )}</For>
                     </select>
                   </label>
@@ -896,7 +896,7 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
                           if (preprocessorInputSource() === 'session') {
                             if (!session) return
                             void controller.runSessionPreprocessor({
-                              artifactId: session.artifactId,
+                              sourceRecordId: session.sourceRecordId,
                               expectedRevision: session.revision,
                               attention: runAttention()
                             })

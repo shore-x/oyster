@@ -25,7 +25,7 @@ function record(
   const result = {
     runId,
     session: {
-      artifactId: `artifact:${runId}`,
+      sourceRecordId: `source-record:${runId}`,
       sourceId: 'source:codex',
       agentType: 'codex',
       sourceDisplayName: 'Codex',
@@ -131,6 +131,39 @@ describe('SqliteKnowledgeFullChainRunRepository', () => {
     `).get('run-1') as { payload_json: string }
     database.close()
     expect(row.payload_json.match(/\"debugTrace\"/g)).toHaveLength(1)
+  })
+
+  it('normalizes the legacy artifactId in stored run history to sourceRecordId', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'oyster-processing-history-'))
+    temporaryDirectories.push(directory)
+    const databasePath = join(directory, 'history.sqlite')
+    const repository = await SqliteKnowledgeFullChainRunRepository.open(databasePath)
+    repository.save(record('legacy-run', '2026-07-20T10:31:00.000Z', 'Legacy Session'))
+    repository.close()
+
+    const database = new DatabaseSync(databasePath)
+    const row = database.prepare(`
+      SELECT payload_json
+      FROM knowledge_full_chain_runs
+      WHERE run_id = ?
+    `).get('legacy-run') as { payload_json: string }
+    const payload = JSON.parse(row.payload_json) as {
+      result: { session: Record<string, unknown> }
+    }
+    const { sourceRecordId, ...legacySession } = payload.result.session
+    payload.result.session = { ...legacySession, artifactId: sourceRecordId }
+    database.prepare(`
+      UPDATE knowledge_full_chain_runs
+      SET payload_json = ?
+      WHERE run_id = ?
+    `).run(JSON.stringify(payload), 'legacy-run')
+    database.close()
+
+    const reopened = await SqliteKnowledgeFullChainRunRepository.open(databasePath)
+    const restored = reopened.read('legacy-run')
+    expect(restored?.result.session.sourceRecordId).toBe('source-record:legacy-run')
+    expect(restored?.result.session).not.toHaveProperty('artifactId')
+    reopened.close()
   })
 
   it('does not silently replace an existing completed run', async () => {

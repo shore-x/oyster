@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { lstat, open } from 'node:fs/promises'
 
 export interface SourceEvidenceRevisionInput {
-  artifactId: string
+  sourceRecordId: string
   absolutePath: string
   expectedSizeBytes: number
   expectedModifiedAt: string
@@ -148,10 +148,10 @@ export class FileSourceEvidenceReader implements SourceEvidenceReader {
 export class MemorySourceEvidenceReader implements SourceEvidenceReader {
   private readonly records = new Map<string, Buffer>()
 
-  constructor(seeds: Array<{ artifactId: string; content: string | Buffer }> = []) {
+  constructor(seeds: Array<{ sourceRecordId: string; content: string | Buffer }> = []) {
     for (const seed of seeds) {
       this.records.set(
-        seed.artifactId,
+        seed.sourceRecordId,
         typeof seed.content === 'string' ? Buffer.from(seed.content, 'utf8') : Buffer.from(seed.content)
       )
     }
@@ -159,7 +159,7 @@ export class MemorySourceEvidenceReader implements SourceEvidenceReader {
 
   async read(input: SourceEvidenceReadInput): Promise<SourceEvidenceReadResult> {
     assertReadLimit(input.maxBytes)
-    const stored = this.records.get(input.artifactId)
+    const stored = this.records.get(input.sourceRecordId)
     if (!stored) throw new SourceSessionUnavailableError()
     if (stored.length !== input.expectedSizeBytes) {
       throw new SourceSessionRevisionChangedError()

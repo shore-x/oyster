@@ -176,7 +176,7 @@ class StaticAgent implements KnowledgeAgentRuntime {
 }
 
 interface FakeDiscoveryOptions {
-  artifactId?: string
+  sourceRecordId?: string
   content?: string
 }
 
@@ -185,7 +185,7 @@ function fakeDiscovery(options: FakeDiscoveryOptions = {}): {
   session: AvailableSessionSummary
   content: string
 } {
-  const artifactId = options.artifactId ?? 'artifact-session-1'
+  const sourceRecordId = options.sourceRecordId ?? 'source-record-session-1'
   const content = options.content ?? [
     '{"role":"user","content":"Please keep summaries concise."}',
     '{"role":"assistant","content":"Understood."}',
@@ -195,7 +195,7 @@ function fakeDiscovery(options: FakeDiscoveryOptions = {}): {
   const contentHash = sha256(content)
   const observationView = new CodexHistoryAdapter().createObservationView(content)
   const session: AvailableSessionSummary = {
-    artifactId,
+    sourceRecordId,
     sourceId: 'source:codex',
     agentType: 'codex',
     sourceDisplayName: 'OpenAI Codex',
@@ -208,14 +208,14 @@ function fakeDiscovery(options: FakeDiscoveryOptions = {}): {
   const service = {
     listAvailableSessions: (): AvailableSessionSummary[] => [structuredClone(session)],
     readAvailableSession: async (
-      input: { artifactId: string; expectedRevision: string },
+      input: { sourceRecordId: string; expectedRevision: string },
       maxBytes?: number
     ) => {
-      if (input.artifactId !== artifactId) throw new Error('Unknown test artifact')
+      if (input.sourceRecordId !== sourceRecordId) throw new Error('Unknown test source record')
       if (input.expectedRevision !== revision) throw new Error('The Session revision has changed')
       const sizeBytes = Buffer.byteLength(content)
       if (maxBytes !== undefined && sizeBytes > maxBytes) throw new Error('Raw evidence exceeds maximum size')
-      return { artifactId, revision, contentHash, sizeBytes, observationView }
+      return { sourceRecordId, revision, contentHash, sizeBytes, observationView }
     }
   } as unknown as DiscoveryService
   return { service, session, content }
@@ -315,12 +315,12 @@ async function createHarness(
 }
 
 function runInput(session: AvailableSessionSummary): {
-  artifactId: string
+  sourceRecordId: string
   expectedRevision: string
   attention: string
 } {
   return {
-    artifactId: session.artifactId,
+    sourceRecordId: session.sourceRecordId,
     expectedRevision: session.revision,
     attention: 'Preserve explicit preferences and rejections.'
   }
@@ -568,7 +568,7 @@ describe('KnowledgeFullChainService', () => {
       modelCallCount: 1,
       toolCalls: [
         'search_knowledge',
-        'read_knowledge_statement',
+        'read_knowledge',
         'submit_knowledge_contribution'
       ]
     })))

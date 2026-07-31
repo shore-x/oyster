@@ -2,13 +2,15 @@
 
 > 状态：当前已落地的第一阶段产品与实现规格
 >
-> 日期：2026-07-26
+> 日期：2026-07-30
 >
 > 范围：发现本机 Claude Code、Pi、Codex，登记会话 transcript 与人类指令，并由 Source Adapter 在需要时从原始位置只读访问。Canonical Activity、知识加工、实时 Connector 和 MCP 不属于本页所述的发现切片。
 
 ## 1. 结论
 
 本地 Agent 历史是 Oyster 可以引用的外部观察，不是必须复制到 Oyster 内部的数据资产。发现阶段只建立轻量 catalog；当用户选择某条记录进行查看或知识加工时，主进程才通过对应 Source Adapter 从原始位置读取它。Session 身份与文件位置是两个不同概念：身份用于持续识别同一条记录，位置只是可失效、可重新发现的访问线索。
+
+Discovery catalog 中的单个外部来源条目称为 **Source Record**。它负责标识和定位来源记录，不是 Artifact Domain 中由用户与 Agent 维护的 Artifact。
 
 因此，当前只有一条历史访问路径：
 
@@ -58,7 +60,7 @@
 
 损坏尾行不会使整个来源失败；无法识别关键 header 的文件计入 invalid，一个坏文件不阻塞其他文件。指令发现只使用允许的文件名、Session header 中的项目路径和少量受信配置，不递归搜索整个 Home。
 
-catalog 保存稳定 artifact 身份、来源定位信息、文件大小和修改时间等轻量版本指纹。重新扫描会刷新当前 catalog：记录变化时形成新的当前版本，已经消失的记录不再出现在可选列表中。扫描能力属于各 Agent Adapter，因为只有 Adapter 理解对应 Harness 的身份与保存位置规则。扫描不会复制文件，也不会静默改变已经完成的加工所依据的 Observation revision。
+catalog 保存稳定的 Source Record 身份、来源定位信息、文件大小和修改时间等轻量版本指纹。重新扫描会刷新当前 catalog：记录变化时形成新的当前版本，已经消失的记录不再出现在可选列表中。扫描能力属于各 Agent Adapter，因为只有 Adapter 理解对应 Harness 的身份与保存位置规则。扫描不会复制文件，也不会静默改变已经完成的加工所依据的 Observation revision。
 
 ### 4.3 按需读取
 
@@ -80,7 +82,7 @@ Renderer 只提交 catalog 中的稳定身份和用户所选择的版本标识�
 - conversation 或 human instruction 的稳定身份、内部 locator 和版本指纹；
 - 必要的脱敏错误与运行状态。
 
-Source Adapter 负责各 Harness 的默认路径、有限 header 解析、artifact 定位、版本检查和原地读取。统一 Discovery Service 负责 catalog、统计、状态和访问协调。Renderer 只通过 typed preload API 使用这些能力，不包含路径规则，也不获得原始绝对路径。
+Source Adapter 负责各 Harness 的默认路径、有限 header 解析、Source Record 定位、版本检查和原地读取。统一 Discovery Service 负责 catalog、统计、状态和访问协调。Renderer 只通过 typed preload API 使用这些能力，不包含路径规则，也不获得原始绝对路径。
 
 Raw Evidence 表示具有明确来源身份和版本身份、可由 Source Adapter 按需读取的上游材料。它保持上游格式，不在发现时统一 Schema，也不把人类指令拼入 transcript；它不是 Oyster 内部的文件副本。异构记录的确定性标准化将在 Canonical Activity 阶段完成。
 
@@ -110,12 +112,12 @@ Raw Evidence 表示具有明确来源身份和版本身份、可由 Source Adapt
 - Canonical Activity 与消息/工具级解析；
 - turn/session 级实时 Connector；
 - 项目身份合并和跨项目关系；
-- 自动调度可用外部证据进入 Observation Preprocessor、Knowledge Maintenance Agent 或 Projection Agent；
+- 自动调度可用外部证据进入 Observation Preprocessor、Knowledge Maintenance Agent 或面向 Artifact 的 Projection 活动；
 - Embedding、知识搜索、MCP 和 Context Packet；
 - 十万文件级分页、Worker 隔离和 byte-offset 增量读取；
 - 第三方 Connector 加载协议。
 
-这些能力的上层边界由 [Product Brief](product-brief.md) 和[知识加工与协作式投影](../architecture/knowledge-model-and-projection.md)定义；当前发现层不提前决定知识 Schema 或 Agent 行为。
+这些能力的上层边界由 [Product Brief](product-brief.md) 和[知识加工、Projection 与 Artifact](../architecture/knowledge-model-and-projection.md)定义；当前发现层不提前决定知识 Schema 或 Agent 行为。
 
 ## 9. 验证
 
