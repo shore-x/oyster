@@ -27,8 +27,12 @@ function group(
     ?? { kind, memberTitles: [] }
 }
 
-function shortLabel(title: string): string {
-  return title.length > 34 ? `${title.slice(0, 33)}…` : title
+const MINIMUM_READABLE_AUTO_ZOOM = 0.72
+const MAXIMUM_AUTO_ZOOM = 1
+
+export function referenceGraphLabel(title: string): string {
+  const characters = [...title]
+  return characters.length > 28 ? `${characters.slice(0, 27).join('')}…` : title
 }
 
 export function referenceGraphPositions(
@@ -82,7 +86,7 @@ function elementsFor(projection: KnowledgeNeighborhoodProjection): ElementDefini
         : node.roles[0] ?? ''
     return {
       group: 'nodes',
-      data: { id, title: node.title, label: shortLabel(node.title) },
+      data: { id, title: node.title, label: referenceGraphLabel(node.title) },
       position: positions.get(node.title),
       classes
     }
@@ -125,13 +129,28 @@ export function KnowledgeReferenceGraph(props: KnowledgeReferenceGraphProps) {
   let currentProjection = props.projection
   let disposed = false
 
+  const fitGraph = (): void => {
+    if (!graph) return
+    graph.fit(undefined, 34)
+    const fittedZoom = graph.zoom()
+    const readableZoom = Math.min(
+      MAXIMUM_AUTO_ZOOM,
+      Math.max(MINIMUM_READABLE_AUTO_ZOOM, fittedZoom)
+    )
+    if (readableZoom !== fittedZoom) {
+      graph.zoom(readableZoom)
+      graph.center()
+    }
+  }
+
   const renderGraph = (): void => {
     if (!graph) return
     graph.startBatch()
     graph.elements().remove()
     graph.add(elementsFor(currentProjection))
     graph.endBatch()
-    graph.layout({ name: 'preset', fit: true, padding: 34, animate: false }).run()
+    graph.layout({ name: 'preset', fit: false, animate: false }).run()
+    fitGraph()
   }
 
   const clearHighlight = (): void => {
@@ -158,16 +177,16 @@ export function KnowledgeReferenceGraph(props: KnowledgeReferenceGraphProps) {
           {
             selector: 'node',
             style: {
-              width: 174,
-              height: 58,
+              width: 190,
+              height: 66,
               shape: 'ellipse',
               label: 'data(label)',
               'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-              'font-size': 10,
+              'font-size': 14,
               'font-weight': 560,
               color: '#3f4b55',
               'text-wrap': 'wrap',
-              'text-max-width': '142px',
+              'text-max-width': '158px',
               'text-valign': 'center',
               'text-halign': 'center',
               'background-color': '#ffffff',
@@ -200,9 +219,9 @@ export function KnowledgeReferenceGraph(props: KnowledgeReferenceGraphProps) {
           {
             selector: 'node.center',
             style: {
-              width: 204,
-              height: 68,
-              'font-size': 11,
+              width: 224,
+              height: 78,
+              'font-size': 15,
               'font-weight': 660,
               color: '#294e65',
               'background-color': '#ffffff',
@@ -277,7 +296,7 @@ export function KnowledgeReferenceGraph(props: KnowledgeReferenceGraphProps) {
 
       resizeObserver = new ResizeObserver(() => {
         graph?.resize()
-        graph?.fit(undefined, 34)
+        fitGraph()
       })
       resizeObserver.observe(container)
       renderGraph()

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { KnowledgeNeighborhoodProjection } from '../src/shared/knowledge'
 import {
   KnowledgeReferenceGraph,
+  referenceGraphLabel,
   referenceGraphPositions
 } from '../src/renderer/src/components/KnowledgeReferenceGraph'
 
@@ -27,6 +28,13 @@ function projection(centerTitle = 'Center'): KnowledgeNeighborhoodProjection {
 }
 
 describe('KnowledgeReferenceGraph', () => {
+  it('keeps the longest real fixture title while bounding unusually long graph labels', () => {
+    expect(referenceGraphLabel('Knowledge Maintenance Agent')).toBe('Knowledge Maintenance Agent')
+    expect(referenceGraphLabel('这是一个明显超过关系图节点安全显示长度的 canonical title 示例')).toBe(
+      '这是一个明显超过关系图节点安全显示长度的 canoni…'
+    )
+  })
+
   it('fans incoming and outgoing Statements into separate, non-overlapping sectors', () => {
     const incoming = Array.from({ length: 5 }, (_, index) => `Incoming ${index + 1}`)
     const outgoing = Array.from({ length: 5 }, (_, index) => `Outgoing ${index + 1}`)
