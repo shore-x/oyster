@@ -1,7 +1,10 @@
 import { renderToString } from 'solid-js/web'
 import { describe, expect, it, vi } from 'vitest'
 import type { KnowledgeNeighborhoodProjection } from '../src/shared/knowledge'
-import { KnowledgeReferenceGraph } from '../src/renderer/src/components/KnowledgeReferenceGraph'
+import {
+  KnowledgeReferenceGraph,
+  referenceGraphPositions
+} from '../src/renderer/src/components/KnowledgeReferenceGraph'
 
 function projection(centerTitle = 'Center'): KnowledgeNeighborhoodProjection {
   return {
@@ -24,6 +27,38 @@ function projection(centerTitle = 'Center'): KnowledgeNeighborhoodProjection {
 }
 
 describe('KnowledgeReferenceGraph', () => {
+  it('fans incoming and outgoing Statements into separate, non-overlapping sectors', () => {
+    const incoming = Array.from({ length: 5 }, (_, index) => `Incoming ${index + 1}`)
+    const outgoing = Array.from({ length: 5 }, (_, index) => `Outgoing ${index + 1}`)
+    const value: KnowledgeNeighborhoodProjection = {
+      centerTitle: 'Center',
+      nodes: [
+        { title: 'Center', excerpt: '', roles: [] },
+        ...incoming.map((title) => ({ title, excerpt: '', roles: ['incoming'] as const })),
+        ...outgoing.map((title) => ({ title, excerpt: '', roles: ['outgoing'] as const }))
+      ],
+      edges: [
+        ...incoming.map((title) => ({ sourceTitle: title, targetTitle: 'Center', occurrenceCount: 1 })),
+        ...outgoing.map((title) => ({ sourceTitle: 'Center', targetTitle: title, occurrenceCount: 1 }))
+      ],
+      groups: [
+        { kind: 'incoming', memberTitles: incoming },
+        { kind: 'outgoing', memberTitles: outgoing }
+      ],
+      unresolvedReferences: []
+    }
+    const positions = referenceGraphPositions(value)
+    const center = positions.get('Center')!
+    const incomingPositions = incoming.map((title) => positions.get(title)!)
+    const outgoingPositions = outgoing.map((title) => positions.get(title)!)
+
+    expect(incomingPositions.every((position) => position.x < center.x)).toBe(true)
+    expect(outgoingPositions.every((position) => position.x > center.x)).toBe(true)
+    expect(new Set(incomingPositions.map((position) => position.y)).size).toBe(incoming.length)
+    expect(Math.max(...incomingPositions.map((position) => position.y))
+      - Math.min(...incomingPositions.map((position) => position.y))).toBeGreaterThan(300)
+  })
+
   it('keeps a readable directional list alongside the canvas graph', () => {
     const html = renderToString(() => (
       <KnowledgeReferenceGraph

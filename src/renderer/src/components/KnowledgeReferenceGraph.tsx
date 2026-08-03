@@ -31,7 +31,9 @@ function shortLabel(title: string): string {
   return title.length > 34 ? `${title.slice(0, 33)}…` : title
 }
 
-function positionsFor(projection: KnowledgeNeighborhoodProjection): Map<string, { x: number; y: number }> {
+export function referenceGraphPositions(
+  projection: KnowledgeNeighborhoodProjection
+): Map<string, { x: number; y: number }> {
   const positions = new Map<string, { x: number; y: number }>()
   const incoming = group(projection, 'incoming').memberTitles
   const outgoing = group(projection, 'outgoing').memberTitles
@@ -40,28 +42,35 @@ function positionsFor(projection: KnowledgeNeighborhoodProjection): Map<string, 
   const mutual = incoming.filter((title) => outgoingSet.has(title))
   const incomingOnly = incoming.filter((title) => !outgoingSet.has(title))
   const outgoingOnly = outgoing.filter((title) => !incomingSet.has(title))
-  const maximumRows = Math.max(incomingOnly.length, outgoingOnly.length, mutual.length + 1, 1)
-  const centerY = Math.max(150, maximumRows * 38)
+  const maximumSideCount = Math.max(incomingOnly.length, outgoingOnly.length, 1)
+  const verticalRadius = Math.max(175, (maximumSideCount - 1) * 52)
+  const center = { x: 500, y: verticalRadius + 130 }
 
-  const placeColumn = (titles: string[], x: number): void => {
+  const placeFan = (titles: string[], side: -1 | 1): void => {
     if (titles.length === 0) return
-    const spacing = Math.min(76, Math.max(52, (centerY * 2 - 80) / titles.length))
-    const start = centerY - ((titles.length - 1) * spacing) / 2
-    titles.forEach((title, index) => positions.set(title, { x, y: start + index * spacing }))
+    const maximumAngle = Math.PI * 0.37
+    titles.forEach((title, index) => {
+      const progress = titles.length === 1 ? 0 : index / (titles.length - 1) * 2 - 1
+      const angle = progress * maximumAngle
+      positions.set(title, {
+        x: center.x + side * Math.cos(angle) * 370,
+        y: center.y + Math.sin(angle) * verticalRadius
+      })
+    })
   }
 
-  placeColumn(incomingOnly, 130)
-  placeColumn(outgoingOnly, 670)
+  placeFan(incomingOnly, -1)
+  placeFan(outgoingOnly, 1)
   mutual.forEach((title, index) => positions.set(title, {
-    x: 400,
-    y: centerY + 95 + index * 68
+    x: center.x + (Math.floor(index / 2) % 2 === 0 ? -88 : 88),
+    y: center.y + (index % 2 === 0 ? -1 : 1) * (225 + Math.floor(index / 2) * 105)
   }))
-  positions.set(projection.centerTitle, { x: 400, y: centerY })
+  positions.set(projection.centerTitle, center)
   return positions
 }
 
 function elementsFor(projection: KnowledgeNeighborhoodProjection): ElementDefinition[] {
-  const positions = positionsFor(projection)
+  const positions = referenceGraphPositions(projection)
   const nodeIds = new Map<string, string>()
   const nodes: ElementDefinition[] = projection.nodes.map((node, index) => {
     const id = `node-${index}`
@@ -78,18 +87,30 @@ function elementsFor(projection: KnowledgeNeighborhoodProjection): ElementDefini
       classes
     }
   })
+  const edgePairs = new Set(projection.edges.map((edge) => JSON.stringify([
+    edge.sourceTitle,
+    edge.targetTitle
+  ])))
+  const routeIndexes = { incoming: 0, outgoing: 0 }
   const edges: ElementDefinition[] = projection.edges.flatMap((edge, index) => {
     const source = nodeIds.get(edge.sourceTitle)
     const target = nodeIds.get(edge.targetTitle)
     if (!source || !target) return []
     const role = edge.sourceTitle === projection.centerTitle ? 'outgoing' : 'incoming'
+    const routeIndex = routeIndexes[role]++
+    const hasReverseEdge = edgePairs.has(JSON.stringify([edge.targetTitle, edge.sourceTitle]))
+    const alternatingDirection = routeIndex % 2 === 0 ? -1 : 1
+    const curveDistance = hasReverseEdge
+      ? 54
+      : alternatingDirection * Math.min(46, 18 + Math.floor(routeIndex / 2) * 7)
     return [{
       group: 'edges',
       data: {
         id: `edge-${index}`,
         source,
         target,
-        occurrenceCount: edge.occurrenceCount
+        occurrenceCount: edge.occurrenceCount,
+        curveDistance
       },
       classes: role
     }]
@@ -137,16 +158,16 @@ export function KnowledgeReferenceGraph(props: KnowledgeReferenceGraphProps) {
           {
             selector: 'node',
             style: {
-              width: 154,
-              height: 44,
-              shape: 'round-rectangle',
+              width: 174,
+              height: 58,
+              shape: 'ellipse',
               label: 'data(label)',
               'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
               'font-size': 10,
               'font-weight': 560,
               color: '#3f4b55',
               'text-wrap': 'wrap',
-              'text-max-width': '132px',
+              'text-max-width': '142px',
               'text-valign': 'center',
               'text-halign': 'center',
               'background-color': '#ffffff',
@@ -158,42 +179,46 @@ export function KnowledgeReferenceGraph(props: KnowledgeReferenceGraphProps) {
           {
             selector: 'node.incoming',
             style: {
-              'background-color': '#fbf7ef',
+              'background-color': '#ffffff',
               'border-color': '#decba9'
             }
           },
           {
             selector: 'node.outgoing',
             style: {
-              'background-color': '#f0f6f9',
+              'background-color': '#ffffff',
               'border-color': '#bfd4df'
             }
           },
           {
             selector: 'node.mutual',
             style: {
-              'background-color': '#f5f3f9',
+              'background-color': '#ffffff',
               'border-color': '#cfc7dc'
             }
           },
           {
             selector: 'node.center',
             style: {
-              width: 184,
-              height: 52,
+              width: 204,
+              height: 68,
               'font-size': 11,
               'font-weight': 660,
               color: '#294e65',
-              'background-color': '#eaf3f7',
-              'border-width': 1.5,
+              'background-color': '#ffffff',
+              'border-width': 2,
               'border-color': '#8fb5c8'
             }
           },
           {
             selector: 'edge',
             style: {
-              width: 1.5,
-              'curve-style': 'bezier',
+              width: 1.35,
+              'curve-style': 'unbundled-bezier',
+              'control-point-distances': 'data(curveDistance)',
+              'control-point-weights': 0.5,
+              'source-endpoint': 'outside-to-node',
+              'target-endpoint': 'outside-to-node',
               'target-arrow-shape': 'triangle',
               'arrow-scale': 0.8,
               'line-color': '#9aa5ad',
