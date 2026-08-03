@@ -12,7 +12,7 @@ Oyster 只提供一个面向用户的通用管理 Agent。它既可以进行普�
 
 ## 2. 常驻工具
 
-每个 Session 始终拥有同一组七项工具：
+每个 Session 始终拥有同一组八项工具：
 
 - `read`：读取文本文件；
 - `edit`：对文件执行精确局部修改；
@@ -20,11 +20,14 @@ Oyster 只提供一个面向用户的通用管理 Agent。它既可以进行普�
 - `bash`：运行普通 Shell 命令；
 - `search_knowledge`：按标题和正文分页搜索正式知识库；
 - `read_knowledge`：按 canonical title 精确读取一条 Knowledge Statement；
-- `upsert_knowledge`：在一次事务中按 canonical title 创建或完整替换一组 Knowledge Statement。
+- `upsert_knowledge`：在一次事务中按 canonical title 创建或完整替换一组 Knowledge Statement；
+- `spawn_agent`：把一项完整任务委派给新的独立上下文通用 Agent，并将其最终回答返回当前 Agent。
 
 工具名称、描述和参数 Schema 由运行时定义直接投影到 Agent 配置页，不维护第二份仅供 UI 使用的说明。知识写入继续采用当前 MVP 的“同名覆盖”语义，不增加 revision、冲突裁决或关系 Schema。
 
-Agent 根据对话自行决定是否以及何时调用这些工具。Harness 不根据当前话题、Artifact 或预先识别的职责增删工具，也不引入 Artifact selector、router 或专用 Git Tool。
+`spawn_agent` 创建的是一次临时 Agent 运行，而不是新的用户 Session、Agent 类型或固定角色。子运行使用空 transcript，不继承父对话历史；它复用当前模型、System Prompt、Artifact Repository 起点和同一组八项工具，因此仍可根据委派任务使用 Knowledge、文件、Shell 或继续委派。父调用等待子运行完成，最终文本进入普通 Tool Result，子 transcript 保存在该结果的 details 中；取消父运行会沿当前委派链传播。
+
+Agent 根据对话自行决定是否以及何时调用这些工具。Harness 不根据当前话题、Artifact 或预先识别的职责增删工具，也不引入 Artifact selector、router、专用 Git Tool、固定子 Agent 角色或预设编排模式。
 
 ## 3. 文件系统、Shell 与 Git
 
@@ -73,18 +76,18 @@ Other internal structure is arbitrary. No Artifact is preselected.
 
 “对话”页面继续使用一套持久 Session 和消息界面。新 Session 在首次发送时创建；完整的 user、assistant 和 tool-result 消息使用 Pi JSONL Session Repository 保存在 Oyster 用户数据目录中。模型输出按事件流更新，每次工具调用显示状态，并可展开查看 Input 与 Result。
 
-Agent 配置页只保留一个面向用户对话的通用管理 Agent 条目，并展示其七项实际工具；Observation Preprocessor 与 Knowledge Maintenance Agent 仍作为结构化知识加工角色单独展示。用户可以编辑或恢复默认 System Prompt；工具由代码拥有，在页面中只读展示。Artifact 页面可以通过普通对话入口帮助用户描述目标，但不创建隐藏绑定或不同类型的 Session。
+Agent 配置页只保留一个面向用户对话的通用管理 Agent 条目，并展示其八项实际工具；Observation Preprocessor 与 Knowledge Maintenance Agent 仍作为结构化知识加工角色单独展示。用户可以编辑或恢复默认 System Prompt；工具由代码拥有，在页面中只读展示。Artifact 页面可以通过普通对话入口帮助用户描述目标，但不创建隐藏绑定或不同类型的 Session。子 Agent 运行不进入 Session 列表，其内部 transcript 只随父 Session 的 `spawn_agent` Tool Result 保存。
 
 ## 7. 当前边界与验证重点
 
 当前 MVP 明确采用：
 
 - 一个通用管理 Agent，而不是知识对话 Agent 与 Artifact 维护 Agent 两套身份；
-- 所有 Session 常驻同一组 Knowledge、文件和 Shell 工具；
+- 所有 Session 常驻同一组 Knowledge、文件、Shell 和通用子 Agent 工具；
 - 固定 Artifact Repository 根作为工具初始坐标，但不作为权限边界；
 - 由 Agent 自主发现零个、一个或多个相关 Artifact；
 - 最小环境事实 Prompt，不在 Harness 中编码语义路由和权限策略。
 
-首要验证场景包括：纯知识对话不需要接触 Artifact；对话从知识讨论自然进入一个 Artifact；同一 Session 转向或比较多个 Artifact；只给出关注点时 Agent 能从目录与 `AGENTS.md` 找到目标；同一轮同时维护 Artifact 与 Knowledge；任务需要时可以使用普通 Git 和 Repository 外文件。
+首要验证场景包括：纯知识对话不需要接触 Artifact；对话从知识讨论自然进入一个 Artifact；同一 Session 转向或比较多个 Artifact；只给出关注点时 Agent 能从目录与 `AGENTS.md` 找到目标；同一轮同时维护 Artifact 与 Knowledge；任务需要时可以使用普通 Git 和 Repository 外文件；Agent 可以把适合独立上下文处理的任务委派给临时子 Agent，并继续使用其返回结果。
 
-当前仍不实现 Statement revision、正式 Artifact 依赖图、稳定 Artifact ID、自动 Projection 调度或自动 Git 工作流。这些缺失不通过 Session 绑定、隐藏 router 或权限规则提前补偿，而由真实使用结果决定后续是否需要新的机制。
+当前仍不实现 Statement revision、正式 Artifact 依赖图、稳定 Artifact ID、自动 Projection 调度、自动 Git 工作流或对抗性盲审 Skill。通用 `spawn_agent` 只提供委派机制，不预设盲审或其他专用流程。这些缺失不通过 Session 绑定、隐藏 router 或权限规则提前补偿，而由真实使用结果决定后续是否需要新的机制。

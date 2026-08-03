@@ -124,7 +124,8 @@ describe('ChatAgentService', () => {
           'write',
           'search_knowledge',
           'read_knowledge',
-          'upsert_knowledge'
+          'upsert_knowledge',
+          'spawn_agent'
         ])
         return fauxAssistantMessage(fauxToolCall('search_knowledge', { query: 'Project P' }), {
           stopReason: 'toolUse'
@@ -210,12 +211,239 @@ describe('ChatAgentService', () => {
       'write',
       'search_knowledge',
       'read_knowledge',
-      'upsert_knowledge'
+      'upsert_knowledge',
+      'spawn_agent'
     ])
     expect(snapshot.agent.tools[6].parameters).toMatchObject({
       type: 'object',
       properties: { statements: { type: 'array', minItems: 1 } }
     })
+    expect(snapshot.agent.tools[7]).toMatchObject({
+      name: 'spawn_agent',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['task'],
+        properties: { task: { type: 'string', minLength: 1 } }
+      }
+    })
+    fixture.knowledgeStore.close()
+    await fixture.sessions.dispose()
+  })
+
+  it('delegates to a fresh general Agent context and keeps the child transcript inside the tool result', async () => {
+    const delegatedTask = 'Read the exact Project P Statement and report its database.'
+    const parentOnlyContext = 'PARENT_ONLY_CONTEXT'
+    const expectedTools = [
+      'read',
+      'bash',
+      'edit',
+      'write',
+      'search_knowledge',
+      'read_knowledge',
+      'upsert_knowledge',
+      'spawn_agent'
+    ]
+    const fixture = await serviceFixture(({ artifactRepositoryPath }) => [
+      (context) => {
+        expect(JSON.stringify(context.messages)).toContain(parentOnlyContext)
+        return fauxAssistantMessage(fauxToolCall('spawn_agent', {
+          task: delegatedTask
+        }), { stopReason: 'toolUse' })
+      },
+      (context) => {
+        expect(context.systemPrompt).toBe(chatAgentSystemPrompt(
+          DEFAULT_CHAT_AGENT_SYSTEM_PROMPT,
+          artifactRepositoryPath
+        ))
+        expect(context.tools?.map((tool) => tool.name)).toEqual(expectedTools)
+        expect(context.messages).toHaveLength(1)
+        expect(JSON.stringify(context.messages)).toContain(delegatedTask)
+        expect(JSON.stringify(context.messages)).not.toContain(parentOnlyContext)
+        return fauxAssistantMessage(fauxToolCall('read_knowledge', {
+          title: 'Project P'
+        }), { stopReason: 'toolUse' })
+      },
+      (context) => {
+        expect(context.messages.map((message) => message.role)).toEqual([
+          'user',
+          'assistant',
+          'toolResult'
+        ])
+        expect(JSON.stringify(context.messages)).toContain('Project P uses SQLite.')
+        expect(JSON.stringify(context.messages)).not.toContain(parentOnlyContext)
+        return fauxAssistantMessage('Child finding: Project P uses SQLite.')
+      },
+      (context) => {
+        expect(context.messages.map((message) => message.role)).toEqual([
+          'user',
+          'assistant',
+          'toolResult'
+        ])
+        expect(JSON.stringify(context.messages)).toContain(parentOnlyContext)
+        expect(JSON.stringify(context.messages)).toContain('Child finding: Project P uses SQLite.')
+        return fauxAssistantMessage('Parent accepted the child result.')
+      }
+    ])
+    fixture.knowledgeStore.commit({
+      runRef: 'seed',
+      statements: [{ title: 'Project P', content: 'Project P uses SQLite.' }]
+    })
+    const session = await fixture.service.createSession({
+      binding: { connectionId: 'connection:test', modelId: fixture.runtime.model.id }
+    })
+
+    const detail = await fixture.service.sendMessage({
+      sessionId: session.id,
+      text: `Delegate this without sharing ${parentOnlyContext}.`
+    })
+
+    expect(fixture.callCount()).toBe(4)
+    expect(detail.messages.map((entry) => entry.message.role)).toEqual([
+      'user',
+      'assistant',
+      'tool',
+      'assistant'
+    ])
+    const spawnResult = detail.messages
+      .map((entry) => entry.message)
+      .find((message) => message.role === 'tool' && message.toolName === 'spawn_agent')
+    expect(spawnResult).toMatchObject({
+      role: 'tool',
+      toolName: 'spawn_agent',
+      text: 'Child finding: Project P uses SQLite.',
+      isError: false,
+      details: {
+        runId: expect.any(String),
+        modelId: fixture.runtime.model.id,
+        transcript: expect.any(Array)
+      }
+    })
+    if (!spawnResult || spawnResult.role !== 'tool') throw new Error('spawn_agent result was not persisted')
+    const details = spawnResult.details as {
+      runId: string
+      transcript: Array<{ role: string }>
+    }
+    expect(details.runId).not.toBe(session.id)
+    expect(details.transcript.map((message) => message.role)).toEqual([
+      'user',
+      'assistant',
+      'toolResult',
+      'assistant'
+    ])
+    expect(JSON.stringify(details.transcript)).not.toContain(parentOnlyContext)
+
+    fixture.knowledgeStore.close()
+    await fixture.sessions.dispose()
+  })
+
+  it('returns a child model failure as a recoverable spawn_agent tool error', async () => {
+    const fixture = await serviceFixture([
+      fauxAssistantMessage(fauxToolCall('spawn_agent', {
+        task: 'Investigate independently.'
+      }), { stopReason: 'toolUse' }),
+      fauxAssistantMessage('', {
+        stopReason: 'error',
+        errorMessage: 'child model unavailable'
+      }),
+      (context) => {
+        const toolResult = context.messages.at(-1)
+        expect(toolResult).toMatchObject({
+          role: 'toolResult',
+          toolName: 'spawn_agent',
+          isError: true
+        })
+        expect(JSON.stringify(toolResult)).toContain('child model unavailable')
+        return fauxAssistantMessage('Parent recovered from the child failure.')
+      }
+    ])
+    const session = await fixture.service.createSession({
+      binding: { connectionId: 'connection:test', modelId: fixture.runtime.model.id }
+    })
+
+    const detail = await fixture.service.sendMessage({
+      sessionId: session.id,
+      text: 'Delegate the investigation.'
+    })
+
+    expect(fixture.callCount()).toBe(3)
+    expect(detail.messages.find((entry) => (
+      entry.message.role === 'tool' && entry.message.toolName === 'spawn_agent'
+    ))?.message).toMatchObject({
+      role: 'tool',
+      isError: true,
+      text: expect.stringContaining('child model unavailable')
+    })
+    expect(detail.messages.at(-1)?.message).toMatchObject({
+      role: 'assistant',
+      text: 'Parent recovered from the child failure.'
+    })
+
+    fixture.knowledgeStore.close()
+    await fixture.sessions.dispose()
+  })
+
+  it('allows a delegated Agent to delegate again without inheriting either parent transcript', async () => {
+    const parentTask = 'First-level delegated task.'
+    const nestedTask = 'Nested delegated task.'
+    const parentOnlyContext = 'TOP_LEVEL_ONLY'
+    const fixture = await serviceFixture([
+      fauxAssistantMessage(fauxToolCall('spawn_agent', {
+        task: parentTask
+      }), { stopReason: 'toolUse' }),
+      (context) => {
+        expect(context.messages).toHaveLength(1)
+        expect(JSON.stringify(context.messages)).toContain(parentTask)
+        expect(JSON.stringify(context.messages)).not.toContain(parentOnlyContext)
+        return fauxAssistantMessage(fauxToolCall('spawn_agent', {
+          task: nestedTask
+        }), { stopReason: 'toolUse' })
+      },
+      (context) => {
+        expect(context.messages).toHaveLength(1)
+        expect(JSON.stringify(context.messages)).toContain(nestedTask)
+        expect(JSON.stringify(context.messages)).not.toContain(parentTask)
+        expect(JSON.stringify(context.messages)).not.toContain(parentOnlyContext)
+        return fauxAssistantMessage('Grandchild result.')
+      },
+      (context) => {
+        expect(JSON.stringify(context.messages)).toContain('Grandchild result.')
+        expect(JSON.stringify(context.messages)).not.toContain(parentOnlyContext)
+        return fauxAssistantMessage('Child combined the grandchild result.')
+      },
+      (context) => {
+        expect(JSON.stringify(context.messages)).toContain(parentOnlyContext)
+        expect(JSON.stringify(context.messages)).toContain('Child combined the grandchild result.')
+        return fauxAssistantMessage('Parent completed the task.')
+      }
+    ])
+    const session = await fixture.service.createSession({
+      binding: { connectionId: 'connection:test', modelId: fixture.runtime.model.id }
+    })
+
+    const detail = await fixture.service.sendMessage({
+      sessionId: session.id,
+      text: `Delegate recursively while keeping ${parentOnlyContext} private.`
+    })
+
+    expect(fixture.callCount()).toBe(5)
+    expect(detail.messages.map((entry) => entry.message.role)).toEqual([
+      'user',
+      'assistant',
+      'tool',
+      'assistant'
+    ])
+    const spawnResult = detail.messages.find((entry) => (
+      entry.message.role === 'tool' && entry.message.toolName === 'spawn_agent'
+    ))?.message
+    expect(spawnResult).toMatchObject({
+      role: 'tool',
+      text: 'Child combined the grandchild result.',
+      isError: false
+    })
+    expect(JSON.stringify(spawnResult)).toContain('Grandchild result.')
+    expect(JSON.stringify(spawnResult)).not.toContain(parentOnlyContext)
+
     fixture.knowledgeStore.close()
     await fixture.sessions.dispose()
   })
@@ -347,16 +575,29 @@ describe('ChatAgentService', () => {
     await fixture.sessions.dispose()
   })
 
-  it('cancels an active model run through the Session-scoped controller', async () => {
+  it('propagates Session cancellation into an active child Agent run', async () => {
     const rootPath = await mkdtemp(join(tmpdir(), 'oyster-chat-cancel-'))
     temporaryPaths.push(rootPath)
     const sessions = new PiChatSessionRepository(join(rootPath, 'sessions'))
     const knowledgeStore = new SqliteKnowledgeStore(join(rootPath, 'knowledge.sqlite'))
     const model = fauxProvider().getModel()
+    let modelCalls = 0
+    let childSignal: AbortSignal | undefined
+    let markChildStarted: (() => void) | undefined
+    const childStarted = new Promise<void>((resolve) => { markChildStarted = resolve })
     const runtime: ModelRuntime = {
       model,
       streamFn: (requestedModel, _context, options) => {
+        modelCalls++
         const stream = createAssistantMessageEventStream()
+        if (modelCalls === 1) {
+          stream.end(fauxAssistantMessage(fauxToolCall('spawn_agent', {
+            task: 'Wait independently until cancelled.'
+          }), { stopReason: 'toolUse' }))
+          return stream
+        }
+        childSignal = options?.signal
+        markChildStarted?.()
         const abort = (): void => {
           const output: AssistantMessage = {
             role: 'assistant',
@@ -395,24 +636,22 @@ describe('ChatAgentService', () => {
     const session = await service.createSession({
       binding: { connectionId: 'connection:test', modelId: model.id }
     })
-    let markRunning: (() => void) | undefined
-    const running = new Promise<void>((resolve) => { markRunning = resolve })
     const events: ChatEvent[] = []
     service.subscribe((event) => {
       events.push(event)
-      if (event.type === 'run_state_changed' && event.status === 'running') markRunning?.()
     })
 
-    const send = service.sendMessage({ sessionId: session.id, text: 'Wait.' })
+    const send = service.sendMessage({ sessionId: session.id, text: 'Delegate a wait.' })
     await Promise.race([
-      running,
-      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('run did not start')), 500))
+      childStarted,
+      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('child run did not start')), 500))
     ])
     await service.cancelRun({ sessionId: session.id })
     await expect(Promise.race([
       send,
       new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('run did not cancel')), 500))
     ])).rejects.toThrow('取消')
+    expect(childSignal?.aborted).toBe(true)
     expect(events).toContainEqual(expect.objectContaining({
       type: 'run_state_changed',
       status: 'cancelled'

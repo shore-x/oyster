@@ -52,6 +52,43 @@ export interface KnowledgeBrowseResult {
   nextOffset?: number
 }
 
+export type KnowledgeNeighborhoodRole = 'incoming' | 'outgoing'
+
+export interface KnowledgeNeighborhoodNode {
+  title: string
+  excerpt: string
+  /** A node may have both roles when it and the center reference each other. */
+  roles: KnowledgeNeighborhoodRole[]
+}
+
+export interface KnowledgeReferenceEdge {
+  /** The Statement whose body contains the reference. */
+  sourceTitle: string
+  /** The dynamically resolved canonical title. */
+  targetTitle: string
+  occurrenceCount: number
+}
+
+export interface KnowledgeNeighborhoodGroup {
+  kind: KnowledgeNeighborhoodRole
+  memberTitles: string[]
+}
+
+export interface UnresolvedKnowledgeReference {
+  sourceTitle: string
+  targetTitle: string
+  occurrenceCount: number
+}
+
+/** Rebuildable, UI-independent projection over one current Statement. */
+export interface KnowledgeNeighborhoodProjection {
+  centerTitle: string
+  nodes: KnowledgeNeighborhoodNode[]
+  edges: KnowledgeReferenceEdge[]
+  groups: KnowledgeNeighborhoodGroup[]
+  unresolvedReferences: UnresolvedKnowledgeReference[]
+}
+
 export interface ClearKnowledgeResult {
   deletedStatementCount: number
   deletedContributionCount: number
@@ -60,5 +97,6 @@ export interface ClearKnowledgeResult {
 export interface KnowledgeApi {
   browse(input?: BrowseKnowledgeInput): Promise<KnowledgeBrowseResult>
   read(title: string): Promise<KnowledgeStatement | undefined>
+  getNeighborhood(title: string): Promise<KnowledgeNeighborhoodProjection | undefined>
   clear(): Promise<ClearKnowledgeResult>
 }

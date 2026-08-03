@@ -2,7 +2,7 @@
 
 > 状态：当前设计原则与待议方向
 >
-> 日期：2026-07-31
+> 日期：2026-08-01
 >
 > 范围：定义观察、知识、Artifact、Projection、Attention、Observation Preprocessing 和 Agent 维护之间的稳定语义与责任边界；治理机制只保留必要预期，不把当前载体提升为长期本体，也不在本页固定知识的存储介质、字段、索引、工具协议或 Agent Runtime。当前验证实现另见《知识加工验证 MVP》和《Artifact Repository MVP》。
 >
@@ -80,7 +80,19 @@ Knowledge Statement 的权威语义内容由 canonical title 与 Markdown 兼容
 
 Artifact 与 Attention 强相关。Attention 改变选择范围、组织方式、抽象程度、读者、用途和交付形式，因此同一共享知识可以支持多个并列 Artifact。围绕持续关注形成的 Artifact 会自然出现分组，但这种分组不得反向把共享知识划成彼此隔离的真相。是否把分组正式建模为 Project、Collection、Workspace 或其他类型尚未决定。
 
-当前 Artifact Repository MVP 采用一项已确认但可替换的最小载体：Oyster 在 Electron `userData/artifacts/` 中维护一个固定的标准 Git Repository；Repository 中每个有效的一级目录就是一个 Artifact，其根部必须包含普通 Markdown `AGENTS.md`，用来表达该 Artifact 的持久 Attention，其他内部结构任意。APP 直接扫描文件系统并读取 `AGENTS.md`，不维护数据库镜像或 manifest；当前以 Repository 相对路径作为身份。Repository 由随 APP 捆绑的私有标准 Git Runtime 创建；APP 自身发起 Git 操作时始终通过绝对可执行文件路径调用它，不依赖系统 Git 或进程 `PATH`。通用管理 Agent 的文件与 Shell 工具从该 Repository 根开始，并自行发现相关 Artifact。该载体用于验证 Artifact 的真实使用，不把“目录”“Git”或 `AGENTS.md` 变成 Artifact Domain 的长期本体。具体契约见[《Artifact Repository MVP》](../product/artifact-repository-mvp.md)。
+当前 Artifact Repository MVP 采用一项已确认但可替换的最小载体：Oyster 在 Electron `userData/artifacts/` 中维护一个固定的标准 Git Repository；Repository 中每个有效的一级目录就是一个 Artifact，其根部必须包含普通 Markdown `AGENTS.md`，用来表达该 Artifact 的持久 Attention。除具体应用明确采用的目录约定外，Artifact 内部结构保持任意。APP 直接扫描文件系统并读取当前文件，不维护数据库镜像或 manifest；当前以 Repository 相对路径作为身份。Repository 由随 APP 捆绑的私有标准 Git Runtime 创建；APP 自身发起 Git 操作时始终通过绝对可执行文件路径调用它，不依赖系统 Git 或进程 `PATH`。通用管理 Agent 的文件与 Shell 工具从该 Repository 根开始，并自行发现相关 Artifact。该载体用于验证 Artifact 的真实使用，不把“目录”“Git”或 `AGENTS.md` 变成 Artifact Domain 的长期本体。具体契约见[《Artifact Repository MVP》](../product/artifact-repository-mvp.md)。
+
+#### Skill Artifact 的应用约定
+
+在已确认的 Skill 管理方向中，每个由 Oyster 管理的 Skill 对应一个 Artifact。该一对一关系只是 Skill 应用对现有 Artifact 的使用约定，不增加新的权威域或核心 Artifact 类型，也不表示其他 Artifact 都是 Skill。按照当前 Repository 载体，一个 Skill Artifact 通常表现为一个目录。
+
+Skill Artifact 的内容保持与其他 Artifact 相同的包容性。早期阶段可以默认预期 Oyster 提供和维护的 Skill 主要是承载知识与行为说明的 Markdown 文档，但这只是产品期望，不是读取、保存或管理时的硬性约束。Skill Artifact 可以包含脚本、可执行文件、配置、资源和任意其他文件；不同外部 Agent 的 Skill 格式不能因为 Oyster 当前主要使用 Markdown 而被丢弃或改写成最低公共格式。
+
+Skill 应用对 Artifact 增加的唯一结构约定是根部直接文件系统项 `output`：其存在使 APP 把该 Artifact 识别为 Skill Artifact；`output/`、入口文档或元数据不合格时，它仍保持这一派生应用身份，但处于不可绑定状态。目标 Agent 注册位置中的目录 symlink 指向有效的 `output/`，而不是 Artifact 根。根 `AGENTS.md` 和其他维护材料继续属于 Artifact，但不进入外部 Skill 根；`output/` 内仍允许任意文件。该约定不增加 Artifact 类型、manifest 或新的权威对象；缺少 `output` 的目录仍可以是普通有效 Artifact。具体边界见[《Skill Symlink 注入 MVP》](../product/skill-symlink-injection-mvp.md)。
+
+Artifact 页面继续呈现通用 Artifact，只为 Skill Artifact 增加派生标记、输出状态与前往 Skills 页面的入口。专门的 Skills 页面同时承载“Oyster 管理”和“外部发现”两个明确视图：前者投影 Skill Artifact 并拥有绑定工作流，后者保持外部注册关系的只读视图。两种视图可以展示同一物理内容的不同事实，但不合并身份，也不把 Skill 管理写操作放回通用 Artifact 页面。
+
+文件被保存在或通过 `output/` 暴露，不表示 Oyster 已经决定执行、安装或信任它。外部 Agent Skill 的只读发现、显式纳管和 Skill Binding 继续保持不同；当前绑定只建立指向同一 Artifact 内容的 symlink，不提供权限隔离、格式转换、复制或双向同步。可执行内容的信任和运行治理仍是独立问题。
 
 **Projection** 是形成消费输出的活动：
 
@@ -170,7 +182,7 @@ Agent 在语义上维护知识，但 Oyster Core 仍拥有权限、运行生命�
 
 默认维护策略以细粒度、可独立检索和修订的知识主体为中心。这里的“实体”只表示能够被识别和讨论的对象或主体，是选择候选知识的启发式，不引入新的 Entity 数据类型、固定分类或图本体。一个 Statement 默认以一个专名、术语或其他可指称主体为标题，正文再形成关于它的自足理解；主体所在场景、与其他 Statement 的关系和具体属性不应被拼接成主题式标题。Session 摘要、时间线、工作日志，以及工具调用、文件修改、测试过程和短期执行结果，不应仅因出现在对话中就成为知识。只有当它们形成可复用理解，或 Attention 明确要求保留任务历史时，才进入维护范围。
 
-未来可以探索对抗式盲审：让未接触原始 Session 的独立 LLM 或 Agent 只依据 Contribution Draft 中的 Statement、现有知识及正文中的显式引用，判断内容能否独立理解，从而暴露维护 Agent 因已知原始上下文而忽略的隐含指代和语境缺失。它只是一种可替换的质量校验，不构成新的认识论层或必需角色，当前 MVP 不实现。
+未来可以探索对抗式盲审：让未接触原始 Session 的独立 LLM 或 Agent 只依据 Contribution Draft 中的 Statement、现有知识及正文中的显式引用，判断内容能否独立理解，从而暴露维护 Agent 因已知原始上下文而忽略的隐含指代和语境缺失。它只是一种可替换的质量校验，不构成新的认识论层或必需角色，当前 MVP 不实现。通用管理 Agent 当前拥有的 `spawn_agent` 只提供独立上下文委派能力，不等同于已经定义盲审 Skill、Prompt、触发条件或知识加工流程。
 
 ### 4.3 Workspace
 
@@ -223,7 +235,9 @@ Observation Preprocessor、Knowledge Maintenance Agent 及其 Runtime 都可以�
 
 ### 5.1 通用管理 Agent 与领域边界
 
-观察、Knowledge 和 Artifact 的区分，不要求为每个权威域建立不同的对话 Agent。当前面向用户的通用管理 Agent 在所有 Session 中常驻七项工具：`read`、`edit`、`write`、`bash`、`search_knowledge`、`read_knowledge` 和 `upsert_knowledge`。同一轮可以只对话、只查询 Knowledge、维护 Knowledge、修改一个或多个 Artifact，或组合这些工作。
+观察、Knowledge 和 Artifact 的区分，不要求为每个权威域建立不同的对话 Agent。当前面向用户的通用管理 Agent 在所有 Session 中常驻八项工具：`read`、`edit`、`write`、`bash`、`search_knowledge`、`read_knowledge`、`upsert_knowledge` 和 `spawn_agent`。同一轮可以只对话、只查询 Knowledge、维护 Knowledge、修改一个或多个 Artifact、把完整任务委派给独立上下文 Agent，或组合这些工作。
+
+`spawn_agent` 创建一次临时委派运行，而不是新的用户 Session、固定角色、状态域或权威域。子 Agent 不继承父 transcript，但复用同一通用身份、模型、环境事实和工具能力；其最终回答作为普通 Tool Result 返回父 Agent，由父 Agent 继续判断和行动。Harness 不预设 reviewer、planner 等子 Agent 类型，也不把任何专用流程固化到这项通用能力中。
 
 单一 Agent 身份与常驻工具不会合并 Knowledge 和 Artifact。知识工具按 canonical title 操作正式 Knowledge Statement；文件和 Shell 工具操作本机当前状态。Artifact 内容不会因为被 Agent 读取或修改就自动成为 Knowledge；调用 `upsert_knowledge` 是对知识层作出的另一项明确修改。
 
@@ -279,7 +293,7 @@ flowchart LR
 | Source Adapter / Observation Pipeline | 发现、定位、版本校验、读取、Raw Evidence、Canonical Activity | LLM 解释、最终知识、Artifact 编辑 |
 | Observation Preprocessor | 有界发现带回源线索的 Candidate 问题 | 把 Candidate 当作事实或 Statement、直接提交长期知识 |
 | Knowledge Maintenance Agent | 在结构化加工运行中调查并处置开放 Candidate、按需核查 Raw Evidence、维护 Contribution Draft | 绕过该 Pipeline 的 Workspace 与 Contribution 提交协议 |
-| Oyster Core | 持有知识加工的运行期 Workspace 与提交边界；提供正式 Knowledge 工具、固定 Artifact Repository、通用 Agent Runtime 和最小环境事实 | 为通用管理 Agent 预选 Artifact、按话题切换工具，或预设 Artifact 内部结构与用户分组 |
+| Oyster Core | 持有知识加工的运行期 Workspace 与提交边界；提供正式 Knowledge 工具、固定 Artifact Repository、通用 Agent Runtime、临时子 Agent 运行能力和最小环境事实 | 为通用管理 Agent 预选 Artifact、按话题切换工具，或预设 Artifact 内部结构与用户分组 |
 | 用户 | 直接创建或编辑 Artifact，并决定当前关注与交付目标 | 让编辑自动成为知识或自动影响其他 Artifact |
 | 通用管理 Agent | 根据对话探索和维护 Knowledge 与一个或多个 Artifact，并在需要时形成 Projection | 让一次文件修改在没有知识工具操作时自动成为 Knowledge |
 
@@ -323,7 +337,7 @@ flowchart LR
 - 模型、Agent Runtime、角色名称、上下文压缩、工具参数、调试轨迹和调度方式；
 - 测试隔离空间的介质、Schema、生命周期和结果展示；
 - 当前以 `userData/artifacts/` Git Repository、一级目录、根 `AGENTS.md` 和路径身份承载 Artifact 的方式，以及捆绑 Git Runtime 的具体版本、包内位置与更新机制。
-- 通用管理 Agent 当前采用的具体 Runtime、七项工具参数、最小环境 Prompt 文案和高信任本机执行方式。
+- 通用管理 Agent 当前采用的具体 Runtime、八项工具参数、最小环境 Prompt 文案和高信任本机执行方式。
 
 ## 8. 可探讨方向与未决定事项
 
@@ -332,7 +346,7 @@ flowchart LR
 ### 8.1 Artifact 的形态
 
 - 当前 MVP 已固定“一个有效一级目录就是一个 Artifact，根 `AGENTS.md` 表达持久 Attention，内部结构任意”的最小载体；长期是否继续只支持目录、是否需要稳定 ID、不同 Artifact 类型或验证契约，仍待真实场景验证。
-- 以文档、脚本和资源共同组成的 Skill 可以作为测试案例，但不预设它会成为唯一或标准产物形态。
+- Skill 已确定为 Artifact Domain 的一个应用方向：每个由 Oyster 管理的 Skill 对应一个 Artifact，内部可以包含任意文件。早期主要维护知识型 Markdown 只是默认期望而非格式限制；这一约定不把 Skill 提升为唯一或核心 Artifact 类型。外部 Skill 发现不因发现而创建 Artifact；对 Oyster 管理的 Skill，当前已确认以根 `output/` 保存外部可消费内容，并通过目标 Agent 注册位置中的目录 symlink 建立显式绑定。见[《外部 Agent Skill 发现与浏览 MVP》](../product/skill-discovery-mvp.md)与[《Skill Symlink 注入 MVP》](../product/skill-symlink-injection-mvp.md)，生态事实见[《主流 Coding Agent 的 Skill 发现与格式调研》](../research/agent-skill-discovery-and-format.md)。
 - Context Packet 等按需消费输出是否始终可丢弃，是否能被接纳为持久 Artifact，以及接纳动作意味着什么。
 
 ### 8.2 分组、引用与依赖
@@ -347,7 +361,7 @@ flowchart LR
 - 是否需要正式的 `Knowledge Need` 或其他反馈协议，把通用管理 Agent 的即时判断升级为可追踪的异步知识调查。
 - 临时消费输出能否提升为 Artifact，Artifact 能否派生新的 Artifact，以及这些动作如何保留来源。
 - 真实使用是否暴露出必须由 Harness 解决的本机执行风险，以及届时是否需要权限、Sandbox 或审批；当前 MVP 不预先加入这些机制。
-- 对包含代码或脚本的 Artifact，是否需要独立的验证、构建、分发和安装产品能力。
+- 对包含代码或脚本的 Artifact，是否需要独立的验证、构建、包分发和完整安装产品能力；这不否定已经确认的 Skill 目录 symlink 最小绑定。
 
 ### 8.4 既有知识治理问题
 

@@ -1,6 +1,7 @@
 import { createSignal } from 'solid-js'
 import type {
   KnowledgeBrowseResult,
+  KnowledgeNeighborhoodProjection,
   KnowledgeStatement
 } from '../../shared/knowledge'
 
@@ -10,6 +11,7 @@ export function createKnowledgeController() {
   const [result, setResult] = createSignal<KnowledgeBrowseResult>(EMPTY_RESULT)
   const [selectedTitle, setSelectedTitle] = createSignal<string>()
   const [statement, setStatement] = createSignal<KnowledgeStatement>()
+  const [neighborhood, setNeighborhood] = createSignal<KnowledgeNeighborhoodProjection>()
   const [loading, setLoading] = createSignal(false)
   const [loadingMore, setLoadingMore] = createSignal(false)
   const [clearing, setClearing] = createSignal(false)
@@ -25,11 +27,18 @@ export function createKnowledgeController() {
     setSelectedTitle(title)
     if (!title) {
       setStatement(undefined)
+      setNeighborhood(undefined)
       return
     }
     try {
-      const selected = await window.oyster.knowledge.read(title)
-      if (generation === readGeneration && selectedTitle() === title) setStatement(selected)
+      const [selected, selectedNeighborhood] = await Promise.all([
+        window.oyster.knowledge.read(title),
+        window.oyster.knowledge.getNeighborhood(title)
+      ])
+      if (generation === readGeneration && selectedTitle() === title) {
+        setStatement(selected)
+        setNeighborhood(selectedNeighborhood)
+      }
     } catch (cause) {
       if (generation === readGeneration) setError(errorMessage(cause))
     }
@@ -88,6 +97,7 @@ export function createKnowledgeController() {
     result,
     selectedTitle,
     statement,
+    neighborhood,
     loading,
     loadingMore,
     clearing,
@@ -95,6 +105,7 @@ export function createKnowledgeController() {
     error,
     browse,
     select,
+    readNeighborhood: (title: string) => window.oyster.knowledge.getNeighborhood(title),
     clear
   }
 }

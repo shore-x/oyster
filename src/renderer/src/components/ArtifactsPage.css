@@ -146,8 +146,49 @@
 }
 
 .artifact-card__identity { min-width: 0; flex: 1; }
-.artifact-card__identity h2 { margin: 0; overflow: hidden; color: var(--text-primary); font-size: 13px; font-weight: 660; text-overflow: ellipsis; white-space: nowrap; }
+.artifact-card__identity-heading { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.artifact-card__identity h2 { min-width: 0; margin: 0; overflow: hidden; color: var(--text-primary); font-size: 13px; font-weight: 660; text-overflow: ellipsis; white-space: nowrap; }
 .artifact-card__identity span { display: block; margin-top: 4px; color: var(--text-muted); font-size: 9.5px; }
+.artifact-card__identity-heading .artifact-skill-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  margin-top: 0;
+  padding: 3px 6px;
+  color: #315f7a;
+  background: #f0f6f9;
+  border: 1px solid #dcebf2;
+  border-radius: 999px;
+  font-size: 8px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.artifact-card__skill {
+  padding: 14px 18px;
+  background: #f5f8fa;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.artifact-card__skill--invalid { background: #faf6ed; }
+.artifact-card__skill-identity { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.artifact-card__skill-identity > div { min-width: 0; }
+.artifact-card__skill-identity strong { display: block; overflow: hidden; color: var(--text-primary); font-size: 11px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.artifact-card__skill-identity > div > span { display: block; margin-top: 4px; color: var(--text-muted); font-size: 9px; }
+.artifact-card__skill-status {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  font-size: 8px;
+  font-weight: 650;
+}
+.artifact-card__skill-status--ready { color: #47745a; background: #eaf4ed; border-color: #d9e9de; }
+.artifact-card__skill-status--invalid { color: #8a672e; background: #f4e8d2; border-color: #ead8b9; }
+.artifact-card__skill > code { display: block; margin-top: 9px; overflow-wrap: anywhere; color: var(--text-secondary); font-size: 9px; line-height: 1.45; user-select: all; }
+.artifact-card__skill > p { display: flex; align-items: flex-start; gap: 6px; margin: 8px 0 0; color: #8a672e; font-size: 9px; line-height: 1.5; }
+.artifact-card__skill > p .ui-icon { flex: 0 0 auto; width: 12px; height: 12px; margin-top: 1px; }
+.artifact-card__skill-actions { display: flex; justify-content: flex-end; margin-top: 11px; }
 .artifact-card__attention-label { padding: 13px 18px 0; color: var(--text-muted); font-size: 9px; font-weight: 650; letter-spacing: .03em; text-transform: uppercase; }
 .artifact-card__attention { max-height: 280px; overflow: auto; padding: 11px 18px 18px; color: var(--text-secondary); font-size: 11px; line-height: 1.65; }
 

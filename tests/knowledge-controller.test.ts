@@ -15,6 +15,16 @@ function installApi(overrides: Partial<KnowledgeApi> = {}): KnowledgeApi {
       total: 2
     }),
     read: async (title) => ({ title, content: `${title} body.` }),
+    getNeighborhood: async (title) => ({
+      centerTitle: title,
+      nodes: [{ title, excerpt: `${title} body.`, roles: [] }],
+      edges: [],
+      groups: [
+        { kind: 'incoming', memberTitles: [] },
+        { kind: 'outgoing', memberTitles: [] }
+      ],
+      unresolvedReferences: []
+    }),
     clear: async () => ({ deletedStatementCount: 2, deletedContributionCount: 1 }),
     ...overrides
   }
@@ -29,6 +39,7 @@ describe('knowledge controller', () => {
     const api = installApi()
     const browse = vi.spyOn(api, 'browse')
     const read = vi.spyOn(api, 'read')
+    const getNeighborhood = vi.spyOn(api, 'getNeighborhood')
 
     await createRoot(async (dispose) => {
       try {
@@ -37,8 +48,10 @@ describe('knowledge controller', () => {
 
         expect(browse).toHaveBeenCalledWith({ query: 'database', limit: 100, offset: 0 })
         expect(read).toHaveBeenCalledWith('Database')
+        expect(getNeighborhood).toHaveBeenCalledWith('Database')
         expect(controller.selectedTitle()).toBe('Database')
         expect(controller.statement()).toEqual({ title: 'Database', content: 'Database body.' })
+        expect(controller.neighborhood()?.centerTitle).toBe('Database')
       } finally {
         dispose()
       }

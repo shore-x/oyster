@@ -5,7 +5,8 @@ import {
   chatChannels,
   discoveryChannels,
   knowledgeChannels,
-  knowledgeProcessingChannels
+  knowledgeProcessingChannels,
+  skillChannels
 } from '../shared/channels'
 import type { AiBackendApi, AiBackendSnapshot } from '../shared/ai-backends'
 import type { DiscoveryApi, DiscoverySnapshot } from '../shared/discovery'
@@ -16,6 +17,7 @@ import type {
 import type { KnowledgeApi } from '../shared/knowledge'
 import type { ChatApi, ChatEvent } from '../shared/chat'
 import type { ArtifactApi } from '../shared/artifacts'
+import type { SkillApi } from '../shared/skills'
 
 const api: DiscoveryApi = {
   getSnapshot: () => ipcRenderer.invoke(discoveryChannels.getSnapshot),
@@ -29,6 +31,30 @@ const api: DiscoveryApi = {
     ipcRenderer.on(discoveryChannels.snapshot, handler)
     return () => ipcRenderer.removeListener(discoveryChannels.snapshot, handler)
   }
+}
+
+const skills: SkillApi = {
+  getDiscoverySnapshot: () => ipcRenderer.invoke(skillChannels.getDiscoverySnapshot),
+  discover: () => ipcRenderer.invoke(skillChannels.discover),
+  readDiscoveredDocument: (skillId) => ipcRenderer.invoke(
+    skillChannels.readDiscoveredDocument,
+    skillId
+  ),
+  openDiscoveredFolder: (skillId) => ipcRenderer.invoke(
+    skillChannels.openDiscoveredFolder,
+    skillId
+  ),
+  getManagedSnapshot: () => ipcRenderer.invoke(skillChannels.getManagedSnapshot),
+  readManagedDocument: (artifactDirectoryName) => ipcRenderer.invoke(
+    skillChannels.readManagedDocument,
+    artifactDirectoryName
+  ),
+  openManagedFolder: (artifactDirectoryName) => ipcRenderer.invoke(
+    skillChannels.openManagedFolder,
+    artifactDirectoryName
+  ),
+  bindManagedSkill: (input) => ipcRenderer.invoke(skillChannels.bindManagedSkill, input),
+  unbindManagedSkill: (input) => ipcRenderer.invoke(skillChannels.unbindManagedSkill, input)
 }
 
 const aiBackends: AiBackendApi = {
@@ -95,6 +121,7 @@ const knowledgeProcessing: KnowledgeProcessingApi = {
 const knowledge: KnowledgeApi = {
   browse: (input) => ipcRenderer.invoke(knowledgeChannels.browse, input),
   read: (title) => ipcRenderer.invoke(knowledgeChannels.read, title),
+  getNeighborhood: (title) => ipcRenderer.invoke(knowledgeChannels.getNeighborhood, title),
   clear: () => ipcRenderer.invoke(knowledgeChannels.clear)
 }
 
@@ -129,6 +156,7 @@ const chat: ChatApi = {
 
 contextBridge.exposeInMainWorld('oyster', {
   discovery: api,
+  skills,
   aiBackends,
   knowledge,
   artifacts,

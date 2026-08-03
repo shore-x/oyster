@@ -259,6 +259,77 @@ describe('ArtifactRepository', () => {
     ])
   })
 
+  it('derives a ready Skill view from a real output directory and valid SKILL.md', async () => {
+    const repositoryPath = await temporaryRepositoryPath()
+    const repository = new ArtifactRepository(repositoryPath)
+    await repository.initialize()
+    const artifactPath = join(repositoryPath, 'review-skill')
+    await mkdir(join(artifactPath, 'output'), { recursive: true })
+    await Promise.all([
+      writeFile(join(artifactPath, 'AGENTS.md'), '# Attention\n\nMaintain review guidance.\n'),
+      writeFile(join(artifactPath, 'output', 'SKILL.md'), [
+        '---',
+        'name: review',
+        'description: Review changes before delivery.',
+        '---',
+        '',
+        '# Review',
+        ''
+      ].join('\n'))
+    ])
+
+    const snapshot = await repository.refresh()
+
+    expect(snapshot.artifacts).toEqual([expect.objectContaining({
+      directoryName: 'review-skill',
+      skill: {
+        outputPath: join(artifactPath, 'output'),
+        documentPath: join(artifactPath, 'output', 'SKILL.md'),
+        name: 'review',
+        description: 'Review changes before delivery.',
+        status: 'ready'
+      }
+    })])
+  })
+
+  it('keeps malformed output entries visible as invalid Skill views', async () => {
+    const repositoryPath = await temporaryRepositoryPath()
+    const repository = new ArtifactRepository(repositoryPath)
+    await repository.initialize()
+    const missingDocument = join(repositoryPath, 'missing-document')
+    const linkedOutput = join(repositoryPath, 'linked-output')
+    const outputTarget = join(repositoryPath, '.output-target')
+    await Promise.all([
+      mkdir(join(missingDocument, 'output'), { recursive: true }),
+      mkdir(linkedOutput),
+      mkdir(outputTarget)
+    ])
+    await Promise.all([
+      writeFile(join(missingDocument, 'AGENTS.md'), '# Missing document\n'),
+      writeFile(join(linkedOutput, 'AGENTS.md'), '# Linked output\n')
+    ])
+    await symlink(outputTarget, join(linkedOutput, 'output'), 'dir')
+
+    const snapshot = await repository.refresh()
+
+    expect(snapshot.artifacts).toEqual([
+      expect.objectContaining({
+        directoryName: 'linked-output',
+        skill: expect.objectContaining({
+          status: 'invalid',
+          issue: expect.stringContaining('真实目录')
+        })
+      }),
+      expect.objectContaining({
+        directoryName: 'missing-document',
+        skill: expect.objectContaining({
+          status: 'invalid',
+          issue: expect.stringContaining('缺少普通文件 SKILL.md')
+        })
+      })
+    ])
+  })
+
   it('reports an unreadable AGENTS.md as invalid without failing the scan', async () => {
     if (process.platform === 'win32') return
     const repositoryPath = await temporaryRepositoryPath()

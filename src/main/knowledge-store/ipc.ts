@@ -2,6 +2,7 @@ import { ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import { knowledgeChannels } from '../../shared/channels'
 import type { BrowseKnowledgeInput } from '../../shared/knowledge'
 import type { KnowledgeFullChainService } from '../knowledge-processing/full-chain-service'
+import { KnowledgeExplorerProjectionService } from '../knowledge-projection/knowledge-explorer-projection'
 import type { SqliteKnowledgeStore } from './sqlite-knowledge-store'
 
 export function registerKnowledgeIpc(
@@ -9,6 +10,8 @@ export function registerKnowledgeIpc(
   fullChain: KnowledgeFullChainService,
   getMainWindow: () => BrowserWindow | undefined
 ): void {
+  const explorer = new KnowledgeExplorerProjectionService(store)
+
   const assertTrustedSender = (event: IpcMainInvokeEvent): void => {
     const window = getMainWindow()
     if (
@@ -23,11 +26,15 @@ export function registerKnowledgeIpc(
 
   ipcMain.handle(knowledgeChannels.browse, (event, input?: BrowseKnowledgeInput) => {
     assertTrustedSender(event)
-    return store.browse(input)
+    return explorer.browse(input)
   })
   ipcMain.handle(knowledgeChannels.read, (event, title: string) => {
     assertTrustedSender(event)
     return store.getStatement(title)
+  })
+  ipcMain.handle(knowledgeChannels.getNeighborhood, (event, title: string) => {
+    assertTrustedSender(event)
+    return explorer.getNeighborhood(title)
   })
   ipcMain.handle(knowledgeChannels.clear, (event) => {
     assertTrustedSender(event)

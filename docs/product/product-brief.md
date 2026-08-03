@@ -2,7 +2,7 @@
 
 > 状态：当前产品定位（source of truth）
 >
-> 日期：2026-07-31
+> 日期：2026-08-01
 >
 > 决策记录：[ADR-0001：将 Oyster 定位为 Agent-Agnostic Knowledge Hub](../decisions/0001-agent-agnostic-knowledge-hub.md)
 >
@@ -13,6 +13,10 @@
 > 内置通用管理界面：[通用管理 Agent MVP](chat-agent-mvp.md)
 >
 > Artifact 当前载体：[Artifact Repository MVP](artifact-repository-mvp.md)
+>
+> 外部 Skill 可观测切片：[外部 Agent Skill 发现与浏览 MVP](skill-discovery-mvp.md)
+>
+> Skill 绑定方向：[Skill Symlink 注入 MVP](skill-symlink-injection-mvp.md)
 
 ## 1. 一句话定位
 
@@ -30,17 +34,19 @@ Knowledge Maintenance Agent 负责结构化知识加工链路；面向用户的�
 - 历史对话虽存在本地文件中，却缺少统一搜索、关系、出处和生命周期管理；
 - 把聊天记录直接向量化会丢失分支、工具调用、时间、项目和来源语义；
 - 自动总结容易把推断写成事实，且难以追溯和纠错；
+- 用户难以统一看清不同 Agent、全局与项目目录中已经注册了哪些 Skill，以及它们的原始内容和位置；
 - 用户缺少一个能够查看“接入了什么、如何得出、向谁提供过”的独立控制面。
 
 ## 3. 产品承诺
 
-Oyster 向用户提供五个核心能力：
+Oyster 向用户提供六个核心能力：
 
 1. **发现与接入**：发现本机 Agent 的可执行程序、应用、配置和数据目录，明确展示每个来源支持历史访问、实时通知或上下文输出中的哪些能力。
 2. **保真访问**：为聊天 transcript 与人类编写的 Agent 指令建立轻量 catalog，并在需要时由 Source Adapter 从原始位置读取确定版本；不同 Harness 的原始格式不因统一模型而丢失，Agent 自动生成的 memory 不作为历史来源。
 3. **知识加工与管理**：用 Observation Preprocessing 从原始活动中发现值得调查的问题，再由 Knowledge Maintenance Agent 在用户 Attention 下核查现有知识与 Raw Evidence、形成可复用的理解；通用管理 Agent 也可以直接搜索、读取和维护正式 Knowledge。
 4. **协作产物**：在 APP 管理的本地 Artifact Repository 中保存围绕持久 Attention 组织的任意文件产物；通用管理 Agent 根据对话和文件系统自主发现相关 Artifact，并与用户共同维护当前状态。
-5. **安全供给**：通过本地 API 和 MCP 等开放边界向第三方 Agent 提供检索；未来可在用户授权、Scope 和 Token Budget 内生成并注入 Context Packet。
+5. **Skill 发现与管理**：在专门的 Skills 页面中分开展示 Oyster 管理的 Skill Artifact 与其他 Agent 的外部注册事实；前者可以预览统一输出并通过显式 symlink Binding 注入已支持的用户级目标，后者保持只读发现。两者不因名称或路径相似而合并身份。
+6. **安全供给**：通过本地 API 和 MCP 等开放边界向第三方 Agent 提供检索；未来可在用户授权、Scope 和 Token Budget 内生成并注入 Context Packet。
 
 ## 4. 产品身份与边界
 
@@ -90,7 +96,7 @@ Artifact 可以随用户 Attention 自然形成分组。是否把这种分组正
 
 ### 6.1 发现 Agent 和数据源
 
-当前已落地的纵向切片见[《本地 Agent 发现与外部证据访问》](local-agent-discovery-mvp.md)、[《AI Backend MVP》](ai-backends-mvp.md)、[《知识加工验证 MVP》](knowledge-processing-mvp.md)、[《通用管理 Agent MVP》](chat-agent-mvp.md)和[《Artifact Repository MVP》](artifact-repository-mvp.md)。发现分为未读取聊天正文的被动候选检查，以及用户触发的有界扫描与 catalog 建立；知识加工可以直接选择一条可用 Session 运行完整测试链路；通用管理 Agent 用一套 Session 和常驻工具处理普通对话、Knowledge 与 Artifact；Artifact Repository 提供第三个权威域的最小持久载体。
+当前已落地的纵向切片见[《本地 Agent 发现与外部证据访问》](local-agent-discovery-mvp.md)、[《外部 Agent Skill 发现与浏览 MVP》](skill-discovery-mvp.md)、[《Skill Symlink 注入 MVP》](skill-symlink-injection-mvp.md)、[《AI Backend MVP》](ai-backends-mvp.md)、[《知识加工验证 MVP》](knowledge-processing-mvp.md)、[《通用管理 Agent MVP》](chat-agent-mvp.md)和[《Artifact Repository MVP》](artifact-repository-mvp.md)。历史发现分为未读取聊天正文的被动候选检查，以及用户触发的有界扫描与 catalog 建立；独立的 Skill 发现由用户触发，按 Agent 注册位置和已知项目上下文重建只读内存 catalog。Skills 页面另从 Artifact Repository 派生 Oyster 管理视图，并在明确的用户操作下维护用户级 Skill Binding。知识加工可以直接选择一条可用 Session 运行完整测试链路；通用管理 Agent 用一套 Session 和常驻工具处理普通对话、Knowledge 与 Artifact；Artifact Repository 提供第三个权威域的最小持久载体。
 
 Oyster 启动后执行本地发现，并分别报告：
 
@@ -138,13 +144,29 @@ Knowledge Maintenance Agent 是一个普通、可替换的工具使用 Agent：�
 
 Projection 可以根据共享 Knowledge、Attention 和必要的当前状态生成按需消费输出，也可以初始化 Artifact，或基于当前 Artifact 形成新修订。用户可以直接创建或编辑 Artifact；Agent 后续修订以当前状态为输入并延续已接纳的编辑。Artifact 内容不会仅因存在而自动成为 Knowledge；通用管理 Agent 可以在同一对话中分别调用 Artifact 工具和 Knowledge 工具，对两个权威域作出明确修改。
 
-Oyster 固定使用 `app.getPath('userData')/artifacts/` 标准 Git Repository；一个带可读取的普通根 `AGENTS.md` 的一级目录是一个 Artifact，`AGENTS.md` 表达持久 Attention，其余结构任意。UI 直接扫描和刷新文件系统、创建 Artifact、显示 Attention，并可在系统文件管理器中打开 Repository 或 Artifact；缺少或无法读取根 `AGENTS.md` 的可见一级目录会被明确显示为无效目录。Repository 通过捆绑 Git Runtime 的绝对路径初始化，系统 Git 不是前置条件。
+Oyster 固定使用 `app.getPath('userData')/artifacts/` 标准 Git Repository；一个带可读取的普通根 `AGENTS.md` 的一级目录是一个 Artifact，`AGENTS.md` 表达持久 Attention。除具体应用明确采用的最小约定外，其余结构保持任意；当前根 `output` 只承担 Skill 应用的派生识别语义。UI 直接扫描和刷新文件系统、创建 Artifact、显示 Attention，并可在系统文件管理器中打开 Repository 或 Artifact；缺少或无法读取根 `AGENTS.md` 的可见一级目录会被明确显示为无效目录。Repository 通过捆绑 Git Runtime 的绝对路径初始化，系统 Git 不是前置条件。
 
-所有通用管理 Agent Session 常驻 `read`、`edit`、`write`、`bash`、`search_knowledge`、`read_knowledge` 和 `upsert_knowledge`。四个 Coding 工具以 Artifact Repository 根作为初始 `cwd`，但这只是坐标起点：Session 不绑定 Artifact、Project 或目录，Harness 不建立 selector、router、Artifact 锁、路径权限边界、Shell 命令限制或 Bash 逐次审批。Agent 根据对话和文件系统识别相关的零个、一个或多个 Artifact，并读取各自根 `AGENTS.md`。文件与 Shell 工具以当前 OS 用户权限运行，因此这一 MVP 是高信任执行模型，不是安全隔离。
+所有通用管理 Agent Session 常驻 `read`、`edit`、`write`、`bash`、`search_knowledge`、`read_knowledge`、`upsert_knowledge` 和 `spawn_agent`。`spawn_agent` 以父 Agent 给出的完整任务创建空 transcript 的临时通用 Agent 运行，并把最终回答作为 Tool Result 返回；它不创建新的用户 Session、绑定 Artifact 或引入固定子 Agent 角色。四个 Coding 工具以 Artifact Repository 根作为初始 `cwd`，但这只是坐标起点：Session 不绑定 Artifact、Project 或目录，Harness 不建立 selector、router、Artifact 锁、路径权限边界、Shell 命令限制或 Bash 逐次审批。Agent 根据对话和文件系统识别相关的零个、一个或多个 Artifact，并读取各自根 `AGENTS.md`。文件与 Shell 工具以当前 OS 用户权限运行，因此这一 MVP 是高信任执行模型，不是安全隔离。
 
 `bash` 的局部 `PATH` 提供 APP 捆绑的标准 Git CLI，Agent 使用普通 `git` 命令，不增加专用 Git Tool。Harness 不自动 commit、branch、worktree、rollback、merge 或处理冲突，但也不通过命令限制阻止 Agent 根据当前任务使用 Git。当前计划中的 Context Packet 仍按临时消费视图处理，不与 Artifact 共用持久身份和修订生命周期；未来能否将其提升为 Artifact 仍待验证。具体范围见[《Artifact Repository MVP》](artifact-repository-mvp.md)与[《通用管理 Agent MVP》](chat-agent-mvp.md)。
 
-### 6.6 检索和供给上下文
+### 6.6 发现和浏览外部 Skill
+
+用户在独立 Skills 页面触发发现。Oyster 检查 Claude Code、Pi 和 Codex 的已知用户、机器和项目注册位置；项目路径来自当前 Session catalog 已经知道的工作目录，不遍历整个 Home 猜测仓库。
+
+发现结果按 Agent、scope 和原始路径分别展示。同名 Skill 不跨 Agent 合并；项目项明确显示项目标记和作用目录，admin、system 与其他来源也保留自身标记。用户可以查看入口 Markdown、原始 Skill 目录和入口文件绝对路径，并在系统文件管理器中打开原始目录。
+
+这是外部文件系统的只读当前视图，不是 Artifact、历史 Source Record 或运行时 enabled 证明。正文按选择读取，脚本和附件不执行；发现不会迁移、绑定或注入 Skill。具体边界见[《外部 Agent Skill 发现与浏览 MVP》](skill-discovery-mvp.md)。
+
+### 6.7 绑定 Oyster 管理的 Skill
+
+一个由 Oyster 管理的 Skill 对应一个 Artifact；Artifact 根 `AGENTS.md` 继续表达持久 Attention，根部存在 `output` 时由 Skill 应用派生出 Skill Artifact 视图。外部 Agent 原生加载的 Skill 根固定为有效的 `output/` 子目录。当前实现允许在 Claude Code、Pi 和 Codex 的用户级规范注册根创建目录 symlink，链接目标是该 `output/`，不是 Artifact 根；项目级 Binding 留给后续切片。
+
+当前实现不复制或同步 Skill，不做 Agent 专属内容转换，也不安装 Plugin、Hook 或 MCP。所有 Agent 暂时共用同一个 `output/`；不同 Agent 仍需要各自的注册根定位，但这只是路径适配，不改变 Skill 内容。symlink 本身就是绑定事实，不新增 Binding 数据库、Artifact 类型或 manifest。管理入口集中在 Skills 页面；Artifact 页面只显示 Skill 标记、输出摘要和导航入口。完整边界见[《Skill Symlink 注入 MVP》](skill-symlink-injection-mvp.md)。
+
+这里的持久 Skill Binding 与下一节按请求形成的 Context Packet 或 Prompt-time 上下文注入是两种不同能力，不能共用 enabled、Scope、Token Budget 或审计语义。
+
+### 6.8 检索和供给上下文
 
 对外检索保持只读优先，并从以下最小能力逐步开放；具体工具名和协议形态可以替换：
 
@@ -172,9 +194,10 @@ Oyster 固定使用 `app.getPath('userData')/artifacts/` 标准 Git Repository�
 - Oyster 接收的 API Key 与主动完成 OAuth 后获得的 Coding Plan 凭据进入系统 Keychain；不扫描、读取或复制其他 Agent Runtime 的凭据；
 - 本地 MCP Server 提供检索与有预算的 Context Packet；
 - 当前验证所需的用户可见运行与结果信息；
+- 外部 Agent Skill 的只读发现与浏览：覆盖 Claude Code、Pi 和 Codex 的已知用户、项目及机器注册位置，展示 Agent、scope、项目路径和原始位置，并按需预览入口 Markdown；
 - 固定 `userData/artifacts/` Artifact Repository 的初始化、扫描、刷新、创建和系统打开入口；以带根 `AGENTS.md` 的一级目录作为当前 Artifact 最小单元，并明确展示无效目录；
 - 随 APP 捆绑私有标准 Git Runtime，APP 通过绝对路径调用它并在没有系统 Git 时仍能初始化标准 Repository；
-- 一个跨普通对话、Knowledge 与 Artifact 的通用管理 Agent；所有 Session 常驻七项工具，Session 不绑定 Artifact、Project 或 `cwd`；
+- 一个跨普通对话、Knowledge 与 Artifact 的通用管理 Agent；所有 Session 常驻八项工具并可创建独立上下文的临时子 Agent 运行，Session 不绑定 Artifact、Project 或 `cwd`；
 - Coding 工具从固定 Artifact Repository 根开始，以当前 OS 用户权限运行；Harness 不增加路径 Sandbox、Bash 审批、Artifact selector/router/lock 或专用 Git Tool。
 
 正式知识可追溯是一项产品原则，但其持久形式、校验方式和 MVP 验收范围尚未确定；在形成独立决策前，不把它展开为固定字段或流程要求。
@@ -191,6 +214,7 @@ Observation、Knowledge 与 Artifact 保持不同的权威边界。由同一个�
 - Artifact 专用 Agent、Artifact/Project Session 绑定、selector/router/lock 和专用 Git Tool；
 - Harness 自动执行的 Git commit、branch、worktree、diff 审核、merge、rollback 和冲突处理；
 - 把派生知识自动写回 `AGENTS.md`、`CLAUDE.md` 等项目文件；
+- 当前 Skill Binding 只覆盖 Claude Code、Pi 和 Codex 的用户级规范注册根；仍不自动把外部 Skill 迁入 Artifact，不提供项目级绑定、Agent 专属内容适配、Skill 执行、附带脚本安装、调用统计或效果判断；
 - 依赖某个向量数据库作为领域真相；
 - 首版支持任意第三方 Connector 在主进程内执行。
 
@@ -221,13 +245,14 @@ Oyster 把认证和计费通道与处理 Runtime 分开：
 - **Stage Configuration** 固定某个阶段使用的 Connection、Model 和可选思考强度；
 - **Runtime** 决定该阶段做一次直接生成，还是用同一模型驱动通用 Agent loop，并负责 Agent 的上下文生命周期。
 
-因此，Coding Plan 与 API 可以共享最小模型调用契约，同时仍保留各自不同的认证和计费语义。结构化知识加工链路中的 Knowledge Maintenance Agent 使用该次 Workspace 和 Contribution 协议；面向用户的通用管理 Agent 则在每个 Session 中常驻同一组 Knowledge、文件与 Shell 工具。二者可以共用负责模型—工具循环和上下文压缩的 Runtime，但通用管理 Agent 不再按当前职责动态切换工具或身份。Oyster 可以发现官方 Agent Runtime 中可公开读取的账号与套餐信息，但不会把该 Runtime 的内部 Agent loop 或凭据当作业务执行接口。
+因此，Coding Plan 与 API 可以共享最小模型调用契约，同时仍保留各自不同的认证和计费语义。结构化知识加工链路中的 Knowledge Maintenance Agent 使用该次 Workspace 和 Contribution 协议；面向用户的通用管理 Agent 则在每个 Session 中常驻同一组 Knowledge、文件、Shell 与通用子 Agent 工具。二者可以共用负责模型—工具循环和上下文压缩的 Runtime，但通用管理 Agent 不再按当前职责动态切换工具或身份。Oyster 可以发现官方 Agent Runtime 中可公开读取的账号与套餐信息，但不会把该 Runtime 的内部 Agent loop 或凭据当作业务执行接口。
 
 LLM 适合承担：
 
 - 在 Observation Preprocessor 中有界发现需要回到 Raw Evidence 调查的名称和指代问题；
 - 驱动受控 Knowledge Maintenance Agent 多步搜索、核查、复用和维护共享知识；
 - 驱动通用管理 Agent 在普通对话、Knowledge 与一个或多个 Artifact 之间自主选择必要工作；
+- 由通用管理 Agent 将适合独立上下文处理的完整任务委派给临时子 Agent，并继续判断返回结果；
 - 通过 Projection 活动，基于当前 Artifact 做局部修订；
 - 通过 Projection 活动为一次查询构建带引用、可丢弃的 Context Packet。
 
@@ -269,16 +294,22 @@ LLM 和 Agent 都不拥有事实真相，其输出在进入知识层前必须经
 
 ## 12. 后续方向
 
-在 MVP 证明来源访问可靠性、知识质量和检索价值后，再依次考虑：
+Skill 管理已确定为 Artifact Domain 的一个应用方向：每个由 Oyster 管理的 Skill 对应一个完整 Artifact，内部可以包含任意文件；知识型 Markdown 只是早期默认期望。专门的 Skills 页面把 Oyster 管理视图与外部发现视图分开：前者从根 `output` 约定识别 Skill Artifact 并管理用户级 symlink Binding，后者展示已知注册位置的只读当前事实。目标 Agent 只读取 Artifact 的固定 `output/` 子目录，不链接 Artifact 根，不复制或同步内容，当前不做 Agent 专属格式适配。具体规则见[《Skill Symlink 注入 MVP》](skill-symlink-injection-mvp.md)；生态调研见[《主流 Coding Agent 的 Skill 发现与格式调研》](../research/agent-skill-discovery-and-format.md)。
 
-1. 更多 Harness、IDE、Issue Tracker、文档和浏览器来源；
-2. SessionStart/UserPrompt 等生命周期的可审查 Context Push；
-3. 项目规则文件的用户审查式导出，而非自动覆写；
-4. 本地或远程同步、多设备和团队 Scope；
-5. 用真实案例验证当前目录式 Artifact、路径身份、自然分组和跨 Artifact 协作需求；
-6. 验证通用管理 Agent 能否在不绑定 Project 或 Artifact 的情况下，根据对话、目录和 `AGENTS.md` 正确维护零个、一个或多个 Artifact；
-7. 更深入的跨项目冲突清理、过期检查和关系建议；
-8. 受控任务执行与 Agent Browser；
-9. 基于历史失败的提醒或策略 Gate。
+后续能力按实际价值验证逐步展开：
+
+1. 对接 Agent 的运行时枚举能力，区分文件系统候选与当前 runtime enabled 的有效集合；
+2. 建立可解释的 Skill 使用观测，并明确区分发现、启用、调用和实际效果；
+3. 在不改变 Skill Artifact 包容性边界的前提下，基于 Knowledge、Artifact 与观测结果辅助维护和优化 Skill；
+4. 在当前用户级 Binding 的基础上验证项目级目标选择，再根据真实兼容性问题判断是否需要 Agent 专属输出；
+5. 更多 Harness、IDE、Issue Tracker、文档和浏览器来源；
+6. SessionStart/UserPrompt 等生命周期的可审查 Context Push；
+7. 项目规则文件的用户审查式导出，而非自动覆写；
+8. 本地或远程同步、多设备和团队 Scope；
+9. 用真实案例验证当前目录式 Artifact、路径身份、自然分组和跨 Artifact 协作需求；
+10. 验证通用管理 Agent 能否在不绑定 Project 或 Artifact 的情况下，根据对话、目录和 `AGENTS.md` 正确维护零个、一个或多个 Artifact；
+11. 更深入的跨项目冲突清理、过期检查和关系建议；
+12. 受控任务执行与 Agent Browser；
+13. 基于历史失败的提醒或策略 Gate。
 
 任何新增能力都必须继续服从两个判断：它是否提高知识与 Artifact 的实际可用性；它是否基于已经观察到的问题，而不是在 Harness 中提前固化模型可以自行完成的判断。

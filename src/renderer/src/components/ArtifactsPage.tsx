@@ -20,13 +20,19 @@ function ArtifactCard(props: {
   artifact: ArtifactSummary
   busy?: string
   onOpen(): void
+  onManageSkill(): void
 }) {
   return (
     <article class="artifact-card" data-testid="artifact-card">
       <header class="artifact-card__header">
         <span class="artifact-card__mark"><Icon name="folder" /></span>
         <div class="artifact-card__identity">
-          <h2>{props.artifact.directoryName}</h2>
+          <div class="artifact-card__identity-heading">
+            <h2>{props.artifact.directoryName}</h2>
+            <Show when={props.artifact.skill}>
+              <span class="artifact-skill-badge" data-testid="artifact-skill-badge">Skill</span>
+            </Show>
+          </div>
           <span>AGENTS.md 更新于 {modifiedAtLabel(props.artifact.modifiedAt)}</span>
         </div>
         <Button
@@ -37,6 +43,34 @@ function ArtifactCard(props: {
           onClick={props.onOpen}
         >{props.busy === `open:${props.artifact.directoryName}` ? '正在打开…' : '打开文件夹'}</Button>
       </header>
+      <Show when={props.artifact.skill}>
+        {(skill) => (
+          <section class={`artifact-card__skill artifact-card__skill--${skill().status}`} data-testid="artifact-skill-summary">
+            <div class="artifact-card__skill-identity">
+              <div>
+                <strong>{skill().name || 'Skill 输出'}</strong>
+                <span>{skill().status === 'ready' ? '可在目标 Agent 中绑定' : '输出暂不可绑定'}</span>
+              </div>
+              <span class={`artifact-card__skill-status artifact-card__skill-status--${skill().status}`}>
+                {skill().status === 'ready' ? '可绑定' : '输出无效'}
+              </span>
+            </div>
+            <code data-testid="artifact-skill-output-path" title={skill().outputPath}>{skill().outputPath}</code>
+            <Show when={skill().issue}>
+              <p><Icon name="warning" />{skill().issue}</p>
+            </Show>
+            <div class="artifact-card__skill-actions">
+              <Button
+                variant="secondary"
+                icon="link"
+                data-testid="manage-artifact-skill"
+                disabled={Boolean(props.busy)}
+                onClick={props.onManageSkill}
+              >在 Skills 中管理</Button>
+            </div>
+          </section>
+        )}
+      </Show>
       <div class="artifact-card__attention-label">AGENTS.md · Attention</div>
       <Markdown
         class="artifact-card__attention"
@@ -46,7 +80,7 @@ function ArtifactCard(props: {
   )
 }
 
-export function ArtifactsPage() {
+export function ArtifactsPage(props: { onManageSkill(artifactDirectoryName: string): void }) {
   const controller = createArtifactsController()
   const [directoryName, setDirectoryName] = createSignal('')
   const [attention, setAttention] = createSignal('')
@@ -199,6 +233,7 @@ export function ArtifactsPage() {
                     artifact={artifact}
                     busy={controller.busy()}
                     onOpen={() => void controller.openArtifact(artifact.directoryName)}
+                    onManageSkill={() => props.onManageSkill(artifact.directoryName)}
                   />
                 )}
               </For>

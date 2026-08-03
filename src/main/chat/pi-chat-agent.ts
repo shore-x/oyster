@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { Agent, type AgentTool } from '@earendil-works/pi-agent-core'
+import { Agent, type AgentMessage, type AgentTool } from '@earendil-works/pi-agent-core'
 import { createCodingTools } from '@earendil-works/pi-coding-agent'
 import { ModelConnectionFailureError } from '../ai-backends/model'
 import {
@@ -12,6 +12,7 @@ import type { PiChatAgentRunInput, ChatKnowledgeStore } from './model'
 import { chatMessageView, serializableChatValue } from './chat-message-view'
 import {
   chatAgentToolDefinition,
+  spawnAgentParameters,
   upsertKnowledgeParameters
 } from './chat-tool-catalog'
 import {
@@ -36,6 +37,57 @@ function statementText(statement: KnowledgeStatement): string {
   return `Title: ${statement.title}\nContent:\n${statement.content}`
 }
 
+function finalAssistantText(messages: readonly AgentMessage[]): string {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]
+    if (message.role !== 'assistant') continue
+    const text = message.content.flatMap((block) => (
+      block.type === 'text' ? [block.text] : []
+    )).join('\n')
+    return text
+  }
+  return ''
+}
+
+interface CreatedAgentRun {
+  agent: Agent
+  getCompactionError(): Error | undefined
+}
+
+function assertAgentRunSucceeded(run: CreatedAgentRun, label: string): void {
+  const compactionError = run.getCompactionError()
+  if (
+    compactionError instanceof PiContextWindowError
+    || compactionError instanceof PiContextCompactionOutputError
+  ) {
+    throw compactionError
+  }
+  if (compactionError) throw new ModelConnectionFailureError(compactionError)
+  if (run.agent.state.errorMessage) {
+    throw new ModelConnectionFailureError(new Error(`${label} 模型调用失败：${run.agent.state.errorMessage}`))
+  }
+}
+
+async function promptAgentRun(
+  run: CreatedAgentRun,
+  prompt: string,
+  signal: AbortSignal | undefined,
+  label: string
+): Promise<void> {
+  signal?.throwIfAborted()
+  const abortAgent = (): void => run.agent.abort()
+  signal?.addEventListener('abort', abortAgent, { once: true })
+  try {
+    const activeRun = run.agent.prompt(prompt)
+    if (signal?.aborted) run.agent.abort()
+    await activeRun
+  } finally {
+    signal?.removeEventListener('abort', abortAgent)
+  }
+  if (signal?.aborted) throw asError(signal.reason, `${label} 运行已取消`)
+  assertAgentRunSucceeded(run, label)
+}
+
 function safeEmit(
   input: PiChatAgentRunInput,
   event: Parameters<NonNullable<PiChatAgentRunInput['onEvent']>>[0]
@@ -49,7 +101,7 @@ function safeEmit(
 
 function knowledgeTools(
   store: ChatKnowledgeStore,
-  input: PiChatAgentRunInput
+  agentRunId: string
 ): AgentTool[] {
   return [
     {
@@ -107,7 +159,7 @@ function knowledgeTools(
       execute: async (_toolCallId, parameters, signal) => {
         signal?.throwIfAborted()
         const result = store.commit({
-          runRef: `chat:${input.sessionId}:${randomUUID()}`,
+          runRef: `chat:${agentRunId}:${randomUUID()}`,
           statements: parameters.statements
         })
         return {
@@ -155,10 +207,6 @@ export class PiChatAgent {
 
     const context = await input.session.buildContext()
     input.signal.throwIfAborted()
-    const tools = [
-      ...codingTools(this.artifactRepositoryPath),
-      ...knowledgeTools(this.knowledgeStore, input)
-    ]
     const systemPrompt = chatAgentSystemPrompt(
       input.binding.systemPrompt,
       this.artifactRepositoryPath
@@ -166,39 +214,80 @@ export class PiChatAgent {
     const thinkingLevel = input.runtime.model.reasoning
       ? (input.binding.reasoningEffort ?? 'off')
       : 'off'
-    let compactionError: Error | undefined
-    const compactContext = createPiContextCompactor({
-      model: input.runtime.model,
-      streamFn: input.runtime.streamFn,
-      systemPrompt,
-      tools,
-      thinkingLevel,
-      onModelCall: (event) => {
-        if (event.type === 'failed') {
-          compactionError = event.error ?? new Error('Context compaction failed')
-        }
-      }
-    })
-    const agent = new Agent({
-      initialState: {
-        systemPrompt,
+
+    const createRun: (
+      agentRunId: string,
+      messages: AgentMessage[]
+    ) => CreatedAgentRun = (agentRunId, messages) => {
+      let compactionError: Error | undefined
+      const tools: AgentTool[] = [
+        ...codingTools(this.artifactRepositoryPath),
+        ...knowledgeTools(this.knowledgeStore, agentRunId),
+        {
+          ...chatAgentToolDefinition('spawn_agent'),
+          execute: async (_toolCallId, parameters, signal) => {
+            const task = parameters.task.trim()
+            if (!task) throw new Error('子 Agent task 去除空白后不能为空')
+            signal?.throwIfAborted()
+
+            const childRunId = randomUUID()
+            const childRun = createRun(childRunId, [])
+            await promptAgentRun(childRun, task, signal, '子 Agent')
+            return {
+              content: [{
+                type: 'text',
+                text: finalAssistantText(childRun.agent.state.messages)
+                  || 'Child Agent completed without a final text response.'
+              }],
+              details: {
+                runId: childRunId,
+                modelId: input.runtime.model.id,
+                transcript: serializableChatValue(childRun.agent.state.messages)
+              }
+            }
+          }
+        } as AgentTool<typeof spawnAgentParameters>
+      ]
+      const compactContext = createPiContextCompactor({
         model: input.runtime.model,
-        thinkingLevel,
+        streamFn: input.runtime.streamFn,
+        systemPrompt,
         tools,
-        messages: context.messages
-      },
-      streamFn: input.runtime.streamFn,
-      transformContext: async (messages, signal) => {
-        try {
-          return await compactContext(messages, signal)
-        } catch (error) {
-          compactionError = asError(error, 'Context compaction failed')
-          throw compactionError
+        thinkingLevel,
+        onModelCall: (event) => {
+          if (event.type === 'failed') {
+            compactionError = event.error ?? new Error('Context compaction failed')
+          }
         }
-      },
-      toolExecution: 'sequential',
-      sessionId: input.sessionId
-    })
+      })
+      const agent = new Agent({
+        initialState: {
+          systemPrompt,
+          model: input.runtime.model,
+          thinkingLevel,
+          tools,
+          messages
+        },
+        streamFn: input.runtime.streamFn,
+        transformContext: async (currentMessages, signal) => {
+          try {
+            return await compactContext(currentMessages, signal)
+          } catch (error) {
+            compactionError = asError(error, 'Context compaction failed')
+            throw compactionError
+          }
+        },
+        toolExecution: 'sequential',
+        sessionId: agentRunId
+      })
+      return {
+        agent,
+        getCompactionError: () => compactionError
+      }
+    }
+
+    const rootRun = createRun(input.sessionId, context.messages)
+    const agent = rootRun.agent
 
     agent.subscribe(async (event) => {
       if (event.type === 'message_update') {
@@ -246,26 +335,6 @@ export class PiChatAgent {
       }
     })
 
-    const abortAgent = (): void => agent.abort()
-    input.signal.addEventListener('abort', abortAgent, { once: true })
-    try {
-      const run = agent.prompt(input.text)
-      if (input.signal.aborted) agent.abort()
-      await run
-    } finally {
-      input.signal.removeEventListener('abort', abortAgent)
-    }
-
-    if (input.signal.aborted) throw asError(input.signal.reason, '对话 Agent 运行已取消')
-    if (
-      compactionError instanceof PiContextWindowError
-      || compactionError instanceof PiContextCompactionOutputError
-    ) {
-      throw compactionError
-    }
-    if (compactionError) throw new ModelConnectionFailureError(compactionError)
-    if (agent.state.errorMessage) {
-      throw new ModelConnectionFailureError(new Error(`对话 Agent 模型调用失败：${agent.state.errorMessage}`))
-    }
+    await promptAgentRun(rootRun, input.text, input.signal, '对话 Agent')
   }
 }

@@ -6,6 +6,7 @@ import type {
   CreateArtifactInput
 } from '../../shared/artifacts'
 import { runArtifactGit } from './git-runtime'
+import { inspectArtifactSkill } from './skill-artifact'
 
 const ATTENTION_FILE_NAME = 'AGENTS.md'
 
@@ -72,10 +73,13 @@ async function readArtifact(
   try {
     const details = await lstat(agentsPath)
     if (!details.isFile()) return undefined
+    const artifactPath = join(repositoryPath, directoryName)
+    const skill = await inspectArtifactSkill(artifactPath)
     return {
       directoryName,
       attention: await readFile(agentsPath, 'utf8'),
-      modifiedAt: details.mtime.toISOString()
+      modifiedAt: details.mtime.toISOString(),
+      ...(skill ? { skill } : {})
     }
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code

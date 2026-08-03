@@ -12,6 +12,8 @@ export interface MarkdownProps {
   text: string
   class?: string
   testId?: string
+  /** External documents can disable images to avoid local or remote resource loads. */
+  allowImages?: boolean
   onOpenKnowledge?(title: string): void
 }
 
@@ -28,7 +30,7 @@ function safeLink(href: string): boolean {
   return /^(?:https?:|mailto:)/i.test(href) || href.startsWith('#')
 }
 
-function createMarkdownParser(interactiveKnowledgeLinks: boolean): Marked {
+function createMarkdownParser(interactiveKnowledgeLinks: boolean, allowImages: boolean): Marked {
   const parser = new Marked({
     async: false,
     breaks: true,
@@ -45,7 +47,13 @@ function createMarkdownParser(interactiveKnowledgeLinks: boolean): Marked {
           ? ''
           : ' target="_blank" rel="noreferrer noopener"'
         return `<a href="${escapeHtml(href)}"${titleAttribute}${externalAttributes}>${label}</a>`
-      }
+      },
+      ...(allowImages ? {} : {
+        image({ text }: Tokens.Image): string {
+          const label = text.trim() || '未命名图片'
+          return `<span class="markdown-image--disabled">[图片：${escapeHtml(label)}]</span>`
+        }
+      })
     }
   })
 
@@ -88,11 +96,19 @@ function createMarkdownParser(interactiveKnowledgeLinks: boolean): Marked {
   return parser
 }
 
-const markdownParser = createMarkdownParser(false)
-const interactiveMarkdownParser = createMarkdownParser(true)
+const markdownParser = createMarkdownParser(false, true)
+const interactiveMarkdownParser = createMarkdownParser(true, true)
+const markdownParserWithoutImages = createMarkdownParser(false, false)
+const interactiveMarkdownParserWithoutImages = createMarkdownParser(true, false)
 
-export function markdownToSafeHtml(text: string, interactiveKnowledgeLinks = false): string {
-  const parser = interactiveKnowledgeLinks ? interactiveMarkdownParser : markdownParser
+export function markdownToSafeHtml(
+  text: string,
+  interactiveKnowledgeLinks = false,
+  allowImages = true
+): string {
+  const parser = interactiveKnowledgeLinks
+    ? allowImages ? interactiveMarkdownParser : interactiveMarkdownParserWithoutImages
+    : allowImages ? markdownParser : markdownParserWithoutImages
   const rendered = parser.parse(text) as string
   if (typeof window === 'undefined' || typeof DOMPurify.sanitize !== 'function') return rendered
   return DOMPurify.sanitize(rendered, {
@@ -104,7 +120,11 @@ export function markdownToSafeHtml(text: string, interactiveKnowledgeLinks = fal
 }
 
 export function Markdown(props: MarkdownProps) {
-  const html = createMemo(() => markdownToSafeHtml(props.text, Boolean(props.onOpenKnowledge)))
+  const html = createMemo(() => markdownToSafeHtml(
+    props.text,
+    Boolean(props.onOpenKnowledge),
+    props.allowImages !== false
+  ))
 
   const onClick: JSX.EventHandlerUnion<HTMLDivElement, MouseEvent> = (event) => {
     if (!props.onOpenKnowledge || !(event.target instanceof Element)) return

@@ -8,6 +8,18 @@ export const discoveryChannels = {
   chooseSourceRoot: 'discovery:choose-source-root'
 } as const
 
+export const skillChannels = {
+  getDiscoverySnapshot: 'skills:get-discovery-snapshot',
+  discover: 'skills:discover',
+  readDiscoveredDocument: 'skills:read-discovered-document',
+  openDiscoveredFolder: 'skills:open-discovered-folder',
+  getManagedSnapshot: 'skills:get-managed-snapshot',
+  readManagedDocument: 'skills:read-managed-document',
+  openManagedFolder: 'skills:open-managed-folder',
+  bindManagedSkill: 'skills:bind-managed-skill',
+  unbindManagedSkill: 'skills:unbind-managed-skill'
+} as const
+
 export const aiBackendChannels = {
   snapshot: 'ai-backends:snapshot',
   getSnapshot: 'ai-backends:get-snapshot',
@@ -40,6 +52,7 @@ export const knowledgeProcessingChannels = {
 export const knowledgeChannels = {
   browse: 'knowledge:browse',
   read: 'knowledge:read',
+  getNeighborhood: 'knowledge:get-neighborhood',
   clear: 'knowledge:clear'
 } as const
 

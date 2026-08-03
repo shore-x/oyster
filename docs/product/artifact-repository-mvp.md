@@ -2,7 +2,7 @@
 
 > 状态：当前验证实现
 >
-> 日期：2026-07-31
+> 日期：2026-08-01
 >
 > 领域边界：[知识加工、Projection 与 Artifact](../architecture/knowledge-model-and-projection.md)
 
@@ -31,14 +31,20 @@
 │   └── timeline.md
 └── a-group-skill/
     ├── AGENTS.md
-    ├── SKILL.md
-    ├── references/
-    └── scripts/
+    ├── notes.md
+    └── output/
+        ├── SKILL.md
+        ├── references/
+        └── scripts/
 ```
 
 一个可见的一级目录只有在其根部存在可读取的普通文件 `AGENTS.md` 时才是有效 Artifact。`.git` 和其他点号开头的目录不参与 Artifact 发现。缺少、无法读取或没有普通文件形态的 `AGENTS.md` 的可见一级目录不是 Artifact，UI 将其明确显示为无效目录，供用户自行补全或处理，而不会猜测其 Attention。
 
-Artifact 内除根 `AGENTS.md` 外没有固定结构。文档、代码、脚本、配置、资源和任意嵌套目录都只是该 Artifact 的内容；嵌套目录即使包含另一个 `AGENTS.md`，也不会被当前 MVP 识别为新的 Artifact。
+Artifact 内除根 `AGENTS.md` 外没有通用固定结构。文档、代码、脚本、配置、资源和任意嵌套目录都只是该 Artifact 的内容；嵌套目录即使包含另一个 `AGENTS.md`，也不会被当前 MVP 识别为新的 Artifact。具体应用可以赋予一个目录名称明确语义；当前唯一实例是 Skill 应用使用的根 `output`。
+
+上例中的 Skill 体现同一包容性边界。每个由 Oyster 管理的 Skill 使用一个 Artifact 作为产物载体，当前通常就是一个一级目录；APP 不对其中的 Skill 文档、脚本、可执行文件、配置、资源或其他格式增加内容白名单。早期主要提供和维护知识型 Markdown Skill 只是产品默认期望，不是 Artifact 扫描或保存契约。保存任意文件也不意味着 APP 自动执行、安装或信任这些内容。
+
+固定 `output` 是 Skill 应用约定，不是通用 Artifact Schema。有效 Artifact 根部存在这个文件系统项时，APP 派生出 Skill Artifact 视图；只有它是有效输出目录且入口满足当前通用基线时，才允许创建 Skill Binding。目标 Agent 通过 symlink 看到 `output/`，Artifact 根 `AGENTS.md`、`notes.md` 等维护材料不进入外部 Skill 根。缺少 `output` 不影响普通 Artifact 的有效性。Artifact Repository 只负责识别和展示派生 Skill 摘要；外部 symlink 的写入由 Skills 模块单独负责，完整设计见[《Skill Symlink 注入 MVP》](skill-symlink-injection-mvp.md)。
 
 ## 3. 固定位置与初始化
 
@@ -75,10 +81,11 @@ APP 直接枚举 Repository 的一级目录，并读取每个有效 Artifact 根
 UI 展示：
 
 - 有效 Artifact 的目录名称和 `AGENTS.md` 内容；
+- Skill Artifact 的派生标记、输出状态及前往 Skills 页面管理的入口；
 - 缺少或无法读取根 `AGENTS.md` 的无效可见一级目录；
 - Repository 和单个 Artifact 的系统打开入口。
 
-当前 Artifact 页面不展示内部文件树，也不提供专用文件编辑器；通用管理 Agent 可以通过其常驻文件和 Shell 工具直接维护这些普通文件。
+当前 Artifact 页面不展示内部文件树，不提供专用文件编辑器，也不承载 Skill 绑定和解绑操作；这些操作集中在 Skills 页面。通用管理 Agent 可以通过其常驻文件和 Shell 工具直接维护 Artifact 中的普通文件。
 
 ### 5.2 创建
 
@@ -144,7 +151,7 @@ Git 是 Artifact Repository 的文件历史基础，而不是 Artifact Domain �
 - Harness 自动执行的 commit、branch、worktree、diff 审核、merge、rollback 或冲突处理；
 - 远端 Git、同步、团队协作或多 Repository；
 - 跨 Artifact 引用、依赖、组合或构建；
-- 独立的脚本执行、验证、安装或发布工作流；
+- 独立的脚本执行、验证、完整安装或发布工作流；当前已确认的 Skill symlink 绑定属于后续独立应用切片，不改变本页的 Repository 实现；
 - 自动把 Artifact 内容回流为 Knowledge。
 
 以下问题继续保留为未决定事项：

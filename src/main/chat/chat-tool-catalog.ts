@@ -26,10 +26,17 @@ export const upsertKnowledgeParameters = Type.Object({
   }, { additionalProperties: false }), { minItems: 1 })
 }, { additionalProperties: false })
 
+export const spawnAgentParameters = Type.Object({
+  task: Type.String({
+    minLength: 1,
+    description: 'The complete task to run in a new Agent context. Include any context the new Agent needs.'
+  })
+}, { additionalProperties: false })
+
 const searchKnowledgeDefinition = knowledgeMaintenanceToolDefinition('search_knowledge')
 const readKnowledgeDefinition = knowledgeMaintenanceToolDefinition('read_knowledge')
 
-const CHAT_AGENT_KNOWLEDGE_TOOL_CATALOG = [
+const CHAT_AGENT_TOOL_CATALOG = [
   {
     ...searchKnowledgeDefinition,
     parameters: searchKnowledgeParameters
@@ -43,18 +50,24 @@ const CHAT_AGENT_KNOWLEDGE_TOOL_CATALOG = [
     label: '写入 Knowledge Statements',
     description: 'Atomically create or replace one or more Statements in the authoritative Knowledge Store. A canonical title is the identity key; existing content is replaced in full.',
     parameters: upsertKnowledgeParameters
+  },
+  {
+    name: 'spawn_agent',
+    label: '创建子 Agent',
+    description: 'Run a delegated task in a new general Agent with an independent conversation context. The new Agent does not see the current conversation; required context must be included in the task. Returns its final response.',
+    parameters: spawnAgentParameters
   }
 ] as const
 
-export type ChatAgentKnowledgeToolName = (typeof CHAT_AGENT_KNOWLEDGE_TOOL_CATALOG)[number]['name']
+export type ChatAgentToolName = (typeof CHAT_AGENT_TOOL_CATALOG)[number]['name']
 
-export function chatAgentToolDefinition<TName extends ChatAgentKnowledgeToolName>(name: TName): Extract<
-  (typeof CHAT_AGENT_KNOWLEDGE_TOOL_CATALOG)[number],
+export function chatAgentToolDefinition<TName extends ChatAgentToolName>(name: TName): Extract<
+  (typeof CHAT_AGENT_TOOL_CATALOG)[number],
   { name: TName }
 > {
-  const definition = CHAT_AGENT_KNOWLEDGE_TOOL_CATALOG.find((tool) => tool.name === name)
+  const definition = CHAT_AGENT_TOOL_CATALOG.find((tool) => tool.name === name)
   if (!definition) throw new Error(`未知的对话 Agent 工具：${name}`)
-  return definition as Extract<(typeof CHAT_AGENT_KNOWLEDGE_TOOL_CATALOG)[number], { name: TName }>
+  return definition as Extract<(typeof CHAT_AGENT_TOOL_CATALOG)[number], { name: TName }>
 }
 
 function serializableParameters(parameters: object): ProcessingToolView['parameters'] {
@@ -69,7 +82,7 @@ export function chatAgentToolViews(artifactRepositoryPath: string): readonly Pro
       description: tool.description,
       parameters: serializableParameters(tool.parameters)
     })),
-    ...CHAT_AGENT_KNOWLEDGE_TOOL_CATALOG.map((tool) => ({
+    ...CHAT_AGENT_TOOL_CATALOG.map((tool) => ({
       name: tool.name,
       label: tool.label,
       description: tool.description,

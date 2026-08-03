@@ -1,10 +1,11 @@
 import type { JSX } from 'solid-js'
 
-export type IconName = 'archive' | 'layers' | 'agent' | 'chat' | 'spark' | 'refresh' | 'folder' | 'download' | 'stop' | 'check' | 'warning' | 'link' | 'play' | 'plus' | 'trash' | 'search' | 'back' | 'forward'
+export type IconName = 'archive' | 'layers' | 'skill' | 'agent' | 'chat' | 'spark' | 'refresh' | 'folder' | 'download' | 'stop' | 'check' | 'warning' | 'link' | 'play' | 'plus' | 'trash' | 'search' | 'back' | 'forward'
 
 const paths: Record<IconName, () => JSX.Element> = {
   archive: () => <><path d="M3.5 5.5h13"/><path d="M5 5.5v10h10v-10"/><path d="M7.5 9h5"/><path d="M4 2.5h12v3H4z"/></>,
   layers: () => <><path d="m9.5 2.5 7 3.5-7 3.5L2.5 6z"/><path d="m3.5 9 6 3 6-3"/><path d="m3.5 12 6 3 6-3"/></>,
+  skill: () => <><path d="M4 2.5h8l3 3v11H4z"/><path d="M12 2.5v3h3"/><path d="M6.5 9h6M6.5 12h5"/></>,
   agent: () => <><rect x="3.5" y="5.5" width="12" height="9" rx="2"/><path d="M9.5 2.5v3"/><path d="M7 9h.01M12 9h.01"/><path d="M7 12h5"/></>,
   chat: () => <><path d="M3 4.5h13v9H8l-4 3v-3H3z"/><path d="M6.5 8h6M6.5 10.5h4"/></>,
   spark: () => <><path d="m9.5 2 1.2 4.3L15 7.5l-4.3 1.2L9.5 13 8.3 8.7 4 7.5l4.3-1.2z"/><path d="m15.5 12 .5 1.8 1.8.5-1.8.5-.5 1.7-.5-1.7-1.8-.5 1.8-.5z"/></>,

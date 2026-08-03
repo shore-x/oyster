@@ -92,7 +92,7 @@ Raw Evidence 表示具有明确来源身份和版本身份、可由 Source Adapt
 
 - Claude/Codex 等 Agent 自动生成的 memory；
 - settings、凭证、API key 和 Keychain 内容；
-- Skill、Prompt Template 和其他尚未纳入来源契约的文件；
+- Skill、Prompt Template 和其他尚未纳入历史 `SourceRecord` 契约的文件；外部 Skill 由独立的[《外部 Agent Skill 发现与浏览 MVP》](skill-discovery-mvp.md)处理，不计入本页的 Session 或人类指令 catalog；
 - 扫描时看到的“当前指令”作为某个历史 turn 的精确 context。
 
 ## 6. 可用性与出处

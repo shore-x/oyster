@@ -4,11 +4,13 @@ import type { KnowledgeProcessingApi } from '../../shared/knowledge-processing'
 import type { KnowledgeApi } from '../../shared/knowledge'
 import type { ChatApi } from '../../shared/chat'
 import type { ArtifactApi } from '../../shared/artifacts'
+import type { SkillApi } from '../../shared/skills'
 
 declare global {
   interface Window {
     oyster: {
       discovery: DiscoveryApi
+      skills: SkillApi
       aiBackends: AiBackendApi
       knowledge: KnowledgeApi
       artifacts: ArtifactApi

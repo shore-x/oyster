@@ -25,6 +25,8 @@ Oyster 是一个独立于外部 Agent Harness 的本地知识与协作产物中�
 - 使用随 APP 捆绑的私有标准 Git Runtime 自动初始化固定的 `userData/artifacts/` Repository，不依赖系统 Git 或用户 `PATH`；
 - 按“带根 `AGENTS.md` 的一级目录”发现、刷新和创建 Artifact，并显示持久 Attention 与无效目录；
 - 在系统文件管理器中打开 Artifact Repository 或单个 Artifact；Artifact 内部结构任意，通用管理 Agent 可以直接维护其普通文件；
+- 在专门的 Skills 页面分开展示 Oyster 管理的 Skill Artifact 与其他 Agent 的外部注册事实，并预览各自入口文档；
+- 将有效 Skill Artifact 的 `output/` 通过安全、可撤销的目录 symlink 绑定到 Claude Code、Pi 或 Codex 的用户级 Skill 注册位置；
 - 默认提供明确标记为 Sandbox 的完整链路测试，同时保留不提交 Knowledge Contribution 的高级阶段调试；
 - Electron Renderer 与文件系统业务逻辑通过 typed preload API 隔离。
 
@@ -79,7 +81,9 @@ src/main/knowledge-store
 src/main/chat
   基于 Pi Agent Core 的通用管理 Agent、Knowledge/Coding 工具、JSONL 会话与默认 Prompt 配置
 src/main/artifacts
-  固定 Artifact Repository、目录扫描与创建、系统打开 IPC
+  固定 Artifact Repository、目录扫描与创建，以及 Skill Artifact 派生识别
+src/main/skills
+  外部 Skill 只读发现、Oyster 管理视图与用户级 symlink Binding
 src/shared       Main / Preload / Renderer 共用契约
 ```
 
@@ -87,10 +91,10 @@ src/shared       Main / Preload / Renderer 共用契约
 
 AI Connection 元数据，以及知识加工阶段的 Connection、Model 和用户默认 Prompt 配置，分别保存在 `userData/ai-connections.json` 与 `userData/knowledge-processing.json`；OAuth 与 API Key 凭据只保存在系统 Keychain。通用管理 Agent 的默认 Prompt 保存在 `userData/chat-agent.json`，完整对话与工具消息使用 Pi JSONL 格式独立保存在 `userData/chat-sessions/`。Session 不绑定 Artifact、Project 或 `cwd`。Observation Workspace 只存在于主进程内存中，Candidate Agenda 和 Contribution Draft 只存在于一次知识维护运行中。当前验证 Knowledge Store 位于 `userData/knowledge-store/knowledge.sqlite`；完整链路使用 `userData/knowledge-store/sandboxes/` 下的独立快照，失败或取消时立即丢弃，成功重跑会替换当前 Sandbox。成功的完整链路结果另存于 `userData/knowledge-processing-history.sqlite`，不依赖 Sandbox 继续存在；它默认与正式知识隔离，只有用户显式导入时才按 canonical title 写入正式 Store。SQLite 是当前实现选择，不代表正式知识层的长期存储介质已经确定。
 
-Artifact Repository 固定在 `userData/artifacts/`，由 APP 创建并初始化为标准 Git Repository；用户不选择其他目录。每个带根 `AGENTS.md` 的一级目录是一个 Artifact，`AGENTS.md` 表达持久 Attention，其余内容结构任意。UI 直接读取文件系统，不维护 manifest 或数据库镜像；当前路径暂作身份，APP 不自动 commit、创建 branch/worktree、审核 diff、merge 或处理冲突。
+Artifact Repository 固定在 `userData/artifacts/`，由 APP 创建并初始化为标准 Git Repository；用户不选择其他目录。每个带根 `AGENTS.md` 的一级目录是一个 Artifact，`AGENTS.md` 表达持久 Attention，其余内容保持包容。根部存在 `output` 时，Skill 应用派生出 Skill Artifact 视图，但不增加 manifest 或核心 Artifact 类型。Artifact 页面只显示这一身份和摘要；绑定管理集中在 Skills 页面。UI 直接读取文件系统，不维护数据库镜像；当前路径暂作身份，APP 不自动 commit、创建 branch/worktree、审核 diff、merge 或处理冲突。
 
 Oyster 随 APP 捆绑私有的标准 Git Runtime，APP 内部始终按绝对可执行文件路径调用它，因此系统 Git 不是运行前置条件。Repository 仍兼容普通 Git CLI。“私有”只描述 Runtime 的分发和定位，不表示专有 Git 格式。通用管理 Agent 的 `bash` 环境在局部 `PATH` 中提供同一个标准 `git` 命令，不增加专用 Git Tool；外部终端默认不获得这一注入。
 
 所有通用管理 Agent Session 常驻 `read`、`edit`、`write`、`bash`、`search_knowledge`、`read_knowledge` 和 `upsert_knowledge`。Coding 工具以 Artifact Repository 根作为初始 `cwd`，但 Harness 不绑定或预选 Artifact，也不设置路径 Sandbox、Shell 命令限制或逐次审批；工具按 APP 当前 OS 用户权限运行。Agent 根据对话和文件系统自行发现相关 Artifact，并读取各自根 `AGENTS.md`。
 
-当前产品范围与设计边界见 [Product Brief](docs/product/product-brief.md)、[本地 Agent 发现与外部证据访问](docs/product/local-agent-discovery-mvp.md)、[AI Backend MVP](docs/product/ai-backends-mvp.md)、[知识加工验证 MVP](docs/product/knowledge-processing-mvp.md)、[通用管理 Agent MVP](docs/product/chat-agent-mvp.md)、[Artifact Repository MVP](docs/product/artifact-repository-mvp.md)和[知识加工、Projection 与 Artifact](docs/architecture/knowledge-model-and-projection.md)。
+当前产品范围与设计边界见 [Product Brief](docs/product/product-brief.md)、[本地 Agent 发现与外部证据访问](docs/product/local-agent-discovery-mvp.md)、[外部 Agent Skill 发现与浏览 MVP](docs/product/skill-discovery-mvp.md)、[Skill Symlink 注入 MVP](docs/product/skill-symlink-injection-mvp.md)、[AI Backend MVP](docs/product/ai-backends-mvp.md)、[知识加工验证 MVP](docs/product/knowledge-processing-mvp.md)、[通用管理 Agent MVP](docs/product/chat-agent-mvp.md)、[Artifact Repository MVP](docs/product/artifact-repository-mvp.md)和[知识加工、Projection 与 Artifact](docs/architecture/knowledge-model-and-projection.md)。

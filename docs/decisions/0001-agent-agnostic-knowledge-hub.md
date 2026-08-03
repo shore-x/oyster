@@ -16,6 +16,7 @@
 - 修订：2026-07-30，确定 Git Runtime 边界：随 APP 捆绑私有标准 Git，内部按绝对路径调用；未来仅向 Oyster 管理的 Agent Shell 注入标准 `git` CLI，不依赖系统 Git 或引入专用 Git Tool
 - 修订：2026-07-31，将现有对话 Agent 扩展为单一通用管理 Agent：所有 Session 常驻 Knowledge 与 Coding 工具，不绑定 Artifact、Project 或 `cwd`，由 Agent 自主发现相关 Artifact
 - 修订：2026-07-31，确定通用 Agent 的高信任 MVP：Coding 工具从固定 Artifact Repository 根开始，但不设置路径边界、Shell Sandbox、逐次审批、selector/router/lock；System Prompt 只提供必要环境事实
+- 修订：2026-07-31，为通用管理 Agent 增加 `spawn_agent`：它创建独立上下文的临时通用 Agent 运行，不建立新的用户 Session、固定子 Agent 角色或专用工作流
 - 关联文档：[Product Brief](../product/product-brief.md)、[本地 Agent 发现与外部证据访问](../product/local-agent-discovery-mvp.md)、[AI Backend MVP](../product/ai-backends-mvp.md)、[知识加工验证 MVP](../product/knowledge-processing-mvp.md)、[Artifact Repository MVP](../product/artifact-repository-mvp.md)、[知识加工、Projection 与 Artifact](../architecture/knowledge-model-and-projection.md)
 
 ## Context
@@ -46,7 +47,7 @@ Git 在这一 MVP 中只是文件历史基础。Oyster 随 APP 捆绑并始终�
 
 APP 自身不自动 commit，不创建 branch 或 worktree，也不实现 diff 审核、merge 或冲突处理。当前通用管理 Agent 可以在普通对话中完成 Artifact 初始化、修订和知识选择，不建立独立 Artifact Agent 或固定 Projection Pipeline。其 `bash` 局部 `PATH` 暴露同一个标准 Git CLI，让 Agent 使用普通 `git` 命令，不增加专用 Git Tool 或替代协议。Harness 不自动编排 Git 工作流，也不限制 Agent 根据当前任务使用普通 Git。外部终端和其他外部进程默认不获得这一 PATH 注入。该实现不把 Git、目录或 `AGENTS.md` 提升为 Artifact Domain 的长期本体。
 
-面向用户的现有对话 Agent 扩展为一个通用管理 Agent。每个 Session 始终拥有 `read`、`edit`、`write`、`bash`、`search_knowledge`、`read_knowledge` 和 `upsert_knowledge`；Session 只保存对话与模型配置，不绑定 Artifact、Project、Workspace 或 `cwd`。四个 Coding 工具以固定 Artifact Repository 根作为初始坐标，但工具按 APP 当前 OS 用户权限运行，该坐标不是访问或安全边界。Harness 不建立 Artifact selector、router、锁、路径限制、命令白名单、Shell Sandbox 或 Bash 逐次审批。
+面向用户的现有对话 Agent 扩展为一个通用管理 Agent。每个 Session 始终拥有 `read`、`edit`、`write`、`bash`、`search_knowledge`、`read_knowledge`、`upsert_knowledge` 和 `spawn_agent`；Session 只保存对话与模型配置，不绑定 Artifact、Project、Workspace 或 `cwd`。`spawn_agent` 使用父 Agent 给出的完整任务启动空 transcript 的临时通用 Agent 运行，复用同一模型、System Prompt 和工具能力，并把最终回答作为 Tool Result 返回父 Agent。子运行不是新的用户 Session，也不按 Artifact 或 Project 绑定；Harness 不预设 reviewer、planner 等固定角色或专用编排模式。四个 Coding 工具以固定 Artifact Repository 根作为初始坐标，但工具按 APP 当前 OS 用户权限运行，该坐标不是访问或安全边界。Harness 不建立 Artifact selector、router、锁、路径限制、命令白名单、Shell Sandbox 或 Bash 逐次审批。
 
 没有预选 Artifact。通用管理 Agent 根据对话和当前文件系统识别相关的零个、一个或多个 Artifact，并读取各自根 `AGENTS.md` 以理解持久 Attention。Harness 不自动加载某个 Attention，也不把 Artifact 清单塞入上下文。System Prompt 只给出 Repository 绝对路径、一级目录 Artifact、根 `AGENTS.md` 和没有预选 Artifact 等必要环境事实，不加入允许/禁止清单或工具使用原则。
 
@@ -93,6 +94,7 @@ Artifact 不是新的世界事实，也不是可由知识层覆盖式重建的�
 - 固定 Repository、一级目录和根 `AGENTS.md` 提供了无需额外 Schema 或专用编辑器的最小可验证载体；
 - 捆绑的标准 Git Runtime 消除了系统 Git 和用户 `PATH` 差异，同时保留普通 Git 工具的互操作性；
 - 单一通用管理 Agent 可以在同一对话中跨 Knowledge 与多个 Artifact 工作，不需要用户先选择 Project 或 Workspace；
+- 临时子 Agent 运行提供独立上下文委派，而不要求新增面向用户的 Agent 身份、Session 类型或固定工作流；
 - 最小 Harness 把语义相关性判断留给 Agent，避免 Artifact router、Session 类型和权限策略提前固化产品模型；
 - 跨项目关系和跨 Agent 检索成为一等能力；
 - MCP 等开放协议可以作为消费者边界，而不污染内部模型。

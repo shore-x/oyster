@@ -38,4 +38,18 @@ describe('Markdown', () => {
     expect(html).not.toContain('href=')
     expect(html).toContain('markdown-link--disabled')
   })
+
+  it('can preview external Markdown without loading image resources', () => {
+    const html = markdownToSafeHtml([
+      '![local](../../secret.png)',
+      '![remote](https://tracking.example/pixel.png)',
+      '![file](file:///etc/passwd)'
+    ].join('\n'), false, false)
+
+    expect(html).not.toContain('<img')
+    expect(html).not.toContain('src=')
+    expect(html).toContain('[图片：local]')
+    expect(html).toContain('[图片：remote]')
+    expect(html).toContain('[图片：file]')
+  })
 })

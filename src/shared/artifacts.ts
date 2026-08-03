@@ -1,3 +1,13 @@
+/** Skill-specific application view derived from an Artifact's root output entry. */
+export interface ArtifactSkillSummary {
+  outputPath: string
+  documentPath?: string
+  name?: string
+  description?: string
+  status: 'ready' | 'invalid'
+  issue?: string
+}
+
 export interface ArtifactSummary {
   /** The first-level directory name and the Artifact identity in the MVP. */
   directoryName: string
@@ -5,6 +15,8 @@ export interface ArtifactSummary {
   attention: string
   /** Last modification time of the root AGENTS.md. */
   modifiedAt: string
+  /** Present when this Artifact carries the Skill application's output convention. */
+  skill?: ArtifactSkillSummary
 }
 
 export interface ArtifactSnapshot {

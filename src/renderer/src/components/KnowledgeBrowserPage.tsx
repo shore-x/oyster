@@ -88,6 +88,7 @@ export function KnowledgeBrowserPage(props: {
           total={controller.result().total}
           selectedTitle={controller.selectedTitle()}
           selectedStatement={controller.statement()}
+          neighborhood={controller.neighborhood()}
           emptyListText={controller.loading()
             ? '正在读取知识…'
             : query().trim()
@@ -98,6 +99,7 @@ export function KnowledgeBrowserPage(props: {
           hasMore={controller.result().nextOffset !== undefined}
           onSelect={(title) => controller.select(title)}
           onRead={(title) => window.oyster.knowledge.read(title)}
+          onReadNeighborhood={(title) => controller.readNeighborhood(title)}
           onLoadMore={() => void controller.browse(query(), true)}
         />
       </section>

@@ -41,6 +41,48 @@ for (const removedCopy of ['KNOWLEDGE SOURCES', '数据仅保存在本机', 'LOC
   if (semantics.bodyText.includes(removedCopy)) throw new Error(`Redundant copy is still rendered: ${removedCopy}`)
 }
 
+const skills = semantics.skills
+const expectedSkillProjectPath = join(userDataPath, 'skill-fixture-home', 'projects', 'oyster')
+if (skills?.title !== 'Agent Skills' || skills.skillCount !== 6) {
+  throw new Error(`Skill discovery page did not render all fixture registrations: ${skills?.skillCount ?? 'missing'}`)
+}
+if (
+  skills.skillNames.filter((name) => name === 'project-shared').length !== 2
+  || !['全局', '项目', '管理', '系统'].every((scope) => skills.scopeLabels.includes(scope))
+) {
+  throw new Error('Skill Agent registrations or scope labels are incomplete')
+}
+if (
+  JSON.stringify(skills.agentGroups) !== JSON.stringify([
+    { agentType: 'claude', name: 'Claude Code', count: 1 },
+    { agentType: 'pi', name: 'Pi', count: 2 },
+    { agentType: 'codex', name: 'Codex', count: 3 }
+  ])
+) {
+  throw new Error('Skill registrations are not grouped by Agent')
+}
+if (
+  skills.listOverflowY !== 'auto'
+  || !skills.listScrollable
+  || skills.detailOverflowY !== 'auto'
+  || !skills.browserWithinViewport
+) {
+  throw new Error('Skill master-detail panes do not scroll independently within the viewport')
+}
+if (skills.projectPath !== expectedSkillProjectPath || !skills.directoryPath?.startsWith(expectedSkillProjectPath)) {
+  throw new Error('Project Skill paths are not shown from the isolated fixture project')
+}
+if (
+  skills.reviewPreviewHeading !== 'Review'
+  || !skills.disabledImageText?.includes('remote preview')
+  || skills.previewImageCount !== 0
+) {
+  throw new Error('Skill Markdown preview is missing or loaded an external image')
+}
+if (skills.openFolderDisabled !== false || skills.pageError || skills.overflowX) {
+  throw new Error(`Skill browser is unavailable or visually invalid: ${skills.pageError || 'layout error'}`)
+}
+
 const artifacts = semantics.artifacts
 const expectedArtifactRepositoryPath = join(userDataPath, 'artifacts')
 if (artifacts?.title !== '协作产物') throw new Error('Artifact page was not rendered')
@@ -224,8 +266,8 @@ if (!agentConfiguration.chatRoleText?.includes('通用 Agent')) {
 }
 if (
   agentConfiguration.chatToolNames?.join(',')
-    !== 'read,bash,edit,write,search_knowledge,read_knowledge,upsert_knowledge'
-  || agentConfiguration.chatSchemaPanelCount !== 7
+    !== 'read,bash,edit,write,search_knowledge,read_knowledge,upsert_knowledge,spawn_agent'
+  || agentConfiguration.chatSchemaPanelCount !== 8
 ) {
   throw new Error('The conversational Agent tool catalog is incomplete')
 }

@@ -10,10 +10,20 @@ import {
 } from 'solid-js'
 import { Portal } from 'solid-js/web'
 import type {
+  KnowledgeNeighborhoodProjection,
   KnowledgeStatement,
   KnowledgeStatementSummary
 } from '../../../shared/knowledge'
+import {
+  knowledgeStatementExcerpt,
+  parseKnowledgeStatementContent
+} from '../../../shared/knowledge-reference'
+import {
+  KnowledgeExplorerSession,
+  type KnowledgeExplorerSessionSnapshot
+} from '../knowledge-explorer-session'
 import { Button } from '../ui'
+import { KnowledgeReferenceGraph } from './KnowledgeReferenceGraph'
 
 type StatementContentPart =
   | { kind: 'text'; value: string }
@@ -41,6 +51,7 @@ export interface KnowledgeStatementBrowserProps {
   total: number
   selectedTitle?: string
   selectedStatement?: KnowledgeStatement
+  neighborhood?: KnowledgeNeighborhoodProjection
   listLabel?: string
   emptyListText: string
   navigationKey?: string
@@ -48,58 +59,49 @@ export interface KnowledgeStatementBrowserProps {
   hasMore?: boolean
   onSelect(title: string): void | Promise<void>
   onRead(title: string): Promise<KnowledgeStatement | undefined>
+  onReadNeighborhood?(title: string): Promise<KnowledgeNeighborhoodProjection | undefined>
   onLoadMore?(): void
 }
 
 export function statementPreview(content: string, limit = 220): string {
-  const text = content
-    .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2')
-    .replace(/\[\[([^\]]+)\]\]/g, '$1')
-    .replace(/\s+/g, ' ')
-    .trim()
-  return text.length > limit ? `${text.slice(0, limit).trimEnd()}…` : text
+  return knowledgeStatementExcerpt(content, limit)
 }
 
 export function parseStatementContent(content: string): StatementContentPart[] {
-  const parts: StatementContentPart[] = []
-  const linkPattern = /\[\[([^\]|\n]+?)(?:\|([^\]\n]+?))?\]\]/g
-  let cursor = 0
-  let match: RegExpExecArray | null
-  while ((match = linkPattern.exec(content)) !== null) {
-    if (match.index > cursor) parts.push({ kind: 'text', value: content.slice(cursor, match.index) })
-    const target = match[1].trim()
-    const label = match[2]?.trim() || target
-    parts.push({ kind: 'link', target, label })
-    cursor = match.index + match[0].length
-  }
-  if (cursor < content.length) parts.push({ kind: 'text', value: content.slice(cursor) })
-  return parts
+  return parseKnowledgeStatementContent(content).map((part) => part.kind === 'text'
+    ? part
+    : { kind: 'link', target: part.targetTitle, label: part.label })
 }
 
 export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps) {
   const previewId = `knowledge-statement-preview-${createUniqueId()}`
-  const [history, setHistory] = createSignal<string[]>([])
-  const [historyIndex, setHistoryIndex] = createSignal(-1)
+  const explorerSession = new KnowledgeExplorerSession(props.selectedTitle)
+  const [session, setSession] = createSignal<KnowledgeExplorerSessionSnapshot>(explorerSession.snapshot())
   const [previews, setPreviews] = createSignal<Record<string, StatementPreviewState>>({})
   const [previewOverlay, setPreviewOverlay] = createSignal<StatementPreviewOverlay>()
+  const [hoverNeighborhood, setHoverNeighborhood] = createSignal<KnowledgeNeighborhoodProjection>()
+  const [hoverNeighborhoodLoading, setHoverNeighborhoodLoading] = createSignal(false)
   const previewLoads = new Map<string, Promise<KnowledgeStatement | undefined>>()
+  const neighborhoodCache = new Map<string, KnowledgeNeighborhoodProjection>()
+  let hoverGeneration = 0
   let previousNavigationKey: string | undefined
 
   createEffect(() => {
     const navigationKey = props.navigationKey
     const selectedTitle = props.selectedTitle
-    const currentTitle = untrack(() => history()[historyIndex()])
+    const currentTitle = untrack(() => session().currentTitle)
     if (navigationKey !== previousNavigationKey) {
       previousNavigationKey = navigationKey
       previewLoads.clear()
+      neighborhoodCache.clear()
       setPreviews({})
-      setHistory(selectedTitle ? [selectedTitle] : [])
-      setHistoryIndex(selectedTitle ? 0 : -1)
+      setHoverNeighborhood(undefined)
+      setSession(explorerSession.reset(selectedTitle))
       return
     }
     if (selectedTitle !== currentTitle) {
-      setHistory(selectedTitle ? [selectedTitle] : [])
-      setHistoryIndex(selectedTitle ? 0 : -1)
+      setHoverNeighborhood(undefined)
+      setSession(explorerSession.reset(selectedTitle))
     }
   })
 
@@ -149,21 +151,55 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
 
   function navigate(title: string): void {
     setPreviewOverlay(undefined)
-    if (history()[historyIndex()] === title) return
-    const nextHistory = history().slice(0, historyIndex() + 1)
-    nextHistory.push(title)
-    setHistory(nextHistory)
-    setHistoryIndex(nextHistory.length - 1)
+    if (session().currentTitle === title) return
+    setHoverNeighborhood(undefined)
+    setSession(explorerSession.navigate(title))
     void props.onSelect(title)
   }
 
   function moveHistory(offset: -1 | 1): void {
-    const nextIndex = historyIndex() + offset
-    const title = history()[nextIndex]
+    const next = explorerSession.move(offset)
+    const title = next.currentTitle
     if (!title) return
     setPreviewOverlay(undefined)
-    setHistoryIndex(nextIndex)
+    setHoverNeighborhood(undefined)
+    setSession(next)
     void props.onSelect(title)
+  }
+
+  async function hoverGraphNode(title?: string): Promise<void> {
+    const generation = ++hoverGeneration
+    setSession(explorerSession.hover(title))
+    if (!title) {
+      setHoverNeighborhood(undefined)
+      setHoverNeighborhoodLoading(false)
+      return
+    }
+    if (title === props.neighborhood?.centerTitle) {
+      setHoverNeighborhood(props.neighborhood)
+      setHoverNeighborhoodLoading(false)
+      return
+    }
+    const cached = neighborhoodCache.get(title)
+    if (cached) {
+      setHoverNeighborhood(cached)
+      setHoverNeighborhoodLoading(false)
+      return
+    }
+    if (!props.onReadNeighborhood) return
+    setHoverNeighborhood(undefined)
+    setHoverNeighborhoodLoading(true)
+    try {
+      const projection = await props.onReadNeighborhood(title)
+      if (projection) neighborhoodCache.set(title, projection)
+      if (generation === hoverGeneration && session().hoveredTitle === title) {
+        setHoverNeighborhood(projection)
+      }
+    } catch {
+      if (generation === hoverGeneration) setHoverNeighborhood(undefined)
+    } finally {
+      if (generation === hoverGeneration) setHoverNeighborhoodLoading(false)
+    }
   }
 
   async function loadPreview(title: string): Promise<KnowledgeStatement | undefined> {
@@ -252,7 +288,7 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
                     data-testid="statement-nav-back"
                     aria-label="后退到上一个 Statement"
                     title="后退"
-                    disabled={historyIndex() <= 0}
+                    disabled={session().historyIndex <= 0}
                     onClick={() => moveHistory(-1)}
                   >后退</Button>
                   <Button
@@ -261,12 +297,24 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
                     data-testid="statement-nav-forward"
                     aria-label="前进到下一个 Statement"
                     title="前进"
-                    disabled={historyIndex() < 0 || historyIndex() >= history().length - 1}
+                    disabled={session().historyIndex < 0 || session().historyIndex >= session().history.length - 1}
                     onClick={() => moveHistory(1)}
                   >前进</Button>
                 </div>
-                <span>{historyIndex() >= 0 ? `${historyIndex() + 1} / ${history().length}` : ''}</span>
+                <span>{session().historyIndex >= 0 ? `${session().historyIndex + 1} / ${session().history.length}` : ''}</span>
               </div>
+              <Show when={props.neighborhood}>
+                {(projection) => (
+                  <KnowledgeReferenceGraph
+                    projection={projection()}
+                    hoveredTitle={session().hoveredTitle}
+                    hoverProjection={hoverNeighborhood()}
+                    hoverLoading={hoverNeighborhoodLoading()}
+                    onSelect={navigate}
+                    onHover={(title) => void hoverGraphNode(title)}
+                  />
+                )}
+              </Show>
               <article data-testid="knowledge-statement-detail">
                 <h2>{statement().title}</h2>
                 <div class="knowledge-browser__content">

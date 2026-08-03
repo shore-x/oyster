@@ -47,6 +47,9 @@ import { registerChatIpc } from './chat/ipc'
 import { PiChatSessionRepository } from './chat/pi-chat-session-repository'
 import { ArtifactRepository } from './artifacts/artifact-repository'
 import { registerArtifactIpc } from './artifacts/ipc'
+import { registerSkillIpc } from './skills/ipc'
+import { ManagedSkillService } from './skills/managed-skill-service'
+import { SkillDiscoveryService } from './skills/skill-discovery-service'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 let mainWindow: BrowserWindow | undefined
@@ -98,6 +101,79 @@ function createBackendService(): AiBackendService {
       openExternal: async (url) => { await shell.openExternal(url) }
     })
   )
+}
+
+function skillDiscoveryHomeDirectory(): string {
+  return fixtureMode()
+    ? join(app.getPath('userData'), 'skill-fixture-home')
+    : app.getPath('home')
+}
+
+async function initializeFixtureSkills(homeDirectory: string): Promise<void> {
+  const projectPath = join(homeDirectory, 'projects', 'oyster')
+  const entries = [
+    {
+      path: join(homeDirectory, '.claude', 'skills', 'review', 'SKILL.md'),
+      content: [
+        '---',
+        'name: review',
+        'description: Review changes before delivery.',
+        '---',
+        '',
+        '# Review',
+        '',
+        'Keep the change focused and verify the result.',
+        '',
+        '![remote preview](https://example.com/tracking.png)',
+        ''
+      ].join('\n')
+    },
+    {
+      path: join(homeDirectory, '.pi', 'agent', 'skills', 'pi-helper', 'SKILL.md'),
+      content: '---\nname: pi-helper\ndescription: Pi user Skill.\n---\n\n# Pi helper\n'
+    },
+    {
+      path: join(projectPath, '.agents', 'skills', 'project-shared', 'SKILL.md'),
+      content: '---\nname: project-shared\ndescription: Shared project Skill.\n---\n\n# Project shared\n'
+    },
+    {
+      path: join(homeDirectory, '.codex', 'skills', '.system', 'system-helper', 'SKILL.md'),
+      content: '---\nname: system-helper\ndescription: Codex system Skill.\n---\n\n# System helper\n'
+    },
+    {
+      path: join(homeDirectory, 'etc', 'codex', 'skills', 'admin-policy', 'SKILL.md'),
+      content: '---\nname: admin-policy\ndescription: Administrator Skill.\n---\n\n# Admin policy\n'
+    }
+  ]
+
+  await mkdir(join(projectPath, '.git'), { recursive: true })
+  await Promise.all(entries.map(async (entry) => {
+    await mkdir(dirname(entry.path), { recursive: true })
+    await writeFile(entry.path, entry.content, 'utf8')
+  }))
+}
+
+function createSkillDiscoveryService(discovery: DiscoveryService): SkillDiscoveryService {
+  const useFixtures = fixtureMode()
+  const homeDirectory = skillDiscoveryHomeDirectory()
+  const context = createDetectionContext(homeDirectory, useFixtures ? {} : process.env)
+  const projectPaths = () => useFixtures
+    ? [join(homeDirectory, 'projects', 'oyster')]
+    : discovery.listAvailableSessions().flatMap((session) => (
+        session.projectPath ? [session.projectPath] : []
+      ))
+  const adminRoot = useFixtures
+    ? join(homeDirectory, 'etc', 'codex', 'skills')
+    : undefined
+
+  return new SkillDiscoveryService(context, projectPaths, adminRoot)
+}
+
+function createManagedSkillService(repository: ArtifactRepository): ManagedSkillService {
+  const useFixtures = fixtureMode()
+  const homeDirectory = skillDiscoveryHomeDirectory()
+  const context = createDetectionContext(homeDirectory, useFixtures ? {} : process.env)
+  return new ManagedSkillService(repository, context)
 }
 
 function createKnowledgeProcessingService(
@@ -164,6 +240,68 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       bodyText: page.innerText
     }
   })()`)
+
+  window.setSize(1160, 680)
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-skills"]').click()`)
+  const skillSemantics = await window.webContents.executeJavaScript(`(async () => {
+    const page = document.querySelector('[data-testid="page-skills"]')
+    const discover = page.querySelector('[data-testid="discover-skills"]')
+    discover?.click()
+    let deadline = Date.now() + 2_000
+    while (
+      (discover?.textContent?.includes('正在发现') || !page.querySelector('[data-testid="skill-document-preview"]'))
+      && !page.querySelector('.page-error')
+      && Date.now() < deadline
+    ) await new Promise((resolve) => setTimeout(resolve, 25))
+
+    const reviewPreviewHeading = page
+      .querySelector('[data-testid="skill-document-preview"] h1')
+      ?.textContent?.trim()
+    const disabledImageText = page.querySelector('.markdown-image--disabled')?.textContent?.trim()
+    const previewImageCount = page.querySelectorAll('[data-testid="skill-document-preview"] img').length
+    const items = Array.from(page.querySelectorAll('[data-testid="skill-list-item"]'))
+    const projectItem = items.find((item) => item.querySelector('.skill-scope--project'))
+    projectItem?.click()
+    deadline = Date.now() + 2_000
+    while (
+      (!page.querySelector('[data-testid="skill-project-path"]')
+        || page.querySelector('[data-testid="open-skill-folder"]')?.disabled)
+      && !page.querySelector('.page-error')
+      && Date.now() < deadline
+    ) await new Promise((resolve) => setTimeout(resolve, 25))
+
+    const listScroll = page.querySelector('[data-testid="skill-list-scroll"]')
+    const detailScroll = page.querySelector('[data-testid="skill-detail-scroll"]')
+    const browser = page.querySelector('.skills-browser')?.getBoundingClientRect()
+
+    return {
+      title: page.querySelector('.page-header h1')?.textContent?.trim(),
+      skillCount: items.length,
+      skillNames: items.map((item) => item.querySelector('strong')?.textContent?.trim()),
+      scopeLabels: items.map((item) => item.querySelector('.skill-scope')?.textContent?.trim()),
+      reviewPreviewHeading,
+      disabledImageText,
+      previewImageCount,
+      projectPath: page.querySelector('[data-testid="skill-project-path"]')?.textContent?.trim(),
+      directoryPath: page.querySelector('[data-testid="skill-directory-path"]')?.textContent?.trim(),
+      openFolderDisabled: page.querySelector('[data-testid="open-skill-folder"]')?.disabled,
+      agentGroups: Array.from(page.querySelectorAll('[data-testid="skill-agent-group"]')).map((group) => ({
+        agentType: group.getAttribute('data-agent-type'),
+        name: group.querySelector('.skill-agent-group__header h3')?.textContent?.trim(),
+        count: Number(group.querySelector('.skill-agent-group__header span')?.textContent)
+      })),
+      listOverflowY: listScroll ? getComputedStyle(listScroll).overflowY : undefined,
+      listScrollable: Boolean(listScroll && listScroll.scrollHeight > listScroll.clientHeight),
+      detailOverflowY: detailScroll ? getComputedStyle(detailScroll).overflowY : undefined,
+      browserWithinViewport: Boolean(browser && browser.bottom <= window.innerHeight + 1),
+      pageError: page.querySelector('.page-error')?.textContent?.trim(),
+      overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
+    }
+  })()`)
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  const skillImage = await window.webContents.capturePage()
+  await writeFile(join(dirname(capturePath), 'skills.png'), skillImage.toPNG())
 
   window.setSize(900, 780)
   await new Promise((resolve) => setTimeout(resolve, 80))
@@ -911,6 +1049,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     `${capturePath}.json`,
     `${JSON.stringify({
       ...semantics,
+      skills: skillSemantics,
       ai: { ...aiSemantics, directTest: aiDirectTestSemantics },
       agentConfiguration: agentConfigurationSemantics,
       artifacts: artifactSemantics,
@@ -985,9 +1124,12 @@ async function createMainWindow(): Promise<void> {
 
 app.whenReady().then(async () => {
   const service = createService()
+  const skillDiscoveryService = createSkillDiscoveryService(service)
+  if (fixtureMode()) await initializeFixtureSkills(skillDiscoveryHomeDirectory())
   const artifactRepository = new ArtifactRepository(
     join(app.getPath('userData'), 'artifacts')
   )
+  const managedSkillService = createManagedSkillService(artifactRepository)
   aiBackendService = createBackendService()
   knowledgeStoreManager = await SqliteKnowledgeStoreManager.open(
     join(app.getPath('userData'), 'knowledge-store')
@@ -1044,6 +1186,7 @@ app.whenReady().then(async () => {
     })
   }
   registerIpc(service)
+  registerSkillIpc(skillDiscoveryService, managedSkillService, () => mainWindow)
   registerArtifactIpc(artifactRepository, () => mainWindow)
   registerAiBackendIpc(aiBackendService, () => mainWindow)
   registerKnowledgeProcessingIpc(

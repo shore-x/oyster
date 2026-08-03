@@ -6,16 +6,18 @@ import { ChatPage } from './components/ChatPage'
 import { ArtifactsPage } from './components/ArtifactsPage'
 import { KnowledgeProcessingPage } from './components/KnowledgeProcessingPage'
 import { KnowledgeBrowserPage } from './components/KnowledgeBrowserPage'
+import { SkillsPage, type SkillsNavigationRequest } from './components/SkillsPage'
 import { SourceCard } from './components/SourceCard'
 import { Button, Icon } from './ui'
 
-type PageId = 'sources' | 'knowledge' | 'artifacts' | 'chat' | 'knowledge-processing' | 'agent-configuration' | 'ai-backends'
+type PageId = 'sources' | 'skills' | 'knowledge' | 'artifacts' | 'chat' | 'knowledge-processing' | 'agent-configuration' | 'ai-backends'
 
 export function App() {
   const controller = createDiscoveryController()
   const [page, setPage] = createSignal<PageId>('sources')
   const [knowledgeResetVersion, setKnowledgeResetVersion] = createSignal(0)
   const [knowledgeNavigation, setKnowledgeNavigation] = createSignal<{ title: string; version: number }>()
+  const [skillsNavigation, setSkillsNavigation] = createSignal<SkillsNavigationRequest>()
   const foundCount = createMemo(
     () => controller.snapshot().sources.filter((source) => source.discoveryState === 'found').length
   )
@@ -37,6 +39,12 @@ export function App() {
             class={`nav-item${page() === 'sources' ? ' nav-item--active' : ''}`}
             onClick={(event) => { event.preventDefault(); navigateTo('sources') }}
           ><Icon name="archive" /><span>数据来源</span></a>
+          <a
+            href="#skills"
+            data-testid="nav-skills"
+            class={`nav-item${page() === 'skills' ? ' nav-item--active' : ''}`}
+            onClick={(event) => { event.preventDefault(); navigateTo('skills') }}
+          ><Icon name="skill" /><span>Skills</span></a>
           <a
             href="#knowledge"
             data-testid="nav-knowledge"
@@ -76,7 +84,7 @@ export function App() {
         </nav>
       </aside>
 
-      <main class={`content${page() === 'knowledge-processing' || page() === 'knowledge' || page() === 'chat' || page() === 'agent-configuration' ? ' content--wide' : ''}`}>
+      <main class={`content${page() === 'skills' || page() === 'knowledge-processing' || page() === 'knowledge' || page() === 'chat' || page() === 'agent-configuration' ? ' content--wide' : ''}`}>
         <div class="window-drag-region" data-testid="window-drag-region" aria-hidden="true" />
         {/* Navigation changes visibility; mounted page state and active runs remain intact. */}
         <div data-testid="page-sources" hidden={page() !== 'sources'}>
@@ -123,6 +131,9 @@ export function App() {
             }}</For>
           </section>
         </div>
+        <div data-testid="page-skills" hidden={page() !== 'skills'}>
+          <SkillsPage navigationRequest={skillsNavigation()} />
+        </div>
         <div data-testid="page-knowledge" hidden={page() !== 'knowledge'}>
           <KnowledgeBrowserPage
             active={page() === 'knowledge'}
@@ -131,7 +142,13 @@ export function App() {
           />
         </div>
         <div data-testid="page-artifacts" hidden={page() !== 'artifacts'}>
-          <ArtifactsPage />
+          <ArtifactsPage onManageSkill={(artifactDirectoryName) => {
+            setSkillsNavigation((current) => ({
+              artifactDirectoryName,
+              version: (current?.version ?? 0) + 1
+            }))
+            navigateTo('skills')
+          }} />
         </div>
         <div data-testid="page-chat" hidden={page() !== 'chat'}>
           <ChatPage onOpenKnowledge={(title) => {
