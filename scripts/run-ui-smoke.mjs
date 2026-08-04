@@ -166,6 +166,11 @@ if (
   || knowledge.browse.referenceHasArrow
   || knowledge.browse.referenceNodeCount !== 4
   || knowledge.browse.referenceEdgeCount < 3
+  || knowledge.browse.referenceFirstHopEdgeCount < 1
+  || knowledge.browse.referenceContextualEdgeCount < 1
+  || !knowledge.browse.referenceDefaultFirstHopEdgesVisible
+  || !knowledge.browse.referenceDefaultContextualEdgesHidden
+  || !knowledge.browse.referenceFirstHopEdgesStronger
   || knowledge.browse.referenceClusterCount !== 1
   || !knowledge.browse.referenceHasTwoHopNode
   || !knowledge.browse.referenceTwoHopTitle
@@ -191,13 +196,16 @@ if (
   knowledge.browse.referenceHasIntroCopy
   || knowledge.browse.referenceViewportHeight > 280
   || knowledge.browse.referenceSceneHeight > 280
-  || knowledge.browse.referenceTwoHopFontSize !== '12px'
+  || knowledge.browse.referenceTwoHopFontSize !== '11px'
   || knowledge.browse.referenceHoverPreviewTitle !== knowledge.browse.referenceTwoHopTitle
   || !knowledge.browse.referenceHoverPreviewText
   || ['它引用', '引用它', '距中心', '个相邻'].some((copy) => knowledge.browse.referenceHoverPreviewText.includes(copy))
   || !knowledge.browse.referenceHoverPreviewInsideGraph
   || !knowledge.browse.referenceHoverKeepsHeight
   || !knowledge.browse.referenceHoverActive
+  || !knowledge.browse.referenceFirstHopEdgesRemainVisibleOnHover
+  || !knowledge.browse.referenceHoveredContextualEdgesVisible
+  || !knowledge.browse.referenceUnrelatedContextualEdgesHidden
   || knowledge.browse.referenceFocusPreviewTitle !== knowledge.browse.referenceTwoHopTitle
   || !knowledge.browse.referenceFocusActive
 ) {

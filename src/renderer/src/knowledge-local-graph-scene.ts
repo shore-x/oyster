@@ -1,6 +1,5 @@
 import type { KnowledgeNeighborhoodProjection } from '../../shared/knowledge'
 import {
-  forceCollide,
   forceManyBody,
   forceSimulation,
   forceX,
@@ -16,21 +15,22 @@ const SCENE_PADDING_X = 16
 const SCENE_PADDING_Y = 16
 const NODE_GAP = 8
 const EDGE_NODE_CLEARANCE = 3
-const LINK_SURFACE_GAP = 46
+const FIRST_HOP_LINK_SURFACE_GAP = 32
+const CONTEXTUAL_LINK_SURFACE_GAP = 20
 const FORCE_TICK_LIMIT = 520
 const FORCE_STABLE_TICKS = 14
-const SECOND_HOP_REPULSION_BASE_RANGE = 140
-const SECOND_HOP_REPULSION_RANGE_PER_DENSE_NODE = 20
-const SECOND_HOP_REPULSION_MAX_EXTRA_RANGE = 90
-const SECOND_HOP_REPULSION_BASE_STRENGTH = 18
-const SECOND_HOP_REPULSION_LINK_LOAD_STRENGTH = 2.5
-const SECOND_HOP_REPULSION_MAX_FORCE = 6
+const SECOND_HOP_REPULSION_BASE_RANGE = 120
+const SECOND_HOP_REPULSION_RANGE_PER_DENSE_NODE = 10
+const SECOND_HOP_REPULSION_MAX_EXTRA_RANGE = 44
+const SECOND_HOP_REPULSION_BASE_STRENGTH = 12
+const SECOND_HOP_REPULSION_LINK_LOAD_STRENGTH = 1.4
+const SECOND_HOP_REPULSION_MAX_FORCE = 3.6
 const SECOND_HOP_REPULSION_WALL_REDIRECT_DISTANCE = 28
 
 const NODE_DIMENSIONS = {
   center: { width: 152, height: 44 },
   firstHop: { width: 136, height: 40 },
-  secondHop: { width: 112, height: 34 }
+  secondHop: { width: 104, height: 30 }
 } as const
 
 export interface KnowledgeLocalGraphSceneNode {
@@ -240,8 +240,8 @@ function seedNodes(
           ? outerAnchorAngle
           : outerAnchorAngle + outerSpread * (index / (titles.length - 1) - 0.5)
         positionByTitle.set(title, {
-          x: Math.cos(angle) * 124,
-          y: Math.sin(angle) * 124
+          x: Math.cos(angle) * 108,
+          y: Math.sin(angle) * 108
         })
       })
     }
@@ -276,10 +276,14 @@ function rectangleRayExtent(node: ForceNode, unitX: number, unitY: number): numb
 }
 
 function createLinkForce(edges: VisualEdge[]): Force<ForceNode, undefined> {
-  let links: Array<[ForceNode, ForceNode]> = []
+  let links: Array<{
+    source: ForceNode
+    target: ForceNode
+    surfaceGap: number
+  }> = []
   const force = ((alpha: number): void => {
     for (let index = 0; index < links.length; index += 1) {
-      const [source, target] = links[index]
+      const { source, target, surfaceGap } = links[index]
       let deltaX = target.x + target.vx - source.x - source.vx
       let deltaY = target.y + target.vy - source.y - source.vy
       if (Math.abs(deltaX) + Math.abs(deltaY) < 0.001) {
@@ -291,7 +295,7 @@ function createLinkForce(edges: VisualEdge[]): Force<ForceNode, undefined> {
       const unitY = deltaY / distance
       const desiredDistance = rectangleRayExtent(source, unitX, unitY)
         + rectangleRayExtent(target, unitX, unitY)
-        + LINK_SURFACE_GAP
+        + surfaceGap
       const movement = (distance - desiredDistance) * 0.14 * alpha
       const sourceMovable = source.distance === 0 ? 0 : 1
       const targetMovable = target.distance === 0 ? 0 : 1
@@ -311,7 +315,13 @@ function createLinkForce(edges: VisualEdge[]): Force<ForceNode, undefined> {
     links = edges.flatMap((edge) => {
       const source = nodesByTitle.get(edge.sourceTitle)
       const target = nodesByTitle.get(edge.targetTitle)
-      return source && target ? [[source, target]] : []
+      if (!source || !target) return []
+      const firstHopEdge = source.distance === 0 || target.distance === 0
+      return [{
+        source,
+        target,
+        surfaceGap: firstHopEdge ? FIRST_HOP_LINK_SURFACE_GAP : CONTEXTUAL_LINK_SURFACE_GAP
+      }]
     })
   }
   return force
@@ -413,22 +423,26 @@ function createRectangleCollisionForce(width: number, iterations = 6): Force<For
           const rightMovable = right.distance === 0 ? 0 : 1
           const totalMovement = leftMovable + rightMovable || 1
           const horizontalDirection = deltaX === 0 ? (rightIndex % 2 === 0 ? 1 : -1) : Math.sign(deltaX)
-          const horizontalCapacity = (leftMovable
+          const leftHorizontalCapacity = leftMovable
             ? horizontalDirection > 0
               ? left.x - horizontalBounds(left, width)[0]
               : horizontalBounds(left, width)[1] - left.x
-            : 0)
-            + (rightMovable
+            : 0
+          const rightHorizontalCapacity = rightMovable
               ? horizontalDirection > 0
                 ? horizontalBounds(right, width)[1] - right.x
                 : right.x - horizontalBounds(right, width)[0]
-              : 0)
-          const canResolveHorizontally = horizontalCapacity >= overlapX + 0.05
+              : 0
+          const canResolveHorizontally = leftHorizontalCapacity + rightHorizontalCapacity >= overlapX + 0.05
           if (overlapX / requiredX < overlapY / requiredY && canResolveHorizontally) {
             const direction = horizontalDirection
             const movement = overlapX + 0.05
-            left.vx -= direction * movement * leftMovable / totalMovement
-            right.vx += direction * movement * rightMovable / totalMovement
+            let leftMovement = Math.min(movement / totalMovement * leftMovable, leftHorizontalCapacity)
+            let rightMovement = Math.min(movement - leftMovement, rightHorizontalCapacity)
+            leftMovement += Math.min(movement - leftMovement - rightMovement, leftHorizontalCapacity - leftMovement)
+            rightMovement += Math.min(movement - leftMovement - rightMovement, rightHorizontalCapacity - rightMovement)
+            left.vx -= direction * leftMovement
+            right.vx += direction * rightMovement
           } else {
             const direction = deltaY === 0 ? (rightIndex % 2 === 0 ? 1 : -1) : Math.sign(deltaY)
             const movement = overlapY + 0.05
@@ -445,6 +459,67 @@ function createRectangleCollisionForce(width: number, iterations = 6): Force<For
   return force
 }
 
+function resolveRemainingRectangleOverlaps(nodes: ForceNode[], width: number): void {
+  const repeatedOverlapCount = new Map<string, number>()
+  for (let pass = 0; pass < 400 && nodesHaveOverlaps(nodes); pass += 1) {
+    for (let leftIndex = 0; leftIndex < nodes.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < nodes.length; rightIndex += 1) {
+        const left = nodes[leftIndex]
+        const right = nodes[rightIndex]
+        const deltaX = right.x - left.x
+        const deltaY = right.y - left.y
+        const requiredX = (left.width + right.width) / 2 + NODE_GAP
+        const requiredY = (left.height + right.height) / 2 + NODE_GAP
+        const overlapX = requiredX - Math.abs(deltaX)
+        const overlapY = requiredY - Math.abs(deltaY)
+        if (overlapX <= 0 || overlapY <= 0) continue
+        const pairKey = `${leftIndex}:${rightIndex}`
+        const overlapCount = (repeatedOverlapCount.get(pairKey) ?? 0) + 1
+        repeatedOverlapCount.set(pairKey, overlapCount)
+
+        const leftMovable = left.distance === 0 ? 0 : 1
+        const rightMovable = right.distance === 0 ? 0 : 1
+        const totalMovement = leftMovable + rightMovable || 1
+        const horizontalDirection = deltaX === 0 ? (rightIndex % 2 === 0 ? 1 : -1) : Math.sign(deltaX)
+        const leftHorizontalCapacity = leftMovable
+          ? horizontalDirection > 0
+            ? left.x - horizontalBounds(left, width)[0]
+            : horizontalBounds(left, width)[1] - left.x
+          : 0
+        const rightHorizontalCapacity = rightMovable
+          ? horizontalDirection > 0
+            ? horizontalBounds(right, width)[1] - right.x
+            : right.x - horizontalBounds(right, width)[0]
+          : 0
+        const canResolveHorizontally = leftHorizontalCapacity + rightHorizontalCapacity >= overlapX + 0.05
+        if (
+          overlapCount < 8
+          && overlapX / requiredX < overlapY / requiredY
+          && canResolveHorizontally
+        ) {
+          const movement = overlapX + 0.05
+          let leftMovement = Math.min(movement / totalMovement * leftMovable, leftHorizontalCapacity)
+          let rightMovement = Math.min(movement - leftMovement, rightHorizontalCapacity)
+          leftMovement += Math.min(movement - leftMovement - rightMovement, leftHorizontalCapacity - leftMovement)
+          rightMovement += Math.min(movement - leftMovement - rightMovement, rightHorizontalCapacity - rightMovement)
+          left.x -= horizontalDirection * leftMovement
+          right.x += horizontalDirection * rightMovement
+        } else {
+          const direction = deltaY === 0 ? (rightIndex % 2 === 0 ? 1 : -1) : Math.sign(deltaY)
+          const movement = overlapY + 0.05
+          left.y -= direction * movement * leftMovable / totalMovement
+          right.y += direction * movement * rightMovable / totalMovement
+        }
+      }
+    }
+    clampHorizontalPosition(nodes, width)
+  }
+  for (const node of nodes) {
+    node.vx = 0
+    node.vy = 0
+  }
+}
+
 function settleNodes(nodes: ForceNode[], edges: VisualEdge[], width: number): void {
   const center = nodes.find((node) => node.distance === 0)
   if (center) {
@@ -454,8 +529,11 @@ function settleNodes(nodes: ForceNode[], edges: VisualEdge[], width: number): vo
   const linkForce = createLinkForce(edges)
   const chargeForce = forceManyBody<ForceNode>().strength(-6).distanceMin(24).distanceMax(160)
   const secondHopRepulsionForce = createSecondHopCenterRepulsionForce(edges, width)
-  const xForce = forceX<ForceNode>(0).strength((node) => node.distance === 0 ? 1 : node.distance === 1 ? 0.008 : 0)
-  const yForce = forceY<ForceNode>(0).strength((node) => node.distance === 0 ? 1 : node.distance === 1 ? 0.008 : 0)
+  const centerCohesionStrength = (node: ForceNode): number => (
+    node.distance === 0 ? 1 : node.distance === 1 ? 0.008 : 0.012
+  )
+  const xForce = forceX<ForceNode>(0).strength(centerCohesionStrength)
+  const yForce = forceY<ForceNode>(0).strength(centerCohesionStrength)
   const simulation = forceSimulation(nodes)
     .stop()
     .alpha(1)
@@ -481,33 +559,8 @@ function settleNodes(nodes: ForceNode[], edges: VisualEdge[], width: number): vo
     stableTicks = tick > 60 && maximumMovement < 0.08 ? stableTicks + 1 : 0
     if (stableTicks >= FORCE_STABLE_TICKS) break
   }
-  if (nodesHaveOverlaps(nodes)) {
-    simulation
-      .force('links', null)
-      .force('charge', null)
-      .force('second-hop-center-repulsion', null)
-      .force('x', null)
-      .force('y', null)
-      .force('collision', forceCollide<ForceNode>()
-        .radius((node) => Math.hypot(node.width, node.height) / 2 + NODE_GAP / 2)
-        .strength(1)
-        .iterations(4))
-    for (const node of nodes) {
-      node.vx = 0
-      node.vy = 0
-    }
-  }
-  for (let pass = 0; pass < 4 && nodesHaveOverlaps(nodes); pass += 1) {
-    simulation.alpha(0.3)
-    let clearTicks = 0
-    for (let tick = 0; tick < 220; tick += 1) {
-      simulation.tick()
-      clampHorizontalPosition(nodes, width)
-      clearTicks = nodesHaveOverlaps(nodes) ? 0 : clearTicks + 1
-      if (clearTicks >= FORCE_STABLE_TICKS) break
-    }
-  }
   simulation.stop()
+  resolveRemainingRectangleOverlaps(nodes, width)
 }
 
 function compactNodes(nodes: ForceNode[], width: number): {

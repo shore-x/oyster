@@ -35,6 +35,11 @@ describe('KnowledgeReferenceExplorer', () => {
     expect(html).toContain('Second hop')
     expect(html).toContain('knowledge-local-graph__viewport')
     expect(html).toContain('knowledge-local-graph__edge')
+    expect(html.match(/knowledge-local-graph__edge--first-hop/g)).toHaveLength(2)
+    expect(html.match(/knowledge-local-graph__edge--contextual/g)).toHaveLength(1)
+    expect(html.match(/data-edge-tier="first-hop"/g)).toHaveLength(2)
+    expect(html.match(/data-edge-tier="contextual"/g)).toHaveLength(1)
+    expect(html).not.toContain('knowledge-local-graph__edge--dimmed')
     expect(html).toContain('<path')
     expect(html).toContain('data-curved=')
     expect(html.match(/<button[^>]*knowledge-local-graph__node/g)).toHaveLength(4)
@@ -68,6 +73,8 @@ describe('KnowledgeReferenceExplorer', () => {
     expect(html).not.toContain('它引用')
     expect(html).not.toContain('引用它')
     expect(html).not.toContain('个相邻节点')
+    expect(html.match(/knowledge-local-graph__edge--first-hop/g)).toHaveLength(2)
+    expect(html.match(/knowledge-local-graph__edge--active/g)).toHaveLength(2)
   })
 
   it('keeps unresolved references in a collapsed disclosure', () => {

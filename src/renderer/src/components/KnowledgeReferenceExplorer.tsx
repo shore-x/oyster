@@ -103,14 +103,19 @@ export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProp
               <For each={scene().edges}>{(edge) => {
                 const active = () => props.hoveredTitle === edge.sourceTitle
                   || props.hoveredTitle === edge.targetTitle
+                const firstHop = edge.sourceTitle === props.projection.centerTitle
+                  || edge.targetTitle === props.projection.centerTitle
                 return (
                   <path
-                    class={`knowledge-local-graph__edge ${props.hoveredTitle && !active()
-                      ? 'knowledge-local-graph__edge--dimmed'
-                      : active() ? 'knowledge-local-graph__edge--active' : ''}`}
+                    class={`knowledge-local-graph__edge ${firstHop
+                      ? 'knowledge-local-graph__edge--first-hop'
+                      : 'knowledge-local-graph__edge--contextual'} ${active()
+                      ? 'knowledge-local-graph__edge--active'
+                      : ''}`}
                     d={edge.path}
                     data-source-title={edge.sourceTitle}
                     data-target-title={edge.targetTitle}
+                    data-edge-tier={firstHop ? 'first-hop' : 'contextual'}
                     data-curved={edge.curved ? 'true' : 'false'}
                     style={`--knowledge-cluster-color:${clusterColor(edge.clusterIndex)}`}
                   />

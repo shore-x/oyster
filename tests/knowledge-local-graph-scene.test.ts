@@ -87,7 +87,7 @@ describe('buildKnowledgeLocalGraphScene', () => {
     expect(first.height).toBeGreaterThan(second.height)
   })
 
-  it('uses soft center repulsion to keep a cohesive second-hop branch peripheral', () => {
+  it('uses soft center repulsion to keep a cohesive second-hop branch nearby but peripheral', () => {
     const firstTitles = ['First 0', 'First 1']
     const secondTitles = Array.from({ length: 5 }, (_, index) => `Second ${index}`)
     const scene = buildKnowledgeLocalGraphScene(graph(
@@ -109,8 +109,13 @@ describe('buildKnowledgeLocalGraphScene', () => {
     )
     const firstHopRadii = scene.nodes.filter((node) => node.distance === 1).map(radius)
     const secondHopRadii = scene.nodes.filter((node) => node.distance === 2).map(radius)
+    const mean = (values: number[]): number => (
+      values.reduce((total, value) => total + value, 0) / values.length
+    )
 
-    expect(Math.min(...secondHopRadii)).toBeGreaterThan(Math.max(...firstHopRadii))
+    expect(Math.min(...secondHopRadii)).toBeGreaterThan(Math.min(...firstHopRadii))
+    expect(mean(secondHopRadii)).toBeGreaterThan(mean(firstHopRadii) + 24)
+    expect(Math.max(...secondHopRadii) - Math.max(...firstHopRadii)).toBeLessThan(90)
     expect(new Set(secondHopRadii.map((value) => Math.round(value))).size).toBeGreaterThan(1)
   })
 
@@ -124,7 +129,7 @@ describe('buildKnowledgeLocalGraphScene', () => {
       ])
     ), { width: 420 })
 
-    expect(scene.height).toBeGreaterThan(320)
+    expect(scene.height).toBeGreaterThan(280)
     for (let leftIndex = 0; leftIndex < scene.nodes.length; leftIndex += 1) {
       for (let rightIndex = leftIndex + 1; rightIndex < scene.nodes.length; rightIndex += 1) {
         const left = scene.nodes[leftIndex]

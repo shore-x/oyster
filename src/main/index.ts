@@ -354,6 +354,18 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const referenceGraph = referenceExplorer?.querySelector('.knowledge-local-graph')
     const referenceNodes = Array.from(referenceGraph?.querySelectorAll('.knowledge-local-graph__node') ?? [])
     const referenceEdges = Array.from(referenceGraph?.querySelectorAll('.knowledge-local-graph__edge') ?? [])
+    const referenceFirstHopEdges = referenceEdges.filter((edge) => edge.dataset.edgeTier === 'first-hop')
+    const referenceContextualEdges = referenceEdges.filter((edge) => edge.dataset.edgeTier === 'contextual')
+    const edgeOpacity = (edge) => Number.parseFloat(getComputedStyle(edge).opacity)
+    const edgeStrokeWidth = (edge) => Number.parseFloat(getComputedStyle(edge).strokeWidth)
+    const referenceDefaultFirstHopEdgesVisible = referenceFirstHopEdges.length > 0
+      && referenceFirstHopEdges.every((edge) => edgeOpacity(edge) >= 0.6)
+    const referenceDefaultContextualEdgesHidden = referenceContextualEdges.length > 0
+      && referenceContextualEdges.every((edge) => edgeOpacity(edge) <= 0.01)
+    const referenceFirstHopEdgesStronger = referenceFirstHopEdges.length > 0
+      && referenceContextualEdges.length > 0
+      && Math.min(...referenceFirstHopEdges.map(edgeStrokeWidth))
+        > Math.max(...referenceContextualEdges.map(edgeStrokeWidth))
     const referenceTwoHopNode = referenceNodes.find((node) => node.getAttribute('aria-label')?.includes('距中心 2 跳'))
     const referenceTwoHopTitle = referenceTwoHopNode?.dataset.title
     const referenceHasTwoHopNode = Boolean(referenceTwoHopNode)
@@ -456,11 +468,25 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     ))
     const referenceExplorerHeightBeforeHover = referenceExplorer?.getBoundingClientRect().height ?? 0
     referenceTwoHopNode?.dispatchEvent(new MouseEvent('mouseenter'))
-    await new Promise((resolve) => requestAnimationFrame(resolve))
+    await new Promise((resolve) => setTimeout(resolve, 160))
     const referenceHoverPreview = referenceExplorer?.querySelector('.knowledge-local-graph__preview')
     const referenceHoverPreviewTitle = referenceHoverPreview?.querySelector('strong')?.textContent?.trim()
     const referenceHoverPreviewText = referenceHoverPreview?.querySelector('p')?.textContent?.trim()
     const referenceHoverActive = referenceTwoHopNode?.classList.contains('knowledge-local-graph__node--active')
+    const referenceFirstHopEdgesRemainVisibleOnHover = referenceFirstHopEdges.every(
+      (edge) => edgeOpacity(edge) >= 0.6
+    )
+    const hoveredContextualEdges = referenceContextualEdges.filter((edge) => (
+      edge.dataset.sourceTitle === referenceTwoHopTitle || edge.dataset.targetTitle === referenceTwoHopTitle
+    ))
+    const unrelatedContextualEdges = referenceContextualEdges.filter((edge) => (
+      edge.dataset.sourceTitle !== referenceTwoHopTitle && edge.dataset.targetTitle !== referenceTwoHopTitle
+    ))
+    const referenceHoveredContextualEdgesVisible = hoveredContextualEdges.length > 0
+      && hoveredContextualEdges.every((edge) => edgeOpacity(edge) >= 0.5)
+    const referenceUnrelatedContextualEdgesHidden = unrelatedContextualEdges.every(
+      (edge) => edgeOpacity(edge) <= 0.01
+    )
     const referenceHoverPreviewInsideGraph = Boolean(referenceHoverPreview && referenceGraph?.contains(referenceHoverPreview))
     const referenceHoverKeepsHeight = Math.abs(
       (referenceExplorer?.getBoundingClientRect().height ?? 0) - referenceExplorerHeightBeforeHover
@@ -573,6 +599,11 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       referenceHasArrow: Boolean(referenceExplorer?.querySelector('marker')),
       referenceNodeCount: referenceNodes.length,
       referenceEdgeCount: referenceEdges.length,
+      referenceFirstHopEdgeCount: referenceFirstHopEdges.length,
+      referenceContextualEdgeCount: referenceContextualEdges.length,
+      referenceDefaultFirstHopEdgesVisible,
+      referenceDefaultContextualEdgesHidden,
+      referenceFirstHopEdgesStronger,
       referenceClusterCount: Number(referenceGraph?.getAttribute('data-cluster-count')),
       referenceHasTwoHopNode,
       referenceTwoHopTitle,
@@ -599,6 +630,9 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       referenceHoverPreviewInsideGraph,
       referenceHoverKeepsHeight,
       referenceHoverActive,
+      referenceFirstHopEdgesRemainVisibleOnHover,
+      referenceHoveredContextualEdgesVisible,
+      referenceUnrelatedContextualEdgesHidden,
       referenceFocusPreviewTitle,
       referenceFocusActive,
       listOverflowY,

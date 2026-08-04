@@ -192,13 +192,14 @@ h1 { margin: 0 0 10px; font-size: var(--font-size-display); line-height: 1.25; l
 .knowledge-local-graph__viewport { max-height: min(280px, 38vh); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
 .knowledge-local-graph { position: relative; width: 100%; min-height: 190px; overflow: hidden; }
 .knowledge-local-graph__edges { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
-.knowledge-local-graph__edge { fill: none; stroke: var(--knowledge-cluster-color); stroke-width: 1; stroke-linecap: round; stroke-linejoin: round; opacity: .48; vector-effect: non-scaling-stroke; transition: opacity .12s ease, stroke-width .12s ease; }
-.knowledge-local-graph__edge--active { stroke-width: 1.4; opacity: .78; }
-.knowledge-local-graph__edge--dimmed { opacity: .1; }
+.knowledge-local-graph__edge { fill: none; stroke: var(--knowledge-cluster-color); stroke-width: 1; stroke-linecap: round; stroke-linejoin: round; opacity: 0; vector-effect: non-scaling-stroke; transition: opacity .12s ease, stroke-width .12s ease; }
+.knowledge-local-graph__edge--first-hop { stroke-width: 1.3; opacity: .66; }
+.knowledge-local-graph__edge--first-hop.knowledge-local-graph__edge--active { stroke-width: 1.55; opacity: .88; }
+.knowledge-local-graph__edge--contextual.knowledge-local-graph__edge--active { stroke-width: 1.05; opacity: .56; }
 .knowledge-local-graph__node { position: absolute; z-index: 1; display: grid; padding: 0; transform: translate(-50%, -50%); place-items: center; color: var(--text-secondary); background: transparent; border: 0; cursor: pointer; font-size: var(--font-size-body-sm); font-weight: var(--font-weight-regular); line-height: var(--line-height-compact); text-align: center; transition: color .12s ease, opacity .12s ease, font-weight .12s ease; }
 .knowledge-local-graph__label { display: -webkit-box; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; background: #fff; box-shadow: 0 0 0 4px #fff; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .knowledge-local-graph__node--center { font-size: var(--font-size-body); font-weight: var(--font-weight-semibold); }
-.knowledge-local-graph__node--second-hop { font-size: var(--font-size-label); }
+.knowledge-local-graph__node--second-hop { font-size: var(--font-size-caption); }
 .knowledge-local-graph__node:hover,
 .knowledge-local-graph__node--active { color: var(--text-primary); font-weight: var(--font-weight-semibold); }
 .knowledge-local-graph__node:hover .knowledge-local-graph__label,
