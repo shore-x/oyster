@@ -254,7 +254,7 @@
 
 .skill-detail__header > div { min-width: 0; }
 .skill-detail__badges { display: flex; align-items: center; gap: 6px; margin-bottom: 11px; }
-.skill-detail__header h2 { margin: 0; color: var(--text-primary); font-size: var(--font-size-title); font-weight: var(--font-weight-semibold); letter-spacing: -.02em; overflow-wrap: anywhere; }
+.skill-detail__header h2 { margin: 0; color: var(--text-primary); font-size: var(--font-size-title); font-weight: var(--font-weight-semibold); letter-spacing: var(--letter-spacing-heading); overflow-wrap: anywhere; }
 .skill-detail__header p { max-width: 68ch; margin: 10px 0 0; color: var(--text-tertiary); font-size: var(--font-size-body-sm); line-height: var(--line-height-ui); }
 .skill-detail__header > .ui-button { flex: 0 0 auto; }
 

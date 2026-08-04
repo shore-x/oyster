@@ -27,7 +27,16 @@ if (semantics.title !== 'Agent 数据来源') throw new Error('Expected page tit
 if (semantics.sourceCards !== 3) throw new Error(`Expected 3 source cards, got ${semantics.sourceCards}`)
 if (semantics.dragRegion !== 'drag') throw new Error('Right-side window drag region is missing')
 if (!semantics.primaryButtonColor.includes('82, 121, 165')) throw new Error('Primary action does not use the muted blue token')
-if (!semantics.secondaryButtonColor.includes('63, 63, 70')) throw new Error('Secondary action is not neutral gray')
+if (!semantics.secondaryButtonColor.includes('39, 39, 42')) throw new Error('Secondary action is not high-contrast neutral gray')
+if (semantics.headingFontSize !== '27px' || semantics.headingFontWeight !== '500') {
+  throw new Error('Page heading does not use the restrained typography scale')
+}
+if (semantics.bodyFontSize !== '13px' || semantics.bodyFontWeight !== '400') {
+  throw new Error('Desktop UI body typography is not compact and regular-weight')
+}
+if (!semantics.mutedTextColor.includes('82, 82, 91')) {
+  throw new Error('Muted readable text does not use the high-contrast neutral token')
+}
 if (semantics.buttonLabelCenterDelta > 1) throw new Error('Button label is not geometrically centered')
 if (semantics.buttonCount !== semantics.sharedButtonCount) throw new Error('A button bypasses the shared UI component')
 if (semantics.buttonIconCount < semantics.sharedButtonCount) throw new Error('A shared button icon was not rendered')

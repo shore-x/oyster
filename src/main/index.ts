@@ -225,6 +225,9 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const primaryLabel = primaryButton.querySelector('.ui-button__label')
     const primaryBounds = primaryButton.getBoundingClientRect()
     const labelBounds = primaryLabel.getBoundingClientRect()
+    const headingStyle = getComputedStyle(page.querySelector('h1'))
+    const bodyStyle = getComputedStyle(document.body)
+    const mutedTextStyle = getComputedStyle(page.querySelector('.source-card .path'))
     const sourceDetails = Array.from(page.querySelectorAll('.source-card__details'))
     const collapsedSourceDetails = sourceDetails.filter((details) => !details.open).length
     const sourceSummary = sourceDetails[0]?.querySelector('summary')?.textContent?.trim()
@@ -236,6 +239,11 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       dragRegion: getComputedStyle(document.querySelector('[data-testid="window-drag-region"]')).getPropertyValue('-webkit-app-region'),
       primaryButtonColor: getComputedStyle(primaryButton).backgroundColor,
       secondaryButtonColor: getComputedStyle(page.querySelector('.ui-button--secondary')).color,
+      headingFontSize: headingStyle.fontSize,
+      headingFontWeight: headingStyle.fontWeight,
+      bodyFontSize: bodyStyle.fontSize,
+      bodyFontWeight: bodyStyle.fontWeight,
+      mutedTextColor: mutedTextStyle.color,
       buttonLabelCenterDelta: Math.abs((primaryBounds.left + primaryBounds.width / 2) - (labelBounds.left + labelBounds.width / 2)),
       buttonCount: page.querySelectorAll('button').length,
       sharedButtonCount: page.querySelectorAll('.ui-button').length,

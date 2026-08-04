@@ -13,7 +13,7 @@
   font: inherit;
   font-size: var(--font-size-body-sm);
   font-weight: var(--font-weight-semibold);
-  letter-spacing: -.005em;
+  letter-spacing: var(--letter-spacing-ui);
   white-space: nowrap;
   transition: color .14s ease, background-color .14s ease, border-color .14s ease, box-shadow .14s ease, transform .1s ease;
   -webkit-app-region: no-drag;
