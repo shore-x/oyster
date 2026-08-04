@@ -164,7 +164,9 @@ if (
   !knowledge.browse.referenceExplorerExists
   || knowledge.browse.referenceHasCanvas
   || knowledge.browse.referenceHasArrow
+  || knowledge.browse.referenceDefaultNodeCount < 2
   || knowledge.browse.referenceNodeCount !== 4
+  || knowledge.browse.referenceDefaultNodeCount >= knowledge.browse.referenceNodeCount
   || knowledge.browse.referenceEdgeCount < 3
   || knowledge.browse.referenceFirstHopEdgeCount < 1
   || knowledge.browse.referenceContextualEdgeCount < 1
@@ -174,6 +176,9 @@ if (
   || knowledge.browse.referenceClusterCount !== 1
   || !knowledge.browse.referenceHasTwoHopNode
   || !knowledge.browse.referenceTwoHopTitle
+  || !knowledge.browse.referenceSecondHopHiddenByDefault
+  || !knowledge.browse.referenceSecondHopDisclosedFromFirstHop
+  || !knowledge.browse.referenceDisclosureKeepsHeight
   || knowledge.browse.referenceNodeNavigationTitle !== knowledge.browse.referenceTwoHopTitle
   || !knowledge.browse.referenceNodesTransparent
   || !knowledge.browse.referenceSecondHopPeripheral
@@ -208,6 +213,7 @@ if (
   || !knowledge.browse.referenceUnrelatedContextualEdgesHidden
   || knowledge.browse.referenceFocusPreviewTitle !== knowledge.browse.referenceTwoHopTitle
   || !knowledge.browse.referenceFocusActive
+  || !knowledge.browse.referenceKeyboardDisclosure
   || !knowledge.browse.referenceViewportScrollbarGutter?.includes('stable')
   || !knowledge.browse.referenceLayoutStableAcrossOverflow
 ) {

@@ -23,7 +23,7 @@ function projection(centerTitle = 'Center'): KnowledgeNeighborhoodProjection {
 }
 
 describe('KnowledgeReferenceExplorer', () => {
-  it('renders a text-led two-hop local graph with adaptive, directionless paths', () => {
+  it('renders the center and first hop by default while retaining the two-hop scene', () => {
     const html = renderToString(() => (
       <KnowledgeReferenceExplorer
         projection={projection()}
@@ -32,7 +32,6 @@ describe('KnowledgeReferenceExplorer', () => {
       />
     ))
 
-    expect(html).toContain('Second hop')
     expect(html).toContain('knowledge-local-graph__viewport')
     expect(html).toContain('data-layout-width="720"')
     expect(html).toContain('knowledge-local-graph__edge')
@@ -43,10 +42,11 @@ describe('KnowledgeReferenceExplorer', () => {
     expect(html).not.toContain('knowledge-local-graph__edge--dimmed')
     expect(html).toContain('<path')
     expect(html).toContain('data-curved=')
-    expect(html.match(/<button[^>]*knowledge-local-graph__node/g)).toHaveLength(4)
-    expect(html.match(/knowledge-local-graph__label/g)).toHaveLength(4)
+    expect(html.match(/<button[^>]*knowledge-local-graph__node/g)).toHaveLength(3)
+    expect(html.match(/knowledge-local-graph__label/g)).toHaveLength(3)
     expect(html).toContain('data-cluster-count="1"')
-    expect(html).toContain('knowledge-local-graph__node--second-hop')
+    expect(html).not.toMatch(/<button[^>]*data-distance="2"/)
+    expect(html).not.toContain('knowledge-local-graph__node--second-hop')
     expect(html).not.toContain('局部引用图 ·')
     expect(html).not.toContain('连线不区分方向')
     expect(html).not.toContain('knowledge-local-graph__marker')
@@ -74,8 +74,26 @@ describe('KnowledgeReferenceExplorer', () => {
     expect(html).not.toContain('它引用')
     expect(html).not.toContain('引用它')
     expect(html).not.toContain('个相邻节点')
+    expect(html).toMatch(/<button[^>]*data-distance="2"/)
+    expect(html).toContain('knowledge-local-graph__node--second-hop')
+    expect(html.match(/<button[^>]*knowledge-local-graph__node/g)).toHaveLength(4)
     expect(html.match(/knowledge-local-graph__edge--first-hop/g)).toHaveLength(2)
     expect(html.match(/knowledge-local-graph__edge--active/g)).toHaveLength(2)
+  })
+
+  it('keeps a disclosed second-hop node visible with its adjacent nodes', () => {
+    const html = renderToString(() => (
+      <KnowledgeReferenceExplorer
+        projection={projection()}
+        hoveredTitle="Second hop"
+        onSelect={vi.fn()}
+        onHover={vi.fn()}
+      />
+    ))
+
+    expect(html).toMatch(/<button[^>]*data-distance="2"[^>]*data-title="Second hop"/)
+    expect(html).toContain('data-title="Outgoing"')
+    expect(html.match(/knowledge-local-graph__edge--active/g)).toHaveLength(1)
   })
 
   it('keeps unresolved references in a collapsed disclosure', () => {

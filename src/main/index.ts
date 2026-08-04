@@ -352,7 +352,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const referenceExplorer = page.querySelector('.knowledge-reference-explorer')
     const referenceViewport = referenceExplorer?.querySelector('.knowledge-local-graph__viewport')
     const referenceGraph = referenceExplorer?.querySelector('.knowledge-local-graph')
-    const referenceNodes = Array.from(referenceGraph?.querySelectorAll('.knowledge-local-graph__node') ?? [])
+    const referenceDefaultNodes = Array.from(referenceGraph?.querySelectorAll('.knowledge-local-graph__node') ?? [])
     const referenceEdges = Array.from(referenceGraph?.querySelectorAll('.knowledge-local-graph__edge') ?? [])
     const referenceFirstHopEdges = referenceEdges.filter((edge) => edge.dataset.edgeTier === 'first-hop')
     const referenceContextualEdges = referenceEdges.filter((edge) => edge.dataset.edgeTier === 'contextual')
@@ -366,9 +366,30 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       && referenceContextualEdges.length > 0
       && Math.min(...referenceFirstHopEdges.map(edgeStrokeWidth))
         > Math.max(...referenceContextualEdges.map(edgeStrokeWidth))
-    const referenceTwoHopNode = referenceNodes.find((node) => node.getAttribute('aria-label')?.includes('距中心 2 跳'))
-    const referenceTwoHopTitle = referenceTwoHopNode?.dataset.title
-    const referenceHasTwoHopNode = Boolean(referenceTwoHopNode)
+    const referenceSecondHopHiddenByDefault = referenceDefaultNodes.every(
+      (node) => Number(node.dataset.distance) < 2
+    )
+    const referenceDisclosureNode = referenceDefaultNodes.find(
+      (node) => Number(node.dataset.distance) === 1
+    )
+    const referenceExplorerHeightBeforeDisclosure = referenceExplorer?.getBoundingClientRect().height ?? 0
+    referenceDisclosureNode?.dispatchEvent(new MouseEvent('mouseenter'))
+    await new Promise((resolve) => setTimeout(resolve, 160))
+    const referenceDisclosedNodes = Array.from(referenceGraph?.querySelectorAll('.knowledge-local-graph__node') ?? [])
+    const referenceDisclosedTwoHopNode = referenceDisclosedNodes.find(
+      (node) => node.getAttribute('aria-label')?.includes('距中心 2 跳')
+    )
+    const referenceTwoHopTitle = referenceDisclosedTwoHopNode?.dataset.title
+    const referenceHasTwoHopNode = Boolean(referenceDisclosedTwoHopNode)
+    const referenceSecondHopDisclosedFromFirstHop = referenceSecondHopHiddenByDefault
+      && Boolean(referenceDisclosureNode && referenceDisclosedTwoHopNode)
+    const referenceDisclosureKeepsHeight = Math.abs(
+      (referenceExplorer?.getBoundingClientRect().height ?? 0) - referenceExplorerHeightBeforeDisclosure
+    ) <= 1
+    referenceDisclosedTwoHopNode?.dispatchEvent(new MouseEvent('mouseenter'))
+    await new Promise((resolve) => setTimeout(resolve, 160))
+    const referenceNodes = Array.from(referenceGraph?.querySelectorAll('.knowledge-local-graph__node') ?? [])
+    const referenceTwoHopNode = referenceNodes.find((node) => node.dataset.title === referenceTwoHopTitle)
     const referenceNodeBackgrounds = referenceNodes.map((node) => getComputedStyle(node).backgroundColor)
     const referenceMarkerFree = !referenceGraph?.querySelector('.knowledge-local-graph__marker, circle, ellipse, marker')
       && referenceNodes.every((node) => [node, node.querySelector('.knowledge-local-graph__label')]
@@ -492,11 +513,18 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       (referenceExplorer?.getBoundingClientRect().height ?? 0) - referenceExplorerHeightBeforeHover
     ) <= 1
     referenceViewport?.dispatchEvent(new MouseEvent('mouseleave'))
-    referenceTwoHopNode?.focus()
-    referenceTwoHopNode?.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+    referenceDisclosureNode?.focus()
+    referenceDisclosureNode?.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const referenceFocusedTwoHopNode = Array.from(
+      referenceGraph?.querySelectorAll('.knowledge-local-graph__node') ?? []
+    ).find((node) => node.dataset.title === referenceTwoHopTitle)
+    referenceFocusedTwoHopNode?.focus()
+    referenceFocusedTwoHopNode?.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
     await new Promise((resolve) => requestAnimationFrame(resolve))
     const referenceFocusPreviewTitle = referenceExplorer?.querySelector('.knowledge-local-graph__preview strong')?.textContent?.trim()
-    const referenceFocusActive = document.activeElement === referenceTwoHopNode
+    const referenceFocusActive = document.activeElement === referenceFocusedTwoHopNode
+    const referenceKeyboardDisclosure = Boolean(referenceDisclosureNode && referenceFocusedTwoHopNode)
     const referenceLayoutSignature = () => JSON.stringify({
       width: referenceViewport?.getAttribute('data-layout-width'),
       height: referenceViewport?.getAttribute('data-scene-height'),
@@ -561,7 +589,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const browserWithinViewport = Boolean(browserBounds)
       && browserBounds.top >= 0
       && browserBounds.bottom <= window.innerHeight + 1
-    referenceTwoHopNode?.click()
+    referenceFocusedTwoHopNode?.click()
     deadline = Date.now() + 2_000
     while (
       page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim() !== referenceTwoHopTitle
@@ -622,6 +650,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       referenceExplorerExists: Boolean(referenceExplorer),
       referenceHasCanvas: Boolean(referenceExplorer?.querySelector('canvas')),
       referenceHasArrow: Boolean(referenceExplorer?.querySelector('marker')),
+      referenceDefaultNodeCount: referenceDefaultNodes.length,
       referenceNodeCount: referenceNodes.length,
       referenceEdgeCount: referenceEdges.length,
       referenceFirstHopEdgeCount: referenceFirstHopEdges.length,
@@ -632,6 +661,9 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       referenceClusterCount: Number(referenceGraph?.getAttribute('data-cluster-count')),
       referenceHasTwoHopNode,
       referenceTwoHopTitle,
+      referenceSecondHopHiddenByDefault,
+      referenceSecondHopDisclosedFromFirstHop,
+      referenceDisclosureKeepsHeight,
       referenceNodeNavigationTitle,
       referenceNodesTransparent: referenceNodeBackgrounds.every((color) => color === 'rgba(0, 0, 0, 0)'),
       referenceSecondHopPeripheral,
@@ -660,6 +692,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       referenceUnrelatedContextualEdgesHidden,
       referenceFocusPreviewTitle,
       referenceFocusActive,
+      referenceKeyboardDisclosure,
       referenceViewportScrollbarGutter,
       referenceLayoutStableAcrossOverflow,
       listOverflowY,

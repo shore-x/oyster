@@ -31,7 +31,23 @@ export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProp
     props.projection,
     { width: graphWidth() }
   ))
-  const hoveredNode = () => scene().nodes.find((node) => node.title === props.hoveredTitle)
+  const nodesByTitle = createMemo(() => new Map(
+    scene().nodes.map((node) => [node.title, node])
+  ))
+  const hoveredNode = () => props.hoveredTitle
+    ? nodesByTitle().get(props.hoveredTitle)
+    : undefined
+  const visibleSecondHopTitles = createMemo(() => {
+    const hovered = hoveredNode()
+    if (!hovered) return new Set<string>()
+    return new Set([
+      ...(hovered.distance >= 2 ? [hovered.title] : []),
+      ...hovered.neighborTitles.filter((title) => (nodesByTitle().get(title)?.distance ?? 0) >= 2)
+    ])
+  })
+  const visibleNodes = createMemo(() => scene().nodes.filter((node) => (
+    node.distance < 2 || visibleSecondHopTitles().has(node.title)
+  )))
   const isRelatedToHovered = (title: string): boolean => {
     const hovered = hoveredNode()
     return !hovered || hovered.title === title || hovered.neighborTitles.includes(title)
@@ -102,6 +118,11 @@ export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProp
           data-scene-height={scene().height}
           data-layout-width={scene().width}
           onMouseLeave={() => props.onHover(undefined)}
+          onFocusOut={(event) => {
+            if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) {
+              props.onHover(undefined)
+            }
+          }}
         >
           <div
             class="knowledge-local-graph"
@@ -137,7 +158,7 @@ export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProp
               }}</For>
             </svg>
 
-            <For each={scene().nodes}>{(node) => (
+            <For each={visibleNodes()}>{(node) => (
               <button
                 type="button"
                 class={nodeClass(node)}
@@ -151,7 +172,6 @@ export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProp
                 aria-describedby={props.hoveredTitle === node.title ? 'knowledge-local-graph-preview' : undefined}
                 onMouseEnter={() => props.onHover(node.title)}
                 onFocusIn={() => props.onHover(node.title)}
-                onFocusOut={() => props.onHover(undefined)}
                 onClick={() => props.onSelect(node.title)}
               >
                 <span class="knowledge-local-graph__label">{node.title}</span>
