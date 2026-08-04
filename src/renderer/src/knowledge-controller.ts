@@ -105,7 +105,6 @@ export function createKnowledgeController() {
     error,
     browse,
     select,
-    readNeighborhood: (title: string) => window.oyster.knowledge.getNeighborhood(title),
     clear
   }
 }

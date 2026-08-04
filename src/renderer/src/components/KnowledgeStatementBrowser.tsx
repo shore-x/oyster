@@ -59,7 +59,6 @@ export interface KnowledgeStatementBrowserProps {
   hasMore?: boolean
   onSelect(title: string): void | Promise<void>
   onRead(title: string): Promise<KnowledgeStatement | undefined>
-  onReadNeighborhood?(title: string): Promise<KnowledgeNeighborhoodProjection | undefined>
   onLoadMore?(): void
 }
 
@@ -79,11 +78,7 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
   const [session, setSession] = createSignal<KnowledgeExplorerSessionSnapshot>(explorerSession.snapshot())
   const [previews, setPreviews] = createSignal<Record<string, StatementPreviewState>>({})
   const [previewOverlay, setPreviewOverlay] = createSignal<StatementPreviewOverlay>()
-  const [hoverNeighborhood, setHoverNeighborhood] = createSignal<KnowledgeNeighborhoodProjection>()
-  const [hoverNeighborhoodLoading, setHoverNeighborhoodLoading] = createSignal(false)
   const previewLoads = new Map<string, Promise<KnowledgeStatement | undefined>>()
-  const neighborhoodCache = new Map<string, KnowledgeNeighborhoodProjection>()
-  let hoverGeneration = 0
   let previousNavigationKey: string | undefined
 
   createEffect(() => {
@@ -93,14 +88,11 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
     if (navigationKey !== previousNavigationKey) {
       previousNavigationKey = navigationKey
       previewLoads.clear()
-      neighborhoodCache.clear()
       setPreviews({})
-      setHoverNeighborhood(undefined)
       setSession(explorerSession.reset(selectedTitle))
       return
     }
     if (selectedTitle !== currentTitle) {
-      setHoverNeighborhood(undefined)
       setSession(explorerSession.reset(selectedTitle))
     }
   })
@@ -152,7 +144,6 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
   function navigate(title: string): void {
     setPreviewOverlay(undefined)
     if (session().currentTitle === title) return
-    setHoverNeighborhood(undefined)
     setSession(explorerSession.navigate(title))
     void props.onSelect(title)
   }
@@ -162,44 +153,12 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
     const title = next.currentTitle
     if (!title) return
     setPreviewOverlay(undefined)
-    setHoverNeighborhood(undefined)
     setSession(next)
     void props.onSelect(title)
   }
 
-  async function hoverGraphNode(title?: string): Promise<void> {
-    const generation = ++hoverGeneration
+  function hoverGraphNode(title?: string): void {
     setSession(explorerSession.hover(title))
-    if (!title) {
-      setHoverNeighborhood(undefined)
-      setHoverNeighborhoodLoading(false)
-      return
-    }
-    if (title === props.neighborhood?.centerTitle) {
-      setHoverNeighborhood(props.neighborhood)
-      setHoverNeighborhoodLoading(false)
-      return
-    }
-    const cached = neighborhoodCache.get(title)
-    if (cached) {
-      setHoverNeighborhood(cached)
-      setHoverNeighborhoodLoading(false)
-      return
-    }
-    if (!props.onReadNeighborhood) return
-    setHoverNeighborhood(undefined)
-    setHoverNeighborhoodLoading(true)
-    try {
-      const projection = await props.onReadNeighborhood(title)
-      if (projection) neighborhoodCache.set(title, projection)
-      if (generation === hoverGeneration && session().hoveredTitle === title) {
-        setHoverNeighborhood(projection)
-      }
-    } catch {
-      if (generation === hoverGeneration) setHoverNeighborhood(undefined)
-    } finally {
-      if (generation === hoverGeneration) setHoverNeighborhoodLoading(false)
-    }
   }
 
   async function loadPreview(title: string): Promise<KnowledgeStatement | undefined> {
@@ -308,10 +267,8 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
                   <KnowledgeReferenceExplorer
                     projection={projection()}
                     hoveredTitle={session().hoveredTitle}
-                    hoverProjection={hoverNeighborhood()}
-                    hoverLoading={hoverNeighborhoodLoading()}
                     onSelect={navigate}
-                    onHover={(title) => void hoverGraphNode(title)}
+                    onHover={hoverGraphNode}
                   />
                 )}
               </Show>

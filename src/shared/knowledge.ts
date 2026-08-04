@@ -52,13 +52,11 @@ export interface KnowledgeBrowseResult {
   nextOffset?: number
 }
 
-export type KnowledgeNeighborhoodRole = 'incoming' | 'outgoing'
-
 export interface KnowledgeNeighborhoodNode {
   title: string
   excerpt: string
-  /** A node may have both roles when it and the center reference each other. */
-  roles: KnowledgeNeighborhoodRole[]
+  /** Undirected shortest-path distance from the center in this local projection. */
+  distance: number
 }
 
 export interface KnowledgeReferenceEdge {
@@ -69,23 +67,19 @@ export interface KnowledgeReferenceEdge {
   occurrenceCount: number
 }
 
-export interface KnowledgeNeighborhoodGroup {
-  kind: KnowledgeNeighborhoodRole
-  memberTitles: string[]
-}
-
 export interface UnresolvedKnowledgeReference {
   sourceTitle: string
   targetTitle: string
   occurrenceCount: number
 }
 
-/** Rebuildable, UI-independent projection over one current Statement. */
+/** Rebuildable, UI-independent local reference projection over one current Statement. */
 export interface KnowledgeNeighborhoodProjection {
   centerTitle: string
+  /** Current extraction depth; it is a projection parameter rather than Statement semantics. */
+  depth: number
   nodes: KnowledgeNeighborhoodNode[]
   edges: KnowledgeReferenceEdge[]
-  groups: KnowledgeNeighborhoodGroup[]
   unresolvedReferences: UnresolvedKnowledgeReference[]
 }
 

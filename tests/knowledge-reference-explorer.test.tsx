@@ -6,25 +6,24 @@ import { KnowledgeReferenceExplorer } from '../src/renderer/src/components/Knowl
 function projection(centerTitle = 'Center'): KnowledgeNeighborhoodProjection {
   return {
     centerTitle,
+    depth: 2,
     nodes: [
-      { title: centerTitle, excerpt: 'Center body.', roles: [] },
-      { title: 'Incoming', excerpt: 'Incoming body.', roles: ['incoming'] },
-      { title: 'Outgoing', excerpt: 'Outgoing body.', roles: ['outgoing'] }
+      { title: centerTitle, excerpt: 'Center body.', distance: 0 },
+      { title: 'Incoming', excerpt: 'Incoming body.', distance: 1 },
+      { title: 'Outgoing', excerpt: 'Outgoing body.', distance: 1 },
+      { title: 'Second hop', excerpt: 'Second-hop body.', distance: 2 }
     ],
     edges: [
       { sourceTitle: 'Incoming', targetTitle: centerTitle, occurrenceCount: 1 },
-      { sourceTitle: centerTitle, targetTitle: 'Outgoing', occurrenceCount: 2 }
-    ],
-    groups: [
-      { kind: 'incoming', memberTitles: ['Incoming'] },
-      { kind: 'outgoing', memberTitles: ['Outgoing'] }
+      { sourceTitle: centerTitle, targetTitle: 'Outgoing', occurrenceCount: 2 },
+      { sourceTitle: 'Outgoing', targetTitle: 'Second hop', occurrenceCount: 1 }
     ],
     unresolvedReferences: []
   }
 }
 
 describe('KnowledgeReferenceExplorer', () => {
-  it('renders direct references as text-first incoming and outgoing groups', () => {
+  it('renders a text-led two-hop local graph with straight, directionless edges', () => {
     const html = renderToString(() => (
       <KnowledgeReferenceExplorer
         projection={projection()}
@@ -33,57 +32,30 @@ describe('KnowledgeReferenceExplorer', () => {
       />
     ))
 
-    expect(html).toContain('被这些 Statement 引用')
-    expect(html).toContain('当前 Statement 引用了')
-    expect(html).toContain('Incoming body.')
-    expect(html).toContain('Outgoing body.')
-    expect(html).toContain('knowledge-reference-explorer__list')
-    expect(html).toContain('<details')
+    expect(html).toMatch(/局部引用图 · [\s\S]*2[\s\S]*跳/)
+    expect(html).toContain('Second hop')
+    expect(html).toContain('knowledge-local-graph__edge')
+    expect(html).toContain('<line')
+    expect(html).toContain('data-cluster-count="1"')
+    expect(html).not.toContain('marker-end')
     expect(html).not.toContain('canvas')
     expect(html).not.toContain('ellipse')
   })
 
-  it('states direction and occurrence counts in natural language', () => {
+  it('previews true incoming and outgoing facts for a hovered node', () => {
     const html = renderToString(() => (
       <KnowledgeReferenceExplorer
         projection={projection()}
+        hoveredTitle="Outgoing"
         onSelect={vi.fn()}
         onHover={vi.fn()}
       />
     ))
 
-    expect(html).toContain('「Incoming」在正文中引用了「Center」')
-    expect(html).toContain('「Center」在正文中引用了「Outgoing」')
-    expect(html).toMatch(/共出现[\s\S]*2[\s\S]*次/)
-  })
-
-  it('shows the active Statement neighborhood inside its expanded detail', () => {
-    const hover: KnowledgeNeighborhoodProjection = {
-      centerTitle: 'Incoming',
-      nodes: [
-        { title: 'Incoming', excerpt: 'Incoming body.', roles: [] },
-        { title: 'Center', excerpt: 'Center body.', roles: ['incoming'] }
-      ],
-      edges: [{ sourceTitle: 'Center', targetTitle: 'Incoming', occurrenceCount: 1 }],
-      groups: [
-        { kind: 'incoming', memberTitles: ['Center'] },
-        { kind: 'outgoing', memberTitles: [] }
-      ],
-      unresolvedReferences: []
-    }
-    const html = renderToString(() => (
-      <KnowledgeReferenceExplorer
-        projection={projection()}
-        hoveredTitle="Incoming"
-        hoverProjection={hover}
-        onSelect={vi.fn()}
-        onHover={vi.fn()}
-      />
-    ))
-
-    expect(html).toContain('knowledge-reference-explorer__neighbors')
-    expect(html).toContain('<dt>被引用</dt>')
-    expect(html).toContain('<dd>Center</dd>')
+    expect(html).toContain('knowledge-local-graph__preview')
+    expect(html).toContain('Outgoing body.')
+    expect(html).toMatch(/它引用[\s\S]*Second hop/)
+    expect(html).toMatch(/Center[\s\S]*引用它/)
   })
 
   it('keeps unresolved references in a collapsed disclosure', () => {

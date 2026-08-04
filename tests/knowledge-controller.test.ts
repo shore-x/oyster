@@ -17,12 +17,9 @@ function installApi(overrides: Partial<KnowledgeApi> = {}): KnowledgeApi {
     read: async (title) => ({ title, content: `${title} body.` }),
     getNeighborhood: async (title) => ({
       centerTitle: title,
-      nodes: [{ title, excerpt: `${title} body.`, roles: [] }],
+      depth: 2,
+      nodes: [{ title, excerpt: `${title} body.`, distance: 0 }],
       edges: [],
-      groups: [
-        { kind: 'incoming', memberTitles: [] },
-        { kind: 'outgoing', memberTitles: [] }
-      ],
       unresolvedReferences: []
     }),
     clear: async () => ({ deletedStatementCount: 2, deletedContributionCount: 1 }),

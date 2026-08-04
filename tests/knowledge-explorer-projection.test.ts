@@ -36,42 +36,49 @@ function reader(initialStatements: KnowledgeStatement[]) {
 }
 
 describe('KnowledgeExplorerProjectionService', () => {
-  it('derives directional direct references, mutual roles and unresolved targets from the current view', () => {
+  it('derives a two-hop local graph while retaining directional reference facts', () => {
     const source = reader([
       {
         title: 'Center',
         content: 'Uses [[Beta]] and repeats [[Beta|the beta statement]]. Missing [[Missing]].'
       },
       { title: 'Alpha', content: 'Explains [[Center]].' },
-      { title: 'Beta', content: 'Also points back to [[Center]].' },
+      { title: 'Beta', content: 'Also points back to [[Center]] and connects [[Delta]].' },
+      { title: 'Delta', content: 'Connects [[Beta]] and [[Epsilon]].' },
+      { title: 'Epsilon', content: 'Only connects [[Delta]].' },
       { title: 'Gamma', content: 'Unrelated.' }
     ])
     const service = new KnowledgeExplorerProjectionService(source)
 
     expect(service.getNeighborhood('Center')).toEqual({
       centerTitle: 'Center',
+      depth: 2,
       nodes: [
         {
           title: 'Center',
           excerpt: 'Uses Beta and repeats the beta statement. Missing Missing.',
-          roles: []
+          distance: 0
         },
-        { title: 'Alpha', excerpt: 'Explains Center.', roles: ['incoming'] },
-        { title: 'Beta', excerpt: 'Also points back to Center.', roles: ['incoming', 'outgoing'] }
+        { title: 'Alpha', excerpt: 'Explains Center.', distance: 1 },
+        {
+          title: 'Beta',
+          excerpt: 'Also points back to Center and connects Delta.',
+          distance: 1
+        },
+        { title: 'Delta', excerpt: 'Connects Beta and Epsilon.', distance: 2 }
       ],
       edges: [
         { sourceTitle: 'Alpha', targetTitle: 'Center', occurrenceCount: 1 },
         { sourceTitle: 'Beta', targetTitle: 'Center', occurrenceCount: 1 },
-        { sourceTitle: 'Center', targetTitle: 'Beta', occurrenceCount: 2 }
-      ],
-      groups: [
-        { kind: 'incoming', memberTitles: ['Alpha', 'Beta'] },
-        { kind: 'outgoing', memberTitles: ['Beta'] }
+        { sourceTitle: 'Beta', targetTitle: 'Delta', occurrenceCount: 1 },
+        { sourceTitle: 'Center', targetTitle: 'Beta', occurrenceCount: 2 },
+        { sourceTitle: 'Delta', targetTitle: 'Beta', occurrenceCount: 1 }
       ],
       unresolvedReferences: [
         { sourceTitle: 'Center', targetTitle: 'Missing', occurrenceCount: 1 }
       ]
     })
+    expect(service.getNeighborhood('Center')?.nodes.some((node) => node.title === 'Epsilon')).toBe(false)
   })
 
   it('rebuilds references from changed Statement bodies instead of retaining an edge authority', () => {

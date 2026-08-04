@@ -59,6 +59,10 @@
   --control-danger-text: #9f4b46;
   --control-danger-border: #ead9d7;
   --progress-accent: #6f91b6;
+  --graph-cluster-1: #52789a;
+  --graph-cluster-2: #716895;
+  --graph-cluster-3: #527c63;
+  --graph-cluster-4: #946a48;
   --shadow-surface: none;
   --shadow-overlay: 0 12px 32px rgba(24, 24, 27, .14);
   font-synthesis: none;

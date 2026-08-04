@@ -350,11 +350,26 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       && Date.now() < deadline
     ) await new Promise((resolve) => setTimeout(resolve, 25))
     const referenceExplorer = page.querySelector('.knowledge-reference-explorer')
-    const referenceDetails = Array.from(referenceExplorer?.querySelectorAll('.knowledge-reference-explorer__item') ?? [])
-    const referenceGroupHeadings = Array.from(referenceExplorer?.querySelectorAll('.knowledge-reference-explorer__group h3') ?? [])
-      .map((heading) => heading.textContent?.trim())
-    const referenceRail = referenceExplorer?.querySelector('.knowledge-reference-explorer__list')
-    const referenceRailStyle = referenceRail ? getComputedStyle(referenceRail).borderLeftStyle : undefined
+    const referenceGraph = referenceExplorer?.querySelector('.knowledge-local-graph')
+    const referenceNodes = Array.from(referenceGraph?.querySelectorAll('.knowledge-local-graph__node') ?? [])
+    const referenceLines = Array.from(referenceGraph?.querySelectorAll('.knowledge-local-graph__edge') ?? [])
+    const referenceTwoHopNode = referenceNodes.find((node) => node.getAttribute('aria-label')?.includes('距中心 2 跳'))
+    const referenceTwoHopTitle = referenceTwoHopNode?.getAttribute('title')
+    const referenceHasTwoHopNode = Boolean(referenceTwoHopNode)
+    const referenceNodeBackgrounds = referenceNodes.map((node) => getComputedStyle(node).backgroundColor)
+    referenceTwoHopNode?.click()
+    deadline = Date.now() + 2_000
+    while (
+      page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim() !== referenceTwoHopTitle
+      && Date.now() < deadline
+    ) await new Promise((resolve) => setTimeout(resolve, 25))
+    const referenceNodeNavigationTitle = page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
+    page.querySelector('[data-testid="statement-nav-back"]')?.click()
+    deadline = Date.now() + 2_000
+    while (
+      page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim() !== 'Oyster 知识加工链路'
+      && Date.now() < deadline
+    ) await new Promise((resolve) => setTimeout(resolve, 25))
     const link = page.querySelector('.knowledge-statement-link > a')
     link?.dispatchEvent(new MouseEvent('mouseenter'))
     deadline = Date.now() + 2_000
@@ -402,9 +417,14 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       linkPreview,
       referenceExplorerExists: Boolean(referenceExplorer),
       referenceHasCanvas: Boolean(referenceExplorer?.querySelector('canvas')),
-      referenceGroupHeadings,
-      referenceDetailsCollapsed: referenceDetails.every((details) => !details.open),
-      referenceRailStyle,
+      referenceHasArrow: Boolean(referenceExplorer?.querySelector('marker')),
+      referenceNodeCount: referenceNodes.length,
+      referenceLineCount: referenceLines.length,
+      referenceClusterCount: Number(referenceGraph?.getAttribute('data-cluster-count')),
+      referenceHasTwoHopNode,
+      referenceTwoHopTitle,
+      referenceNodeNavigationTitle,
+      referenceNodesTransparent: referenceNodeBackgrounds.every((color) => color === 'rgba(0, 0, 0, 0)'),
       linkedTitle,
       backAvailable,
       titleAfterBack,
@@ -1228,7 +1248,15 @@ app.whenReady().then(async () => {
         },
         {
           title: 'Knowledge Maintenance Agent',
-          content: '负责读取候选清单、按需回溯原始证据，并让知识层中的 Statement 可以互相解释。'
+          content: '负责读取[[Candidate Agenda|候选清单]]、按需回溯[[Raw Evidence|原始证据]]，并让知识层中的 Statement 可以互相解释。'
+        },
+        {
+          title: 'Candidate Agenda',
+          content: '记录 [[Knowledge Maintenance Agent]] 当前需要调查的问题，并连接相应的 [[Raw Evidence]]。'
+        },
+        {
+          title: 'Raw Evidence',
+          content: '为 [[Candidate Agenda]] 中的问题保留可回读的原始材料。'
         }
       ]
     })

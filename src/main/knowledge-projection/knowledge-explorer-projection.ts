@@ -11,6 +11,7 @@ import {
 } from '../../shared/knowledge-reference'
 
 const SNAPSHOT_PAGE_SIZE = 1_000
+const LOCAL_GRAPH_DEPTH = 2
 
 export interface KnowledgeProjectionReader {
   getStatement(title: string): KnowledgeStatement | undefined
@@ -79,7 +80,6 @@ export class KnowledgeExplorerProjectionService {
           }
           continue
         }
-        if (statement.title !== center.title && target.title !== center.title) continue
 
         const key = JSON.stringify([statement.title, target.title])
         const existing = edgeCounts.get(key)
@@ -94,46 +94,58 @@ export class KnowledgeExplorerProjectionService {
       }
     }
 
-    const edges = [...edgeCounts.values()].sort((left, right) => (
+    const allEdges = [...edgeCounts.values()].sort((left, right) => (
       compareTitles(left.sourceTitle, right.sourceTitle)
       || compareTitles(left.targetTitle, right.targetTitle)
     ))
-    const rolesByTitle = new Map<string, Set<'incoming' | 'outgoing'>>()
-    for (const edge of edges) {
-      if (edge.targetTitle === center.title && edge.sourceTitle !== center.title) {
-        const roles = rolesByTitle.get(edge.sourceTitle) ?? new Set()
-        roles.add('incoming')
-        rolesByTitle.set(edge.sourceTitle, roles)
-      }
-      if (edge.sourceTitle === center.title && edge.targetTitle !== center.title) {
-        const roles = rolesByTitle.get(edge.targetTitle) ?? new Set()
-        roles.add('outgoing')
-        rolesByTitle.set(edge.targetTitle, roles)
+    const neighborsByTitle = new Map<string, Set<string>>()
+    for (const edge of allEdges) {
+      if (edge.sourceTitle === edge.targetTitle) continue
+      const sourceNeighbors = neighborsByTitle.get(edge.sourceTitle) ?? new Set<string>()
+      sourceNeighbors.add(edge.targetTitle)
+      neighborsByTitle.set(edge.sourceTitle, sourceNeighbors)
+      const targetNeighbors = neighborsByTitle.get(edge.targetTitle) ?? new Set<string>()
+      targetNeighbors.add(edge.sourceTitle)
+      neighborsByTitle.set(edge.targetTitle, targetNeighbors)
+    }
+
+    const distanceByTitle = new Map([[center.title, 0]])
+    const queue = [center.title]
+    for (let index = 0; index < queue.length; index += 1) {
+      const title = queue[index]
+      const distance = distanceByTitle.get(title)
+      if (distance === undefined || distance >= LOCAL_GRAPH_DEPTH) continue
+      const neighbors = [...(neighborsByTitle.get(title) ?? [])].sort(compareTitles)
+      for (const neighborTitle of neighbors) {
+        if (distanceByTitle.has(neighborTitle)) continue
+        distanceByTitle.set(neighborTitle, distance + 1)
+        queue.push(neighborTitle)
       }
     }
 
-    const neighborTitles = [...rolesByTitle.keys()].sort(compareTitles)
-    const nodes = [center.title, ...neighborTitles].map((title) => {
+    const localTitles = [...distanceByTitle.keys()].sort((left, right) => (
+      (distanceByTitle.get(left) ?? 0) - (distanceByTitle.get(right) ?? 0)
+      || compareTitles(left, right)
+    ))
+    const localTitleSet = new Set(localTitles)
+    const nodes = localTitles.map((title) => {
       const statement = statementsByTitle.get(title)
       if (!statement) throw new Error(`Knowledge neighborhood 缺少 Statement：${title}`)
-      const roles = rolesByTitle.get(title)
       return {
         title,
         excerpt: knowledgeStatementExcerpt(statement.content),
-        roles: roles ? [...roles].sort() : []
+        distance: distanceByTitle.get(title) ?? 0
       }
     })
-    const incomingTitles = neighborTitles.filter((title) => rolesByTitle.get(title)?.has('incoming'))
-    const outgoingTitles = neighborTitles.filter((title) => rolesByTitle.get(title)?.has('outgoing'))
+    const edges = allEdges.filter((edge) => (
+      localTitleSet.has(edge.sourceTitle) && localTitleSet.has(edge.targetTitle)
+    ))
 
     return {
       centerTitle: center.title,
+      depth: LOCAL_GRAPH_DEPTH,
       nodes,
       edges,
-      groups: [
-        { kind: 'incoming', memberTitles: incomingTitles },
-        { kind: 'outgoing', memberTitles: outgoingTitles }
-      ],
       unresolvedReferences: [...unresolvedCounts.entries()]
         .sort(([left], [right]) => compareTitles(left, right))
         .map(([targetTitle, occurrenceCount]) => ({

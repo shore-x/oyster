@@ -1,147 +1,132 @@
-import { For, Show } from 'solid-js'
-import type {
-  KnowledgeNeighborhoodGroup,
-  KnowledgeNeighborhoodProjection,
-  KnowledgeNeighborhoodRole
-} from '../../../shared/knowledge'
+import { For, Show, createMemo } from 'solid-js'
+import type { KnowledgeNeighborhoodProjection } from '../../../shared/knowledge'
+import {
+  buildKnowledgeLocalGraphScene,
+  type KnowledgeLocalGraphSceneNode
+} from '../knowledge-local-graph-scene'
 
 export interface KnowledgeReferenceExplorerProps {
   projection: KnowledgeNeighborhoodProjection
   hoveredTitle?: string
-  hoverProjection?: KnowledgeNeighborhoodProjection
-  hoverLoading?: boolean
   onSelect(title: string): void
   onHover(title?: string): void
 }
 
-function group(
-  projection: KnowledgeNeighborhoodProjection,
-  kind: KnowledgeNeighborhoodRole
-): KnowledgeNeighborhoodGroup {
-  return projection.groups.find((candidate) => candidate.kind === kind)
-    ?? { kind, memberTitles: [] }
+function clusterColor(clusterIndex?: number): string {
+  return clusterIndex === undefined
+    ? 'var(--text-muted)'
+    : `var(--graph-cluster-${clusterIndex % 4 + 1})`
 }
 
-function occurrenceCount(
-  projection: KnowledgeNeighborhoodProjection,
-  title: string,
-  role: KnowledgeNeighborhoodRole
-): number {
-  return projection.edges
-    .filter((edge) => role === 'incoming'
-      ? edge.sourceTitle === title && edge.targetTitle === projection.centerTitle
-      : edge.sourceTitle === projection.centerTitle && edge.targetTitle === title)
-    .reduce((total, edge) => total + edge.occurrenceCount, 0)
+function truncatedTitle(title: string): string {
+  return title.length > 24 ? `${title.slice(0, 23)}…` : title
+}
+
+function directionalSummary(projection: KnowledgeNeighborhoodProjection, title: string): string {
+  const outgoing = [...new Set(projection.edges
+    .filter((edge) => edge.sourceTitle === title && edge.targetTitle !== title)
+    .map((edge) => edge.targetTitle))]
+  const incoming = [...new Set(projection.edges
+    .filter((edge) => edge.targetTitle === title && edge.sourceTitle !== title)
+    .map((edge) => edge.sourceTitle))]
+  const parts: string[] = []
+  if (outgoing.length) parts.push(`它引用 ${outgoing.join('、')}`)
+  if (incoming.length) parts.push(`${incoming.join('、')} 引用它`)
+  return parts.length ? `在当前局部图中，${parts.join('；')}。` : '当前局部图中没有其他直接引用。'
 }
 
 export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProps) {
-  const incoming = () => group(props.projection, 'incoming').memberTitles
-  const outgoing = () => group(props.projection, 'outgoing').memberTitles
-  const node = (title: string) => props.projection.nodes.find((candidate) => candidate.title === title)
-  const hoverIncoming = () => props.hoverProjection
-    ? group(props.hoverProjection, 'incoming').memberTitles
-    : []
-  const hoverOutgoing = () => props.hoverProjection
-    ? group(props.hoverProjection, 'outgoing').memberTitles
-    : []
-
-  const renderGroup = (
-    role: KnowledgeNeighborhoodRole,
-    titles: string[]
-  ) => {
-    const incomingRole = role === 'incoming'
-    return (
-      <section class={`knowledge-reference-explorer__group knowledge-reference-explorer__group--${role}`}>
-        <header>
-          <div>
-            <h3>{incomingRole ? '被这些 Statement 引用' : '当前 Statement 引用了'}</h3>
-            <p>{incomingRole
-              ? '以下正文直接引用当前 Statement。'
-              : '当前正文直接引用以下 Statement。'}</p>
-          </div>
-          <span>{titles.length} 项</span>
-        </header>
-        <Show
-          when={titles.length}
-          fallback={<p class="knowledge-reference-explorer__empty">暂无直接关系</p>}
-        >
-          <ol class="knowledge-reference-explorer__list">
-            <For each={titles}>{(title) => {
-              const statementNode = () => node(title)
-              const count = () => occurrenceCount(props.projection, title, role)
-              const mutual = () => statementNode()?.roles.length === 2
-              const expandedNeighborhood = () => props.hoveredTitle === title
-                && props.hoverProjection?.centerTitle === title
-              return (
-                <li>
-                  <details
-                    class="knowledge-reference-explorer__item ui-disclosure"
-                    onMouseEnter={() => props.onHover(title)}
-                    onMouseLeave={(event) => {
-                      if (!event.currentTarget.open) props.onHover(undefined)
-                    }}
-                    onToggle={(event) => {
-                      if (event.currentTarget.open) props.onHover(title)
-                      else if (props.hoveredTitle === title) props.onHover(undefined)
-                    }}
-                  >
-                    <summary>
-                      <span class="knowledge-reference-explorer__summary">
-                        <strong>{title}</strong>
-                        <span>{statementNode()?.excerpt || '这个 Statement 暂无正文摘要。'}</span>
-                      </span>
-                    </summary>
-                    <div class="knowledge-reference-explorer__detail ui-disclosure__content">
-                      <p class="knowledge-reference-explorer__relation-copy">
-                        {incomingRole
-                          ? `「${title}」在正文中引用了「${props.projection.centerTitle}」。`
-                          : `「${props.projection.centerTitle}」在正文中引用了「${title}」。`}
-                        <Show when={count() > 1}> 共出现 {count()} 次。</Show>
-                        <Show when={mutual()}> 两者互相引用。</Show>
-                      </p>
-                      <Show
-                        when={!props.hoverLoading || props.hoveredTitle !== title}
-                        fallback={<p class="knowledge-reference-explorer__loading">正在读取它的直接关系…</p>}
-                      >
-                        <Show when={expandedNeighborhood()}>
-                          <dl class="knowledge-reference-explorer__neighbors">
-                            <div>
-                              <dt>被引用</dt>
-                              <dd>{hoverIncoming().length ? hoverIncoming().join('、') : '无'}</dd>
-                            </div>
-                            <div>
-                              <dt>引用</dt>
-                              <dd>{hoverOutgoing().length ? hoverOutgoing().join('、') : '无'}</dd>
-                            </div>
-                          </dl>
-                        </Show>
-                      </Show>
-                      <button type="button" onClick={() => props.onSelect(title)}>打开 Statement</button>
-                    </div>
-                  </details>
-                </li>
-              )
-            }}</For>
-          </ol>
-        </Show>
-      </section>
-    )
+  const scene = createMemo(() => buildKnowledgeLocalGraphScene(props.projection))
+  const hoveredNode = () => scene().nodes.find((node) => node.title === props.hoveredTitle)
+  const isRelatedToHovered = (title: string): boolean => {
+    const hovered = hoveredNode()
+    return !hovered || hovered.title === title || hovered.neighborTitles.includes(title)
   }
+  const nodeClass = (node: KnowledgeLocalGraphSceneNode): string => [
+    'knowledge-local-graph__node',
+    node.title === props.projection.centerTitle ? 'knowledge-local-graph__node--center' : '',
+    props.hoveredTitle === node.title ? 'knowledge-local-graph__node--active' : '',
+    !isRelatedToHovered(node.title) ? 'knowledge-local-graph__node--dimmed' : ''
+  ].filter(Boolean).join(' ')
 
   return (
-    <section class="knowledge-reference-explorer" aria-label="Statement 直接引用">
+    <section class="knowledge-reference-explorer" aria-label="Statement 局部引用图">
       <header class="knowledge-reference-explorer__header">
         <div>
-          <span>直接引用</span>
+          <span>局部引用图 · {props.projection.depth} 跳</span>
           <h2>{props.projection.centerTitle}</h2>
         </div>
-        <p>关系从正文中的名称引用动态派生；展开条目可查看上下文与相邻关系。</p>
+        <p>连线不区分方向；位置和颜色仅根据当前引用结构排列。</p>
       </header>
 
-      <div class="knowledge-reference-explorer__groups">
-        {renderGroup('incoming', incoming())}
-        {renderGroup('outgoing', outgoing())}
-      </div>
+      <Show
+        when={scene().nodes.length > 1}
+        fallback={<p class="knowledge-local-graph__empty">当前 Statement 暂无可解析的相邻引用。</p>}
+      >
+        <div
+          class="knowledge-local-graph"
+          data-cluster-count={scene().clusterCount}
+          style={`height:${scene().height}px`}
+          onMouseLeave={() => props.onHover(undefined)}
+        >
+          <svg
+            class="knowledge-local-graph__edges"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            <For each={scene().edges}>{(edge) => {
+              const active = () => props.hoveredTitle === edge.sourceTitle
+                || props.hoveredTitle === edge.targetTitle
+              return (
+                <line
+                  class={`knowledge-local-graph__edge ${props.hoveredTitle && !active()
+                    ? 'knowledge-local-graph__edge--dimmed'
+                    : active() ? 'knowledge-local-graph__edge--active' : ''}`}
+                  x1={edge.sourceX}
+                  y1={edge.sourceY}
+                  x2={edge.targetX}
+                  y2={edge.targetY}
+                  style={`--knowledge-cluster-color:${clusterColor(edge.clusterIndex)}`}
+                />
+              )
+            }}</For>
+          </svg>
+
+          <For each={scene().nodes}>{(node) => (
+            <button
+              type="button"
+              class={nodeClass(node)}
+              style={`left:${node.x}%;top:${node.y}%;--knowledge-cluster-color:${node.title === props.projection.centerTitle
+                ? 'var(--text-primary)'
+                : clusterColor(node.clusterIndex)}`}
+              aria-label={`${node.title}，距中心 ${node.distance} 跳，${node.neighborTitles.length} 个相邻 Statement`}
+              aria-current={node.title === props.projection.centerTitle ? 'true' : undefined}
+              title={node.title}
+              onMouseEnter={() => props.onHover(node.title)}
+              onFocus={() => props.onHover(node.title)}
+              onBlur={() => props.onHover(undefined)}
+              onClick={() => props.onSelect(node.title)}
+            >
+              <span class="knowledge-local-graph__marker" aria-hidden="true" />
+              <span class="knowledge-local-graph__label">{truncatedTitle(node.title)}</span>
+            </button>
+          )}</For>
+        </div>
+      </Show>
+
+      <Show when={hoveredNode()}>
+        {(node) => (
+          <aside class="knowledge-local-graph__preview" aria-live="polite">
+            <div>
+              <strong>{node().title}</strong>
+              <span>{node().distance === 0 ? '当前 Statement' : `距中心 ${node().distance} 跳`} · {node().neighborTitles.length} 个相邻节点</span>
+            </div>
+            <p>{node().excerpt || '这个 Statement 暂无正文摘要。'}</p>
+            <p>{directionalSummary(props.projection, node().title)}</p>
+          </aside>
+        )}
+      </Show>
 
       <Show when={props.projection.unresolvedReferences.length}>
         <details class="knowledge-reference-explorer__unresolved ui-disclosure">

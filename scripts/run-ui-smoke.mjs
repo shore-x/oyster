@@ -131,8 +131,8 @@ if (
 
 const knowledge = semantics.knowledge
 if (knowledge.browse.title !== '知识库') throw new Error('Knowledge browser page was not rendered')
-if (knowledge.browse.statementCount !== 2) {
-  throw new Error(`Expected 2 fixture knowledge Statements, got ${knowledge.browse.statementCount}`)
+if (knowledge.browse.statementCount !== 4) {
+  throw new Error(`Expected 4 fixture knowledge Statements, got ${knowledge.browse.statementCount}`)
 }
 if (!knowledge.browse.selectedTitle || knowledge.browse.detailTitle !== knowledge.browse.selectedTitle) {
   throw new Error('Knowledge browser did not load the selected Statement detail')
@@ -163,11 +163,16 @@ if (knowledge.browse.searchPlaceholder !== '搜索标题或正文') {
 if (
   !knowledge.browse.referenceExplorerExists
   || knowledge.browse.referenceHasCanvas
-  || knowledge.browse.referenceGroupHeadings?.join(',') !== '被这些 Statement 引用,当前 Statement 引用了'
-  || !knowledge.browse.referenceDetailsCollapsed
-  || knowledge.browse.referenceRailStyle !== 'solid'
+  || knowledge.browse.referenceHasArrow
+  || knowledge.browse.referenceNodeCount !== 4
+  || knowledge.browse.referenceLineCount < 3
+  || knowledge.browse.referenceClusterCount !== 1
+  || !knowledge.browse.referenceHasTwoHopNode
+  || !knowledge.browse.referenceTwoHopTitle
+  || knowledge.browse.referenceNodeNavigationTitle !== knowledge.browse.referenceTwoHopTitle
+  || !knowledge.browse.referenceNodesTransparent
 ) {
-  throw new Error('Knowledge references are not rendered as a collapsed text-first explorer with straight rails')
+  throw new Error('Knowledge references are not rendered as a directionless, clustered two-hop local graph')
 }
 if (knowledge.browse.clearButtonDisabled !== false) {
   throw new Error('Knowledge clear action is unavailable for a non-empty Store')
@@ -195,7 +200,7 @@ if (!knowledge.clear.cancelled) {
 if (!knowledge.clear.completed || !knowledge.clear.closedAfterCompletion || knowledge.clear.statementCountAfterClear !== 0) {
   throw new Error(`Knowledge was not cleared through the confirmed action: ${knowledge.clear.error || 'unknown error'}`)
 }
-if (!knowledge.clear.result?.includes('已清空 2 条知识')) {
+if (!knowledge.clear.result?.includes('已清空 4 条知识')) {
   throw new Error('The knowledge browser does not report the completed reset')
 }
 

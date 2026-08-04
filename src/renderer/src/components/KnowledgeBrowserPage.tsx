@@ -99,7 +99,6 @@ export function KnowledgeBrowserPage(props: {
           hasMore={controller.result().nextOffset !== undefined}
           onSelect={(title) => controller.select(title)}
           onRead={(title) => window.oyster.knowledge.read(title)}
-          onReadNeighborhood={(title) => controller.readNeighborhood(title)}
           onLoadMore={() => void controller.browse(query(), true)}
         />
       </section>
