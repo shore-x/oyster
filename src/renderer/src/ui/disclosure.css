@@ -1,0 +1,47 @@
+.ui-disclosure {
+  min-width: 0;
+  border-top: 1px solid var(--border-default);
+}
+
+.ui-disclosure > summary {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: var(--font-size-body-sm);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-ui);
+  list-style: none;
+  user-select: none;
+}
+
+.ui-disclosure > summary::-webkit-details-marker { display: none; }
+
+.ui-disclosure > summary::before {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  content: "";
+  transform: rotate(-45deg);
+  transition: transform .14s ease;
+}
+
+.ui-disclosure > summary:hover,
+.ui-disclosure > summary:focus-visible {
+  color: var(--text-primary);
+  background: var(--surface-subtle);
+  outline: none;
+}
+
+.ui-disclosure[open] > summary::before { transform: rotate(45deg); }
+.ui-disclosure[open] > summary { color: var(--text-secondary); }
+.ui-disclosure__content { padding: 0 var(--space-4) var(--space-4); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-disclosure > summary::before { transition: none; }
+}

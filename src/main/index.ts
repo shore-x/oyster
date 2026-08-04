@@ -225,6 +225,11 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const primaryLabel = primaryButton.querySelector('.ui-button__label')
     const primaryBounds = primaryButton.getBoundingClientRect()
     const labelBounds = primaryLabel.getBoundingClientRect()
+    const sourceDetails = Array.from(page.querySelectorAll('.source-card__details'))
+    const collapsedSourceDetails = sourceDetails.filter((details) => !details.open).length
+    const sourceSummary = sourceDetails[0]?.querySelector('summary')?.textContent?.trim()
+    const defaultBodyText = page.innerText
+    if (sourceDetails[0]) sourceDetails[0].open = true
     return {
       title: page.querySelector('h1')?.textContent,
       sourceCards: page.querySelectorAll('[data-testid="source-card"]').length,
@@ -237,6 +242,10 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       buttonIconCount: Array.from(page.querySelectorAll('.ui-button')).filter((button) => button.querySelector('.ui-button__icon .ui-icon')?.childElementCount > 0).length,
       primaryActions: Array.from(page.querySelectorAll('button')).map((button) => button.textContent?.trim()),
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      collapsedSourceDetails,
+      sourceDetailCount: sourceDetails.length,
+      sourceSummary,
+      defaultBodyText,
       bodyText: page.innerText
     }
   })()`)
@@ -246,6 +255,8 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-skills"]').click()`)
   const skillSemantics = await window.webContents.executeJavaScript(`(async () => {
     const page = document.querySelector('[data-testid="page-skills"]')
+    page.querySelector('[data-testid="skills-view-external"]')?.click()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
     const discover = page.querySelector('[data-testid="discover-skills"]')
     discover?.click()
     let deadline = Date.now() + 2_000
@@ -326,9 +337,16 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     oysterItem?.click()
     let deadline = Date.now() + 2_000
     while (
-      page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim() !== 'Oyster 知识加工链路'
+      (page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim() !== 'Oyster 知识加工链路'
+        || !page.querySelector('.knowledge-reference-explorer'))
       && Date.now() < deadline
     ) await new Promise((resolve) => setTimeout(resolve, 25))
+    const referenceExplorer = page.querySelector('.knowledge-reference-explorer')
+    const referenceDetails = Array.from(referenceExplorer?.querySelectorAll('.knowledge-reference-explorer__item') ?? [])
+    const referenceGroupHeadings = Array.from(referenceExplorer?.querySelectorAll('.knowledge-reference-explorer__group h3') ?? [])
+      .map((heading) => heading.textContent?.trim())
+    const referenceRail = referenceExplorer?.querySelector('.knowledge-reference-explorer__list')
+    const referenceRailStyle = referenceRail ? getComputedStyle(referenceRail).borderLeftStyle : undefined
     const link = page.querySelector('.knowledge-statement-link > a')
     link?.dispatchEvent(new MouseEvent('mouseenter'))
     deadline = Date.now() + 2_000
@@ -374,6 +392,11 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       linkLabel,
       linkPreviewTitle,
       linkPreview,
+      referenceExplorerExists: Boolean(referenceExplorer),
+      referenceHasCanvas: Boolean(referenceExplorer?.querySelector('canvas')),
+      referenceGroupHeadings,
+      referenceDetailsCollapsed: referenceDetails.every((details) => !details.open),
+      referenceRailStyle,
       linkedTitle,
       backAvailable,
       titleAfterBack,
@@ -742,15 +765,19 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   await writeFile(join(dirname(capturePath), 'ai-backends.png'), aiImage.toPNG())
   const aiDirectTestSemantics = await window.webContents.executeJavaScript(`(async () => {
     const page = document.querySelector('[data-testid="page-ai-backends"]')
+    const builder = page.querySelector('.ai-builder')
+    const builderWasCollapsed = Boolean(builder && !builder.open)
+    if (builder) builder.open = true
+    await new Promise((resolve) => requestAnimationFrame(resolve))
     page.querySelector('[data-testid="coding-plan-test-button"]')?.click()
     const deadline = Date.now() + 5_000
     while (Date.now() < deadline) {
       const completed = Boolean(page.querySelector('[data-testid="connection-test-result"]'))
       const error = page.querySelector('.page-error')?.textContent?.trim()
-      if (completed || error) return { completed, error }
+      if (completed || error) return { completed, error, builderWasCollapsed }
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
-    return { completed: false, error: 'Timed out waiting for connection test result' }
+    return { completed: false, error: 'Timed out waiting for connection test result', builderWasCollapsed }
   })()`)
   const aiSemantics = await window.webContents.executeJavaScript(`(() => {
     const page = document.querySelector('[data-testid="page-ai-backends"]')
@@ -987,6 +1014,8 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-artifacts"]').click()`)
   const artifactSemantics = await window.webContents.executeJavaScript(`(async () => {
     const page = document.querySelector('[data-testid="page-artifacts"]')
+    const createDisclosure = page.querySelector('.artifact-create')
+    const createWasCollapsed = Boolean(createDisclosure && !createDisclosure.open)
     const path = page.querySelector('[data-testid="artifact-repository-path"]')
     let deadline = Date.now() + 2_000
     while (
@@ -1026,8 +1055,19 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       attentionStrong: page.querySelector('.artifact-card__attention strong')?.textContent?.trim(),
       repositoryOpenDisabled: page.querySelector('[data-testid="open-artifact-repository"]')?.disabled,
       artifactOpenDisabled: page.querySelector('[data-testid="open-artifact"]')?.disabled,
+      createWasCollapsed,
+      cardDetailsCollapsed: Boolean(page.querySelector('.artifact-card__details:not([open])')),
       pageError: page.querySelector('.page-error')?.textContent?.trim(),
-      overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
+      overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      overflowElements: Array.from(page.querySelectorAll('*'))
+        .filter((element) => element.getBoundingClientRect().right > window.innerWidth + 1)
+        .slice(0, 8)
+        .map((element) => ({
+          tag: element.tagName,
+          className: element.className,
+          right: Math.round(element.getBoundingClientRect().right),
+          width: Math.round(element.getBoundingClientRect().width)
+        }))
     }
   })()`)
   await new Promise((resolve) => setTimeout(resolve, 80))

@@ -174,7 +174,7 @@ export function FullChainResultDetail(props: {
         />
       </div>
 
-      <details class="chain-test__candidates" open>
+      <details class="chain-test__candidates ui-disclosure">
         <summary>候选裁决（{props.result.statementCandidates.length}）</summary>
         <StatementCandidateList candidates={props.result.statementCandidates} emptyText="本次测试没有发现需要裁决的 Statement 候选。" />
       </details>

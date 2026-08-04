@@ -42,7 +42,7 @@ Agent 最终提交一份结构化 Knowledge Contribution，其中可以包含多
 - canonical title 是 Agent 可见的唯一读写键。一次 Contribution 内的 title 不得重复；提交时没有同名 Statement 就创建，已有同名 Statement 就原地覆盖正文；
 - Sandbox 只维护当前 Statement 视图，不保存历史。Statement 的生命周期与历史如何治理尚未决定，不属于当前 MVP。
 
-Core 在一个事务中按 title 写入整份 Contribution，再回读实际 Statement 供 UI 展示。正文中的名称引用原样保存，Agent 可以使用引用中的 canonical title 继续精确读取对应 Statement；当前实现不解析引用，也不生成出站引用、反向引用或图投影视图。
+Core 在一个事务中按 title 写入整份 Contribution，再回读实际 Statement 供 UI 展示。正文中的名称引用原样保存，Agent 可以使用引用中的 canonical title 继续精确读取对应 Statement。持久 Store 不保存边；知识浏览 Projection 在读取时解析当前知识视图中的名称引用，并派生当前 Statement 的直接出站引用、反向引用与未解析引用。派生结果只服务浏览，不回写 Store，也不成为第二份权威关系。
 
 Sandbox 的写入不会自动影响正式知识库。失败或取消会丢弃本次 Sandbox；成功重跑会用同一正式知识基线创建新的 Sandbox，并替换当前运行持有的旧 Sandbox。应用启动时会清理上一次进程遗留的 Sandbox。
 
@@ -50,7 +50,7 @@ Sandbox 的写入不会自动影响正式知识库。失败或取消会丢弃本
 
 用户可以从当前结果或任意历史快照显式导入正式知识库。当前 MVP 直接取快照中的最终 Statement，以 canonical title 为键在一个事务中写入：不存在的名称创建，已有的名称覆盖正文，不执行冲突判断、自动合并或隐式同步。重复导入同一次结果也是合法操作。这个入口只用于早期验证，不等同于已经设计了正式知识加工调度链路。
 
-“知识库”是当前持久知识的独立浏览入口，提供标题与正文搜索、Statement 列表和完整正文回读。它与仅展示单次 Sandbox 输出的“加工测试”保持明确边界。“清空知识”也只位于知识库页面：经应用内确认弹窗授权后，原子删除基线 Store 中全部 Statement 及 Contribution 记录，并清理当前进程持有的 Sandbox；该操作与任何知识加工运行互斥，且不可撤销。
+“知识库”是当前持久知识的独立浏览入口，提供标题与正文搜索、Statement 列表、完整正文回读和直接引用浏览。引用浏览采用文本优先的两个方向列表：分别说明“哪些 Statement 引用当前内容”和“当前内容引用哪些 Statement”，默认显示标题与正文摘要，按需展开自然语言方向说明和相邻关系；细直线只辅助扫描层级，不承担语义。它与仅展示单次 Sandbox 输出的“加工测试”保持明确边界。“清空知识”也只位于知识库页面：经应用内确认弹窗授权后，原子删除基线 Store 中全部 Statement 及 Contribution 记录，并清理当前进程持有的 Sandbox；该操作与任何知识加工运行互斥，且不可撤销。
 
 ## 3. 两个加工阶段
 
@@ -147,7 +147,7 @@ Model Connection 会在 Provider 能声明时保留 `contextWindowTokens` 和最
 
 ## 6. 当前未实现
 
-- 从 Statement 正文的动态名称引用派生出站引用、反向引用和图投影视图；
+- 超出当前 Statement 直接邻域的多层路径、全局图或超图投影视图；
 - Statement 生命周期与历史治理；
 - 脱离原始 Session、只依据知识层内容及显式引用进行的 Statement 可理解性盲审或对抗式校验；
 - 正式知识生产的自动提交、冲突裁决与增量同步链路；

@@ -179,7 +179,7 @@ export function AgentConfigurationPage() {
                       onClick={() => void saveDefault()}
                     >{controller.isSaving(role().id) ? '保存中…' : '保存默认 Prompt'}</Button>
                   </div>
-                  <details class="agent-config-built-in">
+                  <details class="agent-config-built-in ui-disclosure">
                     <summary>查看代码内置 Prompt</summary>
                     <pre>{role().builtInInstructions}</pre>
                   </details>
@@ -211,7 +211,7 @@ export function AgentConfigurationPage() {
                           </div>
                           <p>{tool.description}</p>
                           <details
-                            class="agent-config-tool__schema"
+                            class="agent-config-tool__schema ui-disclosure"
                             data-testid={`agent-tool-schema-${tool.name}`}
                           >
                             <summary>

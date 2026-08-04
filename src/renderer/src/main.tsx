@@ -3,6 +3,7 @@ import { App } from './App'
 import './ui/tokens.css'
 import './ui/icon.css'
 import './ui/button.css'
+import './ui/disclosure.css'
 import './styles.css'
 
 render(() => <App />, document.getElementById('root')!)

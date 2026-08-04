@@ -33,7 +33,10 @@ if (semantics.buttonCount !== semantics.sharedButtonCount) throw new Error('A bu
 if (semantics.buttonIconCount < semantics.sharedButtonCount) throw new Error('A shared button icon was not rendered')
 if (semantics.overflowX) throw new Error('Page has unexpected horizontal overflow')
 if (!semantics.primaryActions.includes('探测本机 Agent')) throw new Error('Discovery action is missing')
-if (!semantics.bodyText.includes('内容将在使用时从原始位置读取')) throw new Error('On-demand source reading is not explained')
+if (semantics.collapsedSourceDetails !== semantics.sourceDetailCount) throw new Error('Source details are not collapsed by default')
+if (!semantics.sourceSummary?.includes('个会话')) throw new Error('Source summary does not expose the essential scan information')
+if (semantics.defaultBodyText.includes('内容将在使用时从原始位置读取')) throw new Error('Source detail is visible before disclosure')
+if (!semantics.bodyText.includes('内容将在使用时从原始位置读取')) throw new Error('On-demand source reading is not explained after disclosure')
 for (const removedCopy of ['打开导入目录', '正在导入原始记录', '已全部导入']) {
   if (semantics.bodyText.includes(removedCopy)) throw new Error(`Removed import copy is still rendered: ${removedCopy}`)
 }
@@ -43,7 +46,7 @@ for (const removedCopy of ['KNOWLEDGE SOURCES', '数据仅保存在本机', 'LOC
 
 const skills = semantics.skills
 const expectedSkillProjectPath = join(userDataPath, 'skill-fixture-home', 'projects', 'oyster')
-if (skills?.title !== 'Agent Skills' || skills.skillCount !== 6) {
+if (skills?.title !== 'Skills' || skills.skillCount !== 6) {
   throw new Error(`Skill discovery page did not render all fixture registrations: ${skills?.skillCount ?? 'missing'}`)
 }
 if (
@@ -102,8 +105,11 @@ if (artifacts.attentionHeading !== 'Attention' || artifacts.attentionStrong !== 
 if (artifacts.repositoryOpenDisabled !== false || artifacts.artifactOpenDisabled !== false) {
   throw new Error('Artifact folder open actions are unavailable')
 }
+if (!artifacts.createWasCollapsed || !artifacts.cardDetailsCollapsed) {
+  throw new Error('Artifact creation or Attention details are not progressively disclosed')
+}
 if (artifacts.pageError) throw new Error(`Artifact page reported an error: ${artifacts.pageError}`)
-if (artifacts.overflowX) throw new Error('Artifact page has unexpected horizontal overflow at 900px')
+if (artifacts.overflowX) throw new Error(`Artifact page has unexpected horizontal overflow at 900px: ${JSON.stringify(artifacts.overflowElements)}`)
 if (!(await stat(join(expectedArtifactRepositoryPath, '.git'))).isDirectory()) {
   throw new Error('Artifact Repository was not initialized as Git')
 }
@@ -144,6 +150,15 @@ if (
 }
 if (knowledge.browse.searchPlaceholder !== '搜索标题或正文') {
   throw new Error('Knowledge browser search is missing')
+}
+if (
+  !knowledge.browse.referenceExplorerExists
+  || knowledge.browse.referenceHasCanvas
+  || knowledge.browse.referenceGroupHeadings?.join(',') !== '被这些 Statement 引用,当前 Statement 引用了'
+  || !knowledge.browse.referenceDetailsCollapsed
+  || knowledge.browse.referenceRailStyle !== 'solid'
+) {
+  throw new Error('Knowledge references are not rendered as a collapsed text-first explorer with straight rails')
 }
 if (knowledge.browse.clearButtonDisabled !== false) {
   throw new Error('Knowledge clear action is unavailable for a non-empty Store')
@@ -191,6 +206,9 @@ for (const requiredCopy of ['Oyster 独立 OAuth', '本机 Codex 账号（仅发
 if (semantics.ai.agent.overflowX) throw new Error('AI backend page has unexpected horizontal overflow')
 if (!semantics.ai.directTest?.completed) {
   throw new Error(`AI connection test did not complete without a native confirmation dialog: ${semantics.ai.directTest?.error || 'unknown error'}`)
+}
+if (!semantics.ai.directTest.builderWasCollapsed) {
+  throw new Error('AI backend configuration is not collapsed by default')
 }
 if (semantics.ai.model.backendKind !== 'api') throw new Error('API backend choice did not update the form')
 if (semantics.ai.model.provider !== 'openai') throw new Error('OpenAI is not the default Model provider')

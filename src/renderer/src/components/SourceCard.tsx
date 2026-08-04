@@ -64,59 +64,67 @@ export function SourceCard(props: SourceCardProps) {
           <Button variant="secondary" icon="folder" onClick={props.onChooseRoot}>选择目录</Button>
         </div>
       }>
-        <div class="metrics">
-          <div>
-            <span class="metric__label">会话 · 文件</span>
-            <strong>{props.source.sessionCount} · {props.source.fileCount}</strong>
-          </div>
-          <div><span class="metric__label">指令</span><strong>{props.source.instructionFileCount}</strong></div>
-          <div><span class="metric__label">数据量</span><strong>{formatBytes(props.source.totalBytes)}</strong></div>
-          <div><span class="metric__label">时间范围</span><strong>{formatDate(props.source.oldestSessionAt)} – {formatDate(props.source.latestSessionAt)}</strong></div>
-        </div>
-
-        <Show when={isRunning()} fallback={
-          <div class="catalog-block">
-            <div class="catalog-block__row">
-              <span>本地记录目录</span>
-              <span class="catalog-block__value">{props.source.sessionCount} 个可用 Session</span>
+        <details class="source-card__details ui-disclosure">
+          <summary>
+            {props.source.sessionCount} 个会话 · {formatBytes(props.source.totalBytes)} ·
+            {' '}{formatDate(props.source.oldestSessionAt)} – {formatDate(props.source.latestSessionAt)}
+          </summary>
+          <div class="ui-disclosure__content">
+            <div class="metrics">
+              <div>
+                <span class="metric__label">会话 · 文件</span>
+                <strong>{props.source.sessionCount} · {props.source.fileCount}</strong>
+              </div>
+              <div><span class="metric__label">指令</span><strong>{props.source.instructionFileCount}</strong></div>
+              <div><span class="metric__label">数据量</span><strong>{formatBytes(props.source.totalBytes)}</strong></div>
+              <div><span class="metric__label">时间范围</span><strong>{formatDate(props.source.oldestSessionAt)} – {formatDate(props.source.latestSessionAt)}</strong></div>
             </div>
-            <div class="catalog-block__meta">
-              <span>内容将在使用时从原始位置读取</span>
-              <Show when={props.source.invalidFileCount > 0}>
-                <span>{props.source.invalidFileCount} 个文件无法识别</span>
+
+            <Show when={isRunning()} fallback={
+              <div class="catalog-block">
+                <div class="catalog-block__row">
+                  <span>本地记录目录</span>
+                  <span class="catalog-block__value">{props.source.sessionCount} 个可用 Session</span>
+                </div>
+                <div class="catalog-block__meta">
+                  <span>内容将在使用时从原始位置读取</span>
+                  <Show when={props.source.invalidFileCount > 0}>
+                    <span>{props.source.invalidFileCount} 个文件无法识别</span>
+                  </Show>
+                </div>
+              </div>
+            }>
+              <div class="catalog-block">
+                <div class="catalog-block__row">
+                  <span>正在扫描历史记录</span>
+                  <span class="catalog-block__value">
+                    {props.run!.processedFiles} 个文件 · {formatBytes(props.run!.processedBytes)}
+                  </span>
+                </div>
+                <div class="progress progress--indeterminate" aria-label="扫描进度" role="progressbar">
+                  <span style={{ width: '32%' }} />
+                </div>
+                <div class="catalog-block__meta"><span>总量将在扫描完成后确认</span></div>
+              </div>
+            </Show>
+
+            <div class="source-card__actions">
+              <Show when={isRunning()} fallback={
+                <>
+                  <Button variant="ghost" icon="folder" onClick={props.onChooseRoot}>更改目录</Button>
+                  <Button variant="secondary" icon="refresh" onClick={props.onScan}>
+                    {props.source.scanState === 'ready' ? '重新扫描' : '扫描记录'}
+                  </Button>
+                  <Show when={props.source.scanState === 'ready'}>
+                    <span class="complete-label"><Icon name="check" />目录已扫描</span>
+                  </Show>
+                </>
+              }>
+                <Button variant="danger" icon="stop" onClick={props.onCancel}>取消</Button>
               </Show>
             </div>
           </div>
-        }>
-          <div class="catalog-block">
-            <div class="catalog-block__row">
-              <span>正在扫描历史记录</span>
-              <span class="catalog-block__value">
-                {props.run!.processedFiles} 个文件 · {formatBytes(props.run!.processedBytes)}
-              </span>
-            </div>
-            <div class="progress progress--indeterminate" aria-label="扫描进度" role="progressbar">
-              <span style={{ width: '32%' }} />
-            </div>
-            <div class="catalog-block__meta"><span>总量将在扫描完成后确认</span></div>
-          </div>
-        </Show>
-
-        <div class="source-card__actions">
-          <Show when={isRunning()} fallback={
-            <>
-              <Button variant="ghost" icon="folder" onClick={props.onChooseRoot}>更改目录</Button>
-              <Button variant="secondary" icon="refresh" onClick={props.onScan}>
-                {props.source.scanState === 'ready' ? '重新扫描' : '扫描记录'}
-              </Button>
-              <Show when={props.source.scanState === 'ready'}>
-                <span class="complete-label"><Icon name="check" />目录已扫描</span>
-              </Show>
-            </>
-          }>
-            <Button variant="danger" icon="stop" onClick={props.onCancel}>取消</Button>
-          </Show>
-        </div>
+        </details>
       </Show>
     </article>
   )

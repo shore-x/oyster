@@ -157,65 +157,70 @@ function ApiConnectionCard(props: {
         </div>
         <StatusBadge connection={props.connection} />
       </div>
-      <dl class="ai-connection-details">
-        <div><dt>Backend</dt><dd>API</dd></div>
-        <div><dt>Protocol</dt><dd>{config().protocol === 'openai_responses' ? 'Responses' : 'Chat Completions'}</dd></div>
-        <div><dt>API Key</dt><dd>{config().hasApiKey ? '已保存到 Keychain' : '未配置'}</dd></div>
-      </dl>
-      <div class="ai-model-form__row">
-        <label class="ai-field">
-          <span>测试模型</span>
-          <select
-            data-testid="api-connection-model-select"
-            value={selectedModel()?.id ?? ''}
-            onChange={(event) => chooseModel(event.currentTarget.value)}
-          >
-            <For each={models()}>{(candidate) => (
-              <option value={candidate.id}>{modelLabel(candidate)}</option>
-            )}</For>
-          </select>
-        </label>
-        <label class="ai-field">
-          <span>思考强度</span>
-          <select
-            data-testid="api-connection-reasoning-select"
-            value={selectedReasoningEffort() ?? ''}
-            disabled={!selectedModel()?.reasoningEfforts.length}
-            onChange={(event) => setReasoningEffort(
-              event.currentTarget.value
-                ? event.currentTarget.value as ReasoningEffort
-                : undefined
-            )}
-          >
-            <option value="">模型默认</option>
-            <For each={selectedModel()?.reasoningEfforts ?? []}>{(effort) => (
-              <option value={effort}>{effort}</option>
-            )}</For>
-          </select>
-        </label>
-      </div>
-      <p class="path" data-testid="api-connection-test-configuration">
-        点击后将直接发起一条不含项目数据的测试调用，可能消耗 Provider API 额度；状态与结果会显示在本页。将使用 {modelLabel(selectedModel())}
-        {selectedReasoningEffort() ? ` · ${selectedReasoningEffort()}` : ' · 模型默认思考强度'}
-      </p>
-      <Show when={props.connection.errorMessage}>
-        <p class="ai-connection-error">{props.connection.errorMessage}</p>
-      </Show>
-      <div class="ai-connection-card__actions">
-        <Button
-          variant="danger"
-          icon="trash"
-          disabled={Boolean(props.busy)}
-          onClick={props.onRemove}
-        >删除</Button>
-        <Button
-          variant="secondary"
-          icon="play"
-          data-testid="api-connection-test-button"
-          disabled={Boolean(props.busy) || !selectedModel()}
-          onClick={testConnection}
-        >{props.busy?.startsWith('test:') ? '测试中…' : '运行额度测试'}</Button>
-      </div>
+      <details class="ai-connection-card__details ui-disclosure">
+        <summary>配置与额度测试</summary>
+        <div class="ui-disclosure__content">
+          <dl class="ai-connection-details">
+            <div><dt>Backend</dt><dd>API</dd></div>
+            <div><dt>Protocol</dt><dd>{config().protocol === 'openai_responses' ? 'Responses' : 'Chat Completions'}</dd></div>
+            <div><dt>API Key</dt><dd>{config().hasApiKey ? '已保存到 Keychain' : '未配置'}</dd></div>
+          </dl>
+          <div class="ai-model-form__row">
+            <label class="ai-field">
+              <span>测试模型</span>
+              <select
+                data-testid="api-connection-model-select"
+                value={selectedModel()?.id ?? ''}
+                onChange={(event) => chooseModel(event.currentTarget.value)}
+              >
+                <For each={models()}>{(candidate) => (
+                  <option value={candidate.id}>{modelLabel(candidate)}</option>
+                )}</For>
+              </select>
+            </label>
+            <label class="ai-field">
+              <span>思考强度</span>
+              <select
+                data-testid="api-connection-reasoning-select"
+                value={selectedReasoningEffort() ?? ''}
+                disabled={!selectedModel()?.reasoningEfforts.length}
+                onChange={(event) => setReasoningEffort(
+                  event.currentTarget.value
+                    ? event.currentTarget.value as ReasoningEffort
+                    : undefined
+                )}
+              >
+                <option value="">模型默认</option>
+                <For each={selectedModel()?.reasoningEfforts ?? []}>{(effort) => (
+                  <option value={effort}>{effort}</option>
+                )}</For>
+              </select>
+            </label>
+          </div>
+          <p class="path" data-testid="api-connection-test-configuration">
+            点击后将直接发起一条不含项目数据的测试调用，可能消耗 Provider API 额度；状态与结果会显示在本页。将使用 {modelLabel(selectedModel())}
+            {selectedReasoningEffort() ? ` · ${selectedReasoningEffort()}` : ' · 模型默认思考强度'}
+          </p>
+          <Show when={props.connection.errorMessage}>
+            <p class="ai-connection-error">{props.connection.errorMessage}</p>
+          </Show>
+          <div class="ai-connection-card__actions">
+            <Button
+              variant="danger"
+              icon="trash"
+              disabled={Boolean(props.busy)}
+              onClick={props.onRemove}
+            >删除</Button>
+            <Button
+              variant="secondary"
+              icon="play"
+              data-testid="api-connection-test-button"
+              disabled={Boolean(props.busy) || !selectedModel()}
+              onClick={testConnection}
+            >{props.busy?.startsWith('test:') ? '测试中…' : '运行额度测试'}</Button>
+          </div>
+        </div>
+      </details>
     </article>
   )
 }
@@ -361,36 +366,43 @@ export function AiBackendsPage() {
         )}
       </Show>
 
-      <section class="ai-builder" aria-label="添加 AI 后端">
-        <div class="ai-builder__selectors">
-          <label class="ai-field">
-            <span>执行方式</span>
-            <select
-              data-testid="backend-kind-select"
-              value={backendKind()}
-              onChange={(event) => chooseBackend(event.currentTarget.value as AiBackendKind)}
-            >
-              <option value="coding_plan">已有 Coding Plan</option>
-              <option value="api">API</option>
-            </select>
-          </label>
-          <label class="ai-field">
-            <span>Provider</span>
-            <select
-              data-testid="provider-select"
-              value={providerId()}
-              onChange={(event) => chooseProvider(event.currentTarget.value as 'openai_codex' | ModelProviderId)}
-            >
-              <Show when={backendKind() === 'coding_plan'}>
-                <option value="openai_codex">OpenAI Codex</option>
-              </Show>
-              <Show when={backendKind() === 'api'}>
-                <option value="openai">OpenAI API</option>
-                <option value="openai_compatible">OpenAI-compatible</option>
-              </Show>
-            </select>
-          </label>
-        </div>
+      <details class="ai-builder ui-disclosure">
+        <summary>
+          <span class="ai-builder__summary">
+            <strong>添加或连接 AI 后端</strong>
+            <span>按需展开登录、模型与 API 配置。</span>
+          </span>
+        </summary>
+        <div class="ai-builder__content ui-disclosure__content">
+          <div class="ai-builder__selectors">
+            <label class="ai-field">
+              <span>执行方式</span>
+              <select
+                data-testid="backend-kind-select"
+                value={backendKind()}
+                onChange={(event) => chooseBackend(event.currentTarget.value as AiBackendKind)}
+              >
+                <option value="coding_plan">已有 Coding Plan</option>
+                <option value="api">API</option>
+              </select>
+            </label>
+            <label class="ai-field">
+              <span>Provider</span>
+              <select
+                data-testid="provider-select"
+                value={providerId()}
+                onChange={(event) => chooseProvider(event.currentTarget.value as 'openai_codex' | ModelProviderId)}
+              >
+                <Show when={backendKind() === 'coding_plan'}>
+                  <option value="openai_codex">OpenAI Codex</option>
+                </Show>
+                <Show when={backendKind() === 'api'}>
+                  <option value="openai">OpenAI API</option>
+                  <option value="openai_compatible">OpenAI-compatible</option>
+                </Show>
+              </select>
+            </label>
+          </div>
 
         <Show when={backendKind() === 'coding_plan' && codex()}>
           {(connection) => (
@@ -588,7 +600,8 @@ export function AiBackendsPage() {
             </div>
           </form>
         </Show>
-      </section>
+        </div>
+      </details>
 
       <Show when={apiConnections().length > 0}>
         <section class="ai-connections" aria-label="已配置 API Connections">

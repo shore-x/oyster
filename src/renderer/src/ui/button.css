@@ -1,18 +1,18 @@
 .ui-button {
   display: grid;
-  grid-template-columns: 14px auto 14px;
-  column-gap: 6px;
+  grid-template-columns: 16px auto 16px;
+  column-gap: 8px;
   align-items: center;
   justify-content: center;
-  min-width: 104px;
-  height: 34px;
-  padding: 0 12px;
+  min-width: 112px;
+  height: 40px;
+  padding: 0 14px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   cursor: pointer;
   font: inherit;
-  font-size: 11.5px;
-  font-weight: 600;
+  font-size: var(--font-size-body-sm);
+  font-weight: var(--font-weight-semibold);
   letter-spacing: -.005em;
   white-space: nowrap;
   transition: color .14s ease, background-color .14s ease, border-color .14s ease, box-shadow .14s ease, transform .1s ease;
@@ -22,14 +22,14 @@
 .ui-button:active:not(:disabled) { transform: scale(.98); }
 .ui-button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--control-primary-ring); }
 .ui-button:disabled { cursor: default; opacity: .48; }
-.ui-button--wide { min-width: 150px; }
+.ui-button--wide { min-width: 164px; }
 
 .ui-button__icon,
 .ui-button__balance {
   display: grid;
   place-items: center;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 .ui-button__label {
@@ -41,13 +41,13 @@
   color: #fff;
   background: var(--control-primary);
   border-color: var(--control-primary);
-  box-shadow: 0 1px 2px rgba(42, 66, 94, .18);
+  box-shadow: none;
 }
 
 .ui-button--primary:hover:not(:disabled) {
   background: var(--control-primary-hover);
   border-color: var(--control-primary-hover);
-  box-shadow: 0 2px 5px rgba(42, 66, 94, .16);
+  box-shadow: none;
 }
 
 .ui-button--secondary {

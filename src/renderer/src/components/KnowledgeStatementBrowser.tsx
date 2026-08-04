@@ -23,7 +23,7 @@ import {
   type KnowledgeExplorerSessionSnapshot
 } from '../knowledge-explorer-session'
 import { Button } from '../ui'
-import { KnowledgeReferenceGraph } from './KnowledgeReferenceGraph'
+import { KnowledgeReferenceExplorer } from './KnowledgeReferenceExplorer'
 
 type StatementContentPart =
   | { kind: 'text'; value: string }
@@ -305,7 +305,7 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
               </div>
               <Show when={props.neighborhood}>
                 {(projection) => (
-                  <KnowledgeReferenceGraph
+                  <KnowledgeReferenceExplorer
                     projection={projection()}
                     hoveredTitle={session().hoveredTitle}
                     hoverProjection={hoverNeighborhood()}
