@@ -208,8 +208,10 @@ if (
   || !knowledge.browse.referenceUnrelatedContextualEdgesHidden
   || knowledge.browse.referenceFocusPreviewTitle !== knowledge.browse.referenceTwoHopTitle
   || !knowledge.browse.referenceFocusActive
+  || !knowledge.browse.referenceViewportScrollbarGutter?.includes('stable')
+  || !knowledge.browse.referenceLayoutStableAcrossOverflow
 ) {
-  throw new Error('Knowledge graph hierarchy or in-graph excerpt preview is visually invalid')
+  throw new Error('Knowledge graph hierarchy, stability, or in-graph excerpt preview is visually invalid')
 }
 if (
   knowledge.browse.listOverflowY !== 'auto'

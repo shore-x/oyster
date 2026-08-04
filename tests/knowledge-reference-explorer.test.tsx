@@ -34,6 +34,7 @@ describe('KnowledgeReferenceExplorer', () => {
 
     expect(html).toContain('Second hop')
     expect(html).toContain('knowledge-local-graph__viewport')
+    expect(html).toContain('data-layout-width="720"')
     expect(html).toContain('knowledge-local-graph__edge')
     expect(html.match(/knowledge-local-graph__edge--first-hop/g)).toHaveLength(2)
     expect(html.match(/knowledge-local-graph__edge--contextual/g)).toHaveLength(1)

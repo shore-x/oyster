@@ -497,6 +497,31 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     await new Promise((resolve) => requestAnimationFrame(resolve))
     const referenceFocusPreviewTitle = referenceExplorer?.querySelector('.knowledge-local-graph__preview strong')?.textContent?.trim()
     const referenceFocusActive = document.activeElement === referenceTwoHopNode
+    const referenceLayoutSignature = () => JSON.stringify({
+      width: referenceViewport?.getAttribute('data-layout-width'),
+      height: referenceViewport?.getAttribute('data-scene-height'),
+      nodes: Array.from(referenceGraph?.querySelectorAll('.knowledge-local-graph__node') ?? []).map((node) => (
+        [node.dataset.title, node.style.left, node.style.top]
+      ))
+    })
+    const referenceLayoutBeforeOverflow = referenceLayoutSignature()
+    const referenceViewportWidthBeforeOverflow = referenceViewport?.clientWidth ?? 0
+    const referenceViewportScrollbarGutter = referenceViewport
+      ? getComputedStyle(referenceViewport).scrollbarGutter
+      : ''
+    const referenceGraphOriginalHeight = referenceGraph?.style.height ?? ''
+    if (referenceGraph) referenceGraph.style.height = '360px'
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    const referenceLayoutDuringOverflow = referenceLayoutSignature()
+    const referenceViewportWidthDuringOverflow = referenceViewport?.clientWidth ?? 0
+    if (referenceGraph) referenceGraph.style.height = referenceGraphOriginalHeight
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    const referenceLayoutAfterOverflow = referenceLayoutSignature()
+    const referenceViewportWidthAfterOverflow = referenceViewport?.clientWidth ?? 0
+    const referenceLayoutStableAcrossOverflow = referenceLayoutBeforeOverflow === referenceLayoutDuringOverflow
+      && referenceLayoutBeforeOverflow === referenceLayoutAfterOverflow
+      && Math.abs(referenceViewportWidthBeforeOverflow - referenceViewportWidthDuringOverflow) <= 1
+      && Math.abs(referenceViewportWidthBeforeOverflow - referenceViewportWidthAfterOverflow) <= 1
 
     const listScroll = page.querySelector('[data-testid="knowledge-statement-list-scroll"]')
     const detailScroll = page.querySelector('[data-testid="knowledge-statement-detail-scroll"]')
@@ -635,6 +660,8 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       referenceUnrelatedContextualEdgesHidden,
       referenceFocusPreviewTitle,
       referenceFocusActive,
+      referenceViewportScrollbarGutter,
+      referenceLayoutStableAcrossOverflow,
       listOverflowY,
       detailOverflowY,
       listOverscrollY,

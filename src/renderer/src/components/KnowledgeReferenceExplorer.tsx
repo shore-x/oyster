@@ -25,6 +25,7 @@ const PREVIEW_PADDING = 12
 
 export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProps) {
   const [graphWidth, setGraphWidth] = createSignal(720)
+  let graphContainerElement: HTMLElement | undefined
   let graphViewportElement: HTMLDivElement | undefined
   const scene = createMemo(() => buildKnowledgeLocalGraphScene(
     props.projection,
@@ -71,14 +72,26 @@ export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProp
       if (width > 0) setGraphWidth(width)
     }
     updateWidth()
-    if (!graphViewportElement || typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(updateWidth)
-    observer.observe(graphViewportElement)
+    if (!graphContainerElement || typeof ResizeObserver === 'undefined') return
+    // The scroll viewport must not observe itself: its scrollbar can otherwise change its
+    // client width and repeatedly trigger a different static graph solution.
+    let observedContainerWidth = Math.round(graphContainerElement.getBoundingClientRect().width)
+    const observer = new ResizeObserver(() => {
+      const containerWidth = Math.round(graphContainerElement?.getBoundingClientRect().width ?? 0)
+      if (containerWidth <= 0 || containerWidth === observedContainerWidth) return
+      observedContainerWidth = containerWidth
+      updateWidth()
+    })
+    observer.observe(graphContainerElement)
     onCleanup(() => observer.disconnect())
   })
 
   return (
-    <section class="knowledge-reference-explorer" aria-label="Statement 局部引用图">
+    <section
+      ref={(element) => { graphContainerElement = element }}
+      class="knowledge-reference-explorer"
+      aria-label="Statement 局部引用图"
+    >
       <Show
         when={scene().nodes.length > 1}
         fallback={<p class="knowledge-local-graph__empty">当前 Statement 暂无可解析的相邻引用。</p>}
@@ -87,6 +100,7 @@ export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProp
           ref={(element) => { graphViewportElement = element }}
           class="knowledge-local-graph__viewport"
           data-scene-height={scene().height}
+          data-layout-width={scene().width}
           onMouseLeave={() => props.onHover(undefined)}
         >
           <div
