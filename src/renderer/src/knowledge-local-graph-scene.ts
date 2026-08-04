@@ -1,16 +1,29 @@
 import type { KnowledgeNeighborhoodProjection } from '../../shared/knowledge'
-
-export const KNOWLEDGE_LOCAL_GRAPH_NODE_WIDTH = 136
-export const KNOWLEDGE_LOCAL_GRAPH_NODE_HEIGHT = 44
+import {
+  forceManyBody,
+  forceSimulation,
+  forceX,
+  forceY,
+  type Force,
+  type SimulationNodeDatum
+} from 'd3-force'
 
 const MIN_SCENE_WIDTH = 220
 const DEFAULT_SCENE_WIDTH = 720
-const MIN_SCENE_HEIGHT = 320
-const SCENE_PADDING_X = 22
-const SCENE_PADDING_Y = 24
-const NODE_GAP_X = 30
-const NODE_GAP_Y = 24
+const MIN_SCENE_HEIGHT = 190
+const SCENE_PADDING_X = 16
+const SCENE_PADDING_Y = 16
+const NODE_GAP = 8
 const EDGE_NODE_CLEARANCE = 3
+const LINK_SURFACE_GAP = 46
+const FORCE_TICK_LIMIT = 320
+const FORCE_STABLE_TICKS = 10
+
+const NODE_DIMENSIONS = {
+  center: { width: 152, height: 44 },
+  firstHop: { width: 136, height: 40 },
+  secondHop: { width: 112, height: 34 }
+} as const
 
 export interface KnowledgeLocalGraphSceneNode {
   title: string
@@ -51,7 +64,12 @@ export interface KnowledgeLocalGraphLayoutOptions {
   width?: number
 }
 
-type PositionedNode = KnowledgeLocalGraphSceneNode
+interface ForceNode extends KnowledgeLocalGraphSceneNode, SimulationNodeDatum {
+  x: number
+  y: number
+  vx: number
+  vy: number
+}
 
 interface Point {
   x: number
@@ -105,27 +123,41 @@ function nodeRectangle(node: KnowledgeLocalGraphSceneNode, clearance = 0): Recta
   }
 }
 
+function nodeDimensions(distance: number): { width: number; height: number } {
+  if (distance === 0) return NODE_DIMENSIONS.center
+  if (distance === 1) return NODE_DIMENSIONS.firstHop
+  return NODE_DIMENSIONS.secondHop
+}
+
 function rectanglesOverlap(left: KnowledgeLocalGraphSceneNode, right: KnowledgeLocalGraphSceneNode): boolean {
-  return Math.abs(left.x - right.x) < (left.width + right.width) / 2 + NODE_GAP_X
-    && Math.abs(left.y - right.y) < (left.height + right.height) / 2 + NODE_GAP_Y
+  return Math.abs(left.x - right.x) < (left.width + right.width) / 2 + NODE_GAP
+    && Math.abs(left.y - right.y) < (left.height + right.height) / 2 + NODE_GAP
 }
 
-function hasNodeOverlap(nodes: KnowledgeLocalGraphSceneNode[]): boolean {
-  for (let leftIndex = 0; leftIndex < nodes.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < nodes.length; rightIndex += 1) {
-      if (rectanglesOverlap(nodes[leftIndex], nodes[rightIndex])) return true
+function horizontalBounds(node: KnowledgeLocalGraphSceneNode, width: number): [number, number] {
+  const halfSceneWidth = width / 2
+  return [
+    -halfSceneWidth + SCENE_PADDING_X + node.width / 2,
+    halfSceneWidth - SCENE_PADDING_X - node.width / 2
+  ]
+}
+
+function clampHorizontalPosition(nodes: ForceNode[], width: number): void {
+  for (const node of nodes) {
+    if (node.distance === 0) {
+      node.x = 0
+      node.y = 0
+      node.vx = 0
+      node.vy = 0
+      continue
     }
+    const [minimumX, maximumX] = horizontalBounds(node, width)
+    node.x = clamp(node.x, minimumX, maximumX)
   }
-  return false
 }
 
-function resolveNodeOverlaps(nodes: PositionedNode[], width: number, height: number): boolean {
-  const minimumX = SCENE_PADDING_X + KNOWLEDGE_LOCAL_GRAPH_NODE_WIDTH / 2
-  const maximumX = width - minimumX
-  const minimumY = SCENE_PADDING_Y + KNOWLEDGE_LOCAL_GRAPH_NODE_HEIGHT / 2
-  const maximumY = height - minimumY
-
-  for (let iteration = 0; iteration < 480; iteration += 1) {
+function resolveNodeOverlaps(nodes: ForceNode[], width: number, iterationLimit = 1_200): boolean {
+  for (let iteration = 0; iteration < iterationLimit; iteration += 1) {
     let overlapCount = 0
     for (let leftIndex = 0; leftIndex < nodes.length; leftIndex += 1) {
       for (let rightIndex = leftIndex + 1; rightIndex < nodes.length; rightIndex += 1) {
@@ -133,54 +165,77 @@ function resolveNodeOverlaps(nodes: PositionedNode[], width: number, height: num
         const right = nodes[rightIndex]
         const deltaX = right.x - left.x
         const deltaY = right.y - left.y
-        const requiredX = (left.width + right.width) / 2 + NODE_GAP_X
-        const requiredY = (left.height + right.height) / 2 + NODE_GAP_Y
+        const requiredX = (left.width + right.width) / 2 + NODE_GAP
+        const requiredY = (left.height + right.height) / 2 + NODE_GAP
         const overlapX = requiredX - Math.abs(deltaX)
         const overlapY = requiredY - Math.abs(deltaY)
         if (overlapX <= 0 || overlapY <= 0) continue
         overlapCount += 1
 
-        const leftPinned = left.distance === 0
-        const rightPinned = right.distance === 0
-        const moveLeft = leftPinned ? 0 : rightPinned ? 1 : 0.5
-        const moveRight = rightPinned ? 0 : leftPinned ? 1 : 0.5
+        const leftMovable = left.distance === 0 ? 0 : 1
+        const rightMovable = right.distance === 0 ? 0 : 1
+        const totalMovement = leftMovable + rightMovable || 1
+        const moveLeft = leftMovable / totalMovement
+        const moveRight = rightMovable / totalMovement
         if (overlapX / requiredX < overlapY / requiredY) {
-          const direction = deltaX === 0 ? (leftIndex % 2 === 0 ? 1 : -1) : Math.sign(deltaX)
-          const movement = overlapX + 0.5
+          const direction = deltaX === 0 ? (rightIndex % 2 === 0 ? 1 : -1) : Math.sign(deltaX)
+          const movement = overlapX + 0.05
           left.x -= direction * movement * moveLeft
           right.x += direction * movement * moveRight
         } else {
-          const direction = deltaY === 0 ? (leftIndex % 2 === 0 ? 1 : -1) : Math.sign(deltaY)
-          const movement = overlapY + 0.5
+          const direction = deltaY === 0 ? (rightIndex % 2 === 0 ? 1 : -1) : Math.sign(deltaY)
+          const movement = overlapY + 0.05
           left.y -= direction * movement * moveLeft
           right.y += direction * movement * moveRight
         }
       }
     }
-
-    for (const node of nodes) {
-      if (node.distance === 0) continue
-      node.x = clamp(node.x, minimumX, maximumX)
-      node.y = clamp(node.y, minimumY, maximumY)
-    }
+    clampHorizontalPosition(nodes, width)
     if (overlapCount === 0) return true
   }
-  return !hasNodeOverlap(nodes)
+  return nodes.every((node, index) => (
+    nodes.slice(index + 1).every((other) => !rectanglesOverlap(node, other))
+  ))
 }
 
-function initialSceneHeight(nodeCount: number, width: number): number {
-  const availableWidth = Math.max(
-    KNOWLEDGE_LOCAL_GRAPH_NODE_WIDTH,
-    width - SCENE_PADDING_X * 2
-  )
-  const columns = Math.max(1, Math.floor(
-    availableWidth / (KNOWLEDGE_LOCAL_GRAPH_NODE_WIDTH + NODE_GAP_X)
+function packRemainingOverlapsVertically(nodes: ForceNode[]): void {
+  const ordered = [...nodes].sort((left, right) => (
+    left.distance - right.distance
+    || Math.abs(left.y) - Math.abs(right.y)
+    || compareTitles(left.title, right.title)
   ))
-  const rows = Math.ceil(Math.max(1, nodeCount) / columns)
-  return Math.max(
-    MIN_SCENE_HEIGHT,
-    190 + rows * (KNOWLEDGE_LOCAL_GRAPH_NODE_HEIGHT + NODE_GAP_Y)
-  )
+  const placed: ForceNode[] = []
+  for (const node of ordered) {
+    const intervals = placed
+      .filter((other) => (
+        Math.abs(node.x - other.x) < (node.width + other.width) / 2 + NODE_GAP
+      ))
+      .map((other) => {
+        const separation = (node.height + other.height) / 2 + NODE_GAP
+        return { start: other.y - separation, end: other.y + separation }
+      })
+      .sort((left, right) => left.start - right.start || left.end - right.end)
+    const merged: Array<{ start: number; end: number }> = []
+    for (const interval of intervals) {
+      const previous = merged.at(-1)
+      if (!previous || interval.start > previous.end) merged.push({ ...interval })
+      else previous.end = Math.max(previous.end, interval.end)
+    }
+    const collision = merged.find((interval) => node.y > interval.start && node.y < interval.end)
+    if (collision) {
+      const distanceToStart = Math.abs(node.y - collision.start)
+      const distanceToEnd = Math.abs(collision.end - node.y)
+      node.y = distanceToStart < distanceToEnd
+        ? collision.start
+        : distanceToEnd < distanceToStart
+          ? collision.end
+          : compareTitles(node.title, placed.at(-1)?.title ?? '') < 0
+            ? collision.start
+            : collision.end
+      node.vy = 0
+    }
+    placed.push(node)
+  }
 }
 
 function seedNodes(
@@ -188,56 +243,206 @@ function seedNodes(
   nodesByTitle: Map<string, KnowledgeNeighborhoodProjection['nodes'][number]>,
   components: string[][],
   adjacency: Map<string, Set<string>>,
-  clusterByTitle: Map<string, number | undefined>,
-  width: number,
-  height: number
-): PositionedNode[] {
-  const centerX = width / 2
-  const centerY = height / 2
-  const outerRadiusX = Math.max(
-    72,
-    centerX - SCENE_PADDING_X - KNOWLEDGE_LOCAL_GRAPH_NODE_WIDTH / 2
-  )
-  const outerRadiusY = Math.max(
-    82,
-    centerY - SCENE_PADDING_Y - KNOWLEDGE_LOCAL_GRAPH_NODE_HEIGHT / 2
-  )
+  clusterByTitle: Map<string, number | undefined>
+): ForceNode[] {
   const totalWeight = components.reduce((total, component) => total + component.length, 0) || 1
   const positionByTitle = new Map<string, Point>([
-    [projection.centerTitle, { x: centerX, y: centerY }]
+    [projection.centerTitle, { x: 0, y: 0 }]
   ])
-  let angleCursor = -Math.PI / 2
+  let angleCursor = -Math.PI * 1.5
 
   for (const component of components) {
     const sector = Math.PI * 2 * component.length / totalWeight
-    const sectorPadding = Math.min(0.16, sector * 0.08)
-    const usableSector = Math.max(0, sector - sectorPadding * 2)
-    component.forEach((title, index) => {
+    const anchorAngle = angleCursor + sector / 2
+    component.forEach((title) => {
       const node = nodesByTitle.get(title)
-      const angle = component.length === 1
-        ? angleCursor + sector / 2
-        : angleCursor + sectorPadding + usableSector * (index + 0.5) / component.length
-      const ringFactor = node?.distance === 1 ? 0.56 : 0.94
+      const distance = node?.distance ?? 1
+      const peers = component.filter((peerTitle) => (
+        (nodesByTitle.get(peerTitle)?.distance ?? 1) === distance
+      ))
+      const peerIndex = peers.indexOf(title)
+      const angularStep = distance === 1 ? 0.6 : 0.48
+      const maximumSpread = Math.min(sector * 0.58, Math.PI * 0.82)
+      const desiredSpread = Math.max(0, peers.length - 1) * angularStep
+      const spread = Math.min(maximumSpread, desiredSpread)
+      const angle = peers.length <= 1
+        ? anchorAngle
+        : anchorAngle + spread * (peerIndex / (peers.length - 1) - 0.5)
+      const radius = distance === 1 ? 78 : 124
       positionByTitle.set(title, {
-        x: centerX + Math.cos(angle) * outerRadiusX * ringFactor,
-        y: centerY + Math.sin(angle) * outerRadiusY * ringFactor
+        x: Math.cos(angle) * radius,
+        y: Math.sin(angle) * radius
       })
     })
     angleCursor += sector
   }
 
   return projection.nodes.map((node) => {
-    const position = positionByTitle.get(node.title) ?? { x: centerX, y: centerY }
+    const position = positionByTitle.get(node.title) ?? { x: 0, y: 0 }
+    const dimensions = nodeDimensions(node.distance)
     return {
       ...node,
       x: position.x,
       y: position.y,
-      width: KNOWLEDGE_LOCAL_GRAPH_NODE_WIDTH,
-      height: KNOWLEDGE_LOCAL_GRAPH_NODE_HEIGHT,
+      vx: 0,
+      vy: 0,
+      width: dimensions.width,
+      height: dimensions.height,
       clusterIndex: clusterByTitle.get(node.title),
       neighborTitles: [...(adjacency.get(node.title) ?? [])].sort(compareTitles)
     }
   })
+}
+
+function rectangleRayExtent(node: ForceNode, unitX: number, unitY: number): number {
+  const extentX = Math.abs(unitX) < 0.001
+    ? Number.POSITIVE_INFINITY
+    : node.width / 2 / Math.abs(unitX)
+  const extentY = Math.abs(unitY) < 0.001
+    ? Number.POSITIVE_INFINITY
+    : node.height / 2 / Math.abs(unitY)
+  return Math.min(extentX, extentY)
+}
+
+function createLinkForce(edges: VisualEdge[]): Force<ForceNode, undefined> {
+  let links: Array<[ForceNode, ForceNode]> = []
+  const force = ((alpha: number): void => {
+    for (let index = 0; index < links.length; index += 1) {
+      const [source, target] = links[index]
+      let deltaX = target.x + target.vx - source.x - source.vx
+      let deltaY = target.y + target.vy - source.y - source.vy
+      if (Math.abs(deltaX) + Math.abs(deltaY) < 0.001) {
+        deltaX = index % 2 === 0 ? 0.01 : -0.01
+        deltaY = index % 3 === 0 ? 0.01 : -0.01
+      }
+      const distance = Math.max(0.001, Math.hypot(deltaX, deltaY))
+      const unitX = deltaX / distance
+      const unitY = deltaY / distance
+      const desiredDistance = rectangleRayExtent(source, unitX, unitY)
+        + rectangleRayExtent(target, unitX, unitY)
+        + LINK_SURFACE_GAP
+      const movement = (distance - desiredDistance) * 0.14 * alpha
+      const sourceMovable = source.distance === 0 ? 0 : 1
+      const targetMovable = target.distance === 0 ? 0 : 1
+      const totalMovement = sourceMovable + targetMovable || 1
+      if (sourceMovable) {
+        source.vx += unitX * movement * sourceMovable / totalMovement
+        source.vy += unitY * movement * sourceMovable / totalMovement
+      }
+      if (targetMovable) {
+        target.vx -= unitX * movement * targetMovable / totalMovement
+        target.vy -= unitY * movement * targetMovable / totalMovement
+      }
+    }
+  }) as Force<ForceNode, undefined>
+  force.initialize = (nodes): void => {
+    const nodesByTitle = new Map(nodes.map((node) => [node.title, node]))
+    links = edges.flatMap((edge) => {
+      const source = nodesByTitle.get(edge.sourceTitle)
+      const target = nodesByTitle.get(edge.targetTitle)
+      return source && target ? [[source, target]] : []
+    })
+  }
+  return force
+}
+
+function createRectangleCollisionForce(iterations = 4): Force<ForceNode, undefined> {
+  let nodes: ForceNode[] = []
+  const force = (() => {
+    for (let pass = 0; pass < iterations; pass += 1) {
+      for (let leftIndex = 0; leftIndex < nodes.length; leftIndex += 1) {
+        for (let rightIndex = leftIndex + 1; rightIndex < nodes.length; rightIndex += 1) {
+          const left = nodes[leftIndex]
+          const right = nodes[rightIndex]
+          const deltaX = right.x + right.vx - left.x - left.vx
+          const deltaY = right.y + right.vy - left.y - left.vy
+          const requiredX = (left.width + right.width) / 2 + NODE_GAP
+          const requiredY = (left.height + right.height) / 2 + NODE_GAP
+          const overlapX = requiredX - Math.abs(deltaX)
+          const overlapY = requiredY - Math.abs(deltaY)
+          if (overlapX <= 0 || overlapY <= 0) continue
+
+          const leftMovable = left.distance === 0 ? 0 : 1
+          const rightMovable = right.distance === 0 ? 0 : 1
+          const totalMovement = leftMovable + rightMovable || 1
+          if (overlapX / requiredX < overlapY / requiredY) {
+            const direction = deltaX === 0 ? (rightIndex % 2 === 0 ? 1 : -1) : Math.sign(deltaX)
+            const movement = overlapX + 0.05
+            left.vx -= direction * movement * leftMovable / totalMovement
+            right.vx += direction * movement * rightMovable / totalMovement
+          } else {
+            const direction = deltaY === 0 ? (rightIndex % 2 === 0 ? 1 : -1) : Math.sign(deltaY)
+            const movement = overlapY + 0.05
+            left.vy -= direction * movement * leftMovable / totalMovement
+            right.vy += direction * movement * rightMovable / totalMovement
+          }
+        }
+      }
+    }
+  }) as Force<ForceNode, undefined>
+  force.initialize = (newNodes): void => {
+    nodes = newNodes
+  }
+  return force
+}
+
+function settleNodes(nodes: ForceNode[], edges: VisualEdge[], width: number): void {
+  const center = nodes.find((node) => node.distance === 0)
+  if (center) {
+    center.fx = 0
+    center.fy = 0
+  }
+  const simulation = forceSimulation(nodes)
+    .stop()
+    .alpha(1)
+    .alphaMin(0.001)
+    .alphaDecay(1 - Math.pow(0.001, 1 / 240))
+    .velocityDecay(0.42)
+    .force('links', createLinkForce(edges))
+    .force('charge', forceManyBody<ForceNode>().strength(-6).distanceMin(24).distanceMax(160))
+    .force('x', forceX<ForceNode>(0).strength((node) => node.distance === 0 ? 1 : 0.008))
+    .force('y', forceY<ForceNode>(0).strength((node) => node.distance === 0 ? 1 : 0.008))
+    .force('collision', createRectangleCollisionForce())
+
+  let stableTicks = 0
+  for (let tick = 0; tick < FORCE_TICK_LIMIT; tick += 1) {
+    const previousPositions = nodes.map((node) => ({ x: node.x, y: node.y }))
+    simulation.tick()
+    clampHorizontalPosition(nodes, width)
+    const maximumMovement = nodes.reduce((maximum, node, index) => Math.max(
+      maximum,
+      Math.hypot(node.x - previousPositions[index].x, node.y - previousPositions[index].y)
+    ), 0)
+    stableTicks = tick > 60 && maximumMovement < 0.08 ? stableTicks + 1 : 0
+    if (stableTicks >= FORCE_STABLE_TICKS) break
+  }
+  simulation.stop()
+  if (!resolveNodeOverlaps(nodes, width)) packRemainingOverlapsVertically(nodes)
+}
+
+function compactNodes(nodes: ForceNode[], width: number): {
+  nodes: KnowledgeLocalGraphSceneNode[]
+  height: number
+} {
+  const minimumY = Math.min(...nodes.map((node) => node.y - node.height / 2))
+  const maximumY = Math.max(...nodes.map((node) => node.y + node.height / 2))
+  const contentHeight = maximumY - minimumY
+  const height = Math.max(MIN_SCENE_HEIGHT, Math.ceil(contentHeight + SCENE_PADDING_Y * 2))
+  const offsetY = (height - contentHeight) / 2 - minimumY
+  return {
+    height,
+    nodes: nodes.map((node) => ({
+      title: node.title,
+      excerpt: node.excerpt,
+      distance: node.distance,
+      x: rounded(node.x + width / 2),
+      y: rounded(node.y + offsetY),
+      width: node.width,
+      height: node.height,
+      clusterIndex: node.clusterIndex,
+      neighborTitles: node.neighborTitles
+    }))
+  }
 }
 
 function pointInsideRectangle(point: Point, rectangle: Rectangle): boolean {
@@ -411,7 +616,13 @@ function routeEdges(
         direction * baseOffset * 1.5,
         -direction * baseOffset * 1.5,
         direction * baseOffset * 2.25,
-        -direction * baseOffset * 2.25
+        -direction * baseOffset * 2.25,
+        direction * baseOffset * 3.5,
+        -direction * baseOffset * 3.5,
+        direction * baseOffset * 5,
+        -direction * baseOffset * 5,
+        direction * baseOffset * 7,
+        -direction * baseOffset * 7
       ]
       for (const offset of offsets) {
         const candidate = routeCandidate(
@@ -512,46 +723,29 @@ export function buildKnowledgeLocalGraphScene(
     for (const title of component) clusterByTitle.set(title, clusterIndex)
   }
 
-  const initialHeight = initialSceneHeight(projection.nodes.length, width)
-  const maximumHeight = Math.max(
-    initialHeight,
-    SCENE_PADDING_Y * 2 + projection.nodes.length * (KNOWLEDGE_LOCAL_GRAPH_NODE_HEIGHT + NODE_GAP_Y)
-  )
-  let height = initialHeight
-  let positionedNodes: PositionedNode[] = []
-  while (true) {
-    positionedNodes = seedNodes(
-      projection,
-      nodesByTitle,
-      components,
-      adjacency,
-      clusterByTitle,
-      width,
-      height
-    )
-    if (resolveNodeOverlaps(positionedNodes, width, height)) break
-    if (height >= maximumHeight) break
-    height = Math.min(maximumHeight, height + Math.max(72, Math.ceil(height * 0.16)))
-  }
-
-  const nodes = positionedNodes
-  const sceneNodesByTitle = new Map(nodes.map((node) => [node.title, node]))
   const visualEdges = [...undirectedEdges.values()].map((edge) => {
-    const source = sceneNodesByTitle.get(edge.sourceTitle)
-    const target = sceneNodesByTitle.get(edge.targetTitle)
-    if (!source || !target) throw new Error('Local graph scene 缺少引用端点')
-    const clusterIndex = source.clusterIndex !== undefined
-      && source.clusterIndex === target.clusterIndex
-      ? source.clusterIndex
+    const sourceCluster = clusterByTitle.get(edge.sourceTitle)
+    const targetCluster = clusterByTitle.get(edge.targetTitle)
+    const clusterIndex = sourceCluster !== undefined && sourceCluster === targetCluster
+      ? sourceCluster
       : undefined
     return { ...edge, clusterIndex }
   })
+  const forceNodes = seedNodes(
+    projection,
+    nodesByTitle,
+    components,
+    adjacency,
+    clusterByTitle
+  )
+  settleNodes(forceNodes, visualEdges, width)
+  const compacted = compactNodes(forceNodes, width)
 
   return {
     width,
-    height,
-    nodes,
-    edges: routeEdges(visualEdges, nodes, width, height),
+    height: compacted.height,
+    nodes: compacted.nodes,
+    edges: routeEdges(visualEdges, compacted.nodes, width, compacted.height),
     clusterCount: nextClusterIndex
   }
 }

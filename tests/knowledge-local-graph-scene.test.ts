@@ -67,7 +67,27 @@ describe('buildKnowledgeLocalGraphScene', () => {
     expect(scene.edges).toHaveLength(1)
   })
 
-  it('expands a narrow scene until dense text rectangles no longer overlap', () => {
+  it('keeps a small local graph compact and gives second-hop labels a smaller footprint', () => {
+    const scene = buildKnowledgeLocalGraphScene(graph(
+      [['Center', 0], ['First', 1], ['Second A', 2], ['Second B', 2]],
+      [
+        ['Center', 'First'],
+        ['First', 'Second A'],
+        ['First', 'Second B'],
+        ['Second A', 'Second B']
+      ]
+    ), { width: 356 })
+    const center = scene.nodes.find((node) => node.title === 'Center')!
+    const first = scene.nodes.find((node) => node.title === 'First')!
+    const second = scene.nodes.find((node) => node.title === 'Second A')!
+
+    expect(scene.height).toBeLessThanOrEqual(210)
+    expect(center.width).toBeGreaterThan(first.width)
+    expect(first.width).toBeGreaterThan(second.width)
+    expect(first.height).toBeGreaterThan(second.height)
+  })
+
+  it('uses additional scene height only when dense text rectangles need it', () => {
     const neighbors = Array.from({ length: 16 }, (_, index) => `Statement ${index + 1} with a long title`)
     const scene = buildKnowledgeLocalGraphScene(graph(
       [['Center', 0], ...neighbors.map((title, index) => [title, index % 3 === 0 ? 1 : 2] as [string, number])],

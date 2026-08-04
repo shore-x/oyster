@@ -18,22 +18,14 @@ function clusterColor(clusterIndex?: number): string {
     : `var(--graph-cluster-${clusterIndex % 4 + 1})`
 }
 
-function directionalSummary(projection: KnowledgeNeighborhoodProjection, title: string): string {
-  const outgoing = [...new Set(projection.edges
-    .filter((edge) => edge.sourceTitle === title && edge.targetTitle !== title)
-    .map((edge) => edge.targetTitle))]
-  const incoming = [...new Set(projection.edges
-    .filter((edge) => edge.targetTitle === title && edge.sourceTitle !== title)
-    .map((edge) => edge.sourceTitle))]
-  const parts: string[] = []
-  if (outgoing.length) parts.push(`它引用 ${outgoing.join('、')}`)
-  if (incoming.length) parts.push(`${incoming.join('、')} 引用它`)
-  return parts.length ? `在当前局部图中，${parts.join('；')}。` : '当前局部图中没有其他直接引用。'
-}
+const PREVIEW_MAX_WIDTH = 228
+const PREVIEW_HEIGHT = 82
+const PREVIEW_GAP = 10
+const PREVIEW_PADDING = 12
 
 export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProps) {
   const [graphWidth, setGraphWidth] = createSignal(720)
-  let graphElement: HTMLDivElement | undefined
+  let graphViewportElement: HTMLDivElement | undefined
   const scene = createMemo(() => buildKnowledgeLocalGraphScene(
     props.projection,
     { width: graphWidth() }
@@ -46,96 +38,121 @@ export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProp
   const nodeClass = (node: KnowledgeLocalGraphSceneNode): string => [
     'knowledge-local-graph__node',
     node.title === props.projection.centerTitle ? 'knowledge-local-graph__node--center' : '',
+    node.distance >= 2 ? 'knowledge-local-graph__node--second-hop' : '',
     props.hoveredTitle === node.title ? 'knowledge-local-graph__node--active' : '',
     !isRelatedToHovered(node.title) ? 'knowledge-local-graph__node--dimmed' : ''
   ].filter(Boolean).join(' ')
+  const previewPlacement = createMemo(() => {
+    const node = hoveredNode()
+    if (!node) return undefined
+    const currentScene = scene()
+    const width = Math.min(PREVIEW_MAX_WIDTH, currentScene.width - PREVIEW_PADDING * 2)
+    const leftSpace = node.x - node.width / 2
+    const rightSpace = currentScene.width - node.x - node.width / 2
+    const topSpace = node.y - node.height / 2
+    const bottomSpace = currentScene.height - node.y - node.height / 2
+    let left = node.x - width / 2
+    let top = node.y - PREVIEW_HEIGHT / 2
+    if (rightSpace >= width + PREVIEW_GAP) left = node.x + node.width / 2 + PREVIEW_GAP
+    else if (leftSpace >= width + PREVIEW_GAP) left = node.x - node.width / 2 - PREVIEW_GAP - width
+    else if (bottomSpace >= PREVIEW_HEIGHT + PREVIEW_GAP) top = node.y + node.height / 2 + PREVIEW_GAP
+    else if (topSpace >= PREVIEW_HEIGHT + PREVIEW_GAP) top = node.y - node.height / 2 - PREVIEW_GAP - PREVIEW_HEIGHT
+    else top += node.y < currentScene.height / 2 ? node.height : -node.height
+    return {
+      width,
+      left: Math.max(PREVIEW_PADDING, Math.min(currentScene.width - width - PREVIEW_PADDING, left)),
+      top: Math.max(PREVIEW_PADDING, Math.min(currentScene.height - PREVIEW_HEIGHT - PREVIEW_PADDING, top))
+    }
+  })
 
   onMount(() => {
     const updateWidth = (): void => {
-      const width = Math.round(graphElement?.getBoundingClientRect().width ?? 0)
+      const width = Math.round(graphViewportElement?.clientWidth ?? 0)
       if (width > 0) setGraphWidth(width)
     }
     updateWidth()
-    if (!graphElement || typeof ResizeObserver === 'undefined') return
+    if (!graphViewportElement || typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(updateWidth)
-    observer.observe(graphElement)
+    observer.observe(graphViewportElement)
     onCleanup(() => observer.disconnect())
   })
 
   return (
     <section class="knowledge-reference-explorer" aria-label="Statement 局部引用图">
-      <header class="knowledge-reference-explorer__header">
-        <span>局部引用图 · {props.projection.depth} 跳 · {scene().nodes.length} 个 Statement</span>
-        <p>连线不区分方向；布局和曲线路径会自动避开其他文字。</p>
-      </header>
-
       <Show
         when={scene().nodes.length > 1}
         fallback={<p class="knowledge-local-graph__empty">当前 Statement 暂无可解析的相邻引用。</p>}
       >
         <div
-          ref={(element) => { graphElement = element }}
-          class="knowledge-local-graph"
-          data-cluster-count={scene().clusterCount}
-          style={`height:${scene().height}px`}
+          ref={(element) => { graphViewportElement = element }}
+          class="knowledge-local-graph__viewport"
+          data-scene-height={scene().height}
           onMouseLeave={() => props.onHover(undefined)}
         >
-          <svg
-            class="knowledge-local-graph__edges"
-            viewBox={`0 0 ${scene().width} ${scene().height}`}
-            preserveAspectRatio="none"
-            aria-hidden="true"
+          <div
+            class="knowledge-local-graph"
+            data-cluster-count={scene().clusterCount}
+            style={`height:${scene().height}px`}
           >
-            <For each={scene().edges}>{(edge) => {
-              const active = () => props.hoveredTitle === edge.sourceTitle
-                || props.hoveredTitle === edge.targetTitle
-              return (
-                <path
-                  class={`knowledge-local-graph__edge ${props.hoveredTitle && !active()
-                    ? 'knowledge-local-graph__edge--dimmed'
-                    : active() ? 'knowledge-local-graph__edge--active' : ''}`}
-                  d={edge.path}
-                  data-source-title={edge.sourceTitle}
-                  data-target-title={edge.targetTitle}
-                  data-curved={edge.curved ? 'true' : 'false'}
-                  style={`--knowledge-cluster-color:${clusterColor(edge.clusterIndex)}`}
-                />
-              )
-            }}</For>
-          </svg>
-
-          <For each={scene().nodes}>{(node) => (
-            <button
-              type="button"
-              class={nodeClass(node)}
-              style={`left:${node.x}px;top:${node.y}px;width:${node.width}px;height:${node.height}px;--knowledge-cluster-color:${node.title === props.projection.centerTitle
-                ? 'var(--text-primary)'
-                : clusterColor(node.clusterIndex)}`}
-              aria-label={`${node.title}，距中心 ${node.distance} 跳，${node.neighborTitles.length} 个相邻 Statement`}
-              aria-current={node.title === props.projection.centerTitle ? 'true' : undefined}
-              title={node.title}
-              onMouseEnter={() => props.onHover(node.title)}
-              onFocusIn={() => props.onHover(node.title)}
-              onFocusOut={() => props.onHover(undefined)}
-              onClick={() => props.onSelect(node.title)}
+            <svg
+              class="knowledge-local-graph__edges"
+              viewBox={`0 0 ${scene().width} ${scene().height}`}
+              preserveAspectRatio="none"
+              aria-hidden="true"
             >
-              <span class="knowledge-local-graph__label">{node.title}</span>
-            </button>
-          )}</For>
-        </div>
-      </Show>
+              <For each={scene().edges}>{(edge) => {
+                const active = () => props.hoveredTitle === edge.sourceTitle
+                  || props.hoveredTitle === edge.targetTitle
+                return (
+                  <path
+                    class={`knowledge-local-graph__edge ${props.hoveredTitle && !active()
+                      ? 'knowledge-local-graph__edge--dimmed'
+                      : active() ? 'knowledge-local-graph__edge--active' : ''}`}
+                    d={edge.path}
+                    data-source-title={edge.sourceTitle}
+                    data-target-title={edge.targetTitle}
+                    data-curved={edge.curved ? 'true' : 'false'}
+                    style={`--knowledge-cluster-color:${clusterColor(edge.clusterIndex)}`}
+                  />
+                )
+              }}</For>
+            </svg>
 
-      <Show when={hoveredNode()}>
-        {(node) => (
-          <aside class="knowledge-local-graph__preview" aria-live="polite">
-            <div>
-              <strong>{node().title}</strong>
-              <span>{node().distance === 0 ? '当前 Statement' : `距中心 ${node().distance} 跳`} · {node().neighborTitles.length} 个相邻节点</span>
-            </div>
-            <p>{node().excerpt || '这个 Statement 暂无正文摘要。'}</p>
-            <p>{directionalSummary(props.projection, node().title)}</p>
-          </aside>
-        )}
+            <For each={scene().nodes}>{(node) => (
+              <button
+                type="button"
+                class={nodeClass(node)}
+                data-distance={node.distance}
+                data-title={node.title}
+                style={`left:${node.x}px;top:${node.y}px;width:${node.width}px;height:${node.height}px;--knowledge-cluster-color:${node.title === props.projection.centerTitle
+                  ? 'var(--text-primary)'
+                  : clusterColor(node.clusterIndex)}`}
+                aria-label={`${node.title}，距中心 ${node.distance} 跳，${node.neighborTitles.length} 个相邻 Statement`}
+                aria-current={node.title === props.projection.centerTitle ? 'true' : undefined}
+                aria-describedby={props.hoveredTitle === node.title ? 'knowledge-local-graph-preview' : undefined}
+                onMouseEnter={() => props.onHover(node.title)}
+                onFocusIn={() => props.onHover(node.title)}
+                onFocusOut={() => props.onHover(undefined)}
+                onClick={() => props.onSelect(node.title)}
+              >
+                <span class="knowledge-local-graph__label">{node.title}</span>
+              </button>
+            )}</For>
+
+            <Show when={hoveredNode() && previewPlacement()}>
+              <aside
+                id="knowledge-local-graph-preview"
+                class="knowledge-local-graph__preview"
+                role="tooltip"
+                aria-live="polite"
+                style={`left:${previewPlacement()!.left}px;top:${previewPlacement()!.top}px;width:${previewPlacement()!.width}px`}
+              >
+                <strong>{hoveredNode()!.title}</strong>
+                <p>{hoveredNode()!.excerpt || '这个 Statement 暂无正文摘要。'}</p>
+              </aside>
+            </Show>
+          </div>
+        </div>
       </Show>
 
       <Show when={props.projection.unresolvedReferences.length}>

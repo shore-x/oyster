@@ -350,11 +350,12 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       && Date.now() < deadline
     ) await new Promise((resolve) => setTimeout(resolve, 25))
     const referenceExplorer = page.querySelector('.knowledge-reference-explorer')
+    const referenceViewport = referenceExplorer?.querySelector('.knowledge-local-graph__viewport')
     const referenceGraph = referenceExplorer?.querySelector('.knowledge-local-graph')
     const referenceNodes = Array.from(referenceGraph?.querySelectorAll('.knowledge-local-graph__node') ?? [])
     const referenceEdges = Array.from(referenceGraph?.querySelectorAll('.knowledge-local-graph__edge') ?? [])
     const referenceTwoHopNode = referenceNodes.find((node) => node.getAttribute('aria-label')?.includes('距中心 2 跳'))
-    const referenceTwoHopTitle = referenceTwoHopNode?.getAttribute('title')
+    const referenceTwoHopTitle = referenceTwoHopNode?.dataset.title
     const referenceHasTwoHopNode = Boolean(referenceTwoHopNode)
     const referenceNodeBackgrounds = referenceNodes.map((node) => getComputedStyle(node).backgroundColor)
     const referenceMarkerFree = !referenceGraph?.querySelector('.knowledge-local-graph__marker, circle, ellipse, marker')
@@ -372,7 +373,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       y: Number.parseFloat(node.style.top),
       width: node.getBoundingClientRect().width,
       height: node.getBoundingClientRect().height,
-      title: node.getAttribute('title')
+      title: node.dataset.title
     }))
     const referenceLabelsCentered = Boolean(graphBounds) && referenceNodes.every((node) => {
       const labelBounds = node.querySelector('.knowledge-local-graph__label')?.getBoundingClientRect()
@@ -433,16 +434,24 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     ))
     const referenceCurvedEdgeCount = referenceEdges.filter((edge) => edge.dataset.curved === 'true').length
     const referenceHasLineElement = Boolean(referenceGraph?.querySelector('line'))
+    const referenceTwoHopFontSize = referenceTwoHopNode ? getComputedStyle(referenceTwoHopNode).fontSize : ''
     const referenceNodesAreTextButtons = referenceNodes.every((node) => (
       node.tagName === 'BUTTON'
       && node.tabIndex === 0
       && Boolean(node.querySelector('.knowledge-local-graph__label'))
     ))
+    const referenceExplorerHeightBeforeHover = referenceExplorer?.getBoundingClientRect().height ?? 0
     referenceTwoHopNode?.dispatchEvent(new MouseEvent('mouseenter'))
-    await Promise.resolve()
-    const referenceHoverPreviewTitle = referenceExplorer?.querySelector('.knowledge-local-graph__preview strong')?.textContent?.trim()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const referenceHoverPreview = referenceExplorer?.querySelector('.knowledge-local-graph__preview')
+    const referenceHoverPreviewTitle = referenceHoverPreview?.querySelector('strong')?.textContent?.trim()
+    const referenceHoverPreviewText = referenceHoverPreview?.querySelector('p')?.textContent?.trim()
     const referenceHoverActive = referenceTwoHopNode?.classList.contains('knowledge-local-graph__node--active')
-    referenceGraph?.dispatchEvent(new MouseEvent('mouseleave'))
+    const referenceHoverPreviewInsideGraph = Boolean(referenceHoverPreview && referenceGraph?.contains(referenceHoverPreview))
+    const referenceHoverKeepsHeight = Math.abs(
+      (referenceExplorer?.getBoundingClientRect().height ?? 0) - referenceExplorerHeightBeforeHover
+    ) <= 1
+    referenceViewport?.dispatchEvent(new MouseEvent('mouseleave'))
     referenceTwoHopNode?.focus()
     referenceTwoHopNode?.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
     await new Promise((resolve) => requestAnimationFrame(resolve))
@@ -564,7 +573,16 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       referenceCurvedEdgeCount,
       referenceHasLineElement,
       referenceNodesAreTextButtons,
+      referenceHasIntroCopy: Boolean(referenceExplorer?.querySelector('.knowledge-reference-explorer__header'))
+        || referenceExplorer?.textContent?.includes('局部引用图 ·')
+        || referenceExplorer?.textContent?.includes('连线不区分方向'),
+      referenceViewportHeight: referenceViewport?.getBoundingClientRect().height,
+      referenceSceneHeight: Number(referenceViewport?.getAttribute('data-scene-height')),
+      referenceTwoHopFontSize,
       referenceHoverPreviewTitle,
+      referenceHoverPreviewText,
+      referenceHoverPreviewInsideGraph,
+      referenceHoverKeepsHeight,
       referenceHoverActive,
       referenceFocusPreviewTitle,
       referenceFocusActive,

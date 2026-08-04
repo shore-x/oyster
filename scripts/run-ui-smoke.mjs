@@ -181,19 +181,26 @@ if (
   || !knowledge.browse.referenceEndpointsClipped
   || !knowledge.browse.referenceEdgesAvoidText
   || !knowledge.browse.referenceEdgesUsePaths
-  || knowledge.browse.referenceCurvedEdgeCount < 1
   || knowledge.browse.referenceHasLineElement
   || !knowledge.browse.referenceNodesAreTextButtons
 ) {
   throw new Error('Knowledge graph paths do not preserve collision-free text nodes and obstacle-free boundary routing')
 }
 if (
-  knowledge.browse.referenceHoverPreviewTitle !== knowledge.browse.referenceTwoHopTitle
+  knowledge.browse.referenceHasIntroCopy
+  || knowledge.browse.referenceViewportHeight > 280
+  || knowledge.browse.referenceSceneHeight > 280
+  || knowledge.browse.referenceTwoHopFontSize !== '12px'
+  || knowledge.browse.referenceHoverPreviewTitle !== knowledge.browse.referenceTwoHopTitle
+  || !knowledge.browse.referenceHoverPreviewText
+  || ['它引用', '引用它', '距中心', '个相邻'].some((copy) => knowledge.browse.referenceHoverPreviewText.includes(copy))
+  || !knowledge.browse.referenceHoverPreviewInsideGraph
+  || !knowledge.browse.referenceHoverKeepsHeight
   || !knowledge.browse.referenceHoverActive
   || knowledge.browse.referenceFocusPreviewTitle !== knowledge.browse.referenceTwoHopTitle
   || !knowledge.browse.referenceFocusActive
 ) {
-  throw new Error('Knowledge graph text nodes do not preserve hover and keyboard preview interactions')
+  throw new Error('Knowledge graph hierarchy or in-graph excerpt preview is visually invalid')
 }
 if (
   knowledge.browse.listOverflowY !== 'auto'

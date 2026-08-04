@@ -188,30 +188,27 @@ h1 { margin: 0 0 10px; font-size: var(--font-size-display); line-height: 1.25; l
 .knowledge-statement-preview { position: fixed; z-index: 100; display: block; max-height: min(210px, calc(100vh - 24px)); overflow: hidden; padding: 12px 13px; color: var(--text-secondary); background: #fff; border: 1px solid var(--border-strong); border-radius: var(--radius-control); box-shadow: 0 10px 30px rgba(26,34,42,.14); pointer-events: none; animation: statement-preview-in .12s ease; white-space: normal; }
 .knowledge-statement-preview > strong { display: block; color: var(--text-primary); font-size: var(--font-size-label); font-weight: var(--font-weight-semibold); line-height: 1.4; }
 .knowledge-statement-preview > span { display: -webkit-box; margin-top: 7px; overflow: hidden; color: var(--text-tertiary); font-size: var(--font-size-label); line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
-.knowledge-reference-explorer { margin-top: 24px; padding: 24px 32px 28px; background: #fff; border-top: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-default); }
-.knowledge-reference-explorer__header { display: flex; align-items: center; justify-content: space-between; gap: 32px; }
-.knowledge-reference-explorer__header span { color: var(--text-muted); font-size: var(--font-size-label); }
-.knowledge-reference-explorer__header p { max-width: 460px; margin: 0; color: var(--text-tertiary); font-size: var(--font-size-label); line-height: var(--line-height-ui); text-align: right; }
-.knowledge-local-graph { position: relative; min-height: 320px; margin-top: 18px; overflow: hidden; border-top: 1px solid var(--border-default); }
+.knowledge-reference-explorer { margin-top: 16px; padding: 10px 24px 12px; background: #fff; border-top: 1px solid var(--border-default); border-bottom: 1px solid var(--border-default); }
+.knowledge-local-graph__viewport { max-height: min(280px, 38vh); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+.knowledge-local-graph { position: relative; width: 100%; min-height: 190px; overflow: hidden; }
 .knowledge-local-graph__edges { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .knowledge-local-graph__edge { fill: none; stroke: var(--knowledge-cluster-color); stroke-width: 1; stroke-linecap: round; stroke-linejoin: round; opacity: .48; vector-effect: non-scaling-stroke; transition: opacity .12s ease, stroke-width .12s ease; }
 .knowledge-local-graph__edge--active { stroke-width: 1.4; opacity: .78; }
 .knowledge-local-graph__edge--dimmed { opacity: .1; }
-.knowledge-local-graph__node { position: absolute; z-index: 1; display: grid; min-height: 44px; padding: 0; transform: translate(-50%, -50%); place-items: center; color: var(--text-secondary); background: transparent; border: 0; cursor: pointer; font-size: var(--font-size-body-sm); font-weight: var(--font-weight-regular); line-height: var(--line-height-compact); text-align: center; transition: color .12s ease, opacity .12s ease, font-weight .12s ease; }
-.knowledge-local-graph__label { display: -webkit-box; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; background: #fff; box-shadow: 0 0 0 5px #fff; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.knowledge-local-graph__node { position: absolute; z-index: 1; display: grid; padding: 0; transform: translate(-50%, -50%); place-items: center; color: var(--text-secondary); background: transparent; border: 0; cursor: pointer; font-size: var(--font-size-body-sm); font-weight: var(--font-weight-regular); line-height: var(--line-height-compact); text-align: center; transition: color .12s ease, opacity .12s ease, font-weight .12s ease; }
+.knowledge-local-graph__label { display: -webkit-box; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; background: #fff; box-shadow: 0 0 0 4px #fff; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .knowledge-local-graph__node--center { font-size: var(--font-size-body); font-weight: var(--font-weight-semibold); }
+.knowledge-local-graph__node--second-hop { font-size: var(--font-size-label); }
 .knowledge-local-graph__node:hover,
 .knowledge-local-graph__node--active { color: var(--text-primary); font-weight: var(--font-weight-semibold); }
 .knowledge-local-graph__node:hover .knowledge-local-graph__label,
 .knowledge-local-graph__node--active .knowledge-local-graph__label { text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
 .knowledge-local-graph__node:focus-visible { outline: 2px solid var(--control-primary); outline-offset: 4px; border-radius: var(--radius-control); }
 .knowledge-local-graph__node--dimmed { opacity: .28; }
-.knowledge-local-graph__preview { display: grid; grid-template-columns: minmax(150px, .8fr) minmax(0, 1.2fr) minmax(0, 1.2fr); gap: 20px; padding: 16px 0 0; border-top: 1px solid var(--border-default); }
-.knowledge-local-graph__preview > div { min-width: 0; }
-.knowledge-local-graph__preview strong { display: block; overflow-wrap: anywhere; color: var(--text-primary); font-size: var(--font-size-body-sm); font-weight: var(--font-weight-semibold); }
-.knowledge-local-graph__preview span { display: block; margin-top: 4px; color: var(--text-muted); font-size: var(--font-size-caption); }
-.knowledge-local-graph__preview p { display: -webkit-box; margin: 0; overflow: hidden; color: var(--text-tertiary); font-size: var(--font-size-label); line-height: var(--line-height-ui); -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
-.knowledge-local-graph__empty { margin: 28px 0 4px; padding-top: 24px; color: var(--text-muted); border-top: 1px solid var(--border-default); font-size: var(--font-size-body-sm); }
+.knowledge-local-graph__preview { position: absolute; z-index: 3; box-sizing: border-box; height: 82px; overflow: hidden; padding: 10px 11px; color: var(--text-secondary); background: #fff; border: 1px solid var(--border-strong); border-radius: var(--radius-control); box-shadow: var(--shadow-overlay); pointer-events: none; }
+.knowledge-local-graph__preview strong { display: block; overflow: hidden; color: var(--text-primary); font-size: var(--font-size-label); font-weight: var(--font-weight-semibold); text-overflow: ellipsis; white-space: nowrap; }
+.knowledge-local-graph__preview p { display: -webkit-box; margin: 5px 0 0; overflow: hidden; color: var(--text-tertiary); font-size: var(--font-size-label); line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.knowledge-local-graph__empty { margin: 0; padding: 18px 0; color: var(--text-muted); font-size: var(--font-size-body-sm); }
 .knowledge-reference-explorer__unresolved { margin-top: 18px; }
 .knowledge-reference-explorer__unresolved > summary { color: #725523; }
 .knowledge-reference-explorer__unresolved ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
@@ -643,9 +640,6 @@ h1 { margin: 0 0 10px; font-size: var(--font-size-display); line-height: 1.25; l
   .processing-debug-workspace { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sandbox-knowledge { grid-template-columns: 215px minmax(0, 1fr); }
   .knowledge-browser__body { grid-template-columns: 260px minmax(0, 1fr); }
-  .knowledge-reference-explorer__header { align-items: flex-start; flex-direction: column; gap: 12px; }
-  .knowledge-reference-explorer__header p { text-align: left; }
-  .knowledge-local-graph__preview { grid-template-columns: 1fr; gap: 8px; }
   .chain-test__workspace,
   .stage-debug-workspace,
   .trace-explorer__workspace { grid-template-columns: 1fr; }
