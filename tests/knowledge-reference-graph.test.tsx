@@ -31,7 +31,7 @@ describe('KnowledgeReferenceGraph', () => {
   it('keeps the longest real fixture title while bounding unusually long graph labels', () => {
     expect(referenceGraphLabel('Knowledge Maintenance Agent')).toBe('Knowledge Maintenance Agent')
     expect(referenceGraphLabel('这是一个明显超过关系图节点安全显示长度的 canonical title 示例')).toBe(
-      '这是一个明显超过关系图节点安全显示长度的 canoni…'
+      '这是一个明显超过关系图节点安全…'
     )
   })
 
@@ -65,6 +65,12 @@ describe('KnowledgeReferenceGraph', () => {
     expect(new Set(incomingPositions.map((position) => position.y)).size).toBe(incoming.length)
     expect(Math.max(...incomingPositions.map((position) => position.y))
       - Math.min(...incomingPositions.map((position) => position.y))).toBeGreaterThan(300)
+    expect(Math.max(...incomingPositions.map((position) => Math.hypot(position.x, position.y))))
+      .toBeGreaterThan(250)
+
+    const compactPositions = referenceGraphPositions(value, 400)
+    expect(incoming.every((title) => compactPositions.get(title)!.y < center.y)).toBe(true)
+    expect(outgoing.every((title) => compactPositions.get(title)!.y > center.y)).toBe(true)
   })
 
   it('keeps a readable directional list alongside the canvas graph', () => {

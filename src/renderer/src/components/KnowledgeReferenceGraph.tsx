@@ -27,16 +27,27 @@ function group(
     ?? { kind, memberTitles: [] }
 }
 
-const MINIMUM_READABLE_AUTO_ZOOM = 0.72
+const COMPACT_LAYOUT_WIDTH = 560
+const MINIMUM_READABLE_AUTO_ZOOM = 0.86
 const MAXIMUM_AUTO_ZOOM = 1
+const MAXIMUM_LABEL_UNITS = 32
 
 export function referenceGraphLabel(title: string): string {
-  const characters = [...title]
-  return characters.length > 28 ? `${characters.slice(0, 27).join('')}…` : title
+  let units = 0
+  let label = ''
+  for (const character of title) {
+    const characterUnits = /[\u1100-\u115f\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaff\ufe10-\ufe6f\uff00-\uffef]/u
+      .test(character) ? 2 : 1
+    if (units + characterUnits > MAXIMUM_LABEL_UNITS - 1) return `${label.trimEnd()}…`
+    units += characterUnits
+    label += character
+  }
+  return label
 }
 
 export function referenceGraphPositions(
-  projection: KnowledgeNeighborhoodProjection
+  projection: KnowledgeNeighborhoodProjection,
+  viewportWidth = 800
 ): Map<string, { x: number; y: number }> {
   const positions = new Map<string, { x: number; y: number }>()
   const incoming = group(projection, 'incoming').memberTitles
@@ -46,35 +57,51 @@ export function referenceGraphPositions(
   const mutual = incoming.filter((title) => outgoingSet.has(title))
   const incomingOnly = incoming.filter((title) => !outgoingSet.has(title))
   const outgoingOnly = outgoing.filter((title) => !incomingSet.has(title))
-  const maximumSideCount = Math.max(incomingOnly.length, outgoingOnly.length, 1)
-  const verticalRadius = Math.max(175, (maximumSideCount - 1) * 52)
-  const center = { x: 500, y: verticalRadius + 130 }
+  const center = { x: 0, y: 0 }
 
-  const placeFan = (titles: string[], side: -1 | 1): void => {
-    if (titles.length === 0) return
-    const maximumAngle = Math.PI * 0.37
-    titles.forEach((title, index) => {
-      const progress = titles.length === 1 ? 0 : index / (titles.length - 1) * 2 - 1
-      const angle = progress * maximumAngle
-      positions.set(title, {
-        x: center.x + side * Math.cos(angle) * 370,
-        y: center.y + Math.sin(angle) * verticalRadius
+  const placeSector = (titles: string[], centerAngle: number, baseRadius: number): void => {
+    let offset = 0
+    let ringIndex = 0
+    while (offset < titles.length) {
+      const capacity = 3 + ringIndex
+      const ringTitles = titles.slice(offset, offset + capacity)
+      const radius = baseRadius + ringIndex * 78
+      const maximumAngle = ringTitles.length === 1
+        ? 0
+        : ringTitles.length === 2
+          ? 0.5
+          : Math.min(1.05, 0.58 + ringTitles.length * 0.13)
+      ringTitles.forEach((title, index) => {
+        const progress = ringTitles.length === 1 ? 0 : index / (ringTitles.length - 1) * 2 - 1
+        const angle = centerAngle + progress * maximumAngle
+        positions.set(title, {
+          x: center.x + Math.cos(angle) * radius,
+          y: center.y + Math.sin(angle) * radius
+        })
       })
-    })
+      offset += ringTitles.length
+      ringIndex += 1
+    }
   }
 
-  placeFan(incomingOnly, -1)
-  placeFan(outgoingOnly, 1)
-  mutual.forEach((title, index) => positions.set(title, {
-    x: center.x + (Math.floor(index / 2) % 2 === 0 ? -88 : 88),
-    y: center.y + (index % 2 === 0 ? -1 : 1) * (225 + Math.floor(index / 2) * 105)
-  }))
+  if (viewportWidth < COMPACT_LAYOUT_WIDTH) {
+    placeSector(incomingOnly, -Math.PI / 2, 170)
+    placeSector(outgoingOnly, Math.PI / 2, 170)
+    placeSector(mutual, Math.PI, 145)
+  } else {
+    placeSector(incomingOnly, Math.PI, 185)
+    placeSector(outgoingOnly, 0, 185)
+    placeSector(mutual, -Math.PI / 2, 145)
+  }
   positions.set(projection.centerTitle, center)
   return positions
 }
 
-function elementsFor(projection: KnowledgeNeighborhoodProjection): ElementDefinition[] {
-  const positions = referenceGraphPositions(projection)
+function elementsFor(
+  projection: KnowledgeNeighborhoodProjection,
+  viewportWidth: number
+): ElementDefinition[] {
+  const positions = referenceGraphPositions(projection, viewportWidth)
   const nodeIds = new Map<string, string>()
   const nodes: ElementDefinition[] = projection.nodes.map((node, index) => {
     const id = `node-${index}`
@@ -105,8 +132,8 @@ function elementsFor(projection: KnowledgeNeighborhoodProjection): ElementDefini
     const hasReverseEdge = edgePairs.has(JSON.stringify([edge.targetTitle, edge.sourceTitle]))
     const alternatingDirection = routeIndex % 2 === 0 ? -1 : 1
     const curveDistance = hasReverseEdge
-      ? 54
-      : alternatingDirection * Math.min(46, 18 + Math.floor(routeIndex / 2) * 7)
+      ? 30
+      : alternatingDirection * Math.min(28, 10 + Math.floor(routeIndex / 2) * 5)
     return [{
       group: 'edges',
       data: {
@@ -139,15 +166,15 @@ export function KnowledgeReferenceGraph(props: KnowledgeReferenceGraphProps) {
     )
     if (readableZoom !== fittedZoom) {
       graph.zoom(readableZoom)
-      graph.center()
     }
+    graph.center(graph.nodes('.center'))
   }
 
   const renderGraph = (): void => {
     if (!graph) return
     graph.startBatch()
     graph.elements().remove()
-    graph.add(elementsFor(currentProjection))
+    graph.add(elementsFor(currentProjection, graph.width()))
     graph.endBatch()
     graph.layout({ name: 'preset', fit: false, animate: false }).run()
     fitGraph()
@@ -168,7 +195,7 @@ export function KnowledgeReferenceGraph(props: KnowledgeReferenceGraphProps) {
       graph = createCytoscape({
         container,
         elements: [],
-        minZoom: 0.35,
+        minZoom: 0.5,
         maxZoom: 2.2,
         wheelSensitivity: 0.18,
         boxSelectionEnabled: false,
@@ -177,16 +204,17 @@ export function KnowledgeReferenceGraph(props: KnowledgeReferenceGraphProps) {
           {
             selector: 'node',
             style: {
-              width: 190,
-              height: 66,
+              width: 152,
+              height: 54,
               shape: 'ellipse',
               label: 'data(label)',
               'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-              'font-size': 14,
+              'font-size': 15,
               'font-weight': 560,
               color: '#3f4b55',
               'text-wrap': 'wrap',
-              'text-max-width': '158px',
+              'text-max-width': '124px',
+              'line-height': 1.12,
               'text-valign': 'center',
               'text-halign': 'center',
               'background-color': '#ffffff',
@@ -219,9 +247,9 @@ export function KnowledgeReferenceGraph(props: KnowledgeReferenceGraphProps) {
           {
             selector: 'node.center',
             style: {
-              width: 224,
-              height: 78,
-              'font-size': 15,
+              width: 176,
+              height: 62,
+              'font-size': 16,
               'font-weight': 660,
               color: '#294e65',
               'background-color': '#ffffff',
@@ -232,14 +260,14 @@ export function KnowledgeReferenceGraph(props: KnowledgeReferenceGraphProps) {
           {
             selector: 'edge',
             style: {
-              width: 1.35,
+              width: 1.25,
               'curve-style': 'unbundled-bezier',
               'control-point-distances': 'data(curveDistance)',
               'control-point-weights': 0.5,
               'source-endpoint': 'outside-to-node',
               'target-endpoint': 'outside-to-node',
               'target-arrow-shape': 'triangle',
-              'arrow-scale': 0.8,
+              'arrow-scale': 0.74,
               'line-color': '#9aa5ad',
               'target-arrow-color': '#9aa5ad',
               'overlay-opacity': 0
@@ -296,7 +324,7 @@ export function KnowledgeReferenceGraph(props: KnowledgeReferenceGraphProps) {
 
       resizeObserver = new ResizeObserver(() => {
         graph?.resize()
-        fitGraph()
+        renderGraph()
       })
       resizeObserver.observe(container)
       renderGraph()
