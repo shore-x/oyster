@@ -206,33 +206,41 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
           <span>{props.listLabel || 'Statements'}</span>
           <strong>{props.total}</strong>
         </div>
-        <Show
-          when={props.items.length}
-          fallback={<div class="knowledge-browser__empty-list">{props.emptyListText}</div>}
+        <div
+          class="knowledge-browser__list-scroll"
+          data-testid="knowledge-statement-list-scroll"
         >
-          <For each={props.items}>{(item) => (
-            <button
-              type="button"
-              class="knowledge-browser__item"
-              aria-selected={props.selectedTitle === item.title}
-              onClick={() => navigate(item.title)}
-            >
-              <strong>{item.title}</strong>
-              <span>{statementPreview(item.preview, 150)}</span>
-            </button>
-          )}</For>
-          <Show when={props.hasMore}>
-            <button
-              type="button"
-              class="knowledge-browser__more"
-              disabled={props.loadingMore}
-              onClick={props.onLoadMore}
-            >{props.loadingMore ? '正在加载…' : '加载更多'}</button>
+          <Show
+            when={props.items.length}
+            fallback={<div class="knowledge-browser__empty-list">{props.emptyListText}</div>}
+          >
+            <For each={props.items}>{(item) => (
+              <button
+                type="button"
+                class="knowledge-browser__item"
+                aria-selected={props.selectedTitle === item.title}
+                onClick={() => navigate(item.title)}
+              >
+                <strong>{item.title}</strong>
+                <span>{statementPreview(item.preview, 150)}</span>
+              </button>
+            )}</For>
+            <Show when={props.hasMore}>
+              <button
+                type="button"
+                class="knowledge-browser__more"
+                disabled={props.loadingMore}
+                onClick={props.onLoadMore}
+              >{props.loadingMore ? '正在加载…' : '加载更多'}</button>
+            </Show>
           </Show>
-        </Show>
+        </div>
       </aside>
 
-      <div class="knowledge-browser__detail">
+      <div
+        class="knowledge-browser__detail"
+        data-testid="knowledge-statement-detail-scroll"
+      >
         <Show
           when={props.selectedStatement}
           fallback={<div class="knowledge-browser__empty-detail">选择一条知识查看完整内容。</div>}

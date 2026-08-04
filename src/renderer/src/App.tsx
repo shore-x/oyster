@@ -134,7 +134,7 @@ export function App() {
         <div data-testid="page-skills" hidden={page() !== 'skills'}>
           <SkillsPage navigationRequest={skillsNavigation()} />
         </div>
-        <div data-testid="page-knowledge" hidden={page() !== 'knowledge'}>
+        <div class="knowledge-page" data-testid="page-knowledge" hidden={page() !== 'knowledge'}>
           <KnowledgeBrowserPage
             active={page() === 'knowledge'}
             navigationRequest={knowledgeNavigation()}

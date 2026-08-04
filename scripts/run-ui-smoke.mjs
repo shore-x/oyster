@@ -174,6 +174,35 @@ if (
 ) {
   throw new Error('Knowledge references are not rendered as a directionless, clustered two-hop local graph')
 }
+if (
+  !knowledge.browse.referenceMarkerFree
+  || !knowledge.browse.referenceLabelsCentered
+  || !knowledge.browse.referenceEdgesMeetTextCenters
+  || !knowledge.browse.referenceNodesAreTextButtons
+) {
+  throw new Error('Knowledge graph nodes are not marker-free text centers with matching edge endpoints')
+}
+if (
+  knowledge.browse.referenceHoverPreviewTitle !== knowledge.browse.referenceTwoHopTitle
+  || !knowledge.browse.referenceHoverActive
+  || knowledge.browse.referenceFocusPreviewTitle !== knowledge.browse.referenceTwoHopTitle
+  || !knowledge.browse.referenceFocusActive
+) {
+  throw new Error('Knowledge graph text nodes do not preserve hover and keyboard preview interactions')
+}
+if (
+  knowledge.browse.listOverflowY !== 'auto'
+  || knowledge.browse.detailOverflowY !== 'auto'
+  || knowledge.browse.listOverscrollY !== 'contain'
+  || knowledge.browse.detailOverscrollY !== 'contain'
+  || !knowledge.browse.listScrollable
+  || !knowledge.browse.detailScrollable
+  || !knowledge.browse.listScrollIsolated
+  || !knowledge.browse.detailScrollIsolated
+  || !knowledge.browse.browserWithinViewport
+) {
+  throw new Error('Knowledge Statement list and detail do not scroll independently within the viewport')
+}
 if (knowledge.browse.clearButtonDisabled !== false) {
   throw new Error('Knowledge clear action is unavailable for a non-empty Store')
 }

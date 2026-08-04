@@ -18,10 +18,6 @@ function clusterColor(clusterIndex?: number): string {
     : `var(--graph-cluster-${clusterIndex % 4 + 1})`
 }
 
-function truncatedTitle(title: string): string {
-  return title.length > 24 ? `${title.slice(0, 23)}…` : title
-}
-
 function directionalSummary(projection: KnowledgeNeighborhoodProjection, title: string): string {
   const outgoing = [...new Set(projection.edges
     .filter((edge) => edge.sourceTitle === title && edge.targetTitle !== title)
@@ -52,11 +48,8 @@ export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProp
   return (
     <section class="knowledge-reference-explorer" aria-label="Statement 局部引用图">
       <header class="knowledge-reference-explorer__header">
-        <div>
-          <span>局部引用图 · {props.projection.depth} 跳</span>
-          <h2>{props.projection.centerTitle}</h2>
-        </div>
-        <p>连线不区分方向；位置和颜色仅根据当前引用结构排列。</p>
+        <span>局部引用图 · {props.projection.depth} 跳 · {scene().nodes.length} 个 Statement</span>
+        <p>连线不区分方向；相近位置和连线颜色反映当前引用结构。</p>
       </header>
 
       <Show
@@ -104,12 +97,11 @@ export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProp
               aria-current={node.title === props.projection.centerTitle ? 'true' : undefined}
               title={node.title}
               onMouseEnter={() => props.onHover(node.title)}
-              onFocus={() => props.onHover(node.title)}
-              onBlur={() => props.onHover(undefined)}
+              onFocusIn={() => props.onHover(node.title)}
+              onFocusOut={() => props.onHover(undefined)}
               onClick={() => props.onSelect(node.title)}
             >
-              <span class="knowledge-local-graph__marker" aria-hidden="true" />
-              <span class="knowledge-local-graph__label">{truncatedTitle(node.title)}</span>
+              <span class="knowledge-local-graph__label">{node.title}</span>
             </button>
           )}</For>
         </div>

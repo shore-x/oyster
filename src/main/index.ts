@@ -357,6 +357,93 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const referenceTwoHopTitle = referenceTwoHopNode?.getAttribute('title')
     const referenceHasTwoHopNode = Boolean(referenceTwoHopNode)
     const referenceNodeBackgrounds = referenceNodes.map((node) => getComputedStyle(node).backgroundColor)
+    const referenceMarkerFree = !referenceGraph?.querySelector('.knowledge-local-graph__marker, circle, ellipse, marker')
+      && referenceNodes.every((node) => [node, node.querySelector('.knowledge-local-graph__label')]
+        .filter(Boolean)
+        .every((element) => ['none', 'normal'].includes(getComputedStyle(element, '::before').content)
+          && ['none', 'normal'].includes(getComputedStyle(element, '::after').content)))
+      && referenceLines.every((line) => {
+        const style = getComputedStyle(line)
+        return style.markerStart === 'none' && style.markerMid === 'none' && style.markerEnd === 'none'
+      })
+    const graphBounds = referenceGraph?.getBoundingClientRect()
+    const referenceAnchors = referenceNodes.map((node) => ({
+      x: Number.parseFloat(node.style.left),
+      y: Number.parseFloat(node.style.top)
+    }))
+    const referenceLabelsCentered = Boolean(graphBounds) && referenceNodes.every((node) => {
+      const labelBounds = node.querySelector('.knowledge-local-graph__label')?.getBoundingClientRect()
+      if (!labelBounds) return false
+      const anchorX = graphBounds.left + graphBounds.width * Number.parseFloat(node.style.left) / 100
+      const anchorY = graphBounds.top + graphBounds.height * Number.parseFloat(node.style.top) / 100
+      return Math.hypot(
+        labelBounds.left + labelBounds.width / 2 - anchorX,
+        labelBounds.top + labelBounds.height / 2 - anchorY
+      ) <= 1.5
+    })
+    const referenceEdgesMeetTextCenters = referenceLines.every((line) => {
+      const endpoints = [
+        { x: Number(line.getAttribute('x1')), y: Number(line.getAttribute('y1')) },
+        { x: Number(line.getAttribute('x2')), y: Number(line.getAttribute('y2')) }
+      ]
+      return endpoints.every((endpoint) => referenceAnchors.some((anchor) => (
+        Math.abs(anchor.x - endpoint.x) <= .05 && Math.abs(anchor.y - endpoint.y) <= .05
+      )))
+    })
+    const referenceNodesAreTextButtons = referenceNodes.every((node) => (
+      node.tagName === 'BUTTON'
+      && node.tabIndex === 0
+      && Boolean(node.querySelector('.knowledge-local-graph__label'))
+    ))
+    referenceTwoHopNode?.dispatchEvent(new MouseEvent('mouseenter'))
+    await Promise.resolve()
+    const referenceHoverPreviewTitle = referenceExplorer?.querySelector('.knowledge-local-graph__preview strong')?.textContent?.trim()
+    const referenceHoverActive = referenceTwoHopNode?.classList.contains('knowledge-local-graph__node--active')
+    referenceGraph?.dispatchEvent(new MouseEvent('mouseleave'))
+    referenceTwoHopNode?.focus()
+    referenceTwoHopNode?.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const referenceFocusPreviewTitle = referenceExplorer?.querySelector('.knowledge-local-graph__preview strong')?.textContent?.trim()
+    const referenceFocusActive = document.activeElement === referenceTwoHopNode
+
+    const listScroll = page.querySelector('[data-testid="knowledge-statement-list-scroll"]')
+    const detailScroll = page.querySelector('[data-testid="knowledge-statement-detail-scroll"]')
+    const listProbe = document.createElement('div')
+    const detailProbe = document.createElement('div')
+    listProbe.style.height = '1200px'
+    detailProbe.style.height = '1200px'
+    listProbe.setAttribute('aria-hidden', 'true')
+    detailProbe.setAttribute('aria-hidden', 'true')
+    listScroll?.append(listProbe)
+    detailScroll?.append(detailProbe)
+    if (listScroll) listScroll.scrollTop = 0
+    if (detailScroll) detailScroll.scrollTop = 0
+    const documentScrollStart = window.scrollY
+    if (listScroll) listScroll.scrollTop = 240
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const listScrollIsolated = (listScroll?.scrollTop ?? 0) > 0
+      && (detailScroll?.scrollTop ?? 0) === 0
+      && window.scrollY === documentScrollStart
+    if (listScroll) listScroll.scrollTop = 0
+    if (detailScroll) detailScroll.scrollTop = 240
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const detailScrollIsolated = (detailScroll?.scrollTop ?? 0) > 0
+      && (listScroll?.scrollTop ?? 0) === 0
+      && window.scrollY === documentScrollStart
+    const listScrollable = (listScroll?.scrollHeight ?? 0) > (listScroll?.clientHeight ?? 0)
+    const detailScrollable = (detailScroll?.scrollHeight ?? 0) > (detailScroll?.clientHeight ?? 0)
+    const listOverflowY = listScroll ? getComputedStyle(listScroll).overflowY : ''
+    const detailOverflowY = detailScroll ? getComputedStyle(detailScroll).overflowY : ''
+    const listOverscrollY = listScroll ? getComputedStyle(listScroll).overscrollBehaviorY : ''
+    const detailOverscrollY = detailScroll ? getComputedStyle(detailScroll).overscrollBehaviorY : ''
+    listProbe.remove()
+    detailProbe.remove()
+    if (listScroll) listScroll.scrollTop = 0
+    if (detailScroll) detailScroll.scrollTop = 0
+    const browserBounds = page.querySelector('.knowledge-browser')?.getBoundingClientRect()
+    const browserWithinViewport = Boolean(browserBounds)
+      && browserBounds.top >= 0
+      && browserBounds.bottom <= window.innerHeight + 1
     referenceTwoHopNode?.click()
     deadline = Date.now() + 2_000
     while (
@@ -425,6 +512,23 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       referenceTwoHopTitle,
       referenceNodeNavigationTitle,
       referenceNodesTransparent: referenceNodeBackgrounds.every((color) => color === 'rgba(0, 0, 0, 0)'),
+      referenceMarkerFree,
+      referenceLabelsCentered,
+      referenceEdgesMeetTextCenters,
+      referenceNodesAreTextButtons,
+      referenceHoverPreviewTitle,
+      referenceHoverActive,
+      referenceFocusPreviewTitle,
+      referenceFocusActive,
+      listOverflowY,
+      detailOverflowY,
+      listOverscrollY,
+      detailOverscrollY,
+      listScrollable,
+      detailScrollable,
+      listScrollIsolated,
+      detailScrollIsolated,
+      browserWithinViewport,
       linkedTitle,
       backAvailable,
       titleAfterBack,
