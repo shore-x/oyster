@@ -194,10 +194,10 @@ h1 { margin: 0 0 10px; font-size: var(--font-size-display); line-height: 1.25; l
 .knowledge-reference-explorer__header p { max-width: 460px; margin: 0; color: var(--text-tertiary); font-size: var(--font-size-label); line-height: var(--line-height-ui); text-align: right; }
 .knowledge-local-graph { position: relative; min-height: 320px; margin-top: 18px; overflow: hidden; border-top: 1px solid var(--border-default); }
 .knowledge-local-graph__edges { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
-.knowledge-local-graph__edge { stroke: var(--knowledge-cluster-color); stroke-width: .9; stroke-linecap: round; opacity: .46; vector-effect: non-scaling-stroke; transition: opacity .12s ease, stroke-width .12s ease; }
+.knowledge-local-graph__edge { fill: none; stroke: var(--knowledge-cluster-color); stroke-width: 1; stroke-linecap: round; stroke-linejoin: round; opacity: .48; vector-effect: non-scaling-stroke; transition: opacity .12s ease, stroke-width .12s ease; }
 .knowledge-local-graph__edge--active { stroke-width: 1.4; opacity: .78; }
 .knowledge-local-graph__edge--dimmed { opacity: .1; }
-.knowledge-local-graph__node { position: absolute; z-index: 1; display: grid; width: 136px; min-height: 44px; padding: 0; transform: translate(-50%, -50%); place-items: center; color: var(--text-secondary); background: transparent; border: 0; cursor: pointer; font-size: var(--font-size-body-sm); font-weight: var(--font-weight-regular); line-height: var(--line-height-compact); text-align: center; transition: color .12s ease, opacity .12s ease, font-weight .12s ease; }
+.knowledge-local-graph__node { position: absolute; z-index: 1; display: grid; min-height: 44px; padding: 0; transform: translate(-50%, -50%); place-items: center; color: var(--text-secondary); background: transparent; border: 0; cursor: pointer; font-size: var(--font-size-body-sm); font-weight: var(--font-weight-regular); line-height: var(--line-height-compact); text-align: center; transition: color .12s ease, opacity .12s ease, font-weight .12s ease; }
 .knowledge-local-graph__label { display: -webkit-box; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; background: #fff; box-shadow: 0 0 0 5px #fff; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .knowledge-local-graph__node--center { font-size: var(--font-size-body); font-weight: var(--font-weight-semibold); }
 .knowledge-local-graph__node:hover,

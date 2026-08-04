@@ -23,7 +23,7 @@ function projection(centerTitle = 'Center'): KnowledgeNeighborhoodProjection {
 }
 
 describe('KnowledgeReferenceExplorer', () => {
-  it('renders a text-led two-hop local graph with straight, directionless edges', () => {
+  it('renders a text-led two-hop local graph with adaptive, directionless paths', () => {
     const html = renderToString(() => (
       <KnowledgeReferenceExplorer
         projection={projection()}
@@ -35,12 +35,14 @@ describe('KnowledgeReferenceExplorer', () => {
     expect(html).toMatch(/局部引用图 · [\s\S]*2[\s\S]*跳/)
     expect(html).toContain('Second hop')
     expect(html).toContain('knowledge-local-graph__edge')
-    expect(html).toContain('<line')
+    expect(html).toContain('<path')
+    expect(html).toContain('data-curved=')
     expect(html.match(/<button[^>]*knowledge-local-graph__node/g)).toHaveLength(4)
     expect(html.match(/knowledge-local-graph__label/g)).toHaveLength(4)
     expect(html).toContain('data-cluster-count="1"')
     expect(html).not.toContain('knowledge-local-graph__marker')
     expect(html).not.toContain('<circle')
+    expect(html).not.toContain('<line')
     expect(html).not.toContain('marker-end')
     expect(html).not.toContain('<marker')
     expect(html).not.toContain('canvas')

@@ -165,7 +165,7 @@ if (
   || knowledge.browse.referenceHasCanvas
   || knowledge.browse.referenceHasArrow
   || knowledge.browse.referenceNodeCount !== 4
-  || knowledge.browse.referenceLineCount < 3
+  || knowledge.browse.referenceEdgeCount < 3
   || knowledge.browse.referenceClusterCount !== 1
   || !knowledge.browse.referenceHasTwoHopNode
   || !knowledge.browse.referenceTwoHopTitle
@@ -177,10 +177,15 @@ if (
 if (
   !knowledge.browse.referenceMarkerFree
   || !knowledge.browse.referenceLabelsCentered
-  || !knowledge.browse.referenceEdgesMeetTextCenters
+  || !knowledge.browse.referenceNodesDoNotOverlap
+  || !knowledge.browse.referenceEndpointsClipped
+  || !knowledge.browse.referenceEdgesAvoidText
+  || !knowledge.browse.referenceEdgesUsePaths
+  || knowledge.browse.referenceCurvedEdgeCount < 1
+  || knowledge.browse.referenceHasLineElement
   || !knowledge.browse.referenceNodesAreTextButtons
 ) {
-  throw new Error('Knowledge graph nodes are not marker-free text centers with matching edge endpoints')
+  throw new Error('Knowledge graph paths do not preserve collision-free text nodes and obstacle-free boundary routing')
 }
 if (
   knowledge.browse.referenceHoverPreviewTitle !== knowledge.browse.referenceTwoHopTitle

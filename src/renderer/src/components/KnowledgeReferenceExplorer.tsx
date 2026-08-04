@@ -1,4 +1,4 @@
-import { For, Show, createMemo } from 'solid-js'
+import { For, Show, createMemo, createSignal, onCleanup, onMount } from 'solid-js'
 import type { KnowledgeNeighborhoodProjection } from '../../../shared/knowledge'
 import {
   buildKnowledgeLocalGraphScene,
@@ -32,7 +32,12 @@ function directionalSummary(projection: KnowledgeNeighborhoodProjection, title: 
 }
 
 export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProps) {
-  const scene = createMemo(() => buildKnowledgeLocalGraphScene(props.projection))
+  const [graphWidth, setGraphWidth] = createSignal(720)
+  let graphElement: HTMLDivElement | undefined
+  const scene = createMemo(() => buildKnowledgeLocalGraphScene(
+    props.projection,
+    { width: graphWidth() }
+  ))
   const hoveredNode = () => scene().nodes.find((node) => node.title === props.hoveredTitle)
   const isRelatedToHovered = (title: string): boolean => {
     const hovered = hoveredNode()
@@ -45,11 +50,23 @@ export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProp
     !isRelatedToHovered(node.title) ? 'knowledge-local-graph__node--dimmed' : ''
   ].filter(Boolean).join(' ')
 
+  onMount(() => {
+    const updateWidth = (): void => {
+      const width = Math.round(graphElement?.getBoundingClientRect().width ?? 0)
+      if (width > 0) setGraphWidth(width)
+    }
+    updateWidth()
+    if (!graphElement || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(updateWidth)
+    observer.observe(graphElement)
+    onCleanup(() => observer.disconnect())
+  })
+
   return (
     <section class="knowledge-reference-explorer" aria-label="Statement 局部引用图">
       <header class="knowledge-reference-explorer__header">
         <span>局部引用图 · {props.projection.depth} 跳 · {scene().nodes.length} 个 Statement</span>
-        <p>连线不区分方向；相近位置和连线颜色反映当前引用结构。</p>
+        <p>连线不区分方向；布局和曲线路径会自动避开其他文字。</p>
       </header>
 
       <Show
@@ -57,6 +74,7 @@ export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProp
         fallback={<p class="knowledge-local-graph__empty">当前 Statement 暂无可解析的相邻引用。</p>}
       >
         <div
+          ref={(element) => { graphElement = element }}
           class="knowledge-local-graph"
           data-cluster-count={scene().clusterCount}
           style={`height:${scene().height}px`}
@@ -64,7 +82,7 @@ export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProp
         >
           <svg
             class="knowledge-local-graph__edges"
-            viewBox="0 0 100 100"
+            viewBox={`0 0 ${scene().width} ${scene().height}`}
             preserveAspectRatio="none"
             aria-hidden="true"
           >
@@ -72,14 +90,14 @@ export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProp
               const active = () => props.hoveredTitle === edge.sourceTitle
                 || props.hoveredTitle === edge.targetTitle
               return (
-                <line
+                <path
                   class={`knowledge-local-graph__edge ${props.hoveredTitle && !active()
                     ? 'knowledge-local-graph__edge--dimmed'
                     : active() ? 'knowledge-local-graph__edge--active' : ''}`}
-                  x1={edge.sourceX}
-                  y1={edge.sourceY}
-                  x2={edge.targetX}
-                  y2={edge.targetY}
+                  d={edge.path}
+                  data-source-title={edge.sourceTitle}
+                  data-target-title={edge.targetTitle}
+                  data-curved={edge.curved ? 'true' : 'false'}
                   style={`--knowledge-cluster-color:${clusterColor(edge.clusterIndex)}`}
                 />
               )
@@ -90,7 +108,7 @@ export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProp
             <button
               type="button"
               class={nodeClass(node)}
-              style={`left:${node.x}%;top:${node.y}%;--knowledge-cluster-color:${node.title === props.projection.centerTitle
+              style={`left:${node.x}px;top:${node.y}px;width:${node.width}px;height:${node.height}px;--knowledge-cluster-color:${node.title === props.projection.centerTitle
                 ? 'var(--text-primary)'
                 : clusterColor(node.clusterIndex)}`}
               aria-label={`${node.title}，距中心 ${node.distance} 跳，${node.neighborTitles.length} 个相邻 Statement`}

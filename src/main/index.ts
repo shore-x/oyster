@@ -352,7 +352,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const referenceExplorer = page.querySelector('.knowledge-reference-explorer')
     const referenceGraph = referenceExplorer?.querySelector('.knowledge-local-graph')
     const referenceNodes = Array.from(referenceGraph?.querySelectorAll('.knowledge-local-graph__node') ?? [])
-    const referenceLines = Array.from(referenceGraph?.querySelectorAll('.knowledge-local-graph__edge') ?? [])
+    const referenceEdges = Array.from(referenceGraph?.querySelectorAll('.knowledge-local-graph__edge') ?? [])
     const referenceTwoHopNode = referenceNodes.find((node) => node.getAttribute('aria-label')?.includes('距中心 2 跳'))
     const referenceTwoHopTitle = referenceTwoHopNode?.getAttribute('title')
     const referenceHasTwoHopNode = Boolean(referenceTwoHopNode)
@@ -362,34 +362,77 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
         .filter(Boolean)
         .every((element) => ['none', 'normal'].includes(getComputedStyle(element, '::before').content)
           && ['none', 'normal'].includes(getComputedStyle(element, '::after').content)))
-      && referenceLines.every((line) => {
-        const style = getComputedStyle(line)
+      && referenceEdges.every((edge) => {
+        const style = getComputedStyle(edge)
         return style.markerStart === 'none' && style.markerMid === 'none' && style.markerEnd === 'none'
       })
     const graphBounds = referenceGraph?.getBoundingClientRect()
     const referenceAnchors = referenceNodes.map((node) => ({
       x: Number.parseFloat(node.style.left),
-      y: Number.parseFloat(node.style.top)
+      y: Number.parseFloat(node.style.top),
+      width: node.getBoundingClientRect().width,
+      height: node.getBoundingClientRect().height,
+      title: node.getAttribute('title')
     }))
     const referenceLabelsCentered = Boolean(graphBounds) && referenceNodes.every((node) => {
       const labelBounds = node.querySelector('.knowledge-local-graph__label')?.getBoundingClientRect()
       if (!labelBounds) return false
-      const anchorX = graphBounds.left + graphBounds.width * Number.parseFloat(node.style.left) / 100
-      const anchorY = graphBounds.top + graphBounds.height * Number.parseFloat(node.style.top) / 100
+      const anchorX = graphBounds.left + Number.parseFloat(node.style.left)
+      const anchorY = graphBounds.top + Number.parseFloat(node.style.top)
       return Math.hypot(
         labelBounds.left + labelBounds.width / 2 - anchorX,
         labelBounds.top + labelBounds.height / 2 - anchorY
       ) <= 1.5
     })
-    const referenceEdgesMeetTextCenters = referenceLines.every((line) => {
-      const endpoints = [
-        { x: Number(line.getAttribute('x1')), y: Number(line.getAttribute('y1')) },
-        { x: Number(line.getAttribute('x2')), y: Number(line.getAttribute('y2')) }
-      ]
-      return endpoints.every((endpoint) => referenceAnchors.some((anchor) => (
-        Math.abs(anchor.x - endpoint.x) <= .05 && Math.abs(anchor.y - endpoint.y) <= .05
-      )))
+    const referenceNodesDoNotOverlap = referenceNodes.every((node, index) => {
+      const bounds = node.getBoundingClientRect()
+      return referenceNodes.slice(index + 1).every((other) => {
+        const otherBounds = other.getBoundingClientRect()
+        return bounds.right <= otherBounds.left
+          || otherBounds.right <= bounds.left
+          || bounds.bottom <= otherBounds.top
+          || otherBounds.bottom <= bounds.top
+      })
     })
+    const distanceFromNodeBounds = (point, anchor) => {
+      const deltaX = Math.max(0, Math.abs(point.x - anchor.x) - anchor.width / 2)
+      const deltaY = Math.max(0, Math.abs(point.y - anchor.y) - anchor.height / 2)
+      return Math.hypot(deltaX, deltaY)
+    }
+    const referenceEndpointsClipped = referenceEdges.every((edge) => {
+      const source = referenceAnchors.find((anchor) => anchor.title === edge.dataset.sourceTitle)
+      const target = referenceAnchors.find((anchor) => anchor.title === edge.dataset.targetTitle)
+      const totalLength = edge.getTotalLength?.() ?? 0
+      if (!source || !target || totalLength <= 0) return false
+      const start = edge.getPointAtLength(0)
+      const end = edge.getPointAtLength(totalLength)
+      return distanceFromNodeBounds(start, source) <= 4
+        && distanceFromNodeBounds(end, target) <= 4
+        && Math.hypot(start.x - source.x, start.y - source.y) > 1
+        && Math.hypot(end.x - target.x, end.y - target.y) > 1
+    })
+    const referenceEdgesAvoidText = referenceEdges.every((edge) => {
+      const totalLength = edge.getTotalLength?.() ?? 0
+      if (totalLength <= 0) return false
+      const obstacles = referenceAnchors.filter((anchor) => (
+        anchor.title !== edge.dataset.sourceTitle && anchor.title !== edge.dataset.targetTitle
+      ))
+      for (let index = 1; index < 48; index += 1) {
+        const point = edge.getPointAtLength(totalLength * index / 48)
+        if (obstacles.some((anchor) => (
+          Math.abs(point.x - anchor.x) < anchor.width / 2 + 1
+          && Math.abs(point.y - anchor.y) < anchor.height / 2 + 1
+        ))) return false
+      }
+      return true
+    })
+    const referenceEdgesUsePaths = referenceEdges.every((edge) => (
+      edge.tagName === 'path'
+      && edge.getAttribute('d')?.startsWith('M ')
+      && getComputedStyle(edge).fill === 'none'
+    ))
+    const referenceCurvedEdgeCount = referenceEdges.filter((edge) => edge.dataset.curved === 'true').length
+    const referenceHasLineElement = Boolean(referenceGraph?.querySelector('line'))
     const referenceNodesAreTextButtons = referenceNodes.every((node) => (
       node.tagName === 'BUTTON'
       && node.tabIndex === 0
@@ -506,7 +549,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       referenceHasCanvas: Boolean(referenceExplorer?.querySelector('canvas')),
       referenceHasArrow: Boolean(referenceExplorer?.querySelector('marker')),
       referenceNodeCount: referenceNodes.length,
-      referenceLineCount: referenceLines.length,
+      referenceEdgeCount: referenceEdges.length,
       referenceClusterCount: Number(referenceGraph?.getAttribute('data-cluster-count')),
       referenceHasTwoHopNode,
       referenceTwoHopTitle,
@@ -514,7 +557,12 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       referenceNodesTransparent: referenceNodeBackgrounds.every((color) => color === 'rgba(0, 0, 0, 0)'),
       referenceMarkerFree,
       referenceLabelsCentered,
-      referenceEdgesMeetTextCenters,
+      referenceNodesDoNotOverlap,
+      referenceEndpointsClipped,
+      referenceEdgesAvoidText,
+      referenceEdgesUsePaths,
+      referenceCurvedEdgeCount,
+      referenceHasLineElement,
       referenceNodesAreTextButtons,
       referenceHoverPreviewTitle,
       referenceHoverActive,

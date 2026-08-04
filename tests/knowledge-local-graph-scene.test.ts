@@ -66,4 +66,69 @@ describe('buildKnowledgeLocalGraphScene', () => {
 
     expect(scene.edges).toHaveLength(1)
   })
+
+  it('expands a narrow scene until dense text rectangles no longer overlap', () => {
+    const neighbors = Array.from({ length: 16 }, (_, index) => `Statement ${index + 1} with a long title`)
+    const scene = buildKnowledgeLocalGraphScene(graph(
+      [['Center', 0], ...neighbors.map((title, index) => [title, index % 3 === 0 ? 1 : 2] as [string, number])],
+      neighbors.flatMap((title, index) => [
+        ['Center', title] as [string, string],
+        ...(index === 0 ? [] : [[neighbors[index - 1], title] as [string, string]])
+      ])
+    ), { width: 420 })
+
+    expect(scene.height).toBeGreaterThan(320)
+    for (let leftIndex = 0; leftIndex < scene.nodes.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < scene.nodes.length; rightIndex += 1) {
+        const left = scene.nodes[leftIndex]
+        const right = scene.nodes[rightIndex]
+        const overlaps = Math.abs(left.x - right.x) < (left.width + right.width) / 2
+          && Math.abs(left.y - right.y) < (left.height + right.height) / 2
+        expect(overlaps, `${left.title} overlaps ${right.title}`).toBe(false)
+      }
+    }
+    expect(buildKnowledgeLocalGraphScene(graph(
+      [['Center', 0], ...neighbors.map((title, index) => [title, index % 3 === 0 ? 1 : 2] as [string, number])],
+      neighbors.map((title) => ['Center', title])
+    ), { width: 420 })).toEqual(buildKnowledgeLocalGraphScene(graph(
+      [['Center', 0], ...neighbors.map((title, index) => [title, index % 3 === 0 ? 1 : 2] as [string, number])],
+      neighbors.map((title) => ['Center', title])
+    ), { width: 420 }))
+  })
+
+  it('clips paths to text bounds and curves edges when straight routes conflict', () => {
+    const titles: Array<[string, number]> = [
+      ['Center', 0],
+      ['Alpha', 1],
+      ['Beta', 1],
+      ['Gamma', 1],
+      ['Delta', 1],
+      ['Alpha detail', 2],
+      ['Beta detail', 2],
+      ['Gamma detail', 2],
+      ['Delta detail', 2]
+    ]
+    const leafTitles = titles.slice(1).map(([title]) => title)
+    const edges: Array<[string, string]> = [
+      ...leafTitles.map((title) => ['Center', title] as [string, string]),
+      ...leafTitles.flatMap((title, index) => leafTitles.slice(index + 1).map(
+        (other) => [title, other] as [string, string]
+      ))
+    ]
+    const scene = buildKnowledgeLocalGraphScene(graph(titles, edges), { width: 520 })
+
+    expect(scene.edges.some((edge) => edge.curved)).toBe(true)
+    expect(scene.edges.every((edge) => edge.path.startsWith('M '))).toBe(true)
+    for (const edge of scene.edges) {
+      const source = scene.nodes.find((node) => node.title === edge.sourceTitle)!
+      const target = scene.nodes.find((node) => node.title === edge.targetTitle)!
+      expect(Math.hypot(edge.sourceX - source.x, edge.sourceY - source.y)).toBeGreaterThan(0)
+      expect(Math.hypot(edge.targetX - target.x, edge.targetY - target.y)).toBeGreaterThan(0)
+      if (edge.curved) {
+        expect(edge.controlX).toBeTypeOf('number')
+        expect(edge.controlY).toBeTypeOf('number')
+        expect(edge.path).toContain(' Q ')
+      }
+    }
+  })
 })
