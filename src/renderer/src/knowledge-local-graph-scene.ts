@@ -1,5 +1,6 @@
 import type { KnowledgeNeighborhoodProjection } from '../../shared/knowledge'
 import {
+  forceCollide,
   forceManyBody,
   forceSimulation,
   forceX,
@@ -16,8 +17,15 @@ const SCENE_PADDING_Y = 16
 const NODE_GAP = 8
 const EDGE_NODE_CLEARANCE = 3
 const LINK_SURFACE_GAP = 46
-const FORCE_TICK_LIMIT = 320
-const FORCE_STABLE_TICKS = 10
+const FORCE_TICK_LIMIT = 520
+const FORCE_STABLE_TICKS = 14
+const SECOND_HOP_REPULSION_BASE_RANGE = 140
+const SECOND_HOP_REPULSION_RANGE_PER_DENSE_NODE = 20
+const SECOND_HOP_REPULSION_MAX_EXTRA_RANGE = 90
+const SECOND_HOP_REPULSION_BASE_STRENGTH = 18
+const SECOND_HOP_REPULSION_LINK_LOAD_STRENGTH = 2.5
+const SECOND_HOP_REPULSION_MAX_FORCE = 6
+const SECOND_HOP_REPULSION_WALL_REDIRECT_DISTANCE = 28
 
 const NODE_DIMENSIONS = {
   center: { width: 152, height: 44 },
@@ -134,6 +142,12 @@ function rectanglesOverlap(left: KnowledgeLocalGraphSceneNode, right: KnowledgeL
     && Math.abs(left.y - right.y) < (left.height + right.height) / 2 + NODE_GAP
 }
 
+function nodesHaveOverlaps(nodes: KnowledgeLocalGraphSceneNode[]): boolean {
+  return nodes.some((node, index) => (
+    nodes.slice(index + 1).some((other) => rectanglesOverlap(node, other))
+  ))
+}
+
 function horizontalBounds(node: KnowledgeLocalGraphSceneNode, width: number): [number, number] {
   const halfSceneWidth = width / 2
   return [
@@ -156,88 +170,6 @@ function clampHorizontalPosition(nodes: ForceNode[], width: number): void {
   }
 }
 
-function resolveNodeOverlaps(nodes: ForceNode[], width: number, iterationLimit = 1_200): boolean {
-  for (let iteration = 0; iteration < iterationLimit; iteration += 1) {
-    let overlapCount = 0
-    for (let leftIndex = 0; leftIndex < nodes.length; leftIndex += 1) {
-      for (let rightIndex = leftIndex + 1; rightIndex < nodes.length; rightIndex += 1) {
-        const left = nodes[leftIndex]
-        const right = nodes[rightIndex]
-        const deltaX = right.x - left.x
-        const deltaY = right.y - left.y
-        const requiredX = (left.width + right.width) / 2 + NODE_GAP
-        const requiredY = (left.height + right.height) / 2 + NODE_GAP
-        const overlapX = requiredX - Math.abs(deltaX)
-        const overlapY = requiredY - Math.abs(deltaY)
-        if (overlapX <= 0 || overlapY <= 0) continue
-        overlapCount += 1
-
-        const leftMovable = left.distance === 0 ? 0 : 1
-        const rightMovable = right.distance === 0 ? 0 : 1
-        const totalMovement = leftMovable + rightMovable || 1
-        const moveLeft = leftMovable / totalMovement
-        const moveRight = rightMovable / totalMovement
-        if (overlapX / requiredX < overlapY / requiredY) {
-          const direction = deltaX === 0 ? (rightIndex % 2 === 0 ? 1 : -1) : Math.sign(deltaX)
-          const movement = overlapX + 0.05
-          left.x -= direction * movement * moveLeft
-          right.x += direction * movement * moveRight
-        } else {
-          const direction = deltaY === 0 ? (rightIndex % 2 === 0 ? 1 : -1) : Math.sign(deltaY)
-          const movement = overlapY + 0.05
-          left.y -= direction * movement * moveLeft
-          right.y += direction * movement * moveRight
-        }
-      }
-    }
-    clampHorizontalPosition(nodes, width)
-    if (overlapCount === 0) return true
-  }
-  return nodes.every((node, index) => (
-    nodes.slice(index + 1).every((other) => !rectanglesOverlap(node, other))
-  ))
-}
-
-function packRemainingOverlapsVertically(nodes: ForceNode[]): void {
-  const ordered = [...nodes].sort((left, right) => (
-    left.distance - right.distance
-    || Math.abs(left.y) - Math.abs(right.y)
-    || compareTitles(left.title, right.title)
-  ))
-  const placed: ForceNode[] = []
-  for (const node of ordered) {
-    const intervals = placed
-      .filter((other) => (
-        Math.abs(node.x - other.x) < (node.width + other.width) / 2 + NODE_GAP
-      ))
-      .map((other) => {
-        const separation = (node.height + other.height) / 2 + NODE_GAP
-        return { start: other.y - separation, end: other.y + separation }
-      })
-      .sort((left, right) => left.start - right.start || left.end - right.end)
-    const merged: Array<{ start: number; end: number }> = []
-    for (const interval of intervals) {
-      const previous = merged.at(-1)
-      if (!previous || interval.start > previous.end) merged.push({ ...interval })
-      else previous.end = Math.max(previous.end, interval.end)
-    }
-    const collision = merged.find((interval) => node.y > interval.start && node.y < interval.end)
-    if (collision) {
-      const distanceToStart = Math.abs(node.y - collision.start)
-      const distanceToEnd = Math.abs(collision.end - node.y)
-      node.y = distanceToStart < distanceToEnd
-        ? collision.start
-        : distanceToEnd < distanceToStart
-          ? collision.end
-          : compareTitles(node.title, placed.at(-1)?.title ?? '') < 0
-            ? collision.start
-            : collision.end
-      node.vy = 0
-    }
-    placed.push(node)
-  }
-}
-
 function seedNodes(
   projection: KnowledgeNeighborhoodProjection,
   nodesByTitle: Map<string, KnowledgeNeighborhoodProjection['nodes'][number]>,
@@ -254,26 +186,65 @@ function seedNodes(
   for (const component of components) {
     const sector = Math.PI * 2 * component.length / totalWeight
     const anchorAngle = angleCursor + sector / 2
-    component.forEach((title) => {
-      const node = nodesByTitle.get(title)
-      const distance = node?.distance ?? 1
-      const peers = component.filter((peerTitle) => (
-        (nodesByTitle.get(peerTitle)?.distance ?? 1) === distance
-      ))
-      const peerIndex = peers.indexOf(title)
-      const angularStep = distance === 1 ? 0.6 : 0.48
-      const maximumSpread = Math.min(sector * 0.58, Math.PI * 0.82)
-      const desiredSpread = Math.max(0, peers.length - 1) * angularStep
-      const spread = Math.min(maximumSpread, desiredSpread)
-      const angle = peers.length <= 1
+    const firstHopTitles = component.filter((title) => (
+      (nodesByTitle.get(title)?.distance ?? 1) === 1
+    ))
+    const firstHopSpread = Math.min(
+      Math.min(sector * 0.58, Math.PI * 0.82),
+      Math.max(0, firstHopTitles.length - 1) * 0.6
+    )
+    firstHopTitles.forEach((title, index) => {
+      const angle = firstHopTitles.length <= 1
         ? anchorAngle
-        : anchorAngle + spread * (peerIndex / (peers.length - 1) - 0.5)
-      const radius = distance === 1 ? 78 : 124
+        : anchorAngle + firstHopSpread * (index / (firstHopTitles.length - 1) - 0.5)
       positionByTitle.set(title, {
-        x: Math.cos(angle) * radius,
-        y: Math.sin(angle) * radius
+        x: Math.cos(angle) * 78,
+        y: Math.sin(angle) * 78
       })
     })
+
+    const outerGroups = new Map<string, string[]>()
+    for (const title of component) {
+      if (firstHopTitles.includes(title)) continue
+      const parentTitles = [...(adjacency.get(title) ?? [])]
+        .filter((neighborTitle) => (nodesByTitle.get(neighborTitle)?.distance ?? 0) === 1)
+        .sort(compareTitles)
+      const key = JSON.stringify(parentTitles)
+      const group = outerGroups.get(key) ?? []
+      group.push(title)
+      outerGroups.set(key, group)
+    }
+    for (const [parentKey, titles] of outerGroups) {
+      titles.sort(compareTitles)
+      const parentTitles = JSON.parse(parentKey) as string[]
+      const parentDirections = parentTitles.flatMap((title) => {
+        const position = positionByTitle.get(title)
+        return position ? [position] : []
+      })
+      const direction = parentDirections.reduce(
+        (total, position) => {
+          const angle = Math.atan2(position.y, position.x)
+          return { x: total.x + Math.cos(angle), y: total.y + Math.sin(angle) }
+        },
+        { x: 0, y: 0 }
+      )
+      const outerAnchorAngle = parentDirections.length && Math.hypot(direction.x, direction.y) > 0.001
+        ? Math.atan2(direction.y, direction.x)
+        : anchorAngle
+      const outerSpread = Math.min(
+        Math.min(sector * 0.58, Math.PI * 0.82),
+        Math.max(0, titles.length - 1) * 0.48
+      )
+      titles.forEach((title, index) => {
+        const angle = titles.length <= 1
+          ? outerAnchorAngle
+          : outerAnchorAngle + outerSpread * (index / (titles.length - 1) - 0.5)
+        positionByTitle.set(title, {
+          x: Math.cos(angle) * 124,
+          y: Math.sin(angle) * 124
+        })
+      })
+    }
     angleCursor += sector
   }
 
@@ -346,7 +317,83 @@ function createLinkForce(edges: VisualEdge[]): Force<ForceNode, undefined> {
   return force
 }
 
-function createRectangleCollisionForce(iterations = 4): Force<ForceNode, undefined> {
+/**
+ * Keeps graph-distance-two nodes in the visual periphery without assigning them a ring or
+ * position. The force is emitted only by the fixed center, has a finite range, and fades
+ * continuously to zero so reference springs remain free to form cohesive local clusters.
+ */
+function createSecondHopCenterRepulsionForce(
+  edges: VisualEdge[],
+  width: number
+): Force<ForceNode, undefined> {
+  let center: ForceNode | undefined
+  let secondHopNodes: ForceNode[] = []
+  let influenceRange = SECOND_HOP_REPULSION_BASE_RANGE
+  const linkLoadByTitle = new Map<string, number>()
+  for (const edge of edges) {
+    linkLoadByTitle.set(edge.sourceTitle, (linkLoadByTitle.get(edge.sourceTitle) ?? 0) + 1)
+    linkLoadByTitle.set(edge.targetTitle, (linkLoadByTitle.get(edge.targetTitle) ?? 0) + 1)
+  }
+
+  const force = ((alpha: number): void => {
+    if (!center) return
+    for (const node of secondHopNodes) {
+      let deltaX = node.x + node.vx - center.x
+      let deltaY = node.y + node.vy - center.y
+      if (Math.abs(deltaX) + Math.abs(deltaY) < 0.001) {
+        deltaX = node.index && node.index % 2 === 0 ? 0.01 : -0.01
+        deltaY = node.index && node.index % 3 === 0 ? 0.01 : -0.01
+      }
+      const distance = Math.max(0.001, Math.hypot(deltaX, deltaY))
+      if (distance >= influenceRange) continue
+      const proximity = 1 - distance / influenceRange
+      const linkLoad = Math.sqrt(linkLoadByTitle.get(node.title) ?? 1)
+      const magnitude = Math.min(
+        SECOND_HOP_REPULSION_MAX_FORCE,
+        (SECOND_HOP_REPULSION_BASE_STRENGTH
+          + linkLoad * SECOND_HOP_REPULSION_LINK_LOAD_STRENGTH)
+          * proximity * proximity
+      ) * alpha
+      let directionX = deltaX / distance
+      let directionY = deltaY / distance
+      const [minimumX, maximumX] = horizontalBounds(node, width)
+      const outwardWallDistance = directionX < 0
+        ? node.x - minimumX
+        : maximumX - node.x
+      const wallRedirect = clamp(
+        1 - outwardWallDistance / SECOND_HOP_REPULSION_WALL_REDIRECT_DISTANCE,
+        0,
+        1
+      ) * Math.abs(directionX)
+      if (wallRedirect > 0) {
+        directionX *= 1 - wallRedirect
+        const verticalDirection = Math.abs(directionY) >= 0.05
+          ? Math.sign(directionY)
+          : node.index && node.index % 2 === 0 ? 1 : -1
+        directionY += verticalDirection * wallRedirect
+        const redirectedLength = Math.max(0.001, Math.hypot(directionX, directionY))
+        directionX /= redirectedLength
+        directionY /= redirectedLength
+      }
+      node.vx += directionX * magnitude
+      node.vy += directionY * magnitude
+    }
+  }) as Force<ForceNode, undefined>
+
+  force.initialize = (nodes): void => {
+    center = nodes.find((node) => node.distance === 0)
+    secondHopNodes = nodes.filter((node) => node.distance >= 2)
+    const denseNodeCount = Math.max(0, nodes.length - 4)
+    influenceRange = SECOND_HOP_REPULSION_BASE_RANGE + Math.min(
+      SECOND_HOP_REPULSION_MAX_EXTRA_RANGE,
+      Math.sqrt(denseNodeCount) * SECOND_HOP_REPULSION_RANGE_PER_DENSE_NODE
+    )
+  }
+
+  return force
+}
+
+function createRectangleCollisionForce(width: number, iterations = 6): Force<ForceNode, undefined> {
   let nodes: ForceNode[] = []
   const force = (() => {
     for (let pass = 0; pass < iterations; pass += 1) {
@@ -365,8 +412,20 @@ function createRectangleCollisionForce(iterations = 4): Force<ForceNode, undefin
           const leftMovable = left.distance === 0 ? 0 : 1
           const rightMovable = right.distance === 0 ? 0 : 1
           const totalMovement = leftMovable + rightMovable || 1
-          if (overlapX / requiredX < overlapY / requiredY) {
-            const direction = deltaX === 0 ? (rightIndex % 2 === 0 ? 1 : -1) : Math.sign(deltaX)
+          const horizontalDirection = deltaX === 0 ? (rightIndex % 2 === 0 ? 1 : -1) : Math.sign(deltaX)
+          const horizontalCapacity = (leftMovable
+            ? horizontalDirection > 0
+              ? left.x - horizontalBounds(left, width)[0]
+              : horizontalBounds(left, width)[1] - left.x
+            : 0)
+            + (rightMovable
+              ? horizontalDirection > 0
+                ? horizontalBounds(right, width)[1] - right.x
+                : right.x - horizontalBounds(right, width)[0]
+              : 0)
+          const canResolveHorizontally = horizontalCapacity >= overlapX + 0.05
+          if (overlapX / requiredX < overlapY / requiredY && canResolveHorizontally) {
+            const direction = horizontalDirection
             const movement = overlapX + 0.05
             left.vx -= direction * movement * leftMovable / totalMovement
             right.vx += direction * movement * rightMovable / totalMovement
@@ -392,17 +451,23 @@ function settleNodes(nodes: ForceNode[], edges: VisualEdge[], width: number): vo
     center.fx = 0
     center.fy = 0
   }
+  const linkForce = createLinkForce(edges)
+  const chargeForce = forceManyBody<ForceNode>().strength(-6).distanceMin(24).distanceMax(160)
+  const secondHopRepulsionForce = createSecondHopCenterRepulsionForce(edges, width)
+  const xForce = forceX<ForceNode>(0).strength((node) => node.distance === 0 ? 1 : node.distance === 1 ? 0.008 : 0)
+  const yForce = forceY<ForceNode>(0).strength((node) => node.distance === 0 ? 1 : node.distance === 1 ? 0.008 : 0)
   const simulation = forceSimulation(nodes)
     .stop()
     .alpha(1)
     .alphaMin(0.001)
     .alphaDecay(1 - Math.pow(0.001, 1 / 240))
     .velocityDecay(0.42)
-    .force('links', createLinkForce(edges))
-    .force('charge', forceManyBody<ForceNode>().strength(-6).distanceMin(24).distanceMax(160))
-    .force('x', forceX<ForceNode>(0).strength((node) => node.distance === 0 ? 1 : 0.008))
-    .force('y', forceY<ForceNode>(0).strength((node) => node.distance === 0 ? 1 : 0.008))
-    .force('collision', createRectangleCollisionForce())
+    .force('links', linkForce)
+    .force('charge', chargeForce)
+    .force('second-hop-center-repulsion', secondHopRepulsionForce)
+    .force('x', xForce)
+    .force('y', yForce)
+    .force('collision', createRectangleCollisionForce(width))
 
   let stableTicks = 0
   for (let tick = 0; tick < FORCE_TICK_LIMIT; tick += 1) {
@@ -416,8 +481,33 @@ function settleNodes(nodes: ForceNode[], edges: VisualEdge[], width: number): vo
     stableTicks = tick > 60 && maximumMovement < 0.08 ? stableTicks + 1 : 0
     if (stableTicks >= FORCE_STABLE_TICKS) break
   }
+  if (nodesHaveOverlaps(nodes)) {
+    simulation
+      .force('links', null)
+      .force('charge', null)
+      .force('second-hop-center-repulsion', null)
+      .force('x', null)
+      .force('y', null)
+      .force('collision', forceCollide<ForceNode>()
+        .radius((node) => Math.hypot(node.width, node.height) / 2 + NODE_GAP / 2)
+        .strength(1)
+        .iterations(4))
+    for (const node of nodes) {
+      node.vx = 0
+      node.vy = 0
+    }
+  }
+  for (let pass = 0; pass < 4 && nodesHaveOverlaps(nodes); pass += 1) {
+    simulation.alpha(0.3)
+    let clearTicks = 0
+    for (let tick = 0; tick < 220; tick += 1) {
+      simulation.tick()
+      clampHorizontalPosition(nodes, width)
+      clearTicks = nodesHaveOverlaps(nodes) ? 0 : clearTicks + 1
+      if (clearTicks >= FORCE_STABLE_TICKS) break
+    }
+  }
   simulation.stop()
-  if (!resolveNodeOverlaps(nodes, width)) packRemainingOverlapsVertically(nodes)
 }
 
 function compactNodes(nodes: ForceNode[], width: number): {

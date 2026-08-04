@@ -81,10 +81,37 @@ describe('buildKnowledgeLocalGraphScene', () => {
     const first = scene.nodes.find((node) => node.title === 'First')!
     const second = scene.nodes.find((node) => node.title === 'Second A')!
 
-    expect(scene.height).toBeLessThanOrEqual(210)
+    expect(scene.height).toBeLessThanOrEqual(220)
     expect(center.width).toBeGreaterThan(first.width)
     expect(first.width).toBeGreaterThan(second.width)
     expect(first.height).toBeGreaterThan(second.height)
+  })
+
+  it('uses soft center repulsion to keep a cohesive second-hop branch peripheral', () => {
+    const firstTitles = ['First 0', 'First 1']
+    const secondTitles = Array.from({ length: 5 }, (_, index) => `Second ${index}`)
+    const scene = buildKnowledgeLocalGraphScene(graph(
+      [
+        ['Center', 0],
+        ...firstTitles.map((title) => [title, 1] as [string, number]),
+        ...secondTitles.map((title) => [title, 2] as [string, number])
+      ],
+      [
+        ...firstTitles.map((title) => ['Center', title] as [string, string]),
+        ...secondTitles.map((title, index) => [firstTitles[index % firstTitles.length], title] as [string, string]),
+        ...secondTitles.slice(1).map((title, index) => [secondTitles[index], title] as [string, string])
+      ]
+    ), { width: 360 })
+    const center = scene.nodes.find((node) => node.distance === 0)!
+    const radius = (node: typeof center): number => Math.hypot(
+      node.x - center.x,
+      node.y - center.y
+    )
+    const firstHopRadii = scene.nodes.filter((node) => node.distance === 1).map(radius)
+    const secondHopRadii = scene.nodes.filter((node) => node.distance === 2).map(radius)
+
+    expect(Math.min(...secondHopRadii)).toBeGreaterThan(Math.max(...firstHopRadii))
+    expect(new Set(secondHopRadii.map((value) => Math.round(value))).size).toBeGreaterThan(1)
   })
 
   it('uses additional scene height only when dense text rectangles need it', () => {

@@ -373,8 +373,22 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       y: Number.parseFloat(node.style.top),
       width: node.getBoundingClientRect().width,
       height: node.getBoundingClientRect().height,
-      title: node.dataset.title
+      title: node.dataset.title,
+      distance: Number(node.dataset.distance)
     }))
+    const referenceCenterAnchor = referenceAnchors.find((anchor) => anchor.distance === 0)
+    const referenceRadius = (anchor) => referenceCenterAnchor
+      ? Math.hypot(anchor.x - referenceCenterAnchor.x, anchor.y - referenceCenterAnchor.y)
+      : 0
+    const referenceFirstHopRadii = referenceAnchors
+      .filter((anchor) => anchor.distance === 1)
+      .map(referenceRadius)
+    const referenceSecondHopRadii = referenceAnchors
+      .filter((anchor) => anchor.distance >= 2)
+      .map(referenceRadius)
+    const referenceSecondHopPeripheral = referenceFirstHopRadii.length > 0
+      && referenceSecondHopRadii.length > 0
+      && Math.min(...referenceSecondHopRadii) > Math.max(...referenceFirstHopRadii)
     const referenceLabelsCentered = Boolean(graphBounds) && referenceNodes.every((node) => {
       const labelBounds = node.querySelector('.knowledge-local-graph__label')?.getBoundingClientRect()
       if (!labelBounds) return false
@@ -564,6 +578,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       referenceTwoHopTitle,
       referenceNodeNavigationTitle,
       referenceNodesTransparent: referenceNodeBackgrounds.every((color) => color === 'rgba(0, 0, 0, 0)'),
+      referenceSecondHopPeripheral,
       referenceMarkerFree,
       referenceLabelsCentered,
       referenceNodesDoNotOverlap,

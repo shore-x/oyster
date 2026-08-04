@@ -171,6 +171,7 @@ if (
   || !knowledge.browse.referenceTwoHopTitle
   || knowledge.browse.referenceNodeNavigationTitle !== knowledge.browse.referenceTwoHopTitle
   || !knowledge.browse.referenceNodesTransparent
+  || !knowledge.browse.referenceSecondHopPeripheral
 ) {
   throw new Error('Knowledge references are not rendered as a directionless, clustered two-hop local graph')
 }
