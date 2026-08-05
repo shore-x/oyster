@@ -103,9 +103,9 @@ Knowledge Maintenance Agent 的 Debug Trace 按模型轮次记录有界的模型
 
 ## 4. 配置与结果界面
 
-“Agent 配置”页面列出代码中实际注册的 AI 运行角色，展示每个角色的 Runtime、System Prompt 和工具。Observation Preprocessor 明确显示为不带工具的直接模型调用；Knowledge Maintenance Agent 和通用管理 Agent 分别显示运行时实际提供的工具名称、描述和可展开的参数 JSON Schema，包括必填字段、嵌套结构与约束。参数 Schema 与 AgentTool 由同一工具目录生成，向 Renderer 只投影可序列化的只读信息，不在 UI 中另行启停或编辑。尚未接入运行时的概念角色不作为占位配置出现。
+“Agent 配置”页面只列出代码中实际使用通用 Agent Runtime 的 Agent，当前包括 Knowledge Maintenance Agent 和通用管理 Agent，并展示各自的 Runtime、System Prompt 和工具。Observation Preprocessor 是直接模型调用阶段，不属于 Agent，只在知识加工的配置和调试工作面展示。Agent 的工具名称、描述和可展开参数 JSON Schema 与运行时 AgentTool 由同一工具目录生成，向 Renderer 只投影可序列化的只读信息，不在 UI 中另行启停或编辑。尚未接入运行时的概念角色不作为占位配置出现。
 
-System Prompt 有三个清晰层次：代码内置 Prompt 是始终存在的 fallback；用户可以在 Agent 配置页保存一个默认 Prompt；加工测试页还可以保存该阶段的调试覆盖。实际运行依次选择“阶段覆盖、用户默认、代码内置”中第一个存在的值，并在运行开始时固化到本次配置和成功历史中。在 Agent 配置页恢复代码默认会删除用户默认覆盖；在加工测试页恢复当前默认会删除阶段覆盖，二者都不复制内置文本。Host 提供的初始任务材料和结束被拒绝时的 Runtime Feedback 不属于 System Prompt，也不由该页面配置；Host 不在每轮模型调用前自动注入工作清单。
+System Prompt 有三个清晰层次：代码内置 Prompt 是始终存在的 fallback；实际 Agent 可以在 Agent 配置页保存用户默认 Prompt；知识加工阶段还可以在知识加工页保存调试覆盖。Observation Preprocessor 不出现在 Agent 配置页，知识加工页继续展示其实际生效的处理指令并管理阶段覆盖。实际运行依次选择“阶段覆盖、用户默认、代码内置”中第一个存在的值，并在运行开始时固化到本次配置和成功历史中。在 Agent 配置页恢复代码默认会删除 Agent 的用户默认覆盖；在知识加工页恢复当前默认会删除阶段覆盖，二者都不复制内置文本。Host 提供的初始任务材料和结束被拒绝时的 Runtime Feedback 不属于 System Prompt，也不由该页面配置；Host 不在每轮模型调用前自动注入工作清单。
 
 代码内置 Prompt 默认使用英文表达，但要求 Candidate 的表达与问题以及 Knowledge Statement 跟随原始材料的主要语言；当材料混合多种语言时，保留翻译可能改变含义的关键原文术语。每个阶段还保存用户明确选择的 Connection、该 Connection 中的 Model，以及模型明确支持时的可选思考强度。两个阶段可以选择不同 Backend、Connection、Model 与思考强度；不支持或能力未知的模型不显示该控制，也不会收到相应参数。
 

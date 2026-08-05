@@ -143,7 +143,7 @@ if (!knowledge.browse.detailContent?.includes('Knowledge Maintenance Agent')) {
 if (
   knowledge.browse.linkLabel !== '知识维护 Agent'
   || knowledge.browse.linkPreviewTitle !== 'Knowledge Maintenance Agent'
-  || !knowledge.browse.linkPreview?.includes('读取候选清单')
+  || !knowledge.browse.linkPreview?.includes('通用 Todo')
 ) {
   throw new Error('Knowledge browser did not render the wikilink alias and hover preview')
 }
@@ -292,30 +292,25 @@ if (!semantics.ai.model.configuredSummary?.includes('fixture-model')) throw new 
 if (!semantics.ai.model.bodyText.includes('OpenAI-compatible')) throw new Error('Custom compatible provider choice is missing')
 
 const agentConfiguration = semantics.agentConfiguration
-if (agentConfiguration?.title !== 'Agent 配置' || agentConfiguration.roleCount !== 3) {
-  throw new Error('Agent configuration page does not list the registered AI runtime roles')
+if (agentConfiguration?.title !== 'Agent 配置' || agentConfiguration.roleCount !== 2) {
+  throw new Error('Agent configuration page does not list the registered Agents')
 }
-if (!agentConfiguration.preprocessorRoleText?.includes('Direct Model')) {
-  throw new Error('The Observation Preprocessor is not identified as a direct model call')
-}
-if (
-  agentConfiguration.preprocessorToolCount !== 0
-  || !agentConfiguration.preprocessorToolsEmpty?.includes('不向模型提供工具')
-) {
-  throw new Error('The direct preprocessing call incorrectly exposes Agent tools')
+if (agentConfiguration.preprocessorRolePresent) {
+  throw new Error('The direct-model Observation Preprocessor is incorrectly listed as an Agent')
 }
 if (
-  agentConfiguration.maintenanceToolNames?.length !== 11
+  agentConfiguration.maintenanceToolNames?.length !== 10
   || !agentConfiguration.maintenanceToolNames.includes('search_knowledge')
   || !agentConfiguration.maintenanceToolNames.includes('read_evidence')
-  || !agentConfiguration.maintenanceToolNames.includes('submit_knowledge_contribution')
+  || !agentConfiguration.maintenanceToolNames.includes('upsert_contribution_statement')
+  || !agentConfiguration.maintenanceToolNames.includes('list_todos')
 ) {
   throw new Error('The Agent tool catalog does not match the Knowledge Maintenance runtime')
 }
 if (!agentConfiguration.toolsReadOnlyCopy?.includes('只读展示')) {
   throw new Error('The Agent configuration page does not explain that tools are code-owned')
 }
-if (agentConfiguration.schemaPanelCount !== 11 || agentConfiguration.expandedSchemaCount !== 2) {
+if (agentConfiguration.schemaPanelCount !== 10 || agentConfiguration.expandedSchemaCount !== 2) {
   throw new Error('The Agent tool parameter schemas are not available through expandable panels')
 }
 const searchToolSchema = agentConfiguration.searchToolSchema
@@ -328,17 +323,15 @@ if (
 ) {
   throw new Error('The search_knowledge developer schema lost required fields or constraints')
 }
-const candidateItemSchema = agentConfiguration.candidateToolSchema?.properties?.candidates?.items
-const candidateLocationSchema = candidateItemSchema?.properties?.locations?.items
+const todoItemsSchema = agentConfiguration.addTodosToolSchema?.properties?.todos
 if (
-  !agentConfiguration.candidateToolSchema?.required?.includes('candidates')
-  || !candidateItemSchema?.required?.includes('expression')
-  || !candidateItemSchema?.required?.includes('question')
-  || candidateItemSchema?.properties?.expression?.maxLength !== 512
-  || !candidateLocationSchema?.required?.includes('line')
-  || !candidateLocationSchema?.required?.includes('offset')
+  !agentConfiguration.addTodosToolSchema?.required?.includes('todos')
+  || todoItemsSchema?.type !== 'array'
+  || todoItemsSchema?.minItems !== 1
+  || todoItemsSchema?.items?.type !== 'string'
+  || todoItemsSchema?.items?.maxLength !== 64 * 1_024
 ) {
-  throw new Error('The nested Statement candidate developer schema is incomplete')
+  throw new Error('The shared Agent Todo developer schema is incomplete')
 }
 if (
   !agentConfiguration.builtInPrompt?.includes('Knowledge Maintenance Agent')
@@ -356,8 +349,8 @@ if (!agentConfiguration.chatRoleText?.includes('通用 Agent')) {
 }
 if (
   agentConfiguration.chatToolNames?.join(',')
-    !== 'read,bash,edit,write,search_knowledge,read_knowledge,upsert_knowledge,spawn_agent'
-  || agentConfiguration.chatSchemaPanelCount !== 8
+    !== 'read,bash,edit,write,search_knowledge,read_knowledge,upsert_knowledge,spawn_agent,add_todos,complete_todos,list_todos'
+  || agentConfiguration.chatSchemaPanelCount !== 11
 ) {
   throw new Error('The conversational Agent tool catalog is incomplete')
 }
@@ -463,8 +456,12 @@ if (!processing.fullChainRun.toolInput?.includes('"line":1') || !processing.full
 if (!processing.fullChainRun.resultDetailExists || !processing.fullChainRun.returnedToOverview) {
   throw new Error('The full-chain result detail is not a navigable secondary page')
 }
-if (processing.fullChainRun.candidateCount !== 1 || processing.fullChainRun.resolutionCount !== 1) {
-  throw new Error('Full-chain result does not expose the adjudicated Statement Candidate Agenda')
+if (
+  processing.fullChainRun.candidateCount !== 1
+  || processing.fullChainRun.todoCount !== 1
+  || processing.fullChainRun.completedTodoCount !== 1
+) {
+  throw new Error('Full-chain result does not expose preprocessing candidates and Maintainer Todos separately')
 }
 if (processing.fullChainRun.statementCount !== 2) {
   throw new Error('Full-chain result does not expose the committed Knowledge Statement')
@@ -527,12 +524,12 @@ if (processing.promptValues.some((prompt) => typeof prompt !== 'string' || !prom
   throw new Error('A processing default prompt is empty')
 }
 const [preprocessorPrompt, maintainerPrompt] = processing.promptValues
-for (const requiredCopy of ['open investigation agenda', 'not draft Knowledge Statements', 'not a generated topic heading', 'primary language of the original material']) {
+for (const requiredCopy of ['general-purpose initial Todo', 'not draft Knowledge Statements', 'not a generated topic heading', 'primary language of the original material']) {
   if (!preprocessorPrompt.includes(requiredCopy)) {
     throw new Error(`Observation Preprocessor prompt is missing its responsibility: ${requiredCopy}`)
   }
 }
-for (const requiredCopy of ['Knowledge Maintenance Agent', 'canonical title names that subject', 'Make the body, not an overloaded title, self-explaining', '[[canonical title]]', 'primary language of the original observation', 'submit_knowledge_contribution']) {
+for (const requiredCopy of ['Knowledge Maintenance Agent', 'canonical title names that subject', 'Make the body, not an overloaded title, self-explaining', '[[canonical title]]', 'primary language of the original observation', 'list_todos', 'complete_todos', 'there is no separate submit tool']) {
   if (!maintainerPrompt.includes(requiredCopy)) {
     throw new Error(`Knowledge Maintenance Agent prompt is missing its responsibility: ${requiredCopy}`)
   }
@@ -610,7 +607,7 @@ if (processing.trace.preprocessingOutput.includes('"locations"') || /L\d{6}/.tes
 if (processing.trace.maintenanceEventCount !== 3) {
   throw new Error(`Expected 3 safe maintenance trace events, got ${processing.trace.maintenanceEventCount}`)
 }
-for (const requiredCopy of ['模型输出可能复述原始材料', '模型轮次 1', '读取原始观察证据', '提交 Knowledge Contribution']) {
+for (const requiredCopy of ['模型输出可能复述原始材料', '模型轮次 1', '读取原始观察证据', '完成待办事项']) {
   if (!processing.trace.bodyText.includes(requiredCopy)) {
     throw new Error(`Knowledge processing trace is missing: ${requiredCopy}`)
   }

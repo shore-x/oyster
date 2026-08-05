@@ -2,8 +2,8 @@ import { createMemo, createSignal, onCleanup } from 'solid-js'
 import { CHAT_AGENT_ID, type ChatAgentConfigurationView, type ChatSnapshot } from '../../shared/chat'
 import type {
   KnowledgeProcessingSnapshot,
-  ProcessingRuntime,
   ProcessingStageId,
+  ProcessingStageView,
   ProcessingToolView
 } from '../../shared/knowledge-processing'
 
@@ -34,13 +34,19 @@ export interface AgentConfigurationRoleView {
   id: AgentConfigurationRoleId
   displayName: string
   description: string
-  runtime: ProcessingRuntime
+  runtime: 'pi_agent_core'
   tools: ProcessingToolView[]
   builtInInstructions: string
   defaultInstructions: string
   isDefaultCustomized: boolean
   promptUsageDescription: string
   promptUsageStatus: string
+}
+
+function isAgentStage(
+  stage: ProcessingStageView
+): stage is ProcessingStageView & { runtime: 'pi_agent_core' } {
+  return stage.runtime === 'pi_agent_core'
 }
 
 function chatRole(agent: ChatAgentConfigurationView): AgentConfigurationRoleView {
@@ -60,18 +66,20 @@ export function createAgentConfigurationController() {
   const [error, setError] = createSignal<string>()
 
   const roles = createMemo<AgentConfigurationRoleView[]>(() => [
-    ...processingSnapshot().stages.map((stage) => ({
-      id: stage.id,
-      displayName: stage.displayName,
-      description: stage.description,
-      runtime: stage.runtime,
-      tools: stage.tools,
-      builtInInstructions: stage.builtInInstructions,
-      defaultInstructions: stage.defaultInstructions,
-      isDefaultCustomized: stage.isDefaultCustomized,
-      promptUsageDescription: '没有阶段覆盖的加工运行使用此值；加工测试页的阶段覆盖优先级更高。',
-      promptUsageStatus: stage.isCustomized ? '加工测试存在覆盖' : '当前运行使用默认'
-    })),
+    ...processingSnapshot().stages
+      .filter(isAgentStage)
+      .map((stage) => ({
+        id: stage.id,
+        displayName: stage.displayName,
+        description: stage.description,
+        runtime: stage.runtime,
+        tools: stage.tools,
+        builtInInstructions: stage.builtInInstructions,
+        defaultInstructions: stage.defaultInstructions,
+        isDefaultCustomized: stage.isDefaultCustomized,
+        promptUsageDescription: '没有阶段覆盖的加工运行使用此值；加工测试页的阶段覆盖优先级更高。',
+        promptUsageStatus: stage.isCustomized ? '加工测试存在覆盖' : '当前运行使用默认'
+      })),
     chatRole(chatSnapshot().agent)
   ])
   const configurationErrors = createMemo(() => [

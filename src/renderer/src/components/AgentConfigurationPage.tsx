@@ -61,7 +61,7 @@ export function AgentConfigurationPage() {
         <div>
           <h1>Agent 配置</h1>
           <div class="page-summary">
-            <span><strong>{controller.roles().length}</strong> 个 AI 运行角色</span>
+            <span><strong>{controller.roles().length}</strong> 个 Agent</span>
             <span class="page-summary__separator">·</span>
             <span>默认 Prompt 可配置，工具由代码提供</span>
           </div>
@@ -76,9 +76,9 @@ export function AgentConfigurationPage() {
       )}</For>
 
       <div class="agent-config-layout" data-testid="agent-configuration-workspace">
-        <aside class="agent-config-roles" aria-label="AI 运行角色">
+        <aside class="agent-config-roles" aria-label="Agent">
           <div class="agent-config-roles__heading">
-            <span>运行角色</span>
+            <span>Agents</span>
             <strong>{controller.roles().length}</strong>
           </div>
           <Show
@@ -96,7 +96,7 @@ export function AgentConfigurationPage() {
                   setDetailView('prompt')
                 }}
               >
-                <span class="agent-config-role__mark">{role.runtime === 'pi_agent_core' ? 'A' : 'M'}</span>
+                <span class="agent-config-role__mark">A</span>
                 <span>
                   <strong>{role.displayName}</strong>
                   <small>{runtimeLabel(role.runtime)} · {role.tools.length} 个工具</small>
@@ -123,7 +123,7 @@ export function AgentConfigurationPage() {
                 </span>
               </div>
 
-              <div class="agent-config-tabs" role="tablist" aria-label="角色配置内容">
+              <div class="agent-config-tabs" role="tablist" aria-label="Agent 配置内容">
                 <button
                   type="button"
                   role="tab"
@@ -199,7 +199,7 @@ export function AgentConfigurationPage() {
                     when={role().tools.length}
                     fallback={(
                       <div class="agent-config-tools__empty">
-                        该角色直接调用模型，不向模型提供工具。
+                        该 Agent 当前没有工具。
                       </div>
                     )}
                   >

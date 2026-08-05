@@ -833,8 +833,9 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
         page.querySelector('[data-testid="open-full-chain-result"]')?.click()
         await new Promise((resolve) => requestAnimationFrame(resolve))
         const resultDetailExists = Boolean(page.querySelector('[data-testid="full-chain-result-detail"]'))
-        const candidateCount = page.querySelectorAll('.chain-test__candidates .statement-candidate').length
-        const resolutionCount = page.querySelectorAll('.chain-test__candidates .statement-candidate__resolution').length
+        const candidateCount = page.querySelectorAll('[data-testid="statement-candidate-list"] .statement-candidate').length
+        const todoCount = page.querySelectorAll('[data-testid="agent-todo-list"] .statement-candidate').length
+        const completedTodoCount = page.querySelectorAll('[data-testid="agent-todo-list"] .statement-candidate--resolved').length
         const statementCount = page.querySelectorAll('.knowledge-browser--sandbox .knowledge-browser__item').length
         const sandboxLink = page.querySelector('.knowledge-browser--sandbox .knowledge-statement-link > a')
         sandboxLink?.dispatchEvent(new MouseEvent('mouseenter'))
@@ -879,7 +880,8 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
           toolOutput,
           resultDetailExists,
           candidateCount,
-          resolutionCount,
+          todoCount,
+          completedTodoCount,
           statementCount,
           sandboxLinkLabel,
           sandboxLinkPreview,
@@ -1125,16 +1127,14 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   const agentConfigurationSemantics = await window.webContents.executeJavaScript(`(async () => {
     const page = document.querySelector('[data-testid="page-agent-configuration"]')
     let deadline = Date.now() + 2_000
-    while (page.querySelectorAll('.agent-config-role').length < 3 && Date.now() < deadline) {
+    while (page.querySelectorAll('.agent-config-role').length < 2 && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
     const title = page.querySelector('h1')?.textContent?.trim()
     const roleCount = page.querySelectorAll('.agent-config-role').length
-    const preprocessorRoleText = page.querySelector('[data-testid="agent-config-role-observation_preprocessor"]')?.textContent?.trim()
-    page.querySelector('[data-testid="agent-config-tab-tools"]')?.click()
-    await new Promise((resolve) => requestAnimationFrame(resolve))
-    const preprocessorToolCount = page.querySelectorAll('.agent-config-tool').length
-    const preprocessorToolsEmpty = page.querySelector('.agent-config-tools__empty')?.textContent?.trim()
+    const preprocessorRolePresent = Boolean(
+      page.querySelector('[data-testid="agent-config-role-observation_preprocessor"]')
+    )
 
     page.querySelector('[data-testid="agent-config-role-knowledge_maintenance_agent"]')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
@@ -1145,12 +1145,12 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const toolsReadOnlyCopy = page.querySelector('[data-testid="agent-config-tools-panel"]')?.textContent?.trim()
     const schemaPanelCount = page.querySelectorAll('.agent-config-tool__schema').length
     const searchSchemaDetails = page.querySelector('[data-testid="agent-tool-schema-search_knowledge"]')
-    const candidateSchemaDetails = page.querySelector('[data-testid="agent-tool-schema-add_todos"]')
+    const addTodosSchemaDetails = page.querySelector('[data-testid="agent-tool-schema-add_todos"]')
     searchSchemaDetails.open = true
-    candidateSchemaDetails.open = true
+    addTodosSchemaDetails.open = true
     await new Promise((resolve) => requestAnimationFrame(resolve))
     const searchToolSchema = JSON.parse(searchSchemaDetails.querySelector('pre')?.textContent || '{}')
-    const candidateToolSchema = JSON.parse(candidateSchemaDetails.querySelector('pre')?.textContent || '{}')
+    const addTodosToolSchema = JSON.parse(addTodosSchemaDetails.querySelector('pre')?.textContent || '{}')
     const expandedSchemaCount = page.querySelectorAll('.agent-config-tool__schema[open]').length
 
     page.querySelector('[data-testid="agent-config-tab-prompt"]')?.click()
@@ -1234,15 +1234,13 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     return {
       title,
       roleCount,
-      preprocessorRoleText,
-      preprocessorToolCount,
-      preprocessorToolsEmpty,
+      preprocessorRolePresent,
       maintenanceToolNames,
       toolsReadOnlyCopy,
       schemaPanelCount,
       expandedSchemaCount,
       searchToolSchema,
-      candidateToolSchema,
+      addTodosToolSchema,
       builtInPrompt,
       configuredBadge,
       saveNotice,
