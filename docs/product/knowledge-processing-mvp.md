@@ -82,7 +82,7 @@ Debug Trace 只保存有界的模型与工具事件副本，不是知识或审�
 
 ## 7. 历史与升级
 
-成功链路记录使用当前 V3 payload，只保存 Maintainer 配置、结果、Sandbox 写入结果和一份共享 Debug Trace。历史 SQLite schema 升级时直接删除并重建旧表，不迁移旧记录。当前阶段优先保证概念和数据结构一致，不维护旧格式兼容分支。
+成功链路记录使用当前 V3 payload，只保存 Maintainer 配置、结果、Sandbox 写入结果和一份共享 Debug Trace。历史 SQLite schema 升级时直接删除并重建旧表，不迁移旧记录。`knowledge-processing.json` 使用显式格式版本；单 Maintainer 链路之前的无版本配置会直接重建为空配置，由用户重新选择 Maintainer 的 Connection 和 Model，不解释或迁移旧阶段。当前版本格式损坏或来自更高版本时仍明确报错。当前阶段优先保证概念和数据结构一致，不维护旧格式兼容分支。
 
 ## 8. 当前验收边界
 

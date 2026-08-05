@@ -9,6 +9,11 @@ import type {
 } from './model'
 
 const EMPTY_STATE: KnowledgeProcessingStateData = { stages: [] }
+const FORMAT_VERSION = 1
+
+interface PersistedKnowledgeProcessingState extends KnowledgeProcessingStateData {
+  formatVersion: typeof FORMAT_VERSION
+}
 
 function cloneState(state: KnowledgeProcessingStateData): KnowledgeProcessingStateData {
   return structuredClone(state)
@@ -50,11 +55,11 @@ function isStoredStage(value: unknown): value is StoredProcessingStage {
     )
 }
 
-function validateState(value: unknown): KnowledgeProcessingStateData {
-  if (!value || typeof value !== 'object' || !Array.isArray((value as Record<string, unknown>).stages)) {
+function validateCurrentState(value: Record<string, unknown>): KnowledgeProcessingStateData {
+  if (!Array.isArray(value.stages)) {
     throw new Error('知识加工配置缺少 stages 数组')
   }
-  const stages = (value as Record<string, unknown>).stages as unknown[]
+  const stages = value.stages as unknown[]
   const invalidIndex = stages.findIndex((stage) => !isStoredStage(stage))
   if (invalidIndex >= 0) throw new Error(`知识加工配置中的第 ${invalidIndex + 1} 条记录无效`)
   const typed = stages as StoredProcessingStage[]
@@ -64,6 +69,25 @@ function validateState(value: unknown): KnowledgeProcessingStateData {
   return { stages: typed }
 }
 
+function persistedState(state: KnowledgeProcessingStateData): PersistedKnowledgeProcessingState {
+  return { formatVersion: FORMAT_VERSION, ...cloneState(state) }
+}
+
+function parseState(value: unknown): KnowledgeProcessingStateData | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('知识加工配置必须是对象')
+  }
+  const record = value as Record<string, unknown>
+  if (record.formatVersion === undefined) return undefined
+  if (!Number.isSafeInteger(record.formatVersion) || (record.formatVersion as number) < 1) {
+    throw new Error('知识加工配置格式版本无效')
+  }
+  if ((record.formatVersion as number) > FORMAT_VERSION) {
+    throw new Error(`知识加工配置格式版本 ${record.formatVersion} 高于当前支持版本 ${FORMAT_VERSION}`)
+  }
+  return validateCurrentState(record)
+}
+
 export class JsonKnowledgeProcessingRepository implements KnowledgeProcessingRepository {
   private writeQueue: Promise<void> = Promise.resolve()
 
@@ -71,7 +95,10 @@ export class JsonKnowledgeProcessingRepository implements KnowledgeProcessingRep
 
   async load(): Promise<KnowledgeProcessingStateData> {
     try {
-      return cloneState(validateState(JSON.parse(await readFile(this.filePath, 'utf8')) as unknown))
+      const state = parseState(JSON.parse(await readFile(this.filePath, 'utf8')) as unknown)
+      if (state) return cloneState(state)
+      await this.save(EMPTY_STATE)
+      return cloneState(EMPTY_STATE)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return cloneState(EMPTY_STATE)
       throw error
@@ -83,7 +110,7 @@ export class JsonKnowledgeProcessingRepository implements KnowledgeProcessingRep
     const write = async (): Promise<void> => {
       await mkdir(dirname(this.filePath), { recursive: true })
       const temporaryPath = `${this.filePath}.tmp`
-      await writeFile(temporaryPath, `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8')
+      await writeFile(temporaryPath, `${JSON.stringify(persistedState(snapshot), null, 2)}\n`, 'utf8')
       await rename(temporaryPath, this.filePath)
     }
     this.writeQueue = this.writeQueue.then(write, write)

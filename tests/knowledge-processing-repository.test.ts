@@ -45,6 +45,7 @@ describe('JsonKnowledgeProcessingRepository', () => {
     loaded.stages[0].connectionId = 'mutated-after-load'
     expect((await repository.load()).stages[0].connectionId).toBe('model:a')
     expect(JSON.parse(await readFile(filePath, 'utf8'))).toEqual({
+      formatVersion: 1,
       stages: [expect.objectContaining({
         stageId: 'knowledge_maintenance_agent',
         connectionId: 'model:a',
@@ -53,20 +54,43 @@ describe('JsonKnowledgeProcessingRepository', () => {
     })
   })
 
-  it('rejects malformed, unknown, or duplicate stage records', async () => {
+  it('rebuilds an unversioned legacy configuration instead of validating removed stages', async () => {
+    const { filePath, repository } = await temporaryRepository()
+    await writeFile(filePath, JSON.stringify({
+      stages: [
+        { stageId: 'observation_preprocessor', connectionId: 'model:old', modelId: 'old-preprocessor' },
+        { stageId: 'knowledge_maintenance_agent', connectionId: 'model:old', modelId: 'old-maintainer' }
+      ]
+    }), 'utf8')
+
+    await expect(repository.load()).resolves.toEqual({ stages: [] })
+    expect(JSON.parse(await readFile(filePath, 'utf8'))).toEqual({
+      formatVersion: 1,
+      stages: []
+    })
+  })
+
+  it('rejects malformed, unknown, duplicate, or future-version current records', async () => {
     const { filePath, repository } = await temporaryRepository()
     await writeFile(filePath, '{not json', 'utf8')
     await expect(repository.load()).rejects.toThrow()
 
-    await writeFile(filePath, JSON.stringify({ stages: [{ stageId: 'unknown_stage' }] }), 'utf8')
+    await writeFile(filePath, JSON.stringify({
+      formatVersion: 1,
+      stages: [{ stageId: 'unknown_stage' }]
+    }), 'utf8')
     await expect(repository.load()).rejects.toThrow('第 1 条记录无效')
 
     await writeFile(filePath, JSON.stringify({
+      formatVersion: 1,
       stages: [
         { stageId: 'knowledge_maintenance_agent', connectionId: 'model:a' },
         { stageId: 'knowledge_maintenance_agent', connectionId: 'model:b' }
       ]
     }), 'utf8')
     await expect(repository.load()).rejects.toThrow('重复阶段')
+
+    await writeFile(filePath, JSON.stringify({ formatVersion: 2, stages: [] }), 'utf8')
+    await expect(repository.load()).rejects.toThrow('高于当前支持版本')
   })
 })
