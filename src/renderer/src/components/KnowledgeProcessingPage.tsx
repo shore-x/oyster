@@ -1,20 +1,17 @@
 import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
-import type { ReasoningEffort } from '../../../shared/ai-backends'
 import type {
   KnowledgeMaintenanceResult,
-  ProcessingConnectionView,
   ProcessingStageView
 } from '../../../shared/knowledge-processing'
 import { createKnowledgeProcessingController } from '../knowledge-processing-controller'
 import {
-  REASONING_LABELS,
   backendLabel,
   connectionCanAttemptRun,
   connectionStatusLabel,
   providerLabel,
   reasoningLabel,
   runtimeLabel,
-  selectedStageModel
+  selectedLlmModel
 } from '../processing-configuration'
 import { Button, Icon } from '../ui'
 import { AgentTodoList } from './AgentTodoList'
@@ -124,9 +121,10 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
   const maintainer = createMemo(() => controller.snapshot().stages.find(
     (stage) => stage.id === 'knowledge_maintenance_agent'
   ))
-  const selectedConnection = (stage?: ProcessingStageView) => controller.snapshot().connections.find(
-    (connection) => connection.id === stage?.connectionId
-  )
+  const defaultLlm = createMemo(() => controller.snapshot().defaultLlm)
+  const selectedConnection = createMemo(() => controller.snapshot().connections.find(
+    (connection) => connection.id === defaultLlm()?.connectionId
+  ))
   const selectedSession = createMemo(() => controller.availableSessions().find(
     (session) => session.sourceRecordId === selectedSessionId()
   ))
@@ -161,14 +159,14 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
 
   function configurationIssue(stage?: ProcessingStageView): string | undefined {
     if (!stage) return '正在读取 Knowledge Maintenance Agent 配置…'
-    if (!stage.connectionId) return '请先选择 Connection。'
-    const connection = selectedConnection(stage)
-    if (!connection) return `已保存的 Connection 当前不可用：${stage.connectionId}。`
-    if (!stage.modelId) return '请先选择 Model。'
-    const model = selectedStageModel(stage, connection)
-    if (!model) return `已保存的 Model 当前不可用：${stage.modelId}。`
-    if (stage.reasoningEffort && !model.reasoningEfforts.includes(stage.reasoningEffort)) {
-      return '已保存的思考强度不受当前 Model 支持。'
+    const binding = defaultLlm()
+    if (!binding) return '请先在 AI 后端页面配置默认 LLM。'
+    const connection = selectedConnection()
+    if (!connection) return `默认 LLM 的 Connection 当前不可用：${binding.connectionId}。`
+    const model = selectedLlmModel(binding, connection)
+    if (!model) return `默认 LLM 的 Model 当前不可用：${binding.modelId}。`
+    if (binding.reasoningEffort && !model.reasoningEfforts.includes(binding.reasoningEffort)) {
+      return '默认 LLM 的思考强度不受当前 Model 支持。'
     }
     if (!connectionCanAttemptRun(connection)) {
       return `Connection 状态为“${connectionStatusLabel(connection.status)}”，需要先完成认证或配置。`
@@ -188,42 +186,6 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
     if (!selectedSession()) return '请先选择一个 Session。'
     return undefined
   })
-
-  function savedInstructions(stage: ProcessingStageView): string | null {
-    return stage.isCustomized ? stage.effectiveInstructions : null
-  }
-
-  function saveConfiguration(
-    stage: ProcessingStageView,
-    connectionId: string | null,
-    modelId: string | null,
-    reasoningEffort: ReasoningEffort | null = stage.reasoningEffort ?? null
-  ): void {
-    void controller.saveStage({
-      stageId: stage.id,
-      connectionId,
-      modelId,
-      instructionsOverride: savedInstructions(stage),
-      reasoningEffort
-    })
-  }
-
-  function selectConnection(stage: ProcessingStageView, connectionId: string): void {
-    const connection = controller.snapshot().connections.find((item) => item.id === connectionId)
-    const modelId = connection?.models.find((model) => model.id === connection.defaultModelId)?.id
-      ?? connection?.models[0]?.id
-      ?? null
-    saveConfiguration(stage, connection?.id ?? null, modelId, null)
-  }
-
-  function selectModel(stage: ProcessingStageView, modelId: string): void {
-    const connection = selectedConnection(stage)
-    const model = connection?.models.find((item) => item.id === modelId)
-    const effort = stage.reasoningEffort && model?.reasoningEfforts.includes(stage.reasoningEffort)
-      ? stage.reasoningEffort
-      : null
-    saveConfiguration(stage, stage.connectionId ?? null, model?.id ?? null, effort)
-  }
 
   function updateSelectedSession(value: string): void {
     setSelectedSessionId(value || undefined)
@@ -258,7 +220,8 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
           selectedSessionId={selectedSessionId()}
           attention={fullChainAttention()}
           maintainer={maintainer()}
-          maintainerConnection={selectedConnection(maintainer())}
+          defaultLlm={defaultLlm()}
+          maintainerConnection={selectedConnection()}
           running={controller.isFullChainRunning()}
           debugTrace={fullChainTrace()}
           locked={anyRunning()}
@@ -305,8 +268,8 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
         <section class="processing-list" aria-label="知识加工阶段">
           <Show when={maintainer()}>
             {(stage) => {
-              const connection = () => selectedConnection(stage())
-              const model = () => selectedStageModel(stage(), connection())
+              const connection = () => selectedConnection()
+              const model = () => selectedLlmModel(defaultLlm(), connection())
               return (
                 <article id="processing-stage-knowledge_maintenance_agent" class="processing-stage stage-debug-workspace" data-testid="processing-stage-knowledge_maintenance_agent">
                   <div class="processing-stage__header">
@@ -320,40 +283,16 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
 
                   <div class="processing-workspace-panel stage-debug__configuration" aria-label="模型与提示词">
                     <div class="processing-connection">
-                      <div class="processing-connection__selectors">
-                        <label class="ai-field">
-                          <span>Connection</span>
-                          <select data-testid="processing-connection-knowledge_maintenance_agent" value={stage().connectionId || ''} disabled={anyRunning() || controller.isSaving(stage().id)} onChange={(event) => selectConnection(stage(), event.currentTarget.value)}>
-                            <option value="">选择 Connection</option>
-                            <For each={controller.snapshot().connections}>{(item) => <option value={item.id}>{item.displayName} · {connectionStatusLabel(item.status)}</option>}</For>
-                          </select>
-                        </label>
-                        <label class="ai-field">
-                          <span>Model</span>
-                          <select data-testid="processing-model-knowledge_maintenance_agent" value={stage().modelId || ''} disabled={!connection() || anyRunning() || controller.isSaving(stage().id)} onChange={(event) => selectModel(stage(), event.currentTarget.value)}>
-                            <option value="">选择 Model</option>
-                            <For each={connection()?.models ?? []}>{(item) => <option value={item.id} selected={item.id === stage().modelId}>{item.displayName === item.id ? item.id : `${item.displayName} · ${item.id}`}</option>}</For>
-                          </select>
-                        </label>
-                        <label class="ai-field">
-                          <span>思考强度</span>
-                          <select data-testid="processing-reasoning-knowledge_maintenance_agent" value={stage().reasoningEffort || ''} disabled={!model()?.reasoningEfforts.length || anyRunning() || controller.isSaving(stage().id)} onChange={(event) => saveConfiguration(stage(), stage().connectionId ?? null, stage().modelId ?? null, (event.currentTarget.value || null) as ReasoningEffort | null)}>
-                            <option value="">模型默认</option>
-                            <For each={model()?.reasoningEfforts ?? []}>{(effort) => <option value={effort}>{REASONING_LABELS[effort]}</option>}</For>
-                          </select>
-                        </label>
-                      </div>
-                      <Show when={connection()}>
-                        {(item) => (
-                          <dl class="processing-connection__details" data-testid="processing-config-knowledge_maintenance_agent">
-                            <div><dt>Connection</dt><dd>{item().displayName}</dd></div>
-                            <div><dt>Backend</dt><dd>{backendLabel(item().backendKind)}</dd></div>
-                            <div><dt>Provider</dt><dd>{providerLabel(item().providerId)}</dd></div>
-                            <div><dt>Model</dt><dd>{model()?.id || '未选择'}</dd></div>
-                            <div><dt>Reasoning</dt><dd>{reasoningLabel(stage().reasoningEffort)}</dd></div>
-                            <div><dt>Runtime</dt><dd>{runtimeLabel(stage().runtime)}</dd></div>
-                          </dl>
-                        )}
+                      <Show when={connection() && model()} fallback={<p class="processing-stage__run-status processing-stage__run-status--blocked">请先在 AI 后端页面配置可用的默认 LLM。</p>}>
+                        <dl class="processing-connection__details" data-testid="processing-config-knowledge_maintenance_agent">
+                          <div><dt>Connection</dt><dd>{connection()?.displayName}</dd></div>
+                          <div><dt>Backend</dt><dd>{backendLabel(connection()!.backendKind)}</dd></div>
+                          <div><dt>Provider</dt><dd>{providerLabel(connection()!.providerId)}</dd></div>
+                          <div><dt>Model</dt><dd>{model()?.id}</dd></div>
+                          <div><dt>Reasoning</dt><dd>{reasoningLabel(defaultLlm()?.reasoningEffort)}</dd></div>
+                          <div><dt>Runtime</dt><dd>{runtimeLabel(stage().runtime)}</dd></div>
+                          <div><dt>配置位置</dt><dd>AI 后端 · 默认 LLM</dd></div>
+                        </dl>
                       </Show>
                     </div>
                     <section class="processing-prompt" aria-label="Knowledge Maintenance Agent 提示词">
@@ -363,8 +302,8 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
                       </div>
                       <textarea class="processing-prompt__editor" data-testid="processing-instructions-knowledge_maintenance_agent" value={instructions()} rows={12} spellcheck={false} disabled={anyRunning() || controller.isSaving(stage().id)} onInput={(event) => setInstructions(event.currentTarget.value)} />
                       <div class="processing-prompt__actions">
-                        <Button variant="ghost" icon="refresh" data-testid="restore-processing-instructions-knowledge_maintenance_agent" disabled={anyRunning() || controller.isSaving(stage().id) || (!stage().isCustomized && instructions() === stage().defaultInstructions)} onClick={() => { setInstructions(stage().defaultInstructions); void controller.saveStage({ stageId: stage().id, connectionId: stage().connectionId ?? null, modelId: stage().modelId ?? null, instructionsOverride: null, reasoningEffort: stage().reasoningEffort ?? null }) }}>恢复默认</Button>
-                        <Button variant="secondary" icon="check" data-testid="save-processing-instructions-knowledge_maintenance_agent" disabled={anyRunning() || controller.isSaving(stage().id) || !instructionsDirty() || !instructions().trim()} onClick={() => void controller.saveStage({ stageId: stage().id, connectionId: stage().connectionId ?? null, modelId: stage().modelId ?? null, instructionsOverride: instructions() === stage().defaultInstructions ? null : instructions(), reasoningEffort: stage().reasoningEffort ?? null })}>保存提示词</Button>
+                        <Button variant="ghost" icon="refresh" data-testid="restore-processing-instructions-knowledge_maintenance_agent" disabled={anyRunning() || controller.isSaving(stage().id) || (!stage().isCustomized && instructions() === stage().defaultInstructions)} onClick={() => { setInstructions(stage().defaultInstructions); void controller.saveStage({ stageId: stage().id, instructionsOverride: null }) }}>恢复默认</Button>
+                        <Button variant="secondary" icon="check" data-testid="save-processing-instructions-knowledge_maintenance_agent" disabled={anyRunning() || controller.isSaving(stage().id) || !instructionsDirty() || !instructions().trim()} onClick={() => void controller.saveStage({ stageId: stage().id, instructionsOverride: instructions() === stage().defaultInstructions ? null : instructions() })}>保存提示词</Button>
                       </div>
                     </section>
                   </div>

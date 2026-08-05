@@ -74,15 +74,15 @@ Reviewer 尚未接入当前链路。Maintainer 与 Reviewer 的外层交接、�
 
 - **链路测试**：选择 Session 与可选 Attention，在 Sandbox 中运行完整 Maintainer 和提交链路；
 - **历史记录**：按需读取成功运行的不可变结果与有界 Debug Trace，并可显式导入；
-- **高级调试**：单独配置和运行 Maintainer，查看证据段 Todo、Contribution、模型轮次与工具活动。
+- **高级调试**：单独运行 Maintainer，配置调试 Prompt，并查看证据段 Todo、Contribution、模型轮次与工具活动。
 
-Agent 配置页列出真正使用通用 Agent Runtime 的 Agent，包括 Knowledge Maintenance Agent 和通用管理 Agent。Maintainer 的代码内置 Prompt、用户默认 Prompt 与加工页调试覆盖分别承担 fallback、默认和阶段配置；实际运行固定当次生效的 Connection、Model、思考强度和 Prompt。
+Agent 配置页列出真正使用通用 Agent Runtime 的 Agent，包括 Knowledge Maintenance Agent 和通用管理 Agent。Maintainer 的代码内置 Prompt、用户默认 Prompt 与加工页调试覆盖分别承担 fallback、默认和单次调试配置。Connection、Model 和思考强度只在“AI 后端”页面作为唯一 Default LLM 配置；Maintainer 每次新运行在开始时固定当时的 Default LLM 和生效 Prompt。
 
 Debug Trace 只保存有界的模型与工具事件副本，不是知识或审计真相。它可能包含原始材料，UI 必须如实提示敏感性。Renderer 不获得来源路径、凭据或底层数据库写权限。
 
 ## 7. 历史与升级
 
-成功链路记录使用当前 V3 payload，只保存 Maintainer 配置、结果、Sandbox 写入结果和一份共享 Debug Trace。历史 SQLite schema 升级时直接删除并重建旧表，不迁移旧记录。`knowledge-processing.json` 使用显式格式版本；单 Maintainer 链路之前的无版本配置会直接重建为空配置，由用户重新选择 Maintainer 的 Connection 和 Model，不解释或迁移旧阶段。当前版本格式损坏或来自更高版本时仍明确报错。当前阶段优先保证概念和数据结构一致，不维护旧格式兼容分支。
+成功链路记录使用当前 V3 payload，保存当次已固定的 Maintainer 执行绑定、结果、Sandbox 写入结果和一份共享 Debug Trace。历史 SQLite schema 升级时直接删除并重建旧表，不迁移旧记录。`knowledge-processing.json` 使用 V2 格式，只保存 Maintainer Prompt 覆盖；无版本或 V1 配置直接重建为空配置，不迁移旧的阶段模型绑定。Default LLM 保存在 `ai-connections.json`。当前版本格式损坏或来自更高版本时仍明确报错。
 
 ## 8. 当前验收边界
 

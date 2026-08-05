@@ -54,7 +54,11 @@ function connection(): AiConnection {
 
 class FakeBackend implements AiBackendPort {
   snapshot(): AiBackendSnapshot {
-    return { options: [], connections: [connection()] }
+    return {
+      options: [],
+      connections: [connection()],
+      defaultLlm: { connectionId: 'model:maintainer', modelId: 'maintainer' }
+    }
   }
 
   subscribe(): () => void {
@@ -139,7 +143,7 @@ describe('KnowledgeFullChainService', () => {
     disposals.push(() => stores.close())
     const processing = new KnowledgeProcessingService(
       new InMemoryKnowledgeProcessingRepository({
-        stages: [{ stageId: 'knowledge_maintenance_agent', connectionId: 'model:maintainer', modelId: 'maintainer' }]
+        stages: [{ stageId: 'knowledge_maintenance_agent' }]
       }),
       new FakeBackend(),
       { run: async () => { throw new Error('full chain must use the Sandbox-bound Agent') } }

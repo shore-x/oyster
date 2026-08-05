@@ -271,6 +271,13 @@ if (semantics.ai.agent.codexCards !== 1) throw new Error('Codex runtime card is 
 if (semantics.ai.agent.codingPlanModel !== 'fixture-codex-small') throw new Error('Coding Plan test model is not explicit')
 if (semantics.ai.agent.codingPlanReasoning !== '') throw new Error('Coding Plan fixture should use the model-default reasoning effort')
 if (!semantics.ai.agent.codingPlanConfiguration?.includes('Fixture Codex Small')) throw new Error('Coding Plan test configuration is not visible')
+if (
+  semantics.ai.agent.defaultLlmConnection !== 'model:fixture'
+  || semantics.ai.agent.defaultLlmModel !== 'fixture-model'
+  || !semantics.ai.agent.defaultLlmSummary?.includes('Fixture Model')
+) {
+  throw new Error('The AI backend page does not expose the application default LLM')
+}
 if (!semantics.ai.agent.bodyText.includes('Coding Plan')) throw new Error('Coding Plan choice is missing')
 for (const requiredCopy of ['Oyster 独立 OAuth', '本机 Codex 账号（仅发现）', '本机 Plan（仅发现）']) {
   if (!semantics.ai.agent.bodyText.includes(requiredCopy)) {
@@ -533,17 +540,8 @@ if (processing.promptValues.some((prompt) => prompt.includes('Oyster'))) {
 if (processing.badgeValues.length !== 1 || processing.badgeValues.some((badge) => badge !== 'Default')) {
   throw new Error('The processing stage must show the Default prompt badge in fixture mode')
 }
-if (processing.connectionValues.length !== 1 || processing.connectionValues.some((value) => value !== 'model:fixture')) {
-  throw new Error('The processing stage must select the fixture Model Connection')
-}
-if (processing.modelValues.length !== 1 || processing.modelValues.some((value) => value !== 'fixture-model')) {
-  throw new Error('The processing stage must select an explicit fixture model')
-}
-if (processing.reasoningValues.length !== 1 || processing.reasoningValues.some((value) => value !== '')) {
-  throw new Error('The processing stage must expose its effective model-default reasoning')
-}
 const stageConfiguration = processing.configurationText.join('\n')
-for (const requiredCopy of ['API', 'OpenAI-compatible', 'fixture-model', '模型默认', 'Pi Agent Core']) {
+for (const requiredCopy of ['API', 'OpenAI-compatible', 'fixture-model', '模型默认', 'Pi Agent Core', 'AI 后端 · 默认 LLM']) {
   if (!stageConfiguration.includes(requiredCopy)) {
     throw new Error(`Stage debugging configuration is missing: ${requiredCopy}`)
   }

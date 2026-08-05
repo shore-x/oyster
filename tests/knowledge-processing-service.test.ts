@@ -39,8 +39,17 @@ const MODEL_RUNTIME: ModelRuntime = {
 }
 
 class FakeBackend implements AiBackendPort {
+  defaultLlm: AiBackendSnapshot['defaultLlm'] = {
+    connectionId: 'model:maintainer',
+    modelId: 'maintainer'
+  }
+
   snapshot(): AiBackendSnapshot {
-    return { options: [], connections: [connection()] }
+    return {
+      options: [],
+      connections: [connection()],
+      ...(this.defaultLlm ? { defaultLlm: this.defaultLlm } : {})
+    }
   }
 
   subscribe(): () => void {
@@ -89,19 +98,18 @@ class CapturingAgent implements KnowledgeAgentRuntime {
 
 async function harness() {
   const agent = new CapturingAgent()
+  const backend = new FakeBackend()
   const service = new KnowledgeProcessingService(
     new InMemoryKnowledgeProcessingRepository({
       stages: [{
-        stageId: 'knowledge_maintenance_agent',
-        connectionId: 'model:maintainer',
-        modelId: 'maintainer'
+        stageId: 'knowledge_maintenance_agent'
       }]
     }),
-    new FakeBackend(),
+    backend,
     agent
   )
   await service.initialize()
-  return { service, agent }
+  return { service, agent, backend }
 }
 
 describe('KnowledgeProcessingService', () => {
@@ -166,6 +174,18 @@ describe('KnowledgeProcessingService', () => {
       lines: ['line'],
       skillHints: [{ source: 'tool_call', location: { line: 2, offset: 0 } }]
     }, 'session:test')).rejects.toThrow('Raw Evidence Skill hint 无效')
+    expect(agent.calls).toHaveLength(0)
+  })
+
+  it('blocks a new Maintainer run when the application default LLM is not configured', async () => {
+    const { service, agent, backend } = await harness()
+    backend.defaultLlm = undefined
+
+    await expect(service.runKnowledgeMaintenance({
+      formatVersion: 'test-v1',
+      lines: ['line'],
+      skillHints: []
+    }, 'session:test')).rejects.toThrow('AI 后端页面配置默认 LLM')
     expect(agent.calls).toHaveLength(0)
   })
 })

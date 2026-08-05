@@ -162,7 +162,9 @@ export class ChatAgentService implements ChatApi {
 
   async createSession(input: CreateChatSessionInput): Promise<ChatSessionDetail> {
     if (!input || typeof input !== 'object') throw new Error('新建对话参数无效')
-    const binding = this.validateModelBinding(input.binding)
+    const defaultLlm = this.options.aiBackend.snapshot().defaultLlm
+    if (!defaultLlm) throw new Error('请先在 AI 后端页面配置默认 LLM')
+    const binding = this.validateModelBinding(defaultLlm)
     const title = input.title === undefined
       ? undefined
       : requiredString(input.title, '对话标题', MAX_SESSION_TITLE_LENGTH)

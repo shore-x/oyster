@@ -1,7 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { PROCESSING_STAGE_IDS, type ProcessingStageId } from '../../shared/knowledge-processing'
-import { REASONING_EFFORTS, type ReasoningEffort } from '../../shared/ai-backends'
 import type {
   KnowledgeProcessingRepository,
   KnowledgeProcessingStateData,
@@ -9,7 +8,7 @@ import type {
 } from './model'
 
 const EMPTY_STATE: KnowledgeProcessingStateData = { stages: [] }
-const FORMAT_VERSION = 1
+const FORMAT_VERSION = 2
 
 interface PersistedKnowledgeProcessingState extends KnowledgeProcessingStateData {
   formatVersion: typeof FORMAT_VERSION
@@ -22,23 +21,13 @@ function cloneState(state: KnowledgeProcessingStateData): KnowledgeProcessingSta
 function isStoredStage(value: unknown): value is StoredProcessingStage {
   if (!value || typeof value !== 'object') return false
   const record = value as Record<string, unknown>
-  return typeof record.stageId === 'string'
+  return Object.keys(record).every((key) => (
+    key === 'stageId'
+    || key === 'defaultInstructionsOverride'
+    || key === 'instructionsOverride'
+  ))
+    && typeof record.stageId === 'string'
     && PROCESSING_STAGE_IDS.includes(record.stageId as ProcessingStageId)
-    && (
-      record.connectionId === undefined
-      || (typeof record.connectionId === 'string' && Boolean(record.connectionId.trim()) && record.connectionId.length <= 512)
-    )
-    && (
-      record.modelId === undefined
-      || (typeof record.modelId === 'string' && Boolean(record.modelId.trim()) && record.modelId.length <= 512)
-    )
-    && (
-      record.reasoningEffort === undefined
-      || (
-        typeof record.reasoningEffort === 'string'
-        && REASONING_EFFORTS.includes(record.reasoningEffort as ReasoningEffort)
-      )
-    )
     && (
       record.defaultInstructionsOverride === undefined
       || (
@@ -82,6 +71,7 @@ function parseState(value: unknown): KnowledgeProcessingStateData | undefined {
   if (!Number.isSafeInteger(record.formatVersion) || (record.formatVersion as number) < 1) {
     throw new Error('知识加工配置格式版本无效')
   }
+  if ((record.formatVersion as number) < FORMAT_VERSION) return undefined
   if ((record.formatVersion as number) > FORMAT_VERSION) {
     throw new Error(`知识加工配置格式版本 ${record.formatVersion} 高于当前支持版本 ${FORMAT_VERSION}`)
   }

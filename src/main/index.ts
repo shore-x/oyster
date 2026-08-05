@@ -960,9 +960,6 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const page = document.querySelector('[data-testid="page-knowledge-processing"]')
     const prompts = Array.from(page.querySelectorAll('[data-testid^="processing-instructions-"]'))
     const badges = Array.from(page.querySelectorAll('[data-testid^="processing-prompt-badge-"]'))
-    const connections = Array.from(page.querySelectorAll('[data-testid^="processing-connection-"]'))
-    const models = Array.from(page.querySelectorAll('[data-testid^="processing-model-"]'))
-    const reasoning = Array.from(page.querySelectorAll('[data-testid^="processing-reasoning-"]'))
     const buttons = Array.from(page.querySelectorAll('button'))
     return {
       title: page.querySelector('h1')?.textContent,
@@ -970,9 +967,6 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       promptCount: prompts.length,
       promptValues: prompts.map((prompt) => prompt.value),
       badgeValues: badges.map((badge) => badge.textContent?.trim()),
-      connectionValues: connections.map((connection) => connection.value),
-      modelValues: models.map((model) => model.value),
-      reasoningValues: reasoning.map((effort) => effort.value),
       configurationText: Array.from(page.querySelectorAll('[data-testid^="processing-config-"]')).map((node) => node.textContent?.trim()),
       maintainerSessionOptionCount: page.querySelector('[data-testid="processing-maintainer-session"]')?.options.length,
       maintainerSessionValue: page.querySelector('[data-testid="processing-maintainer-session"]')?.value,
@@ -1072,6 +1066,9 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       codingPlanModel: page.querySelector('[data-testid="coding-plan-model-select"]')?.value,
       codingPlanReasoning: page.querySelector('[data-testid="coding-plan-reasoning-select"]')?.value,
       codingPlanConfiguration: page.querySelector('[data-testid="coding-plan-test-configuration"]')?.textContent,
+      defaultLlmConnection: page.querySelector('[data-testid="default-llm-connection-select"]')?.value,
+      defaultLlmModel: page.querySelector('[data-testid="default-llm-model-select"]')?.value,
+      defaultLlmSummary: page.querySelector('[data-testid="default-llm-summary"]')?.textContent?.trim(),
       bodyText: page.innerText,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
     }
@@ -1241,18 +1238,10 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   const chatSemantics = await window.webContents.executeJavaScript(`(async () => {
     const page = document.querySelector('[data-testid="page-chat"]')
     let deadline = Date.now() + 2_000
-    while (!page.querySelector('[data-testid="chat-model-picker"]') && Date.now() < deadline) {
+    while (!page.querySelector('[data-testid="chat-default-binding"]') && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
-    const connection = page.querySelector('[data-testid="chat-model-picker"] select')
-    const firstConnection = connection?.options?.[1]?.value
-    if (firstConnection) {
-      connection.value = firstConnection
-      connection.dispatchEvent(new Event('change', { bubbles: true }))
-    }
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-    const selects = page.querySelectorAll('[data-testid="chat-model-picker"] select')
-    const model = selects[1]
+    const selectedModel = page.querySelector('[data-testid="chat-default-binding"] > div:nth-child(2) strong')?.textContent?.trim()
     const composer = page.querySelector('.chat-composer textarea')
     composer.value = '请简要介绍你能如何使用知识库。'
     composer.dispatchEvent(new Event('input', { bubbles: true }))
@@ -1267,7 +1256,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     return {
       title: page.querySelector('h1')?.textContent?.trim(),
       sessionCount: page.querySelectorAll('.chat-session').length,
-      selectedModel: model?.value,
+      selectedModel,
       binding: page.querySelector('[data-testid="chat-current-binding"]')?.textContent?.trim(),
       userText: page.querySelector('.chat-message--user')?.textContent?.trim(),
       assistantText: page.querySelector('.chat-message--assistant')?.textContent?.trim(),

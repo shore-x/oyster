@@ -28,6 +28,7 @@ export const aiBackendChannels = {
   cancelConnect: 'ai-backends:cancel-connect',
   discoverModels: 'ai-backends:discover-models',
   saveModelConnection: 'ai-backends:save-model-connection',
+  saveDefaultLlm: 'ai-backends:save-default-llm',
   removeConnection: 'ai-backends:remove-connection',
   testConnection: 'ai-backends:test-connection'
 } as const

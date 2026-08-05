@@ -29,8 +29,6 @@ function processingStage(
       description: 'List Todos.',
       parameters: { type: 'object' }
     }],
-    connectionId: 'model:test',
-    modelId: 'test-model',
     builtInInstructions: `${overrides.displayName} built in`,
     defaultInstructions: `${overrides.displayName} default`,
     effectiveInstructions: `${overrides.displayName} default`,

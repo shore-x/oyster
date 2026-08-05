@@ -1,13 +1,9 @@
-import type { ReasoningEffort } from './ai-backends'
+import type { LlmBinding } from './ai-backends'
 import type { ProcessingToolView, SerializableJsonValue } from './knowledge-processing'
 
 export const CHAT_AGENT_ID = 'chat_agent' as const
 
-export interface ChatSessionModelBinding {
-  connectionId: string
-  modelId: string
-  reasoningEffort?: ReasoningEffort
-}
+export interface ChatSessionModelBinding extends LlmBinding {}
 
 /** Immutable execution binding captured when a conversation is created. */
 export interface ChatSessionBinding extends ChatSessionModelBinding {
@@ -85,7 +81,6 @@ export interface ChatSnapshot {
 
 export interface CreateChatSessionInput {
   title?: string
-  binding: ChatSessionModelBinding
 }
 
 export interface SendChatMessageInput {

@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { ProcessingConnectionView, ProcessingStageView } from '../src/shared/knowledge-processing'
+import type { ProcessingConnectionView } from '../src/shared/knowledge-processing'
 import {
   backendLabel,
   connectionCanAttemptRun,
   providerLabel,
   reasoningLabel,
   runtimeLabel,
-  selectedStageModel
+  selectedLlmModel
 } from '../src/renderer/src/processing-configuration'
 
 function connection(status: ProcessingConnectionView['status']): ProcessingConnectionView {
@@ -23,7 +23,7 @@ function connection(status: ProcessingConnectionView['status']): ProcessingConne
 }
 
 describe('processing configuration presentation', () => {
-  it('resolves the exact model selected for a stage', () => {
+  it('resolves the exact model selected by the default LLM binding', () => {
     const connection: ProcessingConnectionView = {
       id: 'coding-plan:openai-codex',
       displayName: 'OpenAI Codex',
@@ -37,12 +37,12 @@ describe('processing configuration presentation', () => {
       ],
       defaultModelId: 'large'
     }
-    const stage = {
-      id: 'knowledge_maintenance_agent',
+    const binding = {
+      connectionId: connection.id,
       modelId: 'small'
-    } as ProcessingStageView
+    }
 
-    expect(selectedStageModel(stage, connection)?.id).toBe('small')
+    expect(selectedLlmModel(binding, connection)?.id).toBe('small')
     expect(backendLabel(connection.backendKind)).toBe('Coding Plan')
     expect(providerLabel(connection.providerId)).toBe('OpenAI Codex')
     expect(runtimeLabel('pi_agent_core')).toBe('Pi Agent Core')

@@ -11,7 +11,7 @@ import {
   type AssistantMessage,
   type FauxResponseStep
 } from '@earendil-works/pi-ai'
-import type { AiBackendSnapshot } from '../src/shared/ai-backends'
+import type { AiBackendSnapshot, LlmBinding } from '../src/shared/ai-backends'
 import type { ModelRuntime } from '../src/main/ai-backends/model'
 import type { ChatAiBackendPort, ChatConfigurationRepository } from '../src/main/chat/model'
 import { ChatAgentService } from '../src/main/chat/chat-agent-service'
@@ -46,7 +46,11 @@ function fauxRuntime(responses: FauxResponseStep[]): { runtime: ModelRuntime; ca
 }
 
 class FauxAiBackend implements ChatAiBackendPort {
-  constructor(readonly runtime: ModelRuntime) {}
+  defaultLlm?: LlmBinding
+
+  constructor(readonly runtime: ModelRuntime) {
+    this.defaultLlm = { connectionId: 'connection:test', modelId: runtime.model.id }
+  }
 
   snapshot(): AiBackendSnapshot {
     return {
@@ -59,8 +63,12 @@ class FauxAiBackend implements ChatAiBackendPort {
         displayName: 'Test',
         credentialMode: 'oyster_keychain',
         status: 'ready',
-        models: [{ id: this.runtime.model.id, displayName: 'Test Model', reasoningEfforts: [] }]
-      }]
+        models: [
+          { id: this.runtime.model.id, displayName: 'Test Model', reasoningEfforts: [] },
+          { id: 'next-default-model', displayName: 'Next Default Model', reasoningEfforts: ['low'] }
+        ]
+      }],
+      ...(this.defaultLlm ? { defaultLlm: this.defaultLlm } : {})
     }
   }
 
@@ -89,10 +97,11 @@ async function serviceFixture(
   const prepared = fauxRuntime(typeof responses === 'function'
     ? responses({ rootPath, artifactRepositoryPath })
     : responses)
+  const backend = new FauxAiBackend(prepared.runtime)
   const service = new ChatAgentService({
     sessions,
     configuration,
-    aiBackend: new FauxAiBackend(prepared.runtime),
+    aiBackend: backend,
     knowledgeStore,
     artifactRepositoryPath
   })
@@ -103,12 +112,38 @@ async function serviceFixture(
     sessions,
     knowledgeStore,
     configuration,
+    backend,
     service,
     ...prepared
   }
 }
 
 describe('ChatAgentService', () => {
+  it('captures the current default LLM for each new Session without changing existing Sessions', async () => {
+    const fixture = await serviceFixture([fauxAssistantMessage('Unused.')])
+    const first = await fixture.service.createSession({})
+
+    fixture.backend.defaultLlm = {
+      connectionId: 'connection:test',
+      modelId: 'next-default-model',
+      reasoningEffort: 'low'
+    }
+    const second = await fixture.service.createSession({})
+
+    expect(first.binding).toEqual({
+      connectionId: 'connection:test',
+      modelId: fixture.runtime.model.id
+    })
+    expect(second.binding).toEqual({
+      connectionId: 'connection:test',
+      modelId: 'next-default-model',
+      reasoningEffort: 'low'
+    })
+    expect((await fixture.service.readSession(first.id)).binding).toEqual(first.binding)
+    fixture.knowledgeStore.close()
+    await fixture.sessions.dispose()
+  })
+
   it('freezes the configured prompt and runs a persisted Pi conversation with direct Knowledge Store writes', async () => {
     const customPrompt = 'Use local knowledge and reply briefly.'
     const fixture = await serviceFixture(({ artifactRepositoryPath }) => [
@@ -153,9 +188,7 @@ describe('ChatAgentService', () => {
     fixture.service.subscribe((event) => events.push(event))
 
     await fixture.service.saveDefaultInstructions({ instructionsOverride: customPrompt })
-    const session = await fixture.service.createSession({
-      binding: { connectionId: 'connection:test', modelId: fixture.runtime.model.id }
-    })
+    const session = await fixture.service.createSession({})
     await fixture.service.saveDefaultInstructions({ instructionsOverride: null })
     expect((await fixture.sessions.open(session.id)).binding.systemPrompt).toBe(customPrompt)
 
@@ -298,9 +331,7 @@ describe('ChatAgentService', () => {
       runRef: 'seed',
       statements: [{ title: 'Project P', content: 'Project P uses SQLite.' }]
     })
-    const session = await fixture.service.createSession({
-      binding: { connectionId: 'connection:test', modelId: fixture.runtime.model.id }
-    })
+    const session = await fixture.service.createSession({})
 
     const detail = await fixture.service.sendMessage({
       sessionId: session.id,
@@ -366,9 +397,7 @@ describe('ChatAgentService', () => {
         return fauxAssistantMessage('Parent recovered from the child failure.')
       }
     ])
-    const session = await fixture.service.createSession({
-      binding: { connectionId: 'connection:test', modelId: fixture.runtime.model.id }
-    })
+    const session = await fixture.service.createSession({})
 
     const detail = await fixture.service.sendMessage({
       sessionId: session.id,
@@ -426,9 +455,7 @@ describe('ChatAgentService', () => {
         return fauxAssistantMessage('Parent completed the task.')
       }
     ])
-    const session = await fixture.service.createSession({
-      binding: { connectionId: 'connection:test', modelId: fixture.runtime.model.id }
-    })
+    const session = await fixture.service.createSession({})
 
     const detail = await fixture.service.sendMessage({
       sessionId: session.id,
@@ -486,9 +513,7 @@ describe('ChatAgentService', () => {
     })
     const events: ChatEvent[] = []
     fixture.service.subscribe((event) => events.push(event))
-    const session = await fixture.service.createSession({
-      binding: { connectionId: 'connection:test', modelId: fixture.runtime.model.id }
-    })
+    const session = await fixture.service.createSession({})
 
     const detail = await fixture.service.sendMessage({
       sessionId: session.id,
@@ -540,9 +565,7 @@ describe('ChatAgentService', () => {
       { stopReason: 'toolUse' }
     ))
     const fixture = await serviceFixture([...searches, fauxAssistantMessage('Finished.')])
-    const session = await fixture.service.createSession({
-      binding: { connectionId: 'connection:test', modelId: fixture.runtime.model.id }
-    })
+    const session = await fixture.service.createSession({})
     const detail = await fixture.service.sendMessage({ sessionId: session.id, text: 'Search widely.' })
 
     expect(fixture.callCount()).toBe(13)
@@ -553,14 +576,14 @@ describe('ChatAgentService', () => {
     await fixture.sessions.dispose()
   })
 
-  it('validates model bindings without requiring a prior connection test', async () => {
+  it('requires a valid default LLM without requiring a prior connection test', async () => {
     const fixture = await serviceFixture([fauxAssistantMessage('Unused.')])
-    await expect(fixture.service.createSession({
-      binding: { connectionId: 'missing', modelId: fixture.runtime.model.id }
-    })).rejects.toThrow('不存在')
-    await expect(fixture.service.createSession({
-      binding: { connectionId: 'connection:test', modelId: 'missing' }
-    })).rejects.toThrow('不可用')
+    fixture.backend.defaultLlm = undefined
+    await expect(fixture.service.createSession({})).rejects.toThrow('配置默认 LLM')
+    fixture.backend.defaultLlm = { connectionId: 'missing', modelId: fixture.runtime.model.id }
+    await expect(fixture.service.createSession({})).rejects.toThrow('不存在')
+    fixture.backend.defaultLlm = { connectionId: 'connection:test', modelId: 'missing' }
+    await expect(fixture.service.createSession({})).rejects.toThrow('不可用')
     fixture.knowledgeStore.close()
     await fixture.sessions.dispose()
   })
@@ -642,9 +665,7 @@ describe('ChatAgentService', () => {
       artifactRepositoryPath: join(rootPath, 'artifacts')
     })
     await service.initialize()
-    const session = await service.createSession({
-      binding: { connectionId: 'connection:test', modelId: model.id }
-    })
+    const session = await service.createSession({})
     const events: ChatEvent[] = []
     service.subscribe((event) => {
       events.push(event)

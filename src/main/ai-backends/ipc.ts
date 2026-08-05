@@ -3,6 +3,7 @@ import { aiBackendChannels } from '../../shared/channels'
 import type {
   ConnectAiBackendInput,
   DiscoverModelsInput,
+  LlmBinding,
   SaveModelConnectionInput,
   TestConnectionInput
 } from '../../shared/ai-backends'
@@ -54,6 +55,10 @@ export function registerAiBackendIpc(
       return service.saveModelConnection(input)
     }
   )
+  ipcMain.handle(aiBackendChannels.saveDefaultLlm, (event, binding: LlmBinding | null) => {
+    assertTrustedSender(event)
+    return service.saveDefaultLlm(binding)
+  })
   ipcMain.handle(
     aiBackendChannels.removeConnection,
     (event, connectionId: string) => {

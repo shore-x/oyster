@@ -327,6 +327,45 @@ describe('AiBackendService', () => {
     expect(service.snapshot().connections).toHaveLength(1)
   })
 
+  it('persists and clears the single application default LLM', async () => {
+    const { service, repository } = createService()
+    await service.initialize()
+
+    await expect(service.saveDefaultLlm({
+      connectionId: 'runtime:codex',
+      modelId: 'gpt-codex-large',
+      reasoningEffort: 'high'
+    })).resolves.toMatchObject({
+      defaultLlm: {
+        connectionId: 'runtime:codex',
+        modelId: 'gpt-codex-large',
+        reasoningEffort: 'high'
+      }
+    })
+    expect(await repository.load()).toMatchObject({
+      defaultLlm: { connectionId: 'runtime:codex', modelId: 'gpt-codex-large' }
+    })
+
+    await expect(service.saveDefaultLlm(null)).resolves.not.toHaveProperty('defaultLlm')
+    expect(await repository.load()).not.toHaveProperty('defaultLlm')
+  })
+
+  it('rejects an unavailable default model and clears a default that references a removed connection', async () => {
+    const { service, repository } = createService()
+    await service.initialize()
+    await expect(service.saveDefaultLlm({
+      connectionId: 'runtime:codex',
+      modelId: 'gpt-codex-mini',
+      reasoningEffort: 'high'
+    })).rejects.toThrow('不支持所选思考强度')
+
+    const connectionId = await saveApiConnection(service, 'test-model')
+    await service.saveDefaultLlm({ connectionId, modelId: 'test-model' })
+    await service.removeConnection(connectionId)
+    expect(service.snapshot()).not.toHaveProperty('defaultLlm')
+    expect(await repository.load()).not.toHaveProperty('defaultLlm')
+  })
+
   it('passes the explicitly selected Coding Plan model and reasoning effort to generation', async () => {
     const { service, codingPlan, model } = createService()
     await service.initialize()

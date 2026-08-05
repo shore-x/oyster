@@ -643,13 +643,8 @@ h1 { margin: 0 0 10px; font-size: var(--font-size-display); line-height: 1.25; l
 .chat-session small { margin-top: 3px; }
 .chat-conversation { display: grid; min-width: 0; min-height: 0; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; background: #fff; }
 .chat-conversation__toolbar { min-width: 0; padding: 11px 14px; background: rgba(255,255,255,.97); border-bottom: 1px solid var(--border-default); }
-.chat-model-picker { display: grid; min-width: 0; grid-template-columns: minmax(150px, 1.2fr) minmax(140px, 1fr) minmax(105px, .65fr); align-items: end; gap: 9px; }
-.chat-model-picker label { display: flex; min-width: 0; flex-direction: column; gap: 5px; color: var(--text-muted); font-size: var(--font-size-caption); }
-.chat-model-picker select { width: 100%; min-width: 0; height: 38px; padding: 0 10px; color: var(--text-secondary); background: #fff; border: 1px solid var(--border-default); border-radius: var(--radius-control); outline: 0; font: inherit; font-size: var(--font-size-body-sm); text-overflow: ellipsis; }
-.chat-model-picker select:focus { border-color: var(--control-primary); box-shadow: 0 0 0 3px var(--control-primary-ring); }
-.chat-model-picker select:disabled { color: var(--text-muted); background: var(--surface-subtle); }
-.chat-model-picker p { grid-column: 1 / -1; margin: -1px 0 0; overflow: hidden; color: var(--text-muted); font-size: var(--font-size-caption); text-overflow: ellipsis; white-space: nowrap; }
 .chat-binding-summary { display: grid; min-width: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.chat-binding-summary > small { grid-column: 1 / -1; overflow: hidden; color: var(--text-muted); font-size: var(--font-size-caption); text-overflow: ellipsis; white-space: nowrap; }
 .chat-binding-summary > div { min-width: 0; }
 .chat-binding-summary span,
 .chat-binding-summary strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -748,8 +743,6 @@ h1 { margin: 0 0 10px; font-size: var(--font-size-display); line-height: 1.25; l
 
 @media (max-width: 980px) {
   .chat-workspace { grid-template-columns: 220px minmax(0, 1fr); }
-  .chat-model-picker { grid-template-columns: minmax(125px, 1fr) minmax(125px, 1fr); }
-  .chat-model-picker label:last-of-type { grid-column: 1 / -1; }
   .chat-message { max-width: 96%; }
   .chat-message--user { max-width: 88%; }
 }

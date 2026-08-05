@@ -26,14 +26,24 @@ describe('JsonAiBackendRepository', () => {
         baseUrl: 'http://localhost:11434/v1',
         model: 'local-model',
         credentialRef: 'model:one'
-      }]
+      }],
+      defaultLlm: {
+        connectionId: 'model:one',
+        modelId: 'local-model',
+        reasoningEffort: 'low'
+      }
     })
 
     const raw = await readFile(path, 'utf8')
     expect(raw).toContain('credentialRef')
     expect(raw).not.toContain('apiKey')
     expect(await repository.load()).toEqual({
-      connections: [expect.objectContaining({ id: 'model:one', model: 'local-model' })]
+      connections: [expect.objectContaining({ id: 'model:one', model: 'local-model' })],
+      defaultLlm: {
+        connectionId: 'model:one',
+        modelId: 'local-model',
+        reasoningEffort: 'low'
+      }
     })
   })
 
@@ -54,5 +64,17 @@ describe('JsonAiBackendRepository', () => {
 
     await expect(new JsonAiBackendRepository(path).load()).rejects.toThrow('第 1 条记录无效')
     expect(await readFile(path, 'utf8')).toContain('future-entry')
+  })
+
+  it('rejects a malformed default LLM binding', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'oyster-ai-repository-invalid-default-'))
+    temporaryDirectories.push(directory)
+    const path = join(directory, 'ai-connections.json')
+    await writeFile(path, JSON.stringify({
+      connections: [],
+      defaultLlm: { connectionId: 'runtime:codex', modelId: '' }
+    }), 'utf8')
+
+    await expect(new JsonAiBackendRepository(path).load()).rejects.toThrow('默认 LLM 配置无效')
   })
 })

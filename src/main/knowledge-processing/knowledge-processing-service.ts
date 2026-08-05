@@ -11,11 +11,7 @@ import {
   type SaveProcessingDefaultInstructionsInput,
   type SaveProcessingStageInput
 } from '../../shared/knowledge-processing'
-import {
-  REASONING_EFFORTS,
-  type AiConnection,
-  type ReasoningEffort
-} from '../../shared/ai-backends'
+import type { AiBackendSnapshot, AiConnection, ReasoningEffort } from '../../shared/ai-backends'
 import type { RawEvidence } from '../observation/model'
 import type {
   AiBackendPort,
@@ -118,8 +114,8 @@ function defaultInstructions(
   return stored?.defaultInstructionsOverride ?? stageDefinition(stageId).defaultInstructions
 }
 
-function processingConnections(aiBackend: AiBackendPort): ProcessingConnectionView[] {
-  return aiBackend.snapshot().connections.flatMap((connection) => {
+function processingConnections(snapshot: AiBackendSnapshot): ProcessingConnectionView[] {
+  return snapshot.connections.flatMap((connection) => {
     if (!connection.models.length) return []
     return [{
       id: connection.id,
@@ -240,7 +236,8 @@ export class KnowledgeProcessingService {
   }
 
   snapshot(): KnowledgeProcessingSnapshot {
-    const connections = processingConnections(this.aiBackend)
+    const backendSnapshot = this.aiBackend.snapshot()
+    const connections = processingConnections(backendSnapshot)
     return structuredClone({
       stages: PROCESSING_STAGE_DEFINITIONS.map((definition) => {
         const stored = this.state.stages.find((candidate) => candidate.stageId === definition.id)
@@ -254,9 +251,6 @@ export class KnowledgeProcessingService {
           runtime: definition.runtime,
           capabilities: [...definition.capabilities],
           tools: definition.tools.map((tool) => ({ ...tool })),
-          connectionId: stored?.connectionId,
-          modelId: stored?.modelId,
-          reasoningEffort: stored?.reasoningEffort,
           builtInInstructions: definition.defaultInstructions,
           defaultInstructions: configuredDefault,
           effectiveInstructions: stored?.instructionsOverride ?? configuredDefault,
@@ -265,6 +259,9 @@ export class KnowledgeProcessingService {
         }
       }),
       connections,
+      ...(backendSnapshot.defaultLlm
+        ? { defaultLlm: { ...backendSnapshot.defaultLlm } }
+        : {}),
       runningStageIds: [...this.activeRuns.keys()],
       debugTraces: [...this.debugTraces.values()],
       configurationError: this.configurationError
@@ -289,27 +286,9 @@ export class KnowledgeProcessingService {
       if (!input || typeof input !== 'object' || !isStageId(input.stageId)) {
         throw new Error('未知的知识加工阶段')
       }
-      if (input.connectionId !== null && typeof input.connectionId !== 'string') {
-        throw new Error('Model Connection 配置无效')
-      }
-      const connection = processingConnections(this.aiBackend).find((item) => item.id === input.connectionId)
-      if (input.connectionId && !connection) throw new Error('未找到可用于知识加工的 Connection')
-      if (input.modelId !== null && typeof input.modelId !== 'string') throw new Error('Model 配置无效')
-      if (input.connectionId && !selectedModel(connection, input.modelId ?? undefined)) {
-        throw new Error('所选 Model 不属于该 Connection')
-      }
-      if (!input.connectionId && input.modelId) throw new Error('选择 Model 前必须先选择 Connection')
       if (input.instructionsOverride !== null && typeof input.instructionsOverride !== 'string') {
         throw new Error('System Prompt 配置无效')
       }
-      if (
-        input.reasoningEffort !== undefined
-        && input.reasoningEffort !== null
-        && (
-          typeof input.reasoningEffort !== 'string'
-          || !REASONING_EFFORTS.includes(input.reasoningEffort)
-        )
-      ) throw new Error('思考强度配置无效')
 
       const currentStage = this.state.stages.find((candidate) => candidate.stageId === input.stageId)
       let instructionsOverride: string | undefined
@@ -320,21 +299,8 @@ export class KnowledgeProcessingService {
           instructionsOverride = undefined
         }
       }
-      const reasoningEffort = input.reasoningEffort === undefined
-        ? currentStage?.reasoningEffort
-        : input.reasoningEffort ?? undefined
-      if (reasoningEffort) {
-        const model = selectedModel(connection, input.modelId ?? undefined)
-        if (!model?.reasoningEfforts.includes(reasoningEffort)) {
-          throw new Error('所选模型不支持该思考强度')
-        }
-      }
-
       const nextStage: StoredProcessingStage = {
         stageId: input.stageId,
-        ...(input.connectionId ? { connectionId: input.connectionId } : {}),
-        ...(input.modelId ? { modelId: input.modelId } : {}),
-        ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(currentStage?.defaultInstructionsOverride
           ? { defaultInstructionsOverride: currentStage.defaultInstructionsOverride }
           : {}),
@@ -384,20 +350,21 @@ export class KnowledgeProcessingService {
 
   private configuredStage(stageId: ProcessingStageId): ProcessingStageRunBinding {
     const stored = this.state.stages.find((candidate) => candidate.stageId === stageId)
-    if (!stored?.connectionId) throw new Error('请先为该阶段选择并保存 Model Connection')
-    const connection = processingConnections(this.aiBackend).find((candidate) => candidate.id === stored.connectionId)
-    if (!connection) throw new Error('已配置的 Model Connection 不再可用')
-    if (!stored.modelId) throw new Error('请先为该阶段选择并保存 Model')
-    const model = selectedModel(connection, stored.modelId)
-    if (!model) throw new Error('已配置的 Model 不再可用，系统不会自动回退到其他 Model')
-    if (stored.reasoningEffort && !model.reasoningEfforts.includes(stored.reasoningEffort)) {
-      throw new Error('已配置的思考强度不再受当前 Model 支持，系统不会自动改用模型默认值')
+    const backendSnapshot = this.aiBackend.snapshot()
+    const binding = backendSnapshot.defaultLlm
+    if (!binding) throw new Error('请先在 AI 后端页面配置默认 LLM')
+    const connection = processingConnections(backendSnapshot).find((candidate) => candidate.id === binding.connectionId)
+    if (!connection) throw new Error('默认 LLM 的 Connection 当前不可用')
+    const model = selectedModel(connection, binding.modelId)
+    if (!model) throw new Error('默认 LLM 的 Model 当前不可用，系统不会自动回退到其他 Model')
+    if (binding.reasoningEffort && !model.reasoningEfforts.includes(binding.reasoningEffort)) {
+      throw new Error('默认 LLM 的思考强度不再受当前 Model 支持，系统不会自动改用模型默认值')
     }
     return {
-      connectionId: stored.connectionId,
+      connectionId: binding.connectionId,
       modelId: model.id,
-      instructions: stored.instructionsOverride ?? defaultInstructions(stageId, stored),
-      ...(stored.reasoningEffort ? { reasoningEffort: stored.reasoningEffort } : {})
+      instructions: stored?.instructionsOverride ?? defaultInstructions(stageId, stored),
+      ...(binding.reasoningEffort ? { reasoningEffort: binding.reasoningEffort } : {})
     }
   }
 

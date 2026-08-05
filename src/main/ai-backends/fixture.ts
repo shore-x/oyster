@@ -158,7 +158,8 @@ export function createFixtureAiBackendService(): AiBackendService {
         baseUrl: 'http://localhost:11434/v1',
         model: 'fixture-model',
         credentialRef: 'model:fixture'
-      }]
+      }],
+      defaultLlm: { connectionId: 'model:fixture', modelId: 'fixture-model' }
     }),
     credentials,
     new FixtureAgentAdapter(),

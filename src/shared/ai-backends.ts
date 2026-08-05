@@ -55,6 +55,13 @@ export interface AiConnection {
   authentication?: CodingPlanAuthentication
 }
 
+/** Application default captured by each new Agent run or persistent Session. */
+export interface LlmBinding {
+  connectionId: string
+  modelId: string
+  reasoningEffort?: ReasoningEffort
+}
+
 export interface CodingPlanAuthentication {
   loginMethod: CodingPlanLoginMethod
   verificationUri?: string
@@ -70,6 +77,7 @@ export interface ConnectAiBackendInput {
 export interface AiBackendSnapshot {
   options: AiBackendOption[]
   connections: AiConnection[]
+  defaultLlm?: LlmBinding
   configurationError?: string
 }
 
@@ -121,6 +129,7 @@ export interface AiBackendApi {
   connect(input: ConnectAiBackendInput): Promise<AiBackendSnapshot>
   cancelConnect(connectionId: string): Promise<void>
   saveModelConnection(input: SaveModelConnectionInput): Promise<AiBackendSnapshot>
+  saveDefaultLlm(binding: LlmBinding | null): Promise<AiBackendSnapshot>
   discoverModels(input: DiscoverModelsInput): Promise<ModelDiscoveryResult>
   removeConnection(connectionId: string): Promise<AiBackendSnapshot>
   testConnection(input: TestConnectionInput): Promise<ConnectionTestResult>

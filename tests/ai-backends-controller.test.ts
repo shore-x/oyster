@@ -21,6 +21,7 @@ function installApi(
     connect: async () => SNAPSHOT,
     cancelConnect: async () => undefined,
     saveModelConnection: async () => SNAPSHOT,
+    saveDefaultLlm: async () => SNAPSHOT,
     discoverModels: async () => ({ models: [] }),
     removeConnection: async () => SNAPSHOT,
     testConnection,
@@ -111,6 +112,38 @@ describe('AI backends controller', () => {
           loginMethod: 'device_code'
         })
         expect(cancelConnect).toHaveBeenCalledWith('runtime:codex')
+      } finally {
+        dispose()
+      }
+    })
+  })
+
+  it('saves the application default LLM through the shared backend API', async () => {
+    const initial = { ...SNAPSHOT, configurationError: 'loaded' }
+    const saveDefaultLlm = vi.fn<AiBackendApi['saveDefaultLlm']>(async (binding) => ({
+      ...SNAPSHOT,
+      ...(binding ? { defaultLlm: binding } : {})
+    }))
+    installApi(async () => ({ connectionId: 'runtime:codex', output: 'ok', durationMs: 10 }), {
+      getSnapshot: async () => initial,
+      saveDefaultLlm
+    })
+
+    await createRoot(async (dispose) => {
+      try {
+        const controller = createAiBackendsController()
+        await vi.waitFor(() => expect(controller.snapshot().configurationError).toBe('loaded'))
+        await controller.saveDefaultLlm({
+          connectionId: 'runtime:codex',
+          modelId: 'gpt-codex-large',
+          reasoningEffort: 'high'
+        })
+        expect(saveDefaultLlm).toHaveBeenCalledWith({
+          connectionId: 'runtime:codex',
+          modelId: 'gpt-codex-large',
+          reasoningEffort: 'high'
+        })
+        expect(controller.snapshot().defaultLlm?.modelId).toBe('gpt-codex-large')
       } finally {
         dispose()
       }

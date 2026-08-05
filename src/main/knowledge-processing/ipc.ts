@@ -33,15 +33,7 @@ export function registerKnowledgeProcessingIpc(
 
   const resolveMaintainerBinding = (): ProcessingStageRunBinding => {
     if (fullChain.isRunning()) throw new Error('完整链路正在运行，不能启动独立调试')
-    const binding = service.runBinding('knowledge_maintenance_agent')
-    const snapshot = service.snapshot()
-    const stage = snapshot.stages[0]
-    const connection = snapshot.connections.find((candidate) => candidate.id === stage?.connectionId)
-    const model = connection?.models.find((candidate) => candidate.id === binding.modelId)
-    if (!stage?.connectionId || !connection || !model) {
-      throw new Error('请先为知识维护 Agent 选择并保存 Connection 与 Model')
-    }
-    return binding
+    return service.runBinding('knowledge_maintenance_agent')
   }
 
   ipcMain.handle(knowledgeProcessingChannels.getSnapshot, (event) => {

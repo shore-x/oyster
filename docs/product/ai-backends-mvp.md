@@ -16,9 +16,9 @@ AI Backend 是 Oyster 获得模型调用能力的边界。MVP 只区分两种计
 - **Provider** 表示能力来源；
 - **Connection** 表示认证、传输与计费通道；
 - **Model** 表示该 Connection 当前可调用的具体模型；
-- **Stage Configuration** 表示某个处理阶段明确选择的 Connection、Model 和可选思考强度。
+- **Default LLM** 表示应用级唯一的 Connection、Model 和可选思考强度组合。
 
-Connection 不等于 Model。同一个 Connection 可以暴露多个 Model，Knowledge Maintenance Agent 明确选择其中一个组合。通用 Agent Runtime 是执行方式，不是另一类 Backend；当前 Agent Runtime 由 Pi Agent Core 实现，但不构成知识模型的一部分。
+Connection 不等于 Model。同一个 Connection 可以暴露多个 Model，用户在“AI 后端”页面明确保存一个 Default LLM。Knowledge Maintainer 每次新运行在开始时读取并固定它；新建 Chat Session 在创建时将它写入 Session binding，已有 Session 不随默认值变化。通用 Agent Runtime 是执行方式，不是另一类 Backend；当前 Agent Runtime 由 Pi Agent Core 实现，但不构成知识模型的一部分。
 
 Agent 数据来源与 AI Connection 也是两个独立概念。不建立 Subscription 领域对象；套餐和账号信息只是认证后显示的 Connection 上下文。
 
@@ -34,7 +34,7 @@ Oyster 可以通过官方 Codex App Server 发现本机 Runtime、账号和 Plan
 
 Coding Plan 在当前架构中是由 Pi 维护的 Direct Provider 兼容接入，不是公开的 OpenAI-compatible API，也不是官方 Codex Agent Runtime。Oyster 不复制其 OAuth endpoint 或传输协议；Provider 的兼容变化通过固定依赖版本、升级检查和真实连接测试处理。
 
-API 模型发现结果和 Coding Plan 模型目录是可重建的运行时索引，不是新的权威配置。API Connection 仍保存一个默认 Model，阶段配置保存实际选择的 Model ID；刷新后若 Model 已不可用，界面会明确显示配置失效，不会静默替换。
+API 模型发现结果和 Coding Plan 模型目录是可重建的运行时索引，不是新的权威配置。API Connection 仍保存一个用于模型目录与测试的默认 Model；应用的 Default LLM 另行保存实际选择的 Model ID。刷新后若该 Connection 或 Model 已不可用，界面和运行会明确报错，不会静默替换。
 
 ## 3. UI 与选择规则
 
@@ -45,7 +45,7 @@ API 模型发现结果和 Coding Plan 模型目录是可重建的运行时索引
 - 当前可用 Model；
 - 测试实际使用的 Model 与思考强度。
 
-知识加工的每个阶段独立保存 Connection、Model、可选思考强度和 Prompt 覆盖。界面必须同时展示阶段 Runtime，避免把通用 Agent Runtime 或其当前 Pi 实现与 Backend 混为一谈。
+页面在 Connection 列表之外提供唯一的 Default LLM 设置。知识加工页和新建对话页只显示生效绑定，不再提供平行的 Connection、Model 或思考强度选择器。Prompt 仍由各 Agent 的配置拥有，不属于 Default LLM。界面仍展示阶段 Runtime，避免把通用 Agent Runtime 或其当前 Pi 实现与 Backend 混为一谈。
 
 只有模型明确声明支持的思考强度才可选择；“模型默认”不发送额外参数。系统不猜测未知或自定义模型的能力。测试与正式运行都只使用用户明确选择的组合，不自动选择或回退到其他 Connection、Model 或计费来源。
 

@@ -13,9 +13,6 @@ import type { AgentTodo, AgentTodoCounts } from '../../shared/agent-runtime'
 
 export interface StoredProcessingStage {
   stageId: ProcessingStageId
-  connectionId?: string
-  modelId?: string
-  reasoningEffort?: ReasoningEffort
   defaultInstructionsOverride?: string
   instructionsOverride?: string
 }

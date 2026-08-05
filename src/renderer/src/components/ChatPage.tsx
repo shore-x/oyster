@@ -6,21 +6,13 @@ import {
   createSignal,
   type JSX
 } from 'solid-js'
-import type { ReasoningEffort } from '../../../shared/ai-backends'
 import type {
   ChatMessageView,
   ChatSessionDetail,
-  ChatSessionModelBinding,
   ChatToolCallView
 } from '../../../shared/chat'
 import { createChatController, type LiveChatToolActivity } from '../chat-controller'
-import {
-  REASONING_LABELS,
-  backendLabel,
-  connectionStatusLabel,
-  providerLabel,
-  reasoningLabel
-} from '../processing-configuration'
+import { backendLabel, connectionStatusLabel, reasoningLabel } from '../processing-configuration'
 import { Button, Icon, Markdown } from '../ui'
 
 export interface ChatPageProps {
@@ -182,26 +174,34 @@ function ExistingBinding(props: { session: ChatSessionDetail }) {
 
 export function ChatPage(props: ChatPageProps) {
   const controller = createChatController()
-  const [connectionId, setConnectionId] = createSignal('')
-  const [modelId, setModelId] = createSignal('')
-  const [reasoningEffort, setReasoningEffort] = createSignal<ReasoningEffort>()
   const [draft, setDraft] = createSignal('')
   const sortedSessions = createMemo(() => controller.snapshot().sessions
     .slice()
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)))
-  const selectedConnection = createMemo(() => controller.backendSnapshot().connections.find(
-    (connection) => connection.id === connectionId()
+  const defaultBinding = createMemo(() => controller.backendSnapshot().defaultLlm)
+  const defaultConnection = createMemo(() => controller.backendSnapshot().connections.find(
+    (connection) => connection.id === defaultBinding()?.connectionId
   ))
-  const selectedModel = createMemo(() => selectedConnection()?.models.find(
-    (model) => model.id === modelId()
+  const defaultModel = createMemo(() => defaultConnection()?.models.find(
+    (model) => model.id === defaultBinding()?.modelId
   ))
+  const defaultLlmUsable = createMemo(() => {
+    const binding = defaultBinding()
+    const model = defaultModel()
+    return Boolean(
+      binding
+      && defaultConnection()
+      && model
+      && (!binding.reasoningEffort || model.reasoningEfforts.includes(binding.reasoningEffort))
+    )
+  })
   const currentRunning = createMemo(() => controller.isSessionRunning(controller.selectedSessionId()))
   const canSend = createMemo(() => Boolean(
     draft().trim()
       && !controller.loading()
       && !currentRunning()
       && !controller.sending()
-      && (!controller.creatingNew() || (selectedConnection() && selectedModel()))
+      && (!controller.creatingNew() || defaultLlmUsable())
   ))
   const toolLabel = (name: string): string | undefined => (
     controller.snapshot().agent.tools.find((tool) => tool.name === name)?.label
@@ -227,22 +227,8 @@ export function ChatPage(props: ChatPageProps) {
     })
   })
 
-  function chooseConnection(nextId: string): void {
-    setConnectionId(nextId)
-    const connection = controller.backendSnapshot().connections.find((candidate) => candidate.id === nextId)
-    const nextModel = connection?.models.find((model) => model.id === connection.defaultModelId)
-      ?? connection?.models[0]
-    setModelId(nextModel?.id ?? '')
-    setReasoningEffort((current) => current && nextModel?.reasoningEfforts.includes(current)
-      ? current
-      : undefined)
-  }
-
   function startNew(): void {
     controller.startNew()
-    setConnectionId('')
-    setModelId('')
-    setReasoningEffort(undefined)
     setDraft('')
   }
 
@@ -250,14 +236,7 @@ export function ChatPage(props: ChatPageProps) {
     if (!canSend()) return
     const text = draft()
     setDraft('')
-    const binding: ChatSessionModelBinding | undefined = controller.creatingNew()
-      ? {
-          connectionId: connectionId(),
-          modelId: modelId(),
-          ...(reasoningEffort() ? { reasoningEffort: reasoningEffort() } : {})
-        }
-      : undefined
-    const outcome = await controller.send(text, binding)
+    const outcome = await controller.send(text)
     if (!outcome.completed && !outcome.userMessageRecorded && !draft()) setDraft(text)
   }
 
@@ -349,60 +328,17 @@ export function ChatPage(props: ChatPageProps) {
                 >{(current) => <ExistingBinding session={current()} />}</Show>
               )}
             >
-              <div class="chat-model-picker" data-testid="chat-model-picker">
-                <label>
-                  <span>Connection</span>
-                  <select value={connectionId()} onChange={(event) => chooseConnection(event.currentTarget.value)}>
-                    <option value="">选择 Connection</option>
-                    <For each={controller.backendSnapshot().connections}>{(connection) => (
-                      <option value={connection.id}>
-                        {connection.displayName} · {backendLabel(connection.backendKind)} · {connectionStatusLabel(connection.status)}
-                      </option>
-                    )}</For>
-                  </select>
-                </label>
-                <label>
-                  <span>Model</span>
-                  <select
-                    value={modelId()}
-                    disabled={!selectedConnection()}
-                    onChange={(event) => {
-                      setModelId(event.currentTarget.value)
-                      const next = selectedConnection()?.models.find((model) => model.id === event.currentTarget.value)
-                      setReasoningEffort((current) => current && next?.reasoningEfforts.includes(current)
-                        ? current
-                        : undefined)
-                    }}
-                  >
-                    <option value="">选择 Model</option>
-                    <For each={selectedConnection()?.models ?? []}>{(model) => (
-                      <option value={model.id}>
-                        {model.displayName === model.id ? model.id : `${model.displayName} · ${model.id}`}
-                      </option>
-                    )}</For>
-                  </select>
-                </label>
-                <label>
-                  <span>Reasoning</span>
-                  <select
-                    value={reasoningEffort() || ''}
-                    disabled={!selectedModel()?.reasoningEfforts.length}
-                    onChange={(event) => setReasoningEffort(
-                      (event.currentTarget.value || undefined) as ReasoningEffort | undefined
-                    )}
-                  >
-                    <option value="">模型默认</option>
-                    <For each={selectedModel()?.reasoningEfforts ?? []}>{(effort) => (
-                      <option value={effort}>{REASONING_LABELS[effort]}</option>
-                    )}</For>
-                  </select>
-                </label>
-                <Show when={selectedConnection()}>{(connection) => (
-                  <p>
-                    {providerLabel(connection().providerId)} · {connectionStatusLabel(connection().status)}
-                  </p>
-                )}</Show>
-              </div>
+              <Show
+                when={defaultLlmUsable()}
+                fallback={<div class="chat-binding-empty">请先在 AI 后端页面配置可用的默认 LLM。</div>}
+              >
+                <div class="chat-binding-summary" data-testid="chat-default-binding">
+                  <div><span>默认 Connection</span><strong>{defaultConnection()?.displayName}</strong></div>
+                  <div><span>Model</span><strong>{defaultModel()?.id}</strong></div>
+                  <div><span>Reasoning</span><strong>{reasoningLabel(defaultBinding()?.reasoningEffort)}</strong></div>
+                  <small>{backendLabel(defaultConnection()!.backendKind)} · {connectionStatusLabel(defaultConnection()!.status)} · 创建后固定到该 Session</small>
+                </div>
+              </Show>
             </Show>
           </div>
 
@@ -414,7 +350,7 @@ export function ChatPage(props: ChatPageProps) {
               <div class="chat-messages__empty">
                 <span class="chat-messages__empty-mark">O</span>
                 <strong>开始一段新对话</strong>
-                <p>选择模型后，可以询问现有知识，或让 Agent 更新 Knowledge Statement。</p>
+                <p>使用 AI 后端页面保存的默认 LLM，可以询问现有知识，或让 Agent 更新 Knowledge Statement。</p>
               </div>
             </Show>
             <Show when={!controller.loadingSessionId() && !controller.creatingNew() && !controller.session()?.messages.length}>
@@ -451,7 +387,7 @@ export function ChatPage(props: ChatPageProps) {
                   role: 'assistant',
                   text: '',
                   toolCalls: [],
-                  model: controller.session()?.binding.modelId || modelId(),
+                  model: controller.session()?.binding.modelId || defaultBinding()?.modelId || '',
                   stopReason: 'toolUse',
                   timestamp: Date.now()
                 }}
@@ -469,8 +405,8 @@ export function ChatPage(props: ChatPageProps) {
             <textarea
               value={draft()}
               rows={3}
-              placeholder={controller.creatingNew() && !selectedModel()
-                ? '先选择 Connection 和 Model'
+              placeholder={controller.creatingNew() && !defaultLlmUsable()
+                ? '请先在 AI 后端页面配置可用的默认 LLM'
                 : '输入消息；Enter 发送，Shift+Enter 换行'}
               disabled={controller.loading()}
               onInput={(event) => setDraft(event.currentTarget.value)}

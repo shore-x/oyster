@@ -48,7 +48,7 @@ MVP 不在 Harness 层增加路径限制、命令白名单、Sandbox 或 Bash �
 
 ## 4. Session 与 Artifact 发现
 
-Session 只持有对话历史、创建时选择的 Connection、Model、可选 reasoning effort 和当时生效的用户默认 System Prompt。它不绑定 Artifact、Project、Workspace 或 `cwd`，也不因为话题转向另一个 Artifact 而切分。一次对话可以不涉及 Artifact，也可以先后或同时涉及多个 Artifact。
+Session 只持有对话历史、创建时从应用 Default LLM 捕获的 Connection、Model、可选 reasoning effort，以及当时生效的用户默认 System Prompt。对话页不提供独立的模型选择；修改 Default LLM 只影响之后创建的 Session，已有 Session 继续使用其冻结 binding。Session 不绑定 Artifact、Project、Workspace 或 `cwd`，也不因为话题转向另一个 Artifact 而切分。一次对话可以不涉及 Artifact，也可以先后或同时涉及多个 Artifact。
 
 Harness 不保存“当前 Artifact”，不注入 Artifact 清单，不自动加载某个 `AGENTS.md`，也不按目录切换工具。Agent 在需要时从 Repository 当前文件系统状态中发现相关 Artifact，并读取每个相关一级目录根部的 `AGENTS.md` 以理解其持久 Attention。Artifact 仍遵循 Repository MVP 的最小契约：带可读取的普通根 `AGENTS.md` 的可见一级目录是一个 Artifact，其他内部结构任意。
 
@@ -83,7 +83,7 @@ Other internal structure is arbitrary. No Artifact is preselected.
 
 ## 6. 界面与持久化
 
-“对话”页面继续使用一套持久 Session 和消息界面。新 Session 在首次发送时创建；完整的 user、assistant 和 tool-result 消息使用 Pi JSONL Session Repository 保存在 Oyster 用户数据目录中。模型输出按事件流更新，每次工具调用显示状态，并可展开查看 Input 与 Result。
+“对话”页面继续使用一套持久 Session 和消息界面。新 Session 在首次发送时创建；若 AI 后端页面尚未配置 Default LLM，创建会被明确阻止。完整的 user、assistant 和 tool-result 消息使用 Pi JSONL Session Repository 保存在 Oyster 用户数据目录中。模型输出按事件流更新，每次工具调用显示状态，并可展开查看 Input 与 Result。
 
 Agent 配置页展示实际使用通用 Agent Runtime 的 Agent，包括面向用户对话的通用管理 Agent 和 Knowledge Maintenance Agent，并投影各自实际工具。用户可以编辑或恢复 Agent 的默认 System Prompt；工具由代码拥有，在页面中只读展示。Artifact 页面可以通过普通对话入口帮助用户描述目标，但不创建隐藏绑定或不同类型的 Session。子 Agent 运行不进入 Session 列表，其内部 transcript 只随父 Session 的 `spawn_agent` Tool Result 保存。
 

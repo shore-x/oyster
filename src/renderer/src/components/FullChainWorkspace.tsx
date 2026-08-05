@@ -1,5 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
 import type { AvailableSessionSummary } from '../../../shared/discovery'
+import type { LlmBinding } from '../../../shared/ai-backends'
 import type { KnowledgeCommitResult, KnowledgeStatement } from '../../../shared/knowledge'
 import type { AgentTodo } from '../../../shared/agent-runtime'
 import type {
@@ -12,7 +13,7 @@ import {
   connectionCanAttemptRun,
   providerLabel,
   reasoningLabel,
-  selectedStageModel
+  selectedLlmModel
 } from '../processing-configuration'
 import { Button } from '../ui'
 import { FullChainActivityDetail, FullChainResultDetail } from './FullChainRunDetails'
@@ -43,6 +44,7 @@ export interface FullChainWorkspaceProps {
   selectedSessionId?: string
   attention: string
   maintainer?: ProcessingStageView
+  defaultLlm?: LlmBinding
   maintainerConnection?: ProcessingConnectionView
   running: boolean
   debugTrace?: KnowledgeProcessingDebugTrace
@@ -68,23 +70,27 @@ function formatDuration(durationMs: number): string {
   return `${(durationMs / 1_000).toFixed(1)} s`
 }
 
-function stageSummary(stage?: ProcessingStageView, connection?: ProcessingConnectionView): {
+function stageSummary(
+  stage?: ProcessingStageView,
+  binding?: LlmBinding,
+  connection?: ProcessingConnectionView
+): {
   name: string
   detail: string
   runnable: boolean
 } {
   if (!stage) return { name: '正在读取配置…', detail: '—', runnable: false }
-  const model = selectedStageModel(stage, connection)
+  const model = selectedLlmModel(binding, connection)
   const modelLabel = model && (model.displayName === model.id
     ? model.id
     : `${model.displayName} · ${model.id}`)
-  const reasoningSupported = !stage.reasoningEffort
-    || Boolean(model?.reasoningEfforts.includes(stage.reasoningEffort))
+  const reasoningSupported = !binding?.reasoningEffort
+    || Boolean(model?.reasoningEfforts.includes(binding.reasoningEffort))
   return {
     name: stage.displayName,
     detail: connection && model
-      ? `${connection.displayName} · ${backendLabel(connection.backendKind)} / ${providerLabel(connection.providerId)} · ${modelLabel} · ${reasoningLabel(stage.reasoningEffort)}`
-      : '尚未完成模型配置',
+      ? `${connection.displayName} · ${backendLabel(connection.backendKind)} / ${providerLabel(connection.providerId)} · ${modelLabel} · ${reasoningLabel(binding?.reasoningEffort)}`
+      : '尚未配置默认 LLM',
     runnable: Boolean(connection && model && reasoningSupported && connectionCanAttemptRun(connection))
   }
 }
@@ -94,7 +100,11 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
   const selectedSession = createMemo(() => props.sessions.find(
     (session) => session.sourceRecordId === props.selectedSessionId
   ))
-  const maintainer = createMemo(() => stageSummary(props.maintainer, props.maintainerConnection))
+  const maintainer = createMemo(() => stageSummary(
+    props.maintainer,
+    props.defaultLlm,
+    props.maintainerConnection
+  ))
   const disabledReason = createMemo(() => {
     if (props.locked) return '已有知识加工任务正在运行。'
     if (!selectedSession()) return '请选择一个 Session。'
@@ -167,7 +177,7 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
 
             <div class="chain-test__models" aria-label="链路模型配置">
               <div><span>知识维护</span><strong>{maintainer().detail}</strong></div>
-              <p>模型与提示词可在“高级调试”中查看和修改。</p>
+              <p>模型在“AI 后端”中统一配置；提示词可在“高级调试”中修改。</p>
             </div>
 
             <div class="chain-test__actions">

@@ -64,6 +64,7 @@ const aiBackends: AiBackendApi = {
   cancelConnect: (connectionId) => ipcRenderer.invoke(aiBackendChannels.cancelConnect, connectionId),
   discoverModels: (input) => ipcRenderer.invoke(aiBackendChannels.discoverModels, input),
   saveModelConnection: (input) => ipcRenderer.invoke(aiBackendChannels.saveModelConnection, input),
+  saveDefaultLlm: (binding) => ipcRenderer.invoke(aiBackendChannels.saveDefaultLlm, binding),
   removeConnection: (connectionId) => ipcRenderer.invoke(aiBackendChannels.removeConnection, connectionId),
   testConnection: (connectionId) => ipcRenderer.invoke(aiBackendChannels.testConnection, connectionId),
   subscribe: (listener) => {

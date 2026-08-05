@@ -3,6 +3,7 @@ import type {
   AiBackendKind,
   AiConnection,
   AvailableModel,
+  LlmBinding,
   ModelProtocol,
   ModelProviderId,
   ReasoningEffort,
@@ -236,6 +237,9 @@ export function AiBackendsPage() {
   const [availableModels, setAvailableModels] = createSignal<AvailableModel[]>([])
   const [codingPlanModelId, setCodingPlanModelId] = createSignal('')
   const [codingPlanReasoningEffort, setCodingPlanReasoningEffort] = createSignal<ReasoningEffort>()
+  const [defaultConnectionId, setDefaultConnectionId] = createSignal('')
+  const [defaultModelId, setDefaultModelId] = createSignal('')
+  const [defaultReasoningEffort, setDefaultReasoningEffort] = createSignal<ReasoningEffort>()
 
   const codex = createMemo(() => controller.snapshot().connections.find(
     (connection) => connection.backendKind === 'coding_plan' && connection.providerId === 'openai_codex'
@@ -256,6 +260,41 @@ export function AiBackendsPage() {
       : undefined
   })
   const readyCount = createMemo(() => controller.snapshot().connections.filter((connection) => connection.status === 'ready').length)
+  const defaultConnection = createMemo(() => controller.snapshot().connections.find(
+    (connection) => connection.id === defaultConnectionId()
+  ))
+  const defaultModel = createMemo(() => defaultConnection()?.models.find(
+    (candidate) => candidate.id === defaultModelId()
+  ))
+  const effectiveDefaultReasoning = createMemo(() => {
+    const effort = defaultReasoningEffort()
+    return effort && defaultModel()?.reasoningEfforts.includes(effort) ? effort : undefined
+  })
+  const defaultReasoningSupported = createMemo(() => {
+    const effort = defaultReasoningEffort()
+    return !effort || Boolean(defaultModel()?.reasoningEfforts.includes(effort))
+  })
+  const savedDefaultLlmValid = createMemo(() => {
+    const binding = controller.snapshot().defaultLlm
+    if (!binding) return false
+    const connection = controller.snapshot().connections.find((candidate) => candidate.id === binding.connectionId)
+    const selectedModel = connection?.models.find((candidate) => candidate.id === binding.modelId)
+    return Boolean(
+      selectedModel
+      && (!binding.reasoningEffort || selectedModel.reasoningEfforts.includes(binding.reasoningEffort))
+    )
+  })
+
+  let synchronizedDefaultLlm: string | undefined
+  createEffect(() => {
+    const binding = controller.snapshot().defaultLlm
+    const revision = JSON.stringify(binding ?? null)
+    if (revision === synchronizedDefaultLlm) return
+    synchronizedDefaultLlm = revision
+    setDefaultConnectionId(binding?.connectionId ?? '')
+    setDefaultModelId(binding?.modelId ?? '')
+    setDefaultReasoningEffort(binding?.reasoningEffort)
+  })
 
   createEffect(() => {
     const connection = codex()
@@ -328,6 +367,29 @@ export function AiBackendsPage() {
     })
   }
 
+  function chooseDefaultConnection(connectionId: string): void {
+    const connection = controller.snapshot().connections.find((candidate) => candidate.id === connectionId)
+    setDefaultConnectionId(connection?.id ?? '')
+    setDefaultModelId(
+      connection?.models.find((candidate) => candidate.id === connection.defaultModelId)?.id
+        ?? connection?.models[0]?.id
+        ?? ''
+    )
+    setDefaultReasoningEffort(undefined)
+  }
+
+  function saveDefaultLlm(): void {
+    const connection = defaultConnection()
+    const selectedModel = defaultModel()
+    if (!connection || !selectedModel) return
+    const binding: LlmBinding = {
+      connectionId: connection.id,
+      modelId: selectedModel.id,
+      ...(effectiveDefaultReasoning() ? { reasoningEffort: effectiveDefaultReasoning() } : {})
+    }
+    void controller.saveDefaultLlm(binding)
+  }
+
   return (
     <>
       <header class="page-header">
@@ -365,6 +427,98 @@ export function AiBackendsPage() {
           </div>
         )}
       </Show>
+
+      <section class="ai-runtime-panel" data-testid="default-llm-panel">
+        <div class="ai-runtime-panel__header">
+          <div>
+            <h2>默认 LLM</h2>
+            <p>Knowledge Maintainer 和新建 Chat Session 使用这里保存的模型；已有 Chat Session 保留创建时的模型。</p>
+          </div>
+          <Show when={controller.snapshot().defaultLlm} fallback={<span class="status status--warning"><span class="status__dot" />未配置</span>}>
+            <span class={`status ${savedDefaultLlmValid() ? 'status--success' : 'status--warning'}`}><span class="status__dot" />{savedDefaultLlmValid() ? '已配置' : '配置失效'}</span>
+          </Show>
+        </div>
+        <div class="ai-model-form__row">
+          <label class="ai-field">
+            <span>Connection</span>
+            <select
+              data-testid="default-llm-connection-select"
+              value={defaultConnectionId()}
+              disabled={Boolean(controller.busy())}
+              onChange={(event) => chooseDefaultConnection(event.currentTarget.value)}
+            >
+              <option value="">选择 Connection</option>
+              <For each={controller.snapshot().connections}>{(connection) => (
+                <option
+                  value={connection.id}
+                  selected={connection.id === defaultConnectionId()}
+                  disabled={connection.models.length === 0}
+                >
+                  {connection.displayName} · {STATUS[connection.status].label}
+                </option>
+              )}</For>
+            </select>
+          </label>
+          <label class="ai-field">
+            <span>Model</span>
+            <select
+              data-testid="default-llm-model-select"
+              value={defaultModelId()}
+              disabled={!defaultConnection() || Boolean(controller.busy())}
+              onChange={(event) => {
+                setDefaultModelId(event.currentTarget.value)
+                setDefaultReasoningEffort(undefined)
+              }}
+            >
+              <option value="">选择 Model</option>
+              <For each={defaultConnection()?.models ?? []}>{(candidate) => (
+                <option value={candidate.id} selected={candidate.id === defaultModelId()}>{modelLabel(candidate)}</option>
+              )}</For>
+            </select>
+          </label>
+          <label class="ai-field">
+            <span>思考强度</span>
+            <select
+              data-testid="default-llm-reasoning-select"
+              value={defaultReasoningEffort() ?? ''}
+              disabled={Boolean(controller.busy()) || (!defaultModel()?.reasoningEfforts.length && !defaultReasoningEffort())}
+              onChange={(event) => setDefaultReasoningEffort(
+                event.currentTarget.value ? event.currentTarget.value as ReasoningEffort : undefined
+              )}
+            >
+              <option value="">模型默认</option>
+              <Show when={defaultReasoningEffort() && !defaultReasoningSupported()}>
+                <option value={defaultReasoningEffort() ?? ''} selected disabled>{defaultReasoningEffort()} · 当前 Model 不支持</option>
+              </Show>
+              <For each={defaultModel()?.reasoningEfforts ?? []}>{(effort) => (
+                <option value={effort} selected={effort === defaultReasoningEffort()}>{effort}</option>
+              )}</For>
+            </select>
+          </label>
+        </div>
+        <p class="path" data-testid="default-llm-summary">
+          {defaultConnection() && defaultModel()
+            ? `${defaultConnection()!.displayName} · ${modelLabel(defaultModel())} · ${defaultReasoningSupported() ? (effectiveDefaultReasoning() ?? '模型默认思考强度') : `${defaultReasoningEffort()} · 当前 Model 不支持`}`
+            : controller.snapshot().defaultLlm
+              ? `已保存的默认 LLM 当前不可用：${controller.snapshot().defaultLlm!.connectionId} · ${controller.snapshot().defaultLlm!.modelId}`
+              : '设置后，内置 Agent 的新运行将从这里取得模型配置。'}
+        </p>
+        <div class="ai-runtime-panel__actions">
+          <Button
+            variant="ghost"
+            icon="trash"
+            disabled={!controller.snapshot().defaultLlm || Boolean(controller.busy())}
+            onClick={() => void controller.saveDefaultLlm(null)}
+          >清除默认 LLM</Button>
+          <Button
+            variant="primary"
+            icon="check"
+            data-testid="save-default-llm"
+            disabled={!defaultConnection() || !defaultModel() || !defaultReasoningSupported() || Boolean(controller.busy())}
+            onClick={saveDefaultLlm}
+          >{controller.busy() === 'save-default-llm' ? '保存中…' : '保存默认 LLM'}</Button>
+        </div>
+      </section>
 
       <details class="ai-builder ui-disclosure">
         <summary>

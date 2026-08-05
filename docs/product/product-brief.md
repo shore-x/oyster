@@ -128,7 +128,7 @@ MVP 的“实时”定义为 **turn 级近实时**，不是 token streaming。�
 
 用户为项目、Topic 或任务选择 Attention，并启动知识加工：
 
-开始加工前，用户选择一个已配置且能力匹配的 AI Connection。数据来源与执行连接相互独立：从某个 Agent Harness 读取观察，不要求使用同一 Provider 进行知识加工。
+开始加工前，用户在“AI 后端”中保存一个应用级 Default LLM。Maintainer 每次新运行在开始时固定当时的 Connection、Model 和可选思考强度。数据来源与执行连接相互独立：从某个 Agent Harness 读取观察，不要求使用同一 Provider 进行知识加工。
 
 1. Source Adapter 读取所选 Session 的完整 Raw Evidence，并按 Harness 的格式标记疑似 Skill 激活位置；
 2. Host 将证据确定性分页为普通 initial Todo；默认或自定义 Knowledge Maintenance Agent 逐页读取 Raw Evidence，以这些 Todo 和相关已有 Knowledge Statement 为起点，并可用相同的通用工具补充、完成工作；默认策略优先维护细粒度、持久且可复用的对象、概念及其关系理解，而不是生成 Session 总结或工作日志；
@@ -190,7 +190,7 @@ Oyster 固定使用 `app.getPath('userData')/artifacts/` 标准 Git Repository�
 - 提供至少一个可替换的默认 Attention 和受控 Knowledge Maintenance Agent，优先维护细粒度、持久且可复用的对象与概念理解；任务事件只在形成这类理解或 Attention 明确要求时保留，且不将其固化为核心本体；
 - 默认和自定义知识处理器遵循统一的知识提交与权限边界；
 - 用户审查、纠正、删除和重新加工；
-- 可替换的 AI Connection；首个实现支持 Codex Coding Plan 与 OpenAI-compatible API，并允许每个加工阶段独立选择 Connection、Model 和思考强度；
+- 可替换的 AI Connection；首个实现支持 Codex Coding Plan 与 OpenAI-compatible API，并由唯一 Default LLM 统一为 Maintainer 新运行和新建 Chat Session 提供 Connection、Model 和思考强度；
 - Oyster 接收的 API Key 与主动完成 OAuth 后获得的 Coding Plan 凭据进入系统 Keychain；不扫描、读取或复制其他 Agent Runtime 的凭据；
 - 本地 MCP Server 提供检索与有预算的 Context Packet；
 - 当前验证所需的用户可见运行与结果信息；
@@ -242,7 +242,7 @@ Oyster 把认证和计费通道与处理 Runtime 分开：
 
 - **Coding Plan / API Backend** 决定凭据、Provider、传输和额度来源；
 - **Connection** 是用户实际配置并授权的一条通道，可以暴露多个 Model；
-- **Stage Configuration** 固定某个阶段使用的 Connection、Model 和可选思考强度；
+- **Default LLM** 是应用级唯一的 Connection、Model 和可选思考强度组合；新 Agent 运行或持久 Session 在边界上捕获它；
 - **Runtime** 决定该阶段做一次直接生成，还是用同一模型驱动通用 Agent loop，并负责 Agent 的上下文生命周期。
 
 因此，Coding Plan 与 API 可以共享最小模型调用契约，同时仍保留各自不同的认证和计费语义。结构化知识加工链路中的 Knowledge Maintenance Agent 使用该次 Workspace 和 Contribution 协议；面向用户的通用管理 Agent 则在每个 Session 中常驻同一组 Knowledge、文件、Shell、Todo 与通用子 Agent 工具。二者共用负责模型—工具循环、上下文压缩、通用 Todo 和结束检查的 Runtime，但通用管理 Agent 不再按当前职责动态切换工具或身份。Oyster 可以发现官方 Agent Runtime 中可公开读取的账号与套餐信息，但不会把该 Runtime 的内部 Agent loop 或凭据当作业务执行接口。

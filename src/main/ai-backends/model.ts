@@ -1,6 +1,7 @@
 import type {
   AiConnection,
   AvailableModel,
+  LlmBinding,
   ModelProtocol,
   ModelProviderId,
   ReasoningEffort
@@ -20,6 +21,7 @@ export interface StoredModelConnection {
 
 export interface AiBackendStateData {
   connections: StoredModelConnection[]
+  defaultLlm?: LlmBinding
 }
 
 export interface AiBackendRepository {

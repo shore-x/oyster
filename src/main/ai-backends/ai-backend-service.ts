@@ -9,6 +9,7 @@ import type {
   ConnectAiBackendInput,
   ConnectionTestResult,
   DiscoverModelsInput,
+  LlmBinding,
   ModelDiscoveryResult,
   SaveModelConnectionInput,
   TestConnectionInput
@@ -256,7 +257,8 @@ export class AiBackendService {
             throw new Error(`第 ${index + 1} 条 AI Connection 的 Model 名称无效`)
           }
           return { ...connection, baseUrl }
-        })
+        }),
+        ...(stored.defaultLlm ? { defaultLlm: { ...stored.defaultLlm } } : {})
       }
       this.configurationError = undefined
     } catch (error) {
@@ -313,6 +315,7 @@ export class AiBackendService {
     return structuredClone({
       options: OPTIONS,
       connections: [this.codingPlanConnection, ...apiConnections],
+      ...(this.state.defaultLlm ? { defaultLlm: { ...this.state.defaultLlm } } : {}),
       configurationError: this.configurationError
     })
   }
@@ -504,6 +507,40 @@ export class AiBackendService {
     })
   }
 
+  saveDefaultLlm(binding: LlmBinding | null): Promise<AiBackendSnapshot> {
+    return this.enqueueMutation(async () => {
+      this.assertConfigurationWritable()
+      let defaultLlm: LlmBinding | undefined
+      if (binding !== null) {
+        if (!binding || typeof binding !== 'object') throw new Error('默认 LLM 配置无效')
+        if (typeof binding.connectionId !== 'string' || !binding.connectionId.trim()) {
+          throw new Error('默认 LLM Connection 无效')
+        }
+        if (typeof binding.modelId !== 'string' || !binding.modelId.trim()) {
+          throw new Error('默认 LLM Model 无效')
+        }
+        const model = this.connectionModel(binding.connectionId, binding.modelId)
+        if (
+          binding.reasoningEffort !== undefined
+          && !model.reasoningEfforts.includes(binding.reasoningEffort)
+        ) throw new Error('默认 LLM Model 不支持所选思考强度')
+        defaultLlm = {
+          connectionId: binding.connectionId,
+          modelId: binding.modelId,
+          ...(binding.reasoningEffort ? { reasoningEffort: binding.reasoningEffort } : {})
+        }
+      }
+      const nextState: AiBackendStateData = {
+        connections: this.state.connections,
+        ...(defaultLlm ? { defaultLlm } : {})
+      }
+      await this.repository.save(nextState)
+      this.state = nextState
+      this.emit()
+      return this.snapshot()
+    })
+  }
+
   removeConnection(connectionId: string): Promise<AiBackendSnapshot> {
     return this.enqueueMutation(async () => {
       this.assertConfigurationWritable()
@@ -511,7 +548,10 @@ export class AiBackendService {
       if (!connection) throw new Error('未找到可删除的 API Connection')
       const previousState = this.state
       const nextState = {
-        connections: this.state.connections.filter((candidate) => candidate.id !== connectionId)
+        connections: this.state.connections.filter((candidate) => candidate.id !== connectionId),
+        ...(this.state.defaultLlm && this.state.defaultLlm.connectionId !== connectionId
+          ? { defaultLlm: this.state.defaultLlm }
+          : {})
       }
       await this.repository.save(nextState)
       if (connection.credentialRef) {

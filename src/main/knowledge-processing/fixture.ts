@@ -91,7 +91,7 @@ export function createFixtureKnowledgeProcessingService(
   return new KnowledgeProcessingService(
     new InMemoryKnowledgeProcessingRepository({
       stages: [
-        { stageId: 'knowledge_maintenance_agent', connectionId: 'model:fixture', modelId: 'fixture-model' }
+        { stageId: 'knowledge_maintenance_agent' }
       ]
     }),
     aiBackendService,

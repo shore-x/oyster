@@ -5,6 +5,7 @@ import type {
   DiscoverModelsInput,
   ModelDiscoveryResult,
   ConnectionTestResult,
+  LlmBinding,
   SaveModelConnectionInput,
   TestConnectionInput
 } from '../../shared/ai-backends'
@@ -100,6 +101,10 @@ export function createAiBackendsController() {
     saveModelConnection: (input: SaveModelConnectionInput) => update(
       'save-model',
       () => window.oyster.aiBackends.saveModelConnection(input)
+    ),
+    saveDefaultLlm: (binding: LlmBinding | null) => update(
+      'save-default-llm',
+      () => window.oyster.aiBackends.saveDefaultLlm(binding)
     ),
     removeConnection: (connectionId: string) => update(
       `remove:${connectionId}`,

@@ -1,11 +1,10 @@
 import { createSignal, onCleanup, onMount } from 'solid-js'
-import type { AiBackendSnapshot, ReasoningEffort } from '../../shared/ai-backends'
+import type { AiBackendSnapshot } from '../../shared/ai-backends'
 import type { SerializableJsonValue } from '../../shared/knowledge-processing'
 import type {
   ChatEvent,
   ChatMessageView,
   ChatSessionDetail,
-  ChatSessionModelBinding,
   ChatSnapshot
 } from '../../shared/chat'
 
@@ -215,10 +214,7 @@ export function createChatController() {
     })
   })
 
-  async function send(
-    text: string,
-    binding?: ChatSessionModelBinding
-  ): Promise<ChatSendOutcome> {
+  async function send(text: string): Promise<ChatSendOutcome> {
     const normalized = text.trim()
     if (!normalized || sending()) return { completed: false, userMessageRecorded: false }
     setSending(true)
@@ -229,8 +225,7 @@ export function createChatController() {
     )
     try {
       if (!sessionId) {
-        if (!binding) throw new Error('请先选择 Connection 和 Model。')
-        const created = await window.oyster.chat.createSession({ binding })
+        const created = await window.oyster.chat.createSession({})
         selectionInitialized = true
         setCreatingNew(false)
         setSelectedSessionId(created.id)

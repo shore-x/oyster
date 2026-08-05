@@ -3,6 +3,7 @@ import type {
   AiConnectionStatus,
   AiProviderId,
   AvailableModel,
+  LlmBinding,
   ModelProtocol,
   ReasoningEffort
 } from './ai-backends'
@@ -57,9 +58,6 @@ export interface ProcessingStageView {
   runtime: ProcessingRuntime
   capabilities: string[]
   tools: ProcessingToolView[]
-  connectionId?: string
-  modelId?: string
-  reasoningEffort?: ReasoningEffort
   builtInInstructions: string
   defaultInstructions: string
   effectiveInstructions: string
@@ -70,6 +68,7 @@ export interface ProcessingStageView {
 export interface KnowledgeProcessingSnapshot {
   stages: ProcessingStageView[]
   connections: ProcessingConnectionView[]
+  defaultLlm?: LlmBinding
   runningStageIds: ProcessingStageId[]
   debugTraces: KnowledgeProcessingDebugTrace[]
   configurationError?: string
@@ -119,10 +118,7 @@ export interface KnowledgeProcessingDebugTrace {
 
 export interface SaveProcessingStageInput {
   stageId: ProcessingStageId
-  connectionId: string | null
-  modelId: string | null
   instructionsOverride: string | null
-  reasoningEffort?: ReasoningEffort | null
 }
 
 export interface SaveProcessingDefaultInstructionsInput {

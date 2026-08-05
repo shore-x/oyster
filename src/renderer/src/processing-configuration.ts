@@ -1,14 +1,11 @@
 import type {
+  LlmBinding,
   AiBackendKind,
   AiConnectionStatus,
   AiProviderId,
   ReasoningEffort
 } from '../../shared/ai-backends'
-import type {
-  ProcessingConnectionView,
-  ProcessingRuntime,
-  ProcessingStageView
-} from '../../shared/knowledge-processing'
+import type { ProcessingConnectionView, ProcessingRuntime } from '../../shared/knowledge-processing'
 
 export const REASONING_LABELS: Record<ReasoningEffort, string> = {
   minimal: 'Minimal',
@@ -70,9 +67,9 @@ export function reasoningLabel(reasoningEffort?: ReasoningEffort): string {
   return reasoningEffort ? REASONING_LABELS[reasoningEffort] : '模型默认'
 }
 
-export function selectedStageModel(
-  stage: ProcessingStageView | undefined,
+export function selectedLlmModel(
+  binding: LlmBinding | undefined,
   connection: ProcessingConnectionView | undefined
 ) {
-  return connection?.models.find((model) => model.id === stage?.modelId)
+  return connection?.models.find((model) => model.id === binding?.modelId)
 }
