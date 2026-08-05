@@ -80,7 +80,7 @@ Oyster 必须把三个相互区分的状态与权威域分开，避免把模型�
 
 本文将 `Artifact` 作为第三个权威域中单个协作产物的正式英文名称；观察中的来源侧对象使用 Activity Artifact 等限定名称，Discovery catalog 中的外部来源记录称为 Source Record。
 
-Host 在 Knowledge Maintenance Agent 启动时把完整 Raw Evidence 确定性分页为普通 initial Todo；Agent 逐页读取证据，识别名称、指代、背景问题和疑似 Skill 激活，也可以增加新的通用 Todo。Todo 与 Contribution Draft 都是可丢弃的运行期工作材料（Run-local Working Material），不构成第四个状态与权威域。只有经过统一知识提交边界成为 Knowledge Statement 的内容才进入知识层。正式知识应能够追溯到原始观察或输入知识，但追溯结构及其 MVP 实现范围尚未确定。
+Host 在 Knowledge Maintenance Agent 启动时把完整 Raw Evidence 确定性组织为较粗的 Evidence Segment initial Todo；每段可以通过多个有界工具分页读取，分页本身不形成 Todo。Agent 检查各段证据，识别名称、指代、背景问题和疑似 Skill 激活，也可以增加新的通用 Todo。Todo 与 Contribution Draft 都是可丢弃的运行期工作材料（Run-local Working Material），不构成第四个状态与权威域。只有经过统一知识提交边界成为 Knowledge Statement 的内容才进入知识层。正式知识应能够追溯到原始观察或输入知识，但追溯结构及其 MVP 实现范围尚未确定。
 
 三个域在状态和所有权上分离，但知识加工、Projection 和 Artifact 维护通过共享 Attention 耦合。Projection 是从知识、Attention 和必要的当前状态形成按需消费输出，或初始化、修订 Artifact 的活动，不是第三个持久状态域本身。同一个 Attention 可以指导 Knowledge Maintenance Agent 和通用管理 Agent；不同 Attention 产生的知识进入共享知识层并可以重叠、复用或相互修订，不按 Artifact 复制成独立真相。
 
@@ -131,12 +131,12 @@ MVP 的“实时”定义为 **turn 级近实时**，不是 token streaming。�
 开始加工前，用户在“AI 后端”中保存一个应用级 Default LLM。Maintainer 每次新运行在开始时固定当时的 Connection、Model 和可选思考强度。数据来源与执行连接相互独立：从某个 Agent Harness 读取观察，不要求使用同一 Provider 进行知识加工。
 
 1. Source Adapter 读取所选 Session 的完整 Raw Evidence，并按 Harness 的格式标记疑似 Skill 激活位置；
-2. Host 将证据确定性分页为普通 initial Todo；默认或自定义 Knowledge Maintenance Agent 逐页读取 Raw Evidence，以这些 Todo 和相关已有 Knowledge Statement 为起点，并可用相同的通用工具补充、完成工作；默认策略优先维护细粒度、持久且可复用的对象、概念及其关系理解，而不是生成 Session 总结或工作日志；
+2. Host 将证据确定性组织为粗粒度 Evidence Segment initial Todo；默认或自定义 Knowledge Maintenance Agent 通过段内一个或多个有界分页调用覆盖 Raw Evidence，以这些 Todo 和相关已有 Knowledge Statement 为起点，并可用相同的通用工具补充、完成工作；默认策略优先维护细粒度、持久且可复用的对象、概念及其关系理解，而不是生成 Session 总结或工作日志；
 3. Agent 独立维护 Contribution Draft；所有 Todo 完成且 Agent 自然结束后，Host 冻结整份 Draft 并形成包含一条或多条 Knowledge Statement 的 Knowledge Contribution。Statement 使用当前知识视图中唯一、能够指称一个知识主体的 canonical title，以自由文本正文解释该主体的语境、含义、属性和关系，并通过 `[[canonical title]]` 或 `[[canonical title|local display text]]` 动态引用当前同名 Statement；
 4. Oyster Core 统一执行权限、提交和生命周期边界；
 5. 用户可以审查、纠正、删除或重新加工派生知识；如何向用户呈现其追溯关系随治理设计确定。
 
-Knowledge Maintenance Agent 是一个普通、可替换的工具使用 Agent：角色差异来自 System Prompt、Workspace、授权工具和 Host 对自然结束的解释，而不是专用状态机或固定运行步骤。系统不预设模型轮次、工具次数或总时长；通用 Agent Runtime 负责压缩临时 transcript，并向所有内置工具使用 Agent 提供通用 Todo 和结束检查。证据页在启动时绑定为 Todo，Todo 不作为每轮 Context 注入；存在 pending Todo 时，Runtime 通过结束反馈继续同一 Agent。Todo 全部完成且 Agent 自然结束后，Host 冻结 Draft，最终结果仍由 Oyster Core 校验和提交。模型上下文、单次请求、分页读取和持久化完整性仍有各自边界，但这些边界不变成整次 Agent 的行为配额。
+Knowledge Maintenance Agent 是一个普通、可替换的工具使用 Agent：角色差异来自 System Prompt、Workspace、授权工具和 Host 对自然结束的解释，而不是专用状态机或固定运行步骤。系统不预设模型轮次、工具次数或总时长；通用 Agent Runtime 负责压缩临时 transcript，并向所有内置工具使用 Agent 提供通用 Todo 和结束检查。粗粒度 Evidence Segment 在启动时绑定为 Todo，段内有界分页只控制单次 I/O；Todo 不作为每轮 Context 注入，存在 pending Todo 时，Runtime 通过结束反馈继续同一 Agent。Todo 全部完成且 Agent 自然结束后，Host 冻结 Draft，最终结果仍由 Oyster Core 校验和提交。模型上下文、单次请求、分页读取和持久化完整性仍有各自边界，但这些边界不变成整次 Agent 的行为配额。
 
 任何默认或自定义处理器产生的正式知识都没有不同的本体身份。系统应能解释其如何由观察或输入知识形成，但具体需要保存哪些运行元信息、如何持久化以及 MVP 覆盖到什么程度，留给后续验证。模型、Prompt、策略或 Agent 升级时可以重新加工知识，不重写 Raw Evidence。
 

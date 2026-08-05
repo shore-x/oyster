@@ -34,7 +34,7 @@ function connection(): AiConnection {
 }
 
 const MODEL_RUNTIME: ModelRuntime = {
-  model: { id: 'maintainer' } as ModelRuntime['model'],
+  model: { id: 'maintainer', contextWindow: 128_000 } as ModelRuntime['model'],
   streamFn: (() => { throw new Error('not used') }) as ModelRuntime['streamFn']
 }
 
@@ -135,7 +135,7 @@ describe('KnowledgeProcessingService', () => {
     expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/SKILL\.md/i)
   })
 
-  it('binds deterministic evidence pages and Skill hints as ordinary initial Todos', async () => {
+  it('binds coarse evidence segments and Skill hints as ordinary initial Todos', async () => {
     const { service, agent } = await harness()
     const result = await service.runKnowledgeMaintenance({
       formatVersion: 'codex-jsonl-raw-v1',

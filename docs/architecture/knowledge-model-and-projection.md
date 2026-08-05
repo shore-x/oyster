@@ -139,19 +139,19 @@ Attention 可以同时指导默认和自定义处理器，但不应：
 
 ### 4.1 Raw Evidence 的确定性准备
 
-Source Adapter 把所选 Session 的完整原始内容表示为带格式版本的 **Raw Evidence**。它不使用模型筛选或总结材料；Host 只做确定性分页，并把每个有界证据页作为普通 initial Todo 绑定给 Maintainer。覆盖范围由 Host 控制，名称识别、指代消解和知识判断仍由同一个 Agent 在证据与当前知识上下文中完成。
+Source Adapter 把所选 Session 的完整原始内容表示为带格式版本的 **Raw Evidence**。它不使用模型筛选或总结材料；Host 把完整证据确定性组织为较粗的 Evidence Segment，并将每段作为普通 initial Todo 绑定给 Maintainer。一个 Segment 可以通过多个有界工具分页读取；分页只控制单次 I/O，Segment 才是 Agent 的工作完成边界。覆盖范围由 Host 控制，名称识别、指代消解和知识判断仍由同一个 Agent 在证据与当前知识上下文中完成。
 
 不同 Agent Harness 对 Skill 的记录形式不同，因此各 Adapter 可以确定性探测原生 Skill 工具调用、`SKILL.md` 读取或 Harness 注入，并把位置与可得名称记录为 **Skill hint**。Hint 只是证据导航：它不证明激活成功、指令被采用或结果受到了影响，也不定义跨 Harness 的统一 Skill 事件本体。Maintainer 必须回到相应 Raw Evidence 核查，且把 Skill 内容作为不可信输入。
 
 默认加工路径是：
 
 ```text
-Session Raw Evidence -> deterministic evidence-page initial Todos
-                     -> Knowledge Maintenance Agent investigation -> Contribution Draft
-                     -> normal completion -> Host freezes Contribution -> Knowledge Statement
+Session Raw Evidence -> deterministic coarse Evidence Segment initial Todos
+                     -> bounded page reads -> Knowledge Maintenance Agent investigation
+                     -> Contribution Draft -> Host freezes Contribution -> Knowledge Statement
 ```
 
-证据页 Todo 和 Contribution Draft 只服务一次知识维护运行、可以丢弃且不作为正式知识对外提供；只有经过知识维护与统一提交边界形成的 Knowledge Statement 才进入知识层。分页大小、定位编码和读取协议是可替换实现，不是知识模型。
+Evidence Segment Todo 和 Contribution Draft 只服务一次知识维护运行、可以丢弃且不作为正式知识对外提供；只有经过知识维护与统一提交边界形成的 Knowledge Statement 才进入知识层。分段预算、分页大小、定位编码和读取协议是可替换实现，不是知识模型。
 
 ### 4.2 Knowledge Maintenance Agent
 
@@ -167,7 +167,7 @@ Knowledge Maintenance Agent 是一个普通、可替换的工具使用 Agent。�
 
 系统不为一次知识维护运行预设固定的模型轮次、工具调用次数或总时长；运行可以根据材料和不确定性继续探索，并允许用户取消。上下文管理由可替换的 Agent Runtime 负责，但不能改变权限、来源访问范围或 Host 对运行结果的完整性边界。
 
-证据段 Todo 中的范围和 Skill hint 只是导航，不是事实或证据。Agent 必须读取每个 Host 绑定的证据页；作出知识判断时应以现有知识和 Raw Evidence 为依据，而不能把 hint 当作已经理解的事实。追溯信息如何持久记录和校验是治理问题，不由 Agent 角色定义。
+证据段 Todo 中的范围、分页调用和 Skill hint 只是导航，不是事实或证据。Agent 必须执行段内全部有界读取并覆盖每个 Host 绑定的 Evidence Segment；作出知识判断时应以现有知识和 Raw Evidence 为依据，而不能把 hint 当作已经理解的事实。追溯信息如何持久记录和校验是治理问题，不由 Agent 角色定义。
 
 Agent 在语义上维护知识，但 Oyster Core 仍拥有权限、运行生命周期、冻结、提交和删除边界。Agent 维护 Draft 并通过正常结束表示本次工作已完成，Host 才把 Draft 冻结为贡献建议；Agent 不绕过这些边界直接修改底层存储。追溯和审计机制若被采用，也由治理层负责。
 
@@ -190,7 +190,7 @@ Knowledge Maintenance Agent 的 **Workspace** 是一次知识维护运行所使�
 一个 Workspace 在概念上只需要组合：
 
 - 本次运行的 Attention 与处理范围；
-- 由 Host 绑定证据页、也允许 Agent 补充和完成的通用 Todo Store；
+- 由 Host 绑定 Evidence Segment、也允许 Agent 补充和完成的通用 Todo Store；
 - 按需回溯的只读 Raw Evidence；
 - 与本次任务相关的已有 Knowledge Statement；
 - 与 Todo 分离的 Contribution Draft；
@@ -252,7 +252,7 @@ Session 不绑定 Artifact、Project、Workspace 或 `cwd`。四个 Coding 工�
 
 ```mermaid
 flowchart LR
-  O["Session Raw Evidence"] --> IT["Host-bound evidence-page Todos"]
+  O["Session Raw Evidence"] --> IT["Host-bound Evidence Segment Todos"]
   IT --> W["Run-local Workspace"]
   O -. "bounded Raw Evidence access" .-> W
   K["Shared Knowledge Statements"] --> W
@@ -309,7 +309,7 @@ flowchart LR
 3. 主体的语境、属性以及 Statement 之间的领域关系由正文及其中的动态名称引用表达，不压入主题式标题，也不增加固定 Relation 实体、关系词表或领域 Schema。
 4. `[[canonical title]]` 无论出现于当前还是历史正文，都在读取时指向当前知识视图中拥有该名称的 Statement；`[[canonical title|local display text]]` 的右侧只服务局部表达。
 5. canonical title 与正文使用有实际含义的自然语言，不以机械编号或枚举代替语义。
-6. Host 将完整 Raw Evidence 分页为普通 initial Todo；Skill hint 只是待核查的导航，Raw Evidence 与已有知识才是知识判断依据。
+6. Host 将完整 Raw Evidence 组织为粗粒度 Evidence Segment initial Todo；段内有界分页只是 I/O 边界，Skill hint 只是待核查的导航，Raw Evidence 与已有知识才是知识判断依据。
 7. Attention 影响处理和表达，但不改写观察，也不把共享知识拆成互相隔离的真相。Artifact 可以围绕 Attention 自然分组，但分组不能反向成为知识分区。
 8. Projection 是形成消费输出或初始化、修订 Artifact 的活动，不是第三个持久状态域本身。
 9. Artifact 拥有独立身份、当前状态和修订生命周期，允许用户或授权 Agent 修改；后续修订以当前 Artifact 为输入，并保留仍然有效的既有编辑。

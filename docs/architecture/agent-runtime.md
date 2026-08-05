@@ -47,7 +47,7 @@ End Check 不判断 Agent 的工作质量，也不证明 Todo 已被正确完成
 - Todo Store 独立于 `transformContext`，现有 transcript compaction 不负责保存、重建或注入 Todo；
 - Runtime Feedback 通过统一 `convertToLlm` 转换，保持 Host 内部消息与真实用户消息的身份区别。
 
-Knowledge Maintenance Agent 使用同一 Todo Store 跟踪本次调查工作，并独立持有 Contribution Draft。Host 在启动时把完整 Raw Evidence 确定性分页，每一页作为普通 initial Todo 绑定到运行；Agent 可继续增加调查 Todo，但 Runtime 不引入证据专用状态或工具。Agent 主动使用 `list_todos`、`add_todos` 和 `complete_todos`，Runtime 不在每次模型调用前注入工作清单。
+Knowledge Maintenance Agent 使用同一 Todo Store 跟踪本次调查工作，并独立持有 Contribution Draft。Host 在启动时把完整 Raw Evidence 确定性组织为粗粒度 Evidence Segment，每一段作为普通 initial Todo 绑定到运行；段内可以列出多个有界 `read_evidence` 调用，工具分页不会各自产生 Todo。Agent 可继续增加调查 Todo，但 Runtime 不引入证据专用状态或工具。Agent 主动使用 `list_todos`、`add_todos` 和 `complete_todos`，Runtime 不在每次模型调用前注入工作清单。
 
 Knowledge Maintenance Agent 也没有专用的提交或终止工具。只要仍有 pending Todo，通用结束检查就会拒绝自然结束并续跑；当 Todo 全部完成且 Agent 自然结束时，Host 才把完整的当前 Draft 冻结为本次 Knowledge Contribution。这是 Host 对整次运行的解释，不是单次工具调用的提交。
 

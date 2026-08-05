@@ -79,7 +79,7 @@ class FakeBackend implements AiBackendPort {
     operation: (runtime: ModelRuntime) => Promise<T>
   ): Promise<T> {
     return operation({
-      model: { id: 'maintainer' } as ModelRuntime['model'],
+      model: { id: 'maintainer', contextWindow: 128_000 } as ModelRuntime['model'],
       streamFn: (() => { throw new Error('not used') }) as ModelRuntime['streamFn']
     })
   }

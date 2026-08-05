@@ -24,7 +24,10 @@ import type {
 } from './model'
 import { PROCESSING_STAGE_DEFINITIONS, stageDefinition } from './prompts'
 import { KNOWLEDGE_MAINTENANCE_TOOL_CATALOG } from './knowledge-maintenance-tool-catalog'
-import { planEvidenceSegmentTodos } from './evidence-segment-todos'
+import {
+  evidenceSegmentCharacterLimit,
+  planEvidenceSegmentTodos
+} from './evidence-segment-todos'
 
 const MAX_SOURCE_REF_CHARACTERS = 512
 const MAX_DEBUG_TRACE_ERROR_CHARACTERS = 2 * 1_024
@@ -601,37 +604,44 @@ export class KnowledgeProcessingService {
     const stage = options.binding ?? this.configuredStage('knowledge_maintenance_agent')
     const connection = this.aiBackend.snapshot().connections.find((item) => item.id === stage.connectionId)
     if (!connection) throw new Error('已配置的 Connection 不再可用')
-    const plan = planEvidenceSegmentTodos(evidence)
     const controller = this.beginRun(options.lease)
     const debugTrace = options.debugTrace ?? { id: randomUUID(), origin: 'stage_debug' }
     this.beginMaintenanceDebugTrace(debugTrace)
     const startedAt = Date.now()
 
     try {
-      const result = await this.aiBackend.withModelRuntime(
+      const outcome = await this.aiBackend.withModelRuntime(
         stage.connectionId,
         stage.modelId,
-        (runtime) => (options.knowledgeAgent ?? this.knowledgeAgent).run({
-          runtime,
-          systemPrompt: stage.instructions,
-          evidenceLines: evidence.lines,
-          evidenceFormatVersion: evidence.formatVersion,
-          sourceRef,
-          contributionRunRef: options.contributionRunRef ?? `manual:${randomUUID()}`,
-          attention: normalizedAttention,
-          initialTodos: [...plan.todos, ...(options.initialTodos ?? [])],
-          reasoningEffort: stage.reasoningEffort,
-          onTrace: (event) => {
-            try {
-              this.recordKnowledgeAgentTrace(debugTrace, event)
-            } catch {
-              // Debug telemetry must never change the Agent result.
-            }
-          },
-          signal: controller.signal
-        }),
+        async (runtime) => {
+          const plan = planEvidenceSegmentTodos(
+            evidence,
+            evidenceSegmentCharacterLimit(runtime.model.contextWindow)
+          )
+          const result = await (options.knowledgeAgent ?? this.knowledgeAgent).run({
+            runtime,
+            systemPrompt: stage.instructions,
+            evidenceLines: evidence.lines,
+            evidenceFormatVersion: evidence.formatVersion,
+            sourceRef,
+            contributionRunRef: options.contributionRunRef ?? `manual:${randomUUID()}`,
+            attention: normalizedAttention,
+            initialTodos: [...plan.todos, ...(options.initialTodos ?? [])],
+            reasoningEffort: stage.reasoningEffort,
+            onTrace: (event) => {
+              try {
+                this.recordKnowledgeAgentTrace(debugTrace, event)
+              } catch {
+                // Debug telemetry must never change the Agent result.
+              }
+            },
+            signal: controller.signal
+          })
+          return { result, plan }
+        },
         { trackHealth: true }
       )
+      const { result, plan } = outcome
       controller.signal.throwIfAborted()
       this.updateDebugTrace(debugTrace, (trace) => {
         trace.maintenance.modelCallCount = result.modelCallCount

@@ -4,15 +4,15 @@
 >
 > 日期：2026-08-05
 >
-> 范围：验证“外部 Session 的确定版本 → 完整 Raw Evidence 分页 → 通用 Todo 驱动的 Knowledge Maintenance Agent → Host 冻结 Contribution → 隔离 Knowledge Sandbox 写入与回读”的最小闭环。
+> 范围：验证“外部 Session 的确定版本 → 完整 Raw Evidence 粗粒度分段 → 通用 Todo 驱动的 Knowledge Maintenance Agent → Host 冻结 Contribution → 隔离 Knowledge Sandbox 写入与回读”的最小闭环。
 
 ## 1. 当前链路
 
 ```text
 可用外部 Session 的确定 revision
   -> Source Adapter 读取完整 Raw Evidence
-  -> Host 确定性分页，每页绑定为一个 initial Todo
-  -> Knowledge Maintenance Agent 逐页读取证据并增加必要调查 Todo
+  -> Host 形成覆盖完整材料的粗粒度 Evidence Segment Todo
+  -> Knowledge Maintenance Agent 通过一个或多个有界读取检查每段证据，并增加必要调查 Todo
   -> Agent 增量维护 Contribution Draft
   -> 所有 Todo 完成且 Agent 自然结束
   -> Host 冻结整份 Draft 为 Knowledge Contribution
@@ -22,7 +22,7 @@
 
 用户从 discovery catalog 选择 Session 及其当前 revision。主进程通过对应 Source Adapter 从原始位置读取记录，校验 revision，并以 Source Record 身份和实际内容哈希固定本次 `sourceRef`。记录变化、失效或无法读取时必须失败，不得静默换用其他版本或内部副本。
 
-Source Adapter 不用模型缩减材料。Claude、Pi 与 Codex Adapter 均保留完整原始行和各自的格式版本；Host 使用统一的有界读取原语确定性分页。每个分页 Todo 包含精确的 `read_evidence` 调用和预期结束位置，因此一次成功运行必须覆盖所选 Session 的全部证据，而不依赖模型自行决定是否继续。
+Source Adapter 不用模型缩减材料。Claude、Pi 与 Codex Adapter 均保留完整原始行和各自的格式版本。Host 根据当前模型的上下文容量，把完整材料确定性组织为较粗的 Evidence Segment；每个 Segment 作为一个 initial Todo，并列出一个或多个按顺序执行的有界 `read_evidence` 调用及预期结束位置。读取分页只限制单次工具 I/O，Segment 才是工作完成边界，因此 Todo 不随消息或工具分页一一增长，同时一次成功运行仍必须覆盖所选 Session 的全部证据。
 
 ## 2. Skill 激活线索
 
@@ -32,7 +32,7 @@ Source Adapter 不用模型缩减材料。Claude、Pi 与 Codex Adapter 均保�
 - 读取某个 Skill 的 `SKILL.md`；
 - Harness 以结构化内容注入 Skill 指令。
 
-Adapter 只把可得的 Skill 名称、工具名、来源类型和 Raw Evidence 位置记录为 hint。Host 将落在某个证据页内的 hint 附加到对应 Todo，作为不可信导航；hint 不证明激活成功、指令被遵守或输出受到了影响。
+Adapter 只把可得的 Skill 名称、工具名、来源类型和 Raw Evidence 位置记录为 hint。Host 将落在某个 Evidence Segment 内的 hint 附加到对应 Todo，作为不可信导航；hint 不证明激活成功、指令被遵守或输出受到了影响。
 
 Maintainer Prompt 明确要求关注 Skill 激活，但 Agent 必须回到原始证据核查。Skill 正文、工具输出和证据中的任何指令都属于不可信材料，不能改变 Maintainer 的身份、权限或运行规则。当前不把 Skill 观测提升为知识层字段、Artifact 类型或跨 Harness 统一事件模型。
 
@@ -41,15 +41,15 @@ Maintainer Prompt 明确要求关注 Skill 激活，但 Agent 必须回到原始
 Knowledge Maintenance Agent 使用 Pi Agent Core 的普通 Agent loop。一次运行的 Workspace 只有以下状态：
 
 - 完整 Raw Evidence 的只读分页访问；
-- Host 绑定的证据页 initial Todo，以及 Agent 自行增加的普通 Todo；
+- Host 绑定的粗粒度 Evidence Segment initial Todo，以及 Agent 自行增加的普通 Todo；
 - 可搜索、可读取的当前 Knowledge Statement；
 - 与 Todo 独立的 Contribution Draft。
 
 通用 Runtime 只提供 `list_todos`、`add_todos` 和 `complete_todos` 三项 Todo 工具。Todo 不作为消息注入，也不在每次模型调用前重复加入上下文。Agent 自然结束时若仍有 pending Todo，Runtime 通过内部 Follow-up 告知不能结束的原因并继续同一运行。系统不设置整次运行的固定模型轮次、工具次数或总时长；用户可以显式取消，单次模型 I/O、分页读取和持久化仍遵守各自边界。
 
-证据页 Todo 要求 Maintainer 在完成前：
+Evidence Segment Todo 要求 Maintainer 在完成前：
 
-1. 执行该页指定的有界读取；
+1. 按顺序执行该段列出的全部有界读取，并覆盖预期结束位置；
 2. 识别严肃的局部名称、指代、缺失背景和疑似 Skill 激活；
 3. 为仍需调查的问题增加 Todo；
 4. 记录当前证据已经充分支持的 Draft 更新。
@@ -87,7 +87,7 @@ Debug Trace 只保存有界的模型与工具事件副本，不是知识或审�
 ## 8. 当前验收边界
 
 - 三个 Harness 的 Adapter 保留完整 Raw Evidence，并能独立演进 Skill hint 探测；
-- Host 生成的证据页 Todo 无遗漏地覆盖完整 Session；
+- Host 生成的粗粒度 Evidence Segment Todo 无遗漏地覆盖完整 Session，读取分页不被建模为独立 Todo；
 - Maintainer 通过通用 Todo 工具推进，不依赖领域专用完成状态；
 - Prompt 明确要求核查 Skill 激活、名称、指代和必要背景；
 - 成功结果只在 Sandbox 中自动提交，正式知识必须显式导入；
