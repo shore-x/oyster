@@ -4,7 +4,7 @@
 >
 > 日期：2026-08-01
 >
-> 范围：定义观察、知识、Artifact、Projection、Attention、Observation Preprocessing 和 Agent 维护之间的稳定语义与责任边界；治理机制只保留必要预期，不把当前载体提升为长期本体，也不在本页固定知识的存储介质、字段、索引、工具协议或 Agent Runtime。当前验证实现另见《知识加工验证 MVP》和《Artifact Repository MVP》。
+> 范围：定义观察、知识、Artifact、Projection、Attention、Observation Preprocessing、Maintainer 和 Reviewer 之间的稳定语义与责任边界；治理机制只保留必要预期，不把当前载体提升为长期本体，也不在本页固定知识的存储介质、字段、索引、工具协议或 Agent Runtime。当前验证实现另见《知识加工验证 MVP》和《Artifact Repository MVP》。
 >
 > 确定性说明：第 1 节总结已确认结论，第 7.1 节列出稳定原则；第 7.2 节只是治理预期，第 7.3 节是可替换实现。第 2 至第 6 节用于解释当前边界，其中尚未决定的内容会用“可以”“如果”“未来”或“尚未决定”等措辞明确标注。第 8 节先标明已确认的 Artifact MVP 边界，再记录相关长期治理问题；其中列出的扩展方向不构成当前原则、产品承诺或实现要求。
 
@@ -30,9 +30,11 @@ Oyster 保留三个相互区分的状态与权威域。它们不是三种固定�
 
 Knowledge Statement 以语义丰富的自然语言正文及其中对其他 Statement 的显式名称引用作为权威内容；Artifact 以用户与 Agent 当前共同维护的产物状态作为权威内容。Artifact 不限定为 Markdown、文档或单一文件。它可以包含文档、配置、模板、代码、脚本、资源或它们的组合，但这些只是可能形式，不是当前固定的产物类型。通用管理 Agent 可以在同一对话中搜索和维护 Knowledge，也可以发现和修订一个或多个 Artifact；单一 Agent 身份不合并两个权威域。
 
-Observation Preprocessor 与 Knowledge Maintenance Agent 是结构化知识加工链路中的处理器；通用管理 Agent 是面向用户、跨 Knowledge 与 Artifact 的协作界面。它们不是互相竞争的整套架构，也不要求为每种状态域建立一个 Agent 身份。越靠近观察层，流程越固定、来源约束越强；越靠近通用管理，越应让 Agent 根据对话、Attention 和当前状态自行探索并进行多步判断。
+Observation Preprocessor、Knowledge Maintenance Agent 与 Reviewer 是结构化知识加工链路中边界不同的处理职责；通用管理 Agent 是面向用户、跨 Knowledge 与 Artifact 的协作界面。它们不是互相竞争的整套架构，也不要求为每种状态域建立一个长期 Agent 身份。越靠近观察层，流程越固定、来源约束越强；越靠近通用管理，越应让 Agent 根据对话、Attention 和当前状态自行探索并进行多步判断。
 
 当前仍处于核心链路验证阶段，默认采用能完整表达上述模型的最小机制。不能为了假设中的极端体验问题，静默增加整次运行的次数或时长配额、禁止普通 Agent 操作，或引入专用状态机和特殊分支。当前通用管理 Agent 明确采用高信任执行模型：Harness 不按话题切换工具，不绑定 Artifact 或 Project，也不为文件和 Shell 增加路径限制、Sandbox 或逐次审批。若真实使用暴露出必须由 Harness 解决的问题，再据此讨论新的机制。
+
+内置工具使用 Agent 可以共享 Runtime 提供的通用 Todo 与结束检查，但这两者都只是运行期控制状态。业务层可以把待处理工作投影为 initial Todo，但 Todo 不因此变成业务记录，也不替代 Contribution Draft 或任何权威域。初始 Todo 与消息输入保持独立，也不作为每轮模型上下文注入。当前具体工具和 Pi Core 接入见[《通用 Agent Runtime》](agent-runtime.md)。
 
 ## 2. 三个状态与权威域
 
@@ -133,31 +135,31 @@ Attention 可以同时指导默认和自定义处理器，但不应：
 
 在当前 Artifact Repository MVP 中，一个 Artifact 根部的 `AGENTS.md` 是该 Artifact 持久 Attention 的直接载体。它保存需要跨多次任务延续的目标、范围或表达重点，而不是一次性任务、权限声明或知识副本；其 Markdown 结构不固定。Harness 不预先选择 Artifact，也不自动把 `AGENTS.md` 注入上下文；通用管理 Agent 根据对话和文件系统识别相关 Artifact，并读取各自当前的根 `AGENTS.md`。
 
-## 4. Observation Preprocessing 与 Agent 的边界
+## 4. Observation Preprocessing、Maintainer 与 Reviewer 的边界
 
 ### 4.1 Observation Preprocessing
 
 **Observation Preprocessing** 是从一批观察中发现后续值得调查的问题的过程；承担该职责的模块称为 **Observation Preprocessor**。它负责解析来源、降低执行噪声、对长输入进行有界扫描，并保留回到相关 Raw Evidence 的位置。它不负责总结 Session，也不提前决定知识层应当保存什么。
 
-Source Adapter 可以针对不同 Harness 生成选择性的 Observation View。默认视图以人类与 Agent 的语义消息为主，只保留发现局部名称和指代所需的语境；运行时注入指令、遥测和常规工具执行不应主导预处理材料。选择性视图只是发现材料，被省略的记录仍留在 Raw Evidence 中，不能因未被选中而视为不存在。
+Source Adapter 可以针对不同 Harness 生成选择性的 Observation View。默认视图以人类与 Agent 的语义消息为主，只保留发现局部名称和指代所需的语境；运行时注入指令、遥测和常规工具执行不应主导预处理材料。Adapter 可以依据各 Harness 的原始记录形式保留少量疑似 Skill 激活线索，作为回到相关 Raw Evidence 的导航，但该线索不证明激活成功或效果，也不定义跨 Harness 的正式事件模型。选择性视图只是发现材料，被省略的记录仍留在 Raw Evidence 中，不能因未被选中而视为不存在。
 
 预处理结果由若干 **Statement Candidate** 构成。Candidate 是关于原始称呼、局部指代或必要背景的待调查问题，并带有回到观察的线索；它不是拟定的 canonical title、Knowledge Statement、事实或知识变更决定。预处理应保留尚未解决的歧义，而不是用摘要或猜测把它过早消除。
 
-Candidate 与 Statement 不存在固定对应关系：多个 Candidate 可以共同支持一条 Statement，一条 Candidate 可以要求维护多条 Statement，也可以在核查后不产生任何知识变更。Knowledge Maintenance Agent 还可以在调查中发现并加入新的 Candidate，因此预处理只提供开放调查清单的初始种子，不宣称发现已经完整。
+Candidate 与 Statement 不存在固定对应关系：多个 Candidate 可以共同支持一条 Statement，一条 Candidate 可以要求维护多条 Statement，也可以在核查后不产生任何知识变更。Host 在 Maintainer 启动时把 Candidate 的表达、问题和证据起点格式化为普通 initial Todo；Maintainer 可以用通用 Todo 工具补充工作，但不维护另一份 Candidate 专用清单或结构化 resolution。
 
 默认加工路径可以概括为：
 
 ```text
-Observation -> bounded candidate discovery -> open Candidate Agenda (Run-local Working Material)
-            -> Knowledge Maintenance Agent adjudication -> Contribution Draft
-            -> Core submission boundary -> Knowledge Statement
+Observation -> bounded candidate discovery -> initial Todos (Run-local Working Material)
+            -> Knowledge Maintenance Agent investigation -> Contribution Draft
+            -> normal completion -> Host freezes Contribution -> Knowledge Statement
 ```
 
-固定的是发现与裁决分离、Candidate 的非权威性，以及 Agent 能按需回到 Raw Evidence；Candidate 的字段、分段、去重、定位编码、模型调用和呈现方式都可以替换。
+固定的是发现与知识维护分离、Candidate 的非权威性，以及 Agent 能按需回到 Raw Evidence；Candidate 的字段、分段、去重、定位编码、模型调用和呈现方式都可以替换。
 
 责任边界不取决于是否调用 LLM，而取决于输出的权威性和生命周期：
 
-- Candidate Agenda 等只服务一次知识维护运行、可以丢弃且不作为正式知识对外提供的内容，是**运行期工作材料（Run-local Working Material）**；
+- Candidate Batch、Todo 和 Contribution Draft 等只服务一次知识维护运行、可以丢弃且不作为正式知识对外提供的内容，是**运行期工作材料（Run-local Working Material）**；
 - 只有经过知识维护与统一提交边界形成的 Knowledge Statement，才进入知识层。
 
 默认 Observation Preprocessor 只产生运行期工作材料。未来若允许其他处理器直接形成正式知识，它仍应服从与 Agent 相同的知识和治理边界。
@@ -166,59 +168,67 @@ Observation -> bounded candidate discovery -> open Candidate Agenda (Run-local W
 
 **Knowledge Maintenance Agent** 负责需要多步探索的知识维护：
 
-- 以开放 Candidate Agenda、Attention 和相关已有 Knowledge Statement 作为默认起点；
-- 搜索、读取和比较现有知识，并从 Candidate 指向的位置按需读取 Raw Evidence；
-- 判断每个 Candidate 应由已有知识覆盖、形成一项或多项知识变更、与其他 Candidate 合并处理，还是不产生知识；
-- 在调查中补充遗漏的 Candidate，并为已处理 Candidate 留下明确处置；
-- 独立维护 Contribution Draft，最终形成 Knowledge Contribution。
+- 以 Host 绑定的 initial Todo、Attention 和相关已有 Knowledge Statement 作为默认起点；
+- 搜索、读取和比较现有知识，并从 Todo 中给出的位置按需读取 Raw Evidence；
+- 判断已观察的表达应由已有知识覆盖、形成一项或多项知识变更、与其他工作合并处理，还是不产生知识；
+- 用 `add_todos` 补充调查中发现的工作，并在完成后用 `complete_todos` 关闭；
+- 独立维护 Contribution Draft，在正常自然结束后由 Host 冻结为 Knowledge Contribution。
 
-Knowledge Maintenance Agent 是一个普通、可替换的工具使用 Agent。它的角色只由本次运行的 System Prompt、Workspace、工具集合和最终提交协议定义，不需要知识维护专属的 loop、固定步骤或状态机。默认实现可以更换 Agent Runtime，也可以增加或替换工具，而不改变知识层的概念模型。
+Knowledge Maintenance Agent 是一个普通、可替换的工具使用 Agent。它的角色只由本次运行的 System Prompt、Workspace、工具集合和 Host 对自然结束的解释定义，不需要知识维护专属的 loop、固定步骤或状态机。默认实现可以更换 Agent Runtime，也可以增加或替换工具，而不改变知识层的概念模型。
 
-系统不为一次知识维护运行预设固定的模型轮次、工具调用次数或总时长；运行可以根据材料和不确定性继续探索，并允许用户取消。上下文管理由可替换的 Agent Runtime 负责，但不能改变权限、来源访问范围或最终提交边界。
+系统不为一次知识维护运行预设固定的模型轮次、工具调用次数或总时长；运行可以根据材料和不确定性继续探索，并允许用户取消。上下文管理由可替换的 Agent Runtime 负责，但不能改变权限、来源访问范围或 Host 对运行结果的完整性边界。
 
-Candidate 的问题和上下文只是导航，不是事实或证据。Agent 不需要默认读取全部原始观察，但作出知识判断时应以现有知识和按需展开的 Raw Evidence 为依据，而不能把预处理输出当作已经裁决的理解。追溯信息如何持久记录和校验是治理问题，不由 Agent 角色定义。
+Todo 中来自 Candidate 的问题和上下文只是导航，不是事实或证据。Agent 不需要默认读取全部原始观察，但作出知识判断时应以现有知识和按需展开的 Raw Evidence 为依据，而不能把预处理输出当作已经理解的事实。追溯信息如何持久记录和校验是治理问题，不由 Agent 角色定义。
 
-Agent 在语义上维护知识，但 Oyster Core 仍拥有权限、运行生命周期、提交和删除边界。Agent 提交贡献或变更建议，不绕过这些边界直接修改底层存储；追溯的具体机制，以及审计机制若被采用，也由治理层负责。
+Agent 在语义上维护知识，但 Oyster Core 仍拥有权限、运行生命周期、冻结、提交和删除边界。Agent 维护 Draft 并通过正常结束表示本次工作已完成，Host 才把 Draft 冻结为贡献建议；Agent 不绕过这些边界直接修改底层存储。追溯和审计机制若被采用，也由治理层负责。
 
 默认维护策略以细粒度、可独立检索和修订的知识主体为中心。这里的“实体”只表示能够被识别和讨论的对象或主体，是选择候选知识的启发式，不引入新的 Entity 数据类型、固定分类或图本体。一个 Statement 默认以一个专名、术语或其他可指称主体为标题，正文再形成关于它的自足理解；主体所在场景、与其他 Statement 的关系和具体属性不应被拼接成主题式标题。Session 摘要、时间线、工作日志，以及工具调用、文件修改、测试过程和短期执行结果，不应仅因出现在对话中就成为知识。只有当它们形成可复用理解，或 Attention 明确要求保留任务历史时，才进入维护范围。
 
-未来可以探索对抗式盲审：让未接触原始 Session 的独立 LLM 或 Agent 只依据 Contribution Draft 中的 Statement、现有知识及正文中的显式引用，判断内容能否独立理解，从而暴露维护 Agent 因已知原始上下文而忽略的隐含指代和语境缺失。它只是一种可替换的质量校验，不构成新的认识论层或必需角色，当前 MVP 不实现。通用管理 Agent 当前拥有的 `spawn_agent` 只提供独立上下文委派能力，不等同于已经定义盲审 Skill、Prompt、触发条件或知识加工流程。
+### 4.3 Reviewer
 
-### 4.3 Workspace
+**Reviewer** 与 Maintainer 对应，负责从知识消费者视角审阅一份冻结的 Contribution Draft 及其相关现有知识，判断拟提交的 Statement 是否能够脱离原始 Session 独立理解，并检查相关知识邻域的内部一致性、引用完整性、概念边界和必要背景。Reviewer 解决的是 Maintainer 因已经接触原始语境而可能无意识补全缺失信息的问题，不重新执行知识维护，也不直接修改 Draft 或正式知识。
 
-Knowledge Maintenance Agent 的 **Workspace** 是一次知识维护运行所使用的临时工作面。它组合已有材料供 Agent 读取和提交结果，不构成第四个权威域，不是新的长期存储，也不拥有其中任何内容的权威版本。运行结束后，Workspace 可以丢弃或重建。
+Reviewer 必须在独立上下文中运行，并且不能访问 Raw Evidence、Observation View、预处理 Candidate、Maintainer Todo、Maintainer transcript、工具轨迹或其他包含原始 Session 隐含语境的材料。它可以使用受限的知识搜索与读取工具，展开 Draft 中的显式引用和相关现有 Statement。Host 也可以把 Draft 中待审阅的 Statement 绑定为 Reviewer 的通用 initial Todo；这种清单只组织本次审阅，不宣布判断正确，也不构成新的知识层或长期审计记录。具体工具和检查结果表示属于可替换实现。
+
+Reviewer 的结论只对它实际审阅的精确 Draft 和知识版本有效，Draft 发生变化后不能把旧结论当作新版本的审阅结果。Reviewer 与 Maintainer 如何在外层交换结果、何时触发重新维护，以及审阅如何影响正式提交，当前尚未设计；通用 Agent Todo 不承担这项跨运行交接职责。
+
+当前方向不增加独立的证据审查角色。知识变更是否得到 Raw Evidence 支持、是否保留必要限定以及是否遗漏值得维护的观察，仍由能够读取原始证据的 Maintainer 负责；Reviewer 不因缺少 Raw Evidence 而宣称已经验证这些性质。未来若真实质量问题证明需要第二次独立证据审查，应另行定义其长材料覆盖、成本和上下文边界，而不能扩张 Reviewer 的输入来破坏其隔离目的。
+
+### 4.4 Workspace
+
+Knowledge Maintenance Agent 的 **Workspace** 是一次知识维护运行所使用的临时工作面。它组合 Agent 可操作的运行期状态和授权材料，不构成第四个权威域，不是新的长期存储，也不拥有其中任何内容的权威版本。运行结束后，Workspace 可以丢弃或重建。
 
 一个 Workspace 在概念上只需要组合：
 
 - 本次运行的 Attention 与处理范围；
-- 由预处理结果初始化、也允许 Agent 补充和处置的开放 Candidate Agenda；
+- 由预处理 Candidate 投影得到、也允许 Agent 补充和完成的通用 Todo Store；
 - 按需回溯的只读 Raw Evidence；
 - 与本次任务相关的已有 Knowledge Statement；
-- 与 Candidate Agenda 分离的 Contribution Draft；
-- 独立的 Knowledge Contribution 提交边界。
+- 与 Todo 分离的 Contribution Draft；
+- Agent 自然结束时由 Host 冻结 Knowledge Contribution 的边界。
 
-Candidate Agenda 跟踪本次运行调查了哪些问题，Contribution Draft 跟踪准备提交哪些 Statement。处置 Candidate 不自动写入知识，修改 Draft 也不自动表示某个 Candidate 已经处理；两者分离才能表达多对多、无知识变更和调查中新增问题。Core 可以在最终提交前要求所有开放 Candidate 都有明确处置；未满足时提交不结束运行，而是把仍需处理的工作反馈给 Agent 继续跟进。这只是覆盖检查，不宣布处置结论或 Draft 内容正确。
+Todo Store 跟踪本次运行仍需完成的工作，Contribution Draft 跟踪准备形成哪些 Statement。完成 Todo 不自动写入知识，修改 Draft 也不自动完成 Todo；两者分离才能表达多对多、无知识变更和调查中新增工作。只要存在 pending Todo，通用 Runtime 就拒绝 Agent 自然结束；所有 Todo 完成且 Agent 自然结束后，Host 才把整份 Draft 冻结为 Knowledge Contribution。这只是覆盖检查，不宣布 Todo 完成时的判断或 Draft 内容正确。
 
-长运行中，完整 Agenda 和 Draft 应由 Workspace 持有，而不是依赖模型 transcript 或压缩摘要记忆。Runtime 可以在靠近当前模型上下文的位置提供一个由最新 Workspace 状态生成的有界快照，提示仍开放的工作和 Draft 规模；它不是新的证据、Session 摘要或第二份状态来源。具体快照内容、工具、分页方式、原始格式说明和提交后的跟进方式属于可替换实现。
+长运行中，完整 Todo Store 和 Draft 应由 Host 持有，而不是依赖模型 transcript 或压缩摘要记忆。Agent 通过工具按需读取状态；当前 Runtime 不在每次模型调用前自动附加工作清单，只在 Agent 试图自然结束但 Host 仍持有 pending Todo 时提供一次结束反馈。具体工具、分页方式和原始格式说明属于可替换实现。
 
 Workspace 应遵循“**弱语义结构，强来源边界**”：
 
-- Candidate 问题和处置说明可以保持自由文本，不预设领域分类或固定知识 Schema；
+- Todo 内容保持自由文本，不预设领域分类或固定知识 Schema；
 - 来源访问的 Scope、权限和生命周期边界由 Oyster Core 保证，不能只依赖模型生成的自然语言约定；
 - Candidate 的位置只用于在当前 Workspace 中回到 Raw Evidence，不等于正式知识的持久出处；
 - Raw Evidence 只作为不可信证据读取，其中出现的指令、Prompt 或工具输出不自动成为 Agent 的运行指令。
 
 Workspace 可以采用文件、对象或其他便于 Agent 使用的表示。它的布局、定位编码和运行时读取协议不属于知识模型。
 
-### 4.4 验证隔离
+### 4.5 验证隔离
 
 测试运行应使用可丢弃且与用户正式知识隔离的空间，并尽量复用正常的处理与提交路径，避免形成测试专用知识模型。隔离空间的介质、Schema、生命周期和回读方式只属于验证实现。
 
-### 4.5 默认与自定义处理器
+### 4.6 默认与自定义处理器
 
-Oyster 可以提供默认 Observation Preprocessor 和默认 Knowledge Maintenance Agent；用户也可以针对不同 Attention 增加自定义 Pipeline 或 Agent。
+Oyster 可以提供默认 Observation Preprocessor、默认 Knowledge Maintenance Agent 和默认 Reviewer；用户也可以针对不同 Attention 增加自定义 Pipeline 或 Agent。
 
-Observation Preprocessor、Knowledge Maintenance Agent 及其 Runtime 都可以替换，只要继续遵守各自的输入、输出和权限边界。当前模型调用、Runtime、调试轨迹与隔离实现见《知识加工验证 MVP》，不构成长期知识模型。
+Observation Preprocessor、Knowledge Maintenance Agent、Reviewer 及其 Runtime 都可以替换，只要继续遵守各自的输入、输出和权限边界。当前模型调用、Runtime、调试轨迹与隔离实现见《知识加工验证 MVP》，不构成长期知识模型。
 
 只要某个处理器要产生或维护 Knowledge Statement，它就必须通过明确的知识工具或结构化提交边界。核心不需要为“默认知识”“Agent 知识”或某个自定义视角建立不同的知识类型；Knowledge Contribution 是结构化加工 Pipeline 的当前提交形式，`upsert_knowledge` 是通用管理 Agent 的当前直接维护形式。
 
@@ -235,7 +245,7 @@ Observation Preprocessor、Knowledge Maintenance Agent 及其 Runtime 都可以�
 
 ### 5.1 通用管理 Agent 与领域边界
 
-观察、Knowledge 和 Artifact 的区分，不要求为每个权威域建立不同的对话 Agent。当前面向用户的通用管理 Agent 在所有 Session 中常驻八项工具：`read`、`edit`、`write`、`bash`、`search_knowledge`、`read_knowledge`、`upsert_knowledge` 和 `spawn_agent`。同一轮可以只对话、只查询 Knowledge、维护 Knowledge、修改一个或多个 Artifact、把完整任务委派给独立上下文 Agent，或组合这些工作。
+观察、Knowledge 和 Artifact 的区分，不要求为每个权威域建立不同的对话 Agent。当前面向用户的通用管理 Agent 在所有 Session 中常驻十一项工具：`read`、`edit`、`write`、`bash`、`search_knowledge`、`read_knowledge`、`upsert_knowledge`、`spawn_agent`、`add_todos`、`complete_todos` 和 `list_todos`。同一轮可以只对话、只查询 Knowledge、维护 Knowledge、修改一个或多个 Artifact、组织运行期 Todo、把完整任务委派给独立上下文 Agent，或组合这些工作。
 
 `spawn_agent` 创建一次临时委派运行，而不是新的用户 Session、固定角色、状态域或权威域。子 Agent 不继承父 transcript，但复用同一通用身份、模型、环境事实和工具能力；其最终回答作为普通 Tool Result 返回父 Agent，由父 Agent 继续判断和行动。Harness 不预设 reviewer、planner 等子 Agent 类型，也不把任何专用流程固化到这项通用能力中。
 
@@ -247,23 +257,28 @@ Session 不绑定 Artifact、Project、Workspace 或 `cwd`。四个 Coding 工�
 
 `bash` 的局部 `PATH` 提供 APP 捆绑的标准 Git CLI，使 Agent 使用普通 `git` 命令；不建立专用 Git Tool 或替代协议。Harness 不自动 commit、branch、worktree、rollback、merge 或处理冲突，也不通过 Shell 命令限制代替 Agent 的判断。
 
-结构化知识加工链路中的 Knowledge Maintenance Agent 仍使用一次运行的 Workspace、Raw Evidence 来源和 Knowledge Contribution 提交协议。这是该 Pipeline 的输入、输出与数据完整性契约，不是通用管理 Agent 的 Artifact 权限模型。两者可以复用模型—工具循环与上下文压缩 Runtime，但不应因此把加工测试的 Sandbox 或 Candidate 流程强加给普通对话。
+结构化知识加工链路中的 Knowledge Maintenance Agent 仍使用一次运行的 Workspace、Raw Evidence 来源，以及 Agent 自然结束后由 Host 冻结 Contribution 的边界。这是该 Pipeline 的输入、输出与数据完整性契约，不是通用管理 Agent 的 Artifact 权限模型。两者可以复用模型—工具循环与上下文压缩 Runtime，但不应因此把加工测试的 Sandbox 或 Candidate 投影强加给普通对话。
 
 ### 5.2 协作与反馈
 
 ```mermaid
 flowchart LR
   O["Observation"] --> PP["Observation Preprocessors"]
-  PP --> CA["Open Candidate Agenda"]
+  PP --> CS["Statement Candidate Seed"]
   AT["Attention"] --> PP
-  CA --> W["Run-local Workspace"]
+  CS --> IT["Host-bound initial Todos"]
+  IT --> W["Run-local Workspace"]
   O -. "bounded Raw Evidence access" .-> W
   K["Shared Knowledge Statements"] --> W
   AT --> W
   W --> KA["Knowledge Maintenance Agents"]
   KA --> CD["Contribution Draft"]
-  CD --> SG["Core submit gate"]
-  SG -->|"Knowledge Contribution"| K
+  CD --> HF["Host freezes Contribution"]
+  HF --> CB["Core contribution boundary"]
+  CB --> K
+  HF -. "future isolated review input" .-> RV["Reviewer"]
+  K -.-> RV
+  RV --> RO["Review result; outer integration undecided"]
   U["User conversation"] --> GM["General management Agent"]
   K --> GM
   AT --> GM
@@ -274,11 +289,12 @@ flowchart LR
   GM -. "possible deeper investigation" .-> KA
 ```
 
-这张图表达三项已经确定的关系：
+这张图表达四项已经确定的关系：
 
 1. **共享 Attention**：同一个用户关注可以同时影响观察预处理、知识维护和最终 Artifact；
 2. **当前 Artifact 是修订输入**：后续修订读取并延续当前 Artifact，不能只从知识全量重建后覆盖它；
 3. **一个 Agent、两个修改目标**：通用管理 Agent 可以在同一对话中修改 Artifact 与 Knowledge，但文件修改不会自动成为 Knowledge；`upsert_knowledge` 是单独的知识层操作。
+4. **隔离审阅**：Reviewer 只从 Draft 与知识层判断拟提交内容能否独立理解，不访问 Raw Evidence，也不替代 Maintainer 的证据判断。
 
 图中的 `possible deeper investigation` 只表示通用管理 Agent 可以在需要时借助结构化知识加工链路，不固定 `Knowledge Need`、审批流或自动触发协议。类似地，是否记录某次 Artifact 修订实际使用的 Statement、以何种粒度记录，以及如何据此发现受影响 Artifact，均留给后续治理设计。即使未来保存系统依赖，它也与读者可见引用彼此独立，不能自动把旧知识或 Artifact 内容替换为语义上相似的新内容。
 
@@ -292,7 +308,8 @@ flowchart LR
 | --- | --- | --- |
 | Source Adapter / Observation Pipeline | 发现、定位、版本校验、读取、Raw Evidence、Canonical Activity | LLM 解释、最终知识、Artifact 编辑 |
 | Observation Preprocessor | 有界发现带回源线索的 Candidate 问题 | 把 Candidate 当作事实或 Statement、直接提交长期知识 |
-| Knowledge Maintenance Agent | 在结构化加工运行中调查并处置开放 Candidate、按需核查 Raw Evidence、维护 Contribution Draft | 绕过该 Pipeline 的 Workspace 与 Contribution 提交协议 |
+| Knowledge Maintenance Agent | 在结构化加工运行中完成通用 Todo、按需核查 Raw Evidence、维护 Contribution Draft | 绕过该 Pipeline 的 Workspace 与 Host 冻结、提交边界 |
+| Reviewer | 在不接触 Raw Evidence 的独立上下文中审阅冻结 Draft 与相关知识，报告自足性、内部一致性和引用问题 | 重新解释原始 Session、判断证据覆盖、直接修改 Draft 或正式知识 |
 | Oyster Core | 持有知识加工的运行期 Workspace 与提交边界；提供正式 Knowledge 工具、固定 Artifact Repository、通用 Agent Runtime、临时子 Agent 运行能力和最小环境事实 | 为通用管理 Agent 预选 Artifact、按话题切换工具，或预设 Artifact 内部结构与用户分组 |
 | 用户 | 直接创建或编辑 Artifact，并决定当前关注与交付目标 | 让编辑自动成为知识或自动影响其他 Artifact |
 | 通用管理 Agent | 根据对话探索和维护 Knowledge 与一个或多个 Artifact，并在需要时形成 Projection | 让一次文件修改在没有知识工具操作时自动成为 Knowledge |
@@ -306,12 +323,13 @@ flowchart LR
 3. 主体的语境、属性以及 Statement 之间的领域关系由正文及其中的动态名称引用表达，不压入主题式标题，也不增加固定 Relation 实体、关系词表或领域 Schema。
 4. `[[canonical title]]` 无论出现于当前还是历史正文，都在读取时指向当前知识视图中拥有该名称的 Statement；`[[canonical title|local display text]]` 的右侧只服务局部表达。
 5. canonical title 与正文使用有实际含义的自然语言，不以机械编号或枚举代替语义。
-6. 预处理 Candidate 是待裁决的问题而不是知识；Raw Evidence 与已有知识才是裁决依据。
+6. 预处理 Candidate 是待调查的问题而不是知识；Host 只在启动 Maintainer 时把它投影为普通 Todo，Raw Evidence 与已有知识才是知识判断依据。
 7. Attention 影响处理和表达，但不改写观察，也不把共享知识拆成互相隔离的真相。Artifact 可以围绕 Attention 自然分组，但分组不能反向成为知识分区。
 8. Projection 是形成消费输出或初始化、修订 Artifact 的活动，不是第三个持久状态域本身。
 9. Artifact 拥有独立身份、当前状态和修订生命周期，允许用户或授权 Agent 修改；后续修订以当前 Artifact 为输入，并保留仍然有效的既有编辑。
 10. Artifact 不限于文档、Markdown 或单一文件，也不是新的世界事实来源，不能自动回流为知识；内容形式不改变它所属的权威域。
 11. Agent 身份不定义状态域；同一个通用管理 Agent 可以维护 Knowledge 与 Artifact，而每次工具操作仍落入各自的权威状态。
+12. Reviewer 在与原始 Session 隔离的上下文中审阅冻结 Draft 和相关知识，只检查知识能否自足、连贯并完整解析引用；Raw Evidence 的支持与覆盖仍由 Maintainer 负责，当前不增加独立证据审查角色。
 
 ### 7.2 治理预期
 
@@ -333,11 +351,11 @@ flowchart LR
 - 知识层使用数据库、本地文件或其他介质；
 - 路径、来源 selector、运行时游标、Contribution 和审计结构；
 - 出站和反向引用、全文、Embedding、相似度、图或超图索引；
-- 预处理分段、Candidate 字段与组织方式、Agenda 和 Draft 的具体实现、近上下文快照以及原始证据读取协议；
+- 预处理分段、Candidate 字段与组织方式、Todo Store 和 Draft 的具体实现、近上下文快照以及原始证据读取协议；
 - 模型、Agent Runtime、角色名称、上下文压缩、工具参数、调试轨迹和调度方式；
 - 测试隔离空间的介质、Schema、生命周期和结果展示；
 - 当前以 `userData/artifacts/` Git Repository、一级目录、根 `AGENTS.md` 和路径身份承载 Artifact 的方式，以及捆绑 Git Runtime 的具体版本、包内位置与更新机制。
-- 通用管理 Agent 当前采用的具体 Runtime、八项工具参数、最小环境 Prompt 文案和高信任本机执行方式。
+- 通用管理 Agent 当前采用的具体 Runtime、十一项工具参数、最小环境 Prompt 文案和高信任本机执行方式。
 
 ## 8. 可探讨方向与未决定事项
 

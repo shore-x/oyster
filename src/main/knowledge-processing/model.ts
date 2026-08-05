@@ -9,8 +9,8 @@ import type {
   KnowledgeProcessingSnapshot,
   ProcessingStageId
 } from '../../shared/knowledge-processing'
+import type { AgentTodo, AgentTodoCounts } from '../../shared/agent-runtime'
 import type { StatementCandidate as DiscoveredStatementCandidate } from './statement-candidate-batch'
-import type { StatementCandidate as AgendaStatementCandidate } from './statement-candidate-agenda'
 
 export interface StoredProcessingStage {
   stageId: ProcessingStageId
@@ -72,6 +72,8 @@ export interface KnowledgeAgentRunInput {
   sourceRef: string
   contributionRunRef: string
   attention?: string
+  /** Host-owned initial work items bound to this Agent run, not prompt content. */
+  initialTodos?: readonly string[]
   reasoningEffort?: ReasoningEffort
   onTrace?: (event: KnowledgeAgentTraceEvent) => void
   signal: AbortSignal
@@ -101,13 +103,13 @@ export type KnowledgeAgentTraceEvent =
     }
   | {
       type: 'workspace_status'
-      candidates: { total: number; open: number; resolved: number }
+      todos: AgentTodoCounts
       draftStatementCount: number
     }
 
 export interface KnowledgeAgentRunResult {
   contribution: KnowledgeContributionDraft
-  statementCandidates: AgendaStatementCandidate[]
+  todos: AgentTodo[]
   modelCallCount: number
   toolCalls: string[]
 }

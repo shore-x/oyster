@@ -72,16 +72,11 @@ function candidateBatch(
   })
 }
 
-function resolvedStatementCandidates(input: KnowledgeAgentRunInput) {
+function completedCandidateTodos(input: KnowledgeAgentRunInput) {
   return input.statementCandidates.map((candidate, index) => ({
-    ref: `C${String(index + 1).padStart(6, '0')}`,
-    expression: candidate.expression,
-    question: candidate.question,
-    evidenceLocations: candidate.locations.map(({ line, offset }) => (
-      `L${String(line).padStart(6, '0')}:C${offset}`
-    )),
-    status: 'resolved' as const,
-    resolution: 'Covered by the submitted Knowledge Contribution.'
+    id: `T${String(index + 1).padStart(6, '0')}`,
+    content: `Investigate the observed name or expression: ${candidate.expression}`,
+    status: 'completed' as const
   }))
 }
 
@@ -243,9 +238,9 @@ function normalAgentFactory(options: {
           }
         ]
       },
-      statementCandidates: resolvedStatementCandidates(input),
+      todos: completedCandidateTodos(input),
       modelCallCount: 2,
-      toolCalls: ['search_knowledge', 'submit_knowledge_contribution']
+      toolCalls: ['search_knowledge', 'complete_todos']
     }
   })
 }
@@ -353,7 +348,7 @@ describe('KnowledgeFullChainService', () => {
         durationMs: record.result.durationMs,
         sourceDisplayName: record.result.session.sourceDisplayName,
         statementCount: record.result.knowledge.statements.length,
-        candidateCount: record.result.maintenance.statementCandidates.length,
+        candidateCount: record.result.preprocessing.statementCandidates.length,
         preprocessorModel: record.result.preprocessing.execution.model,
         maintainerModel: record.result.maintenance.execution.model
       })),
@@ -501,12 +496,11 @@ describe('KnowledgeFullChainService', () => {
         locations: [{ line: 1, offset: 0 }]
       }
     ])
-    expect(result.maintenance.statementCandidates).toEqual([
+    expect(result.maintenance.todos).toEqual([
       expect.objectContaining({
-        ref: 'C000001',
-        expression: 'summaries',
-        evidenceLocations: ['L000001:C0'],
-        status: 'resolved'
+        id: 'T000001',
+        content: expect.stringContaining('summaries'),
+        status: 'completed'
       })
     ])
 
@@ -564,12 +558,12 @@ describe('KnowledgeFullChainService', () => {
           content: 'The current understanding references [[Oyster architecture]].'
         }]
       },
-      statementCandidates: resolvedStatementCandidates(input),
+      todos: completedCandidateTodos(input),
       modelCallCount: 1,
       toolCalls: [
         'search_knowledge',
         'read_knowledge',
-        'submit_knowledge_contribution'
+        'complete_todos'
       ]
     })))
 
@@ -588,7 +582,7 @@ describe('KnowledgeFullChainService', () => {
       .toBe('The earlier understanding.')
   })
 
-  it('keeps global candidate locations through segmented discovery, Agent agenda, and Sandbox commit', async () => {
+  it('keeps global candidate locations through segmented discovery, initial Todos, and Sandbox commit', async () => {
     const discovery = fakeDiscovery({
       content: 'line-one\nline-two\nline-three\nline-four'
     })
@@ -628,9 +622,9 @@ describe('KnowledgeFullChainService', () => {
             content: 'Knowledge grounded in the final global range.'
           }]
         },
-        statementCandidates: resolvedStatementCandidates(input),
+        todos: completedCandidateTodos(input),
         modelCallCount: 1,
-        toolCalls: ['submit_knowledge_contribution']
+        toolCalls: ['complete_todos']
       }
     }))
     const fullChainTraceSnapshots: Array<ReturnType<typeof harness.processing.snapshot>['debugTraces'][number]> = []
@@ -677,16 +671,14 @@ describe('KnowledgeFullChainService', () => {
     expect(currentRunTraces.at(-1)?.status).toBe('completed')
     expect(currentRunTraces.slice(0, -1).every((trace) => trace.status === 'running')).toBe(true)
     expect(harness.backend.generationCalls).toHaveLength(2)
-    expect(result.maintenance.statementCandidates).toEqual([
+    expect(result.maintenance.todos).toEqual([
       expect.objectContaining({
-        expression: 'line-one',
-        evidenceLocations: ['L000001:C0'],
-        status: 'resolved'
+        content: expect.stringContaining('line-one'),
+        status: 'completed'
       }),
       expect.objectContaining({
-        expression: 'line-four',
-        evidenceLocations: ['L000004:C0'],
-        status: 'resolved'
+        content: expect.stringContaining('line-four'),
+        status: 'completed'
       })
     ])
     expect(result.knowledge.statements[0]).toEqual({
@@ -754,9 +746,9 @@ describe('KnowledgeFullChainService', () => {
           { title: ' Duplicate title ', content: 'Second body.' }
         ]
       },
-      statementCandidates: resolvedStatementCandidates(input),
+      todos: completedCandidateTodos(input),
       modelCallCount: 1,
-      toolCalls: ['submit_knowledge_contribution']
+      toolCalls: ['complete_todos']
     }))
     const fullChain = harness.createFullChain(forgedFactory)
 

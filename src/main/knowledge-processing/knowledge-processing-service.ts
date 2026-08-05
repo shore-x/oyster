@@ -975,7 +975,7 @@ export class KnowledgeProcessingService {
       }
       if (event.type === 'workspace_status') {
         maintenance.workspace = {
-          candidates: { ...event.candidates },
+          todos: { ...event.todos },
           draftStatementCount: event.draftStatementCount
         }
         return
@@ -1337,10 +1337,7 @@ export class KnowledgeProcessingService {
         stageId,
         preprocessingRunId: workspace.runId,
         contribution: result.contribution,
-        statementCandidates: result.statementCandidates.map((candidate) => ({
-          ...candidate,
-          evidenceLocations: [...candidate.evidenceLocations]
-        })),
+        todos: result.todos.map((todo) => ({ ...todo })),
         debugTrace: completedDebugTrace,
         durationMs: Date.now() - startedAt,
         completedAt: new Date().toISOString(),

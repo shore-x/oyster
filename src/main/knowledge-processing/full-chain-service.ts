@@ -163,7 +163,7 @@ export class KnowledgeFullChainService {
         completedAt: new Date().toISOString()
       }
       this.history?.save({
-        formatVersion: 1,
+        formatVersion: 2,
         runId,
         ...(input.attention ? { attention: input.attention } : {}),
         configuration: {

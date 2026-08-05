@@ -1,12 +1,13 @@
 import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
 import type { AvailableSessionSummary } from '../../../shared/discovery'
 import type { KnowledgeCommitResult, KnowledgeStatement } from '../../../shared/knowledge'
+import type { AgentTodo } from '../../../shared/agent-runtime'
 import type {
   KnowledgeProcessingDebugTrace,
   ObservationPreprocessingProgress,
   ProcessingConnectionView,
   ProcessingStageView,
-  StatementCandidateView
+  StatementCandidateSeed
 } from '../../../shared/knowledge-processing'
 import {
   backendLabel,
@@ -32,7 +33,8 @@ export interface FullChainResultView {
   runId: string
   completedAt?: string
   durationMs?: number
-  statementCandidates: StatementCandidateView[]
+  statementCandidates: StatementCandidateSeed[]
+  todos: AgentTodo[]
   debugTrace: KnowledgeProcessingDebugTrace
   steps: FullChainStepView[]
   statements: KnowledgeStatement[]
@@ -123,8 +125,8 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
     return undefined
   })
   const visibleDebugTrace = createMemo(() => props.debugTrace ?? props.result?.debugTrace)
-  const resolvedCandidateCount = createMemo(() => props.result?.statementCandidates.filter(
-    (candidate) => candidate.status === 'resolved'
+  const completedTodoCount = createMemo(() => props.result?.todos.filter(
+    (todo) => todo.status === 'completed'
   ).length ?? 0)
   const completedPreprocessingCalls = createMemo(() => visibleDebugTrace()?.preprocessing?.calls.filter(
     (call) => call.status === 'completed'
@@ -242,7 +244,7 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
                     </div>
                     <div>
                       <span class="processing-debug__marker" aria-hidden="true" />
-                      <div><strong>知识维护</strong><p>{trace().maintenance ? `${trace().maintenance!.modelCallCount} 次模型 · ${trace().maintenance!.toolCallCount} 次工具 · ${trace().maintenance!.workspace?.candidates.open ?? 0} 个候选待处理` : '等待预处理完成'}</p></div>
+                      <div><strong>知识维护</strong><p>{trace().maintenance ? `${trace().maintenance!.modelCallCount} 次模型 · ${trace().maintenance!.toolCallCount} 次工具 · ${trace().maintenance!.workspace?.todos.pending ?? 0} 个 Todo 待处理` : '等待预处理完成'}</p></div>
                     </div>
                   </div>
                   <Show when={trace().error}>{(error) => <p class="processing-debug__error">{error()}</p>}</Show>
@@ -266,14 +268,14 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
               <div class="chain-test__result-heading">
                 <div>
                   <h2>Sandbox 结果</h2>
-                  <p>隔离知识已经生成；正文与候选裁决放在结果详情中。</p>
+                  <p>隔离知识已经生成；正文、预处理候选与 Maintainer Todo 放在结果详情中。</p>
                 </div>
                 <span>{result().completedAt ? `完成于 ${formatTime(result().completedAt)}` : ''}</span>
               </div>
               <div class="chain-test__result-metrics">
                 <div><strong data-testid="full-chain-result-statement-count">{result().statements.length}</strong><span>Statements</span></div>
                 <div><strong data-testid="full-chain-result-candidate-count">{result().statementCandidates.length}</strong><span>候选</span></div>
-                <div><strong>{resolvedCandidateCount()}</strong><span>已裁决</span></div>
+                <div><strong>{completedTodoCount()}</strong><span>Todo 已完成</span></div>
                 <div><strong>{result().durationMs === undefined ? '—' : formatDuration(result().durationMs!)}</strong><span>耗时</span></div>
               </div>
               <Show when={result().statements.length}>

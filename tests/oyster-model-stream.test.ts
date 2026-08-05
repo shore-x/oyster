@@ -18,8 +18,8 @@ function connection(
 }
 
 const TOOL = {
-  name: 'submit_knowledge_contribution',
-  description: 'Submit the candidate.',
+  name: 'record_test_result',
+  description: 'Record a test result.',
   parameters: Type.Object({ content: Type.String() }, { additionalProperties: false })
 }
 
@@ -84,7 +84,7 @@ describe('Oyster model Agent stream', () => {
                 index: 0,
                 id: 'call-1',
                 type: 'function',
-                function: { name: 'submit_knowledge_contribution', arguments: '{"content":' }
+                function: { name: 'record_test_result', arguments: '{"content":' }
               }]
             },
             finish_reason: null
@@ -137,7 +137,7 @@ describe('Oyster model Agent stream', () => {
     expect(result.content).toContainEqual(expect.objectContaining({
       type: 'toolCall',
       id: 'call-1',
-      name: 'submit_knowledge_contribution',
+      name: 'record_test_result',
       arguments: { content: 'candidate' }
     }))
   })
@@ -215,7 +215,7 @@ describe('Oyster model Agent stream', () => {
         type: 'function_call',
         id: 'fc-1',
         call_id: 'call-1',
-        name: 'submit_knowledge_contribution',
+        name: 'record_test_result',
         arguments: '{"content":"candidate"}',
         status: 'completed'
       }
@@ -281,7 +281,7 @@ describe('Oyster model Agent stream', () => {
     expect(result.stopReason).toBe('toolUse')
     expect(result.content).toContainEqual(expect.objectContaining({
       type: 'toolCall',
-      name: 'submit_knowledge_contribution',
+      name: 'record_test_result',
       arguments: { content: 'candidate' }
     }))
   })
@@ -322,7 +322,7 @@ describe('Oyster model Agent stream', () => {
               id: 'call-filtered',
               type: 'function',
               function: {
-                name: 'submit_knowledge_contribution',
+                name: 'record_test_result',
                 arguments: '{"content":"must not execute"}'
               }
             }]

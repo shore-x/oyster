@@ -27,13 +27,13 @@ describe('agent history adapters', () => {
   it.each([
     {
       adapter: new ClaudeHistoryAdapter(),
-      formatVersion: 'claude-jsonl-v2',
+      formatVersion: 'claude-jsonl-v3',
       context: 'Claude · record=assistant · role=assistant · blocks=text',
       record: { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: `Claude ${'😀'.repeat(6_000)}` }] } }
     },
     {
       adapter: new PiHistoryAdapter(),
-      formatVersion: 'pi-jsonl-v2',
+      formatVersion: 'pi-jsonl-v3',
       context: 'Pi · record=message · role=assistant',
       record: { type: 'message', message: { role: 'assistant', content: `Pi ${'😀'.repeat(6_000)}` } }
     }
@@ -66,6 +66,82 @@ describe('agent history adapters', () => {
       expect(first < 0xdc00 || first > 0xdfff).toBe(true)
       expect(last < 0xd800 || last > 0xdbff).toBe(true)
     }
+  })
+
+  it('marks Claude Skill tools and SKILL.md reads without marking routine reads', () => {
+    const records = [
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'deep-research' } }]
+        }
+      },
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool_use', name: 'Read', input: { file_path: '/opt/skills/code-review/SKILL.md' } }]
+        }
+      },
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool_use', name: 'Read', input: { file_path: '/work/README.md' } }]
+        }
+      }
+    ]
+    const view = new ClaudeHistoryAdapter().createObservationView(
+      records.map((record) => JSON.stringify(record)).join('\n')
+    )
+
+    expect(view.units.find((unit) => unit.lineNumber === 1)?.recordContext)
+      .toContain('skill_hint=deep-research')
+    expect(view.units.find((unit) => unit.lineNumber === 2)?.recordContext)
+      .toContain('skill_hint=code-review')
+    expect(view.units.find((unit) => unit.lineNumber === 3)?.recordContext)
+      .not.toContain('skill_hint=')
+  })
+
+  it('marks Pi Skill expansion and SKILL.md reads without marking routine reads', () => {
+    const records = [
+      {
+        type: 'message',
+        message: {
+          role: 'user',
+          content: '<skill name="release-review">instructions</skill>'
+        }
+      },
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [{
+            type: 'toolCall',
+            name: 'read',
+            arguments: { path: '/opt/skills/pi-helper/SKILL.md' }
+          }]
+        }
+      },
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'toolCall', name: 'read', arguments: { path: '/work/README.md' } }]
+        }
+      }
+    ]
+    const view = new PiHistoryAdapter().createObservationView(
+      records.map((record) => JSON.stringify(record)).join('\n')
+    )
+
+    expect(view.units.find((unit) => unit.lineNumber === 1)?.recordContext)
+      .toContain('skill_hint=release-review')
+    expect(view.units.find((unit) => unit.lineNumber === 2)?.recordContext)
+      .toContain('skill_hint=pi-helper')
+    expect(view.units.find((unit) => unit.lineNumber === 3)?.recordContext)
+      .not.toContain('skill_hint=')
   })
 
   it('keeps JSON escape sequences intact at adapter-owned long-record boundaries', () => {
@@ -120,7 +196,7 @@ describe('agent history adapters', () => {
     const rawLines = records.map((record) => JSON.stringify(record))
     const view = new CodexHistoryAdapter().createObservationView(rawLines.join('\n'))
 
-    expect(view.formatVersion).toBe('codex-jsonl-v4')
+    expect(view.formatVersion).toBe('codex-jsonl-v5')
     expect(view.rawLines).toEqual(rawLines)
     expect([...new Set(view.units.map((unit) => unit.lineNumber))]).toEqual([1, 6, 8, 18, 19])
 
@@ -153,6 +229,72 @@ describe('agent history adapters', () => {
     expect(view.units.some((unit) => unit.content.includes('turn_aborted'))).toBe(false)
   })
 
+  it('keeps only Skill-related Codex runtime injections and tool calls as compact hints', () => {
+    const records = [
+      {
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{
+            type: 'input_text',
+            text: '<skill><name>openai-docs</name><instructions>runtime detail</instructions></skill>'
+          }]
+        }
+      },
+      {
+        type: 'response_item',
+        payload: {
+          type: 'custom_tool_call',
+          name: 'exec',
+          call_id: 'call-skill',
+          input: JSON.stringify({ cmd: 'sed -n 1,200p /opt/skills/deep-research/SKILL.md' })
+        }
+      },
+      {
+        type: 'response_item',
+        payload: {
+          type: 'custom_tool_call',
+          name: 'exec',
+          call_id: 'call-routine',
+          input: JSON.stringify({ cmd: 'rg TODO src' })
+        }
+      },
+      {
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{
+            type: 'input_text',
+            text: 'Review the inline <skill><name>example</name></skill> representation.'
+          }]
+        }
+      }
+    ]
+    const rawLines = records.map((record) => JSON.stringify(record))
+    const view = new CodexHistoryAdapter().createObservationView(rawLines.join('\n'))
+
+    expect(view.rawLines).toEqual(rawLines)
+    expect([...new Set(view.units.map((unit) => unit.lineNumber))]).toEqual([1, 2, 4])
+    expect(JSON.parse(view.units.find((unit) => unit.lineNumber === 1)?.modelContent ?? '')).toEqual({
+      kind: 'skill_activation_hint',
+      source: 'runtime_injection',
+      name: 'openai-docs'
+    })
+    expect(JSON.parse(view.units.find((unit) => unit.lineNumber === 2)?.modelContent ?? '')).toEqual({
+      kind: 'skill_activation_hint',
+      source: 'tool_call',
+      name: 'deep-research',
+      tool: 'exec'
+    })
+    expect(view.units.find((unit) => unit.lineNumber === 1)?.modelContent)
+      .not.toContain('runtime detail')
+    expect(view.units.some((unit) => unit.lineNumber === 3)).toBe(false)
+    expect(view.units.find((unit) => unit.lineNumber === 4)?.content).toBe(rawLines[3])
+    expect(view.units.find((unit) => unit.lineNumber === 4)?.modelContent).toBeUndefined()
+  })
+
   it('keeps long canonical Codex messages lossless and byte-bounded', () => {
     const rawLine = JSON.stringify({
       type: 'response_item',
@@ -164,7 +306,7 @@ describe('agent history adapters', () => {
     })
     const view = new CodexHistoryAdapter().createObservationView(rawLine)
 
-    expect(view.formatVersion).toBe('codex-jsonl-v4')
+    expect(view.formatVersion).toBe('codex-jsonl-v5')
     expect(view.units.length).toBeGreaterThan(1)
     expect(view.units.map((unit) => unit.content).join('')).toBe(rawLine)
     expect(view.units.every((unit) => Buffer.byteLength(unit.content, 'utf8') <= 3 * 1_024)).toBe(true)

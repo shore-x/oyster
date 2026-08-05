@@ -4,8 +4,10 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   createAssistantMessageEventStream,
+  createModels,
   fauxAssistantMessage,
-  fauxProvider
+  fauxProvider,
+  fauxToolCall
 } from '@earendil-works/pi-ai'
 import type { ModelRuntime } from '../src/main/ai-backends/model'
 import { PiChatAgent } from '../src/main/chat/pi-chat-agent'
@@ -75,6 +77,71 @@ describe('PiChatAgent', () => {
       role: 'assistant',
       text: 'Continued after compaction.'
     })
+    knowledgeStore.close()
+    await sessions.dispose()
+  })
+
+  it('binds initial Todos outside messages and hides Runtime feedback from the Chat projection', async () => {
+    const rootPath = await mkdtemp(join(tmpdir(), 'oyster-pi-chat-todos-'))
+    temporaryPaths.push(rootPath)
+    const sessions = new PiChatSessionRepository(join(rootPath, 'sessions'))
+    const knowledgeStore = new SqliteKnowledgeStore(join(rootPath, 'knowledge.sqlite'))
+    const binding = {
+      connectionId: 'connection:test',
+      modelId: 'todo-model',
+      systemPrompt: 'Complete the task.'
+    }
+    const opened = await sessions.create(binding)
+    const faux = fauxProvider()
+    faux.setResponses([
+      (context) => {
+        expect(JSON.stringify(context.messages)).not.toContain('Inspect the artifact')
+        return fauxAssistantMessage('Finished too early.')
+      },
+      (context) => {
+        expect(JSON.stringify(context.messages)).toContain('1 Todos remain pending')
+        return fauxAssistantMessage(
+          fauxToolCall('list_todos', {}),
+          { stopReason: 'toolUse' }
+        )
+      },
+      (context) => {
+        expect(JSON.stringify(context.messages)).toContain('T000001 [pending] Inspect the artifact')
+        return fauxAssistantMessage(
+          fauxToolCall('complete_todos', { ids: ['T000001'] }),
+          { stopReason: 'toolUse' }
+        )
+      },
+      fauxAssistantMessage('Finished after completing the Todo.')
+    ])
+    const models = createModels()
+    models.setProvider(faux.provider)
+    const runtime: ModelRuntime = {
+      model: { ...faux.getModel(), id: 'todo-model' },
+      streamFn: (model, context, options) => models.streamSimple(model, context, options)
+    }
+    const metadata = await opened.session.getMetadata()
+
+    await new PiChatAgent(knowledgeStore, join(rootPath, 'artifacts')).run({
+      sessionId: metadata.id,
+      session: opened.session,
+      binding,
+      runtime,
+      text: 'Start.',
+      initialTodos: ['Inspect the artifact'],
+      signal: new AbortController().signal
+    })
+
+    const detail = await sessions.detail(metadata.id)
+    expect(detail.messages.filter((entry) => entry.message.role === 'user')).toHaveLength(1)
+    expect(JSON.stringify(detail.messages)).not.toContain('The Agent cannot finish yet')
+    expect(detail.messages.at(-1)?.message).toMatchObject({
+      role: 'assistant',
+      text: 'Finished after completing the Todo.'
+    })
+    const rawContext = await opened.session.buildContext()
+    expect(rawContext.messages).toContainEqual(expect.objectContaining({ role: 'runtimeFeedback' }))
+
     knowledgeStore.close()
     await sessions.dispose()
   })

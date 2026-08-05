@@ -1,6 +1,5 @@
 import {
   Agent,
-  type AgentMessage,
   type AgentTool,
   type StreamFn
 } from '@earendil-works/pi-agent-core'
@@ -11,13 +10,20 @@ import {
   type Model,
   type Usage
 } from '@earendil-works/pi-ai'
-import { ModelConnectionFailureError } from '../ai-backends/model'
+import {
+  ModelConnectionFailureError,
+  ModelOutputTruncatedError
+} from '../ai-backends/model'
 import type { ModelRuntime } from '../ai-backends/model'
 import {
   createPiContextCompactor,
   PiContextCompactionOutputError,
   PiContextWindowError
 } from '../agent-runtime/pi-context-compactor'
+import {
+  convertPiAgentMessages,
+  createPiAgentRuntime
+} from '../agent-runtime/pi-agent-runtime'
 import {
   formatEvidenceLocation,
   formatEvidenceReadPage,
@@ -27,7 +33,6 @@ import {
   splitsSurrogatePair
 } from '../observation/evidence-location'
 import {
-  type KnowledgeContributionDraft,
   type KnowledgeStatement,
   type KnowledgeStatementDraft
 } from '../../shared/knowledge'
@@ -40,32 +45,25 @@ import type {
   KnowledgeStatementRecord
 } from './model'
 import {
-  InMemoryStatementCandidateAgenda,
-  MAX_STATEMENT_CANDIDATE_EXPRESSION_CHARACTERS,
-  MAX_STATEMENT_CANDIDATE_QUESTION_CHARACTERS,
-  type StatementCandidateInput
-} from './statement-candidate-agenda'
+  MAX_STATEMENT_CANDIDATE_EXPRESSION_LENGTH,
+  MAX_STATEMENT_CANDIDATE_QUESTION_LENGTH
+} from './statement-candidate-batch'
 import { KnowledgeContributionWorkspace } from './knowledge-contribution-workspace'
 import {
-  addStatementCandidatesParameters,
   contributionStatementParameters,
   KNOWLEDGE_MAINTENANCE_TOOL_CATALOG,
   knowledgeMaintenanceToolDefinition,
   listContributionStatementsParameters,
-  listStatementCandidatesParameters,
   MAX_KNOWLEDGE_SEARCH_RESULTS as MAX_SEARCH_RESULTS,
   MAX_KNOWLEDGE_WORKSPACE_LIST_RESULTS as MAX_WORKSPACE_LIST_RESULTS,
   readContributionStatementParameters,
   readEvidenceParameters,
   readKnowledgeParameters,
   removeContributionStatementParameters,
-  resolveStatementCandidatesParameters,
-  searchKnowledgeParameters,
-  submitContributionParameters
+  searchKnowledgeParameters
 } from './knowledge-maintenance-tool-catalog'
 
 const MAX_EVIDENCE_OUTPUT_CHARS = 64 * 1_024
-const WORKSPACE_STATUS_CONTEXT_TOKENS = 2_048
 const UNKNOWN_TRACE_TOOL_NAME = '未知工具'
 
 const TRACEABLE_TOOL_NAMES = new Set<string>(
@@ -157,17 +155,9 @@ function safeTraceDetails(toolName: string, result: unknown, isError: boolean): 
   if (toolName === 'read_knowledge') {
     return typeof record.found === 'boolean' ? (record.found ? '已找到 Statement' : '未找到 Statement') : undefined
   }
-  if (
-    toolName === 'list_statement_candidates'
-    || toolName === 'add_statement_candidates'
-    || toolName === 'resolve_statement_candidates'
-  ) {
-    const open = safeTraceInteger(record.open)
-    const resolved = safeTraceInteger(record.resolved)
-    const total = safeTraceInteger(record.total)
-    return open === undefined || resolved === undefined || total === undefined
-      ? undefined
-      : `候选 ${resolved}/${total} 已处置 · ${open} 个待处理`
+  if (toolName === 'list_todos' || toolName === 'add_todos' || toolName === 'complete_todos') {
+    const pending = safeTraceInteger(record.pendingCount)
+    return pending === undefined ? undefined : `Todo · ${pending} 个待处理`
   }
   if (
     toolName === 'upsert_contribution_statement'
@@ -196,13 +186,6 @@ function safeTraceDetails(toolName: string, result: unknown, isError: boolean): 
       returnedCharacters === undefined ? undefined : `${returnedCharacters} 字符`,
       next
     ].filter(Boolean).join(' · ') || undefined
-  }
-  if (toolName === 'submit_knowledge_contribution') {
-    const statementCount = safeTraceInteger(record.statementCount)
-    const accepted = record.accepted === true
-    const open = safeTraceInteger(record.open)
-    if (!accepted && open !== undefined) return `仍有 ${open} 个候选待处理`
-    return statementCount === undefined ? undefined : `提交 ${statementCount} 条 Statement 草稿`
   }
   return undefined
 }
@@ -318,9 +301,10 @@ function validateRunInput(input: KnowledgeAgentRunInput): void {
       !candidate
       || typeof candidate.expression !== 'string'
       || !candidate.expression.trim()
-      || candidate.expression.trim().length > MAX_STATEMENT_CANDIDATE_EXPRESSION_CHARACTERS
+      || candidate.expression.trim().length > MAX_STATEMENT_CANDIDATE_EXPRESSION_LENGTH
       || typeof candidate.question !== 'string'
       || !candidate.question.trim()
+      || candidate.question.trim().length > MAX_STATEMENT_CANDIDATE_QUESTION_LENGTH
       || !Array.isArray(candidate.locations)
       || !candidate.locations.length
     ) {
@@ -365,32 +349,16 @@ function workspaceEvidenceLocation(
   return formatEvidenceLocation(location)
 }
 
-function agendaSeed(input: KnowledgeAgentRunInput): StatementCandidateInput[] {
+function candidateTodos(input: KnowledgeAgentRunInput): string[] {
   return input.statementCandidates.map((candidate) => ({
-    expression: candidate.expression,
-    question: candidate.question,
+    expression: candidate.expression.trim(),
+    question: candidate.question.trim(),
     evidenceLocations: candidate.locations.map((location) => workspaceEvidenceLocation(input, location))
-  }))
-}
-
-function candidateCountsDetails(counts: { total: number; open: number; resolved: number }) {
-  return { total: counts.total, open: counts.open, resolved: counts.resolved }
-}
-
-function candidatePageText(page: ReturnType<InMemoryStatementCandidateAgenda['list']>): string {
-  const items = page.items.map((candidate) => [
-    `- ${candidate.ref} [${candidate.status}] ${compactInline(candidate.expression, 512)}`,
-    `  Question: ${compactInline(candidate.question, MAX_STATEMENT_CANDIDATE_QUESTION_CHARACTERS)}`,
-    candidate.evidenceLocations.length
-      ? `  Evidence: ${candidate.evidenceLocations.join(', ')}`
-      : '  Evidence: not yet attached',
-    candidate.resolution ? `  Resolution: ${compactInline(candidate.resolution, 2_048)}` : undefined
-  ].filter((part): part is string => Boolean(part)).join('\n'))
-  return [
-    `Agenda: ${page.counts.resolved}/${page.counts.total} resolved; ${page.counts.open} open.`,
-    ...items,
-    `Next offset: ${page.nextOffset ?? 'none'}`
-  ].join('\n')
+  })).map((candidate) => [
+    `Investigate the observed name or expression: ${candidate.expression}`,
+    `Question: ${candidate.question}`,
+    `Evidence starting locations: ${candidate.evidenceLocations.join(', ')}`
+  ].join('\n'))
 }
 
 function contributionDraftPageText(page: ReturnType<KnowledgeContributionWorkspace['list']>): string {
@@ -405,38 +373,16 @@ function contributionDraftPageText(page: ReturnType<KnowledgeContributionWorkspa
   ].join('\n')
 }
 
-function workspaceStatusText(
-  agenda: InMemoryStatementCandidateAgenda,
-  draft: KnowledgeContributionWorkspace
-): string {
-  const snapshot = agenda.snapshot(3)
-  const preview = snapshot.openPreview.map((candidate) => (
-    `- ${candidate.ref}: ${compactInline(candidate.expression, 128)} — ${compactInline(candidate.question, 256)}`
-  ))
-  return [
-    '<knowledge-maintenance-workspace-status>',
-    'This is fresh Host-owned run state, not a new user request and not knowledge evidence.',
-    `Candidates: ${snapshot.counts.total} total; ${snapshot.counts.open} open; ${snapshot.counts.resolved} resolved.`,
-    `Contribution Draft: ${draft.size} Statements.`,
-    ...(preview.length ? ['Next open candidates:', ...preview] : ['No open candidates remain.']),
-    snapshot.remainingOpen ? `Additional open candidates not shown: ${snapshot.remainingOpen}.` : undefined,
-    snapshot.counts.open
-      ? 'Continue investigating and explicitly resolve open candidates. Use list_statement_candidates for the complete agenda.'
-      : 'The agenda is closed. Review the Contribution Draft and call submit_knowledge_contribution when it is ready.',
-    '</knowledge-maintenance-workspace-status>'
-  ].filter((part): part is string => Boolean(part)).join('\n')
-}
-
 function taskPrompt(input: KnowledgeAgentRunInput): string {
   const lastLine = input.observationLines.length
   const readableRange = lastLine > 0
     ? `${observationLineAddress(1)}-${observationLineAddress(lastLine)}`
     : 'No readable lines'
   return [
-    'Maintain knowledge in this authorized workspace. The Host owns an open Statement-candidate agenda and a run-local Contribution Draft. Use the provided tools to inspect and update both. Follow the System Prompt language policy.',
+    'Maintain knowledge in this authorized workspace. The Host owns a general-purpose Todo list and a run-local Contribution Draft. Begin with list_todos, use the provided tools to complete the work, and follow the System Prompt language policy.',
     `Observation sourceRef: ${input.sourceRef}`,
     `Observation view format: ${input.observationFormatVersion}`,
-    `Range available to read_evidence: ${readableRange}. Candidate locations use one-based line and zero-based UTF-16 offset; limit is also measured in UTF-16 code units and must be at least 2 (maximum applied limit ${MAX_EVIDENCE_READ_LIMIT}). Always set a bounded limit and copy the returned Next location when more detail is needed.`,
+    `Range available to read_evidence: ${readableRange}. Evidence locations use one-based line and zero-based UTF-16 offset; limit is also measured in UTF-16 code units and must be at least 2 (maximum applied limit ${MAX_EVIDENCE_READ_LIMIT}). Always set a bounded limit and copy the returned Next location when more detail is needed.`,
     'Tool calls may be repeated when useful. Keep each read bounded and use returned continuation locations to inspect more material progressively.',
     input.attention?.trim() ? `Attention:\n${input.attention.trim()}` : undefined
   ].filter((part): part is string => Boolean(part)).join('\n\n')
@@ -448,15 +394,16 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
   async run(input: KnowledgeAgentRunInput): Promise<KnowledgeAgentRunResult> {
     validateRunInput(input)
     const runtime: ModelRuntime = input.runtime
-    const agenda = new InMemoryStatementCandidateAgenda(agendaSeed(input))
     const contributionDraft = new KnowledgeContributionWorkspace()
     let modelCallCount = 0
     const toolCalls: string[] = []
-    let contribution: KnowledgeContributionDraft | undefined
-    let protocolError: Error | undefined
     let compactionError: Error | undefined
     let activeModelCall: number | undefined
     let activeCompactionCall: number | undefined
+
+    const agentRuntime = createPiAgentRuntime({
+      initialTodos: [...candidateTodos(input), ...(input.initialTodos ?? [])]
+    })
 
     const reportTrace = (event: Parameters<NonNullable<KnowledgeAgentRunInput['onTrace']>>[0]): void => {
       try {
@@ -467,9 +414,15 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
     }
 
     const reportWorkspaceStatus = (): void => {
+      const todos = agentRuntime.todos.list()
+      const pending = todos.filter((todo) => todo.status === 'pending').length
       reportTrace({
         type: 'workspace_status',
-        candidates: candidateCountsDetails(agenda.snapshot(0).counts),
+        todos: {
+          total: todos.length,
+          pending,
+          completed: todos.length - pending
+        },
         draftStatementCount: contributionDraft.size
       })
     }
@@ -538,75 +491,6 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
           }
         }
       } as AgentTool<typeof readKnowledgeParameters>,
-      {
-        ...knowledgeMaintenanceToolDefinition('list_statement_candidates'),
-        executionMode: 'sequential',
-        execute: async (_toolCallId, parameters, signal) => {
-          signal?.throwIfAborted()
-          const page = agenda.list({
-            status: parameters.status,
-            limit: parameters.limit,
-            offset: parameters.offset
-          })
-          return {
-            content: [{ type: 'text', text: candidatePageText(page) }],
-            details: {
-              ...candidateCountsDetails(page.counts),
-              count: page.items.length,
-              offset: page.offset,
-              nextOffset: page.nextOffset
-            }
-          }
-        }
-      } as AgentTool<typeof listStatementCandidatesParameters>,
-      {
-        ...knowledgeMaintenanceToolDefinition('add_statement_candidates'),
-        executionMode: 'sequential',
-        execute: async (_toolCallId, parameters, signal) => {
-          signal?.throwIfAborted()
-          const added = agenda.add(parameters.candidates.map((candidate) => ({
-            expression: candidate.expression,
-            question: candidate.question,
-            evidenceLocations: candidate.locations?.map((location) => (
-              workspaceEvidenceLocation(input, location)
-            ))
-          })))
-          reportWorkspaceStatus()
-          const counts = agenda.snapshot(0).counts
-          return {
-            content: [{
-              type: 'text',
-              text: [
-                `Added ${added.length} open Statement candidates.`,
-                ...added.map((candidate) => `- ${candidate.ref}: ${candidate.expression}`),
-                `Agenda now has ${counts.open} open and ${counts.resolved} resolved candidates.`
-              ].join('\n')
-            }],
-            details: { ...candidateCountsDetails(counts), added: added.length }
-          }
-        }
-      } as AgentTool<typeof addStatementCandidatesParameters>,
-      {
-        ...knowledgeMaintenanceToolDefinition('resolve_statement_candidates'),
-        executionMode: 'sequential',
-        execute: async (_toolCallId, parameters, signal) => {
-          signal?.throwIfAborted()
-          const resolved = agenda.resolve(parameters.resolutions)
-          reportWorkspaceStatus()
-          const counts = agenda.snapshot(0).counts
-          return {
-            content: [{
-              type: 'text',
-              text: [
-                `Resolved ${resolved.length} Statement candidates.`,
-                ...resolved.map((candidate) => `- ${candidate.ref}: ${candidate.resolution}`),
-                `Agenda now has ${counts.open} open and ${counts.resolved} resolved candidates.`
-              ].join('\n')
-            }],
-            details: { ...candidateCountsDetails(counts), addressed: resolved.length }
-          }
-        }
-      } as AgentTool<typeof resolveStatementCandidatesParameters>,
       {
         ...knowledgeMaintenanceToolDefinition('upsert_contribution_statement'),
         executionMode: 'sequential',
@@ -697,41 +581,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
           }
         }
       } as AgentTool<typeof readEvidenceParameters>,
-      {
-        ...knowledgeMaintenanceToolDefinition('submit_knowledge_contribution'),
-        executionMode: 'sequential',
-        execute: async (_toolCallId, _parameters, signal) => {
-          signal?.throwIfAborted()
-          const snapshot = agenda.snapshot(5)
-          if (snapshot.counts.open) {
-            return {
-              content: [{
-                type: 'text',
-                text: [
-                  `Submission was not accepted because ${snapshot.counts.open} Statement candidates remain open.`,
-                  ...snapshot.openPreview.map((candidate) => `- ${candidate.ref}: ${candidate.expression}`),
-                  snapshot.remainingOpen ? `- ...and ${snapshot.remainingOpen} more. Use list_statement_candidates.` : undefined
-                ].filter((part): part is string => Boolean(part)).join('\n')
-              }],
-              details: {
-                accepted: false,
-                ...candidateCountsDetails(snapshot.counts),
-                statementCount: contributionDraft.size
-              }
-            }
-          }
-          contribution = contributionDraft.contribution(input.contributionRunRef)
-          return {
-            content: [{ type: 'text', text: 'The Knowledge Contribution has been captured for host validation and commit.' }],
-            details: {
-              accepted: true,
-              ...candidateCountsDetails(snapshot.counts),
-              statementCount: contribution.statements.length
-            },
-            terminate: true
-          }
-        }
-      } as AgentTool<typeof submitContributionParameters>
+      ...agentRuntime.tools
     ]
 
     const thinkingLevel = runtime.model.reasoning ? (input.reasoningEffort ?? 'off') : 'off'
@@ -741,7 +591,6 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
       systemPrompt: input.systemPrompt,
       tools,
       thinkingLevel,
-      reservedContextTokens: WORKSPACE_STATUS_CONTEXT_TOKENS,
       onModelCall: (event) => {
         if (event.type === 'started') {
           modelCallCount++
@@ -773,24 +622,6 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         activeCompactionCall = undefined
       }
     })
-    const transformContext = async (
-      messages: Parameters<typeof compactContext>[0],
-      signal?: AbortSignal
-    ): ReturnType<typeof compactContext> => {
-      try {
-        const compacted = await compactContext(messages, signal)
-        const statusMessage: AgentMessage = {
-          role: 'user',
-          content: [{ type: 'text', text: workspaceStatusText(agenda, contributionDraft) }],
-          timestamp: Date.now()
-        }
-        return [...compacted, statusMessage]
-      } catch (error) {
-        compactionError = asError(error, 'Context compaction failed')
-        throw compactionError
-      }
-    }
-
     const agent = new Agent({
       initialState: {
         systemPrompt: input.systemPrompt,
@@ -799,30 +630,19 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         tools
       },
       streamFn: guardedStreamFn,
-      transformContext,
-      toolExecution: 'sequential',
-      beforeToolCall: async ({ toolCall }) => {
-        if (contribution !== undefined) {
-          const message = toolCall.name === 'submit_knowledge_contribution'
-            ? 'Knowledge Contribution 只能提交一次'
-            : '提交 Knowledge Contribution 后不能继续调用工具'
-          protocolError ??= new Error(message)
-          return { block: true, reason: message }
+      convertToLlm: convertPiAgentMessages,
+      transformContext: async (messages, signal) => {
+        try {
+          return await compactContext(messages, signal)
+        } catch (error) {
+          compactionError = asError(error, 'Context compaction failed')
+          throw compactionError
         }
-        return undefined
       },
-      afterToolCall: async ({ assistantMessage, toolCall }) => {
-        const batchSubmits = assistantMessage.content.some((content) =>
-          content.type === 'toolCall' && content.name === 'submit_knowledge_contribution')
-        if (!batchSubmits) return undefined
-
-        // Pi ends a batch only when every result carries the hint. Other calls in a submit batch
-        // can terminate; a rejected first submit remains a normal tool error so the model can retry.
-        return toolCall.name !== 'submit_knowledge_contribution' || contribution !== undefined
-          ? { terminate: true }
-          : undefined
-      }
+      toolExecution: 'sequential'
     })
+
+    agentRuntime.attach(agent)
 
     agent.subscribe((event) => {
       if (event.type === 'message_end' && event.message.role === 'assistant') {
@@ -859,6 +679,12 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
             : safeTraceDetails(event.toolName, event.result, event.isError),
           output: traceable ? toolTraceOutput(event.result) : undefined
         })
+        if (
+          !event.isError
+          && (event.toolName === 'list_todos'
+            || event.toolName === 'add_todos'
+            || event.toolName === 'complete_todos')
+        ) reportWorkspaceStatus()
         return
       }
       if (event.type === 'tool_execution_start') {
@@ -872,26 +698,6 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         })
         toolCalls.push(toolName)
         return
-      }
-      if (
-        event.type === 'turn_end'
-        && event.toolResults.length === 0
-        && contribution === undefined
-        && event.message.role === 'assistant'
-        && event.message.stopReason !== 'error'
-        && event.message.stopReason !== 'aborted'
-      ) {
-        const counts = agenda.snapshot(0).counts
-        agent.followUp({
-          role: 'user',
-          content: [{
-            type: 'text',
-            text: counts.open
-              ? `The run is not complete: ${counts.open} Statement candidates remain open. Continue investigating and resolving the agenda; use list_statement_candidates for the complete list.`
-              : 'The agenda is closed, but the current Contribution Draft has not been submitted. Review it and call submit_knowledge_contribution when it is ready.'
-          }],
-          timestamp: Date.now()
-        })
       }
     })
 
@@ -925,7 +731,6 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
     }
 
     if (input.signal.aborted) throw asError(input.signal.reason, 'Knowledge Maintenance Agent 运行已取消')
-    if (protocolError) throw protocolError
     if (
       compactionError instanceof PiContextWindowError
       || compactionError instanceof PiContextCompactionOutputError
@@ -938,11 +743,27 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         new Error(`Knowledge Maintenance Agent 模型调用失败：${agent.state.errorMessage}`)
       )
     }
-    if (contribution === undefined) throw new Error('Knowledge Maintenance Agent 未提交 Knowledge Contribution')
+    let finalAssistantMessage: AssistantMessage | undefined
+    for (let index = agent.state.messages.length - 1; index >= 0; index--) {
+      const message = agent.state.messages[index]
+      if (message.role !== 'assistant') continue
+      finalAssistantMessage = message
+      break
+    }
+    if (finalAssistantMessage?.stopReason === 'length') {
+      throw new ModelOutputTruncatedError('Knowledge Maintenance Agent 的最终模型输出达到长度上限，运行结果不完整')
+    }
+    if (!finalAssistantMessage || finalAssistantMessage.stopReason !== 'stop') {
+      throw new Error('Knowledge Maintenance Agent 未正常自然结束')
+    }
+    if (agentRuntime.todos.pendingCount) {
+      throw new Error('Knowledge Maintenance Agent 结束时仍有 pending Todo')
+    }
+    const contribution = contributionDraft.contribution(input.contributionRunRef)
 
     return {
       contribution,
-      statementCandidates: agenda.all(),
+      todos: agentRuntime.todos.list(),
       modelCallCount,
       toolCalls: [...toolCalls]
     }

@@ -188,15 +188,15 @@ class FakeKnowledgeAgent implements KnowledgeAgentRuntime {
     })
     input.onTrace?.({
       type: 'tool_started',
-      toolCallId: 'submit-1',
-      toolName: 'submit_knowledge_contribution'
+      toolCallId: 'complete-1',
+      toolName: 'complete_todos'
     })
     input.onTrace?.({
       type: 'tool_completed',
-      toolCallId: 'submit-1',
-      toolName: 'submit_knowledge_contribution',
+      toolCallId: 'complete-1',
+      toolName: 'complete_todos',
       status: 'completed',
-      detail: '捕获 1 条候选 Statement'
+      detail: 'Todo · 0 个待处理'
     })
     return {
       contribution: {
@@ -206,18 +206,13 @@ class FakeKnowledgeAgent implements KnowledgeAgentRuntime {
           content: 'Candidate Knowledge Statement'
         }]
       },
-      statementCandidates: input.statementCandidates.map((candidate, index) => ({
-        ref: `C${String(index + 1).padStart(6, '0')}`,
-        expression: candidate.expression,
-        question: candidate.question,
-        evidenceLocations: candidate.locations.map(
-          (location) => `L${String(location.line).padStart(6, '0')}:C${location.offset}`
-        ),
-        status: 'resolved',
-        resolution: 'Covered by Candidate.'
+      todos: input.statementCandidates.map((candidate, index) => ({
+        id: `T${String(index + 1).padStart(6, '0')}`,
+        content: `Investigate the observed name or expression: ${candidate.expression}`,
+        status: 'completed'
       })),
       modelCallCount: 2,
-      toolCalls: ['read_evidence', 'submit_knowledge_contribution']
+      toolCalls: ['read_evidence', 'complete_todos']
     }
   }
 }
@@ -290,13 +285,15 @@ describe('KnowledgeProcessingService', () => {
         tools: expect.arrayContaining([
           expect.objectContaining({ name: 'search_knowledge' }),
           expect.objectContaining({ name: 'read_evidence' }),
-          expect.objectContaining({ name: 'submit_knowledge_contribution' })
+          expect.objectContaining({ name: 'add_todos' }),
+          expect.objectContaining({ name: 'complete_todos' }),
+          expect.objectContaining({ name: 'list_todos' })
         ]),
         isCustomized: false
       })
     ]))
     expect(snapshot.stages.find((stage) => stage.id === 'knowledge_maintenance_agent')?.tools)
-      .toHaveLength(11)
+      .toHaveLength(10)
   })
 
   it('uses product-agnostic English defaults that follow the source language', () => {
@@ -312,11 +309,14 @@ describe('KnowledgeProcessingService', () => {
     expect(OBSERVATION_PREPROCESSOR_PROMPT).toMatch(/not draft Knowledge Statements/i)
     expect(OBSERVATION_PREPROCESSOR_PROMPT).toMatch(/not a generated topic heading/i)
     expect(OBSERVATION_PREPROCESSOR_PROMPT).toMatch(/exact raw starting location/i)
+    expect(OBSERVATION_PREPROCESSOR_PROMPT).toContain('skill_hint')
+    expect(OBSERVATION_PREPROCESSOR_PROMPT).toContain('skill_activation_hint')
+    expect(OBSERVATION_PREPROCESSOR_PROMPT).toMatch(/do not infer that activation succeeded/i)
 
     expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/not a Session digest/i)
     expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/anchor each Statement in one independently searchable named referent/i)
     expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/canonical title names that subject/i)
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/A Candidate expression is evidence to resolve, not a proposed title/i)
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/An observed expression in a Todo is evidence to investigate, not a proposed title/i)
     expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/title a Statement "Northstar"/i)
     expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/must not summarize "what does this Statement say\?"/i)
     expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/Put context, scope, meaning, property, and relationship in the body/i)
@@ -327,8 +327,10 @@ describe('KnowledgeProcessingService', () => {
     expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/omit that claim instead of preserving or paraphrasing it/i)
     expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).not.toMatch(/context-rich canonical title/i)
     expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('[[canonical title]]')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('submit_knowledge_contribution')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/new title creates a Statement/i)
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('list_todos')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('complete_todos')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).not.toContain('submit_knowledge_contribution')
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/new title in that Contribution creates a Statement/i)
     expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/existing title replaces its current content/i)
   })
 
@@ -1385,7 +1387,7 @@ describe('KnowledgeProcessingService', () => {
         model: 'codex-small',
         runtime: 'pi_agent_core',
         modelCallCount: 2,
-        toolCalls: ['read_evidence', 'submit_knowledge_contribution']
+        toolCalls: ['read_evidence', 'complete_todos']
       },
       debugTrace: {
         id: preprocessing.runId,
@@ -1398,7 +1400,7 @@ describe('KnowledgeProcessingService', () => {
             { kind: 'model_call', label: '模型轮次 1', status: 'completed' },
             { kind: 'tool_call', label: '读取原始观察证据', status: 'completed', detail: 'L000001-L000001 · 1 行' },
             { kind: 'model_call', label: '模型轮次 2', status: 'completed' },
-            { kind: 'tool_call', label: '提交 Knowledge Contribution', status: 'completed', detail: '捕获 1 条候选 Statement' }
+            { kind: 'tool_call', label: '完成待办事项', status: 'completed', detail: 'Todo · 0 个待处理' }
           ]
         }
       }
@@ -1496,7 +1498,7 @@ describe('KnowledgeProcessingService', () => {
             content: 'Candidate content'
           }]
         },
-        statementCandidates: [],
+        todos: [],
         modelCallCount: 1,
         toolCalls: ['read_evidence', 'read_evidence']
       }

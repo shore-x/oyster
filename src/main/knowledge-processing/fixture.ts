@@ -1,4 +1,5 @@
 import type { AiBackendService } from '../ai-backends/ai-backend-service'
+import { AgentTodoStore } from '../agent-runtime/agent-todos'
 import type { KnowledgeAgentRunInput, KnowledgeAgentRunResult, KnowledgeAgentRuntime } from './model'
 import { InMemoryKnowledgeProcessingRepository } from './repository'
 import { KnowledgeProcessingService } from './knowledge-processing-service'
@@ -6,12 +7,24 @@ import { KnowledgeProcessingService } from './knowledge-processing-service'
 export class FixtureKnowledgeAgentRuntime implements KnowledgeAgentRuntime {
   async run(input: KnowledgeAgentRunInput): Promise<KnowledgeAgentRunResult> {
     input.signal.throwIfAborted()
+    const candidateTodoContents = input.statementCandidates.map((candidate) => [
+      `Investigate the observed name or expression: ${candidate.expression}`,
+      `Question: ${candidate.question}`,
+      `Evidence starting locations: ${candidate.locations.map((location) => (
+        `L${String(location.line).padStart(6, '0')}:C${location.offset}`
+      )).join(', ')}`
+    ].join('\n'))
+    const todoStore = new AgentTodoStore([
+      ...candidateTodoContents,
+      ...(input.initialTodos ?? [])
+    ])
+    const pendingTodos = todoStore.list()
     input.onTrace?.({
       type: 'workspace_status',
-      candidates: {
-        total: input.statementCandidates.length,
-        open: input.statementCandidates.length,
-        resolved: 0
+      todos: {
+        total: pendingTodos.length,
+        pending: pendingTodos.length,
+        completed: 0
       },
       draftStatementCount: 0
     })
@@ -20,7 +33,7 @@ export class FixtureKnowledgeAgentRuntime implements KnowledgeAgentRuntime {
       type: 'model_completed',
       callNumber: 1,
       status: 'completed',
-      detail: 'stop=toolUse · tokens=48 · tools=read_evidence, submit_knowledge_contribution',
+      detail: 'stop=toolUse · tokens=48 · tools=list_todos, read_evidence, complete_todos',
       output: 'Tool call · read_evidence\n{"line":1,"offset":0,"limit":48}'
     })
     input.onTrace?.({
@@ -39,24 +52,25 @@ export class FixtureKnowledgeAgentRuntime implements KnowledgeAgentRuntime {
     })
     input.onTrace?.({
       type: 'tool_started',
-      toolCallId: 'fixture-submit',
-      toolName: 'submit_knowledge_contribution',
-      input: '{}'
+      toolCallId: 'fixture-complete',
+      toolName: 'complete_todos',
+      input: JSON.stringify({ ids: pendingTodos.map((todo) => todo.id) })
     })
+    todoStore.complete(pendingTodos.map((todo) => todo.id))
     input.onTrace?.({
       type: 'tool_completed',
-      toolCallId: 'fixture-submit',
-      toolName: 'submit_knowledge_contribution',
+      toolCallId: 'fixture-complete',
+      toolName: 'complete_todos',
       status: 'completed',
-      detail: '捕获 1 条候选 Statement',
-      output: 'The Knowledge Contribution has been captured for host validation and commit.'
+      detail: 'Todo · 0 个待处理',
+      output: `Completed ${pendingTodos.length} Todos.`
     })
     input.onTrace?.({
       type: 'workspace_status',
-      candidates: {
-        total: input.statementCandidates.length,
-        open: 0,
-        resolved: input.statementCandidates.length
+      todos: {
+        total: pendingTodos.length,
+        pending: 0,
+        completed: pendingTodos.length
       },
       draftStatementCount: 2
     })
@@ -70,22 +84,13 @@ export class FixtureKnowledgeAgentRuntime implements KnowledgeAgentRuntime {
           },
           {
             title: 'Knowledge Maintenance Agent',
-            content: 'Knowledge Maintenance Agent 读取候选清单和原始证据，为 [[知识加工链路]] 维护相互可解释的 Statement。'
+            content: 'Knowledge Maintenance Agent 通过通用 Todo 组织调查并读取原始证据，为 [[知识加工链路]] 维护相互可解释的 Statement。'
           }
         ]
       },
-      statementCandidates: input.statementCandidates.map((candidate, index) => ({
-        ref: `C${String(index + 1).padStart(6, '0')}`,
-        expression: candidate.expression,
-        question: candidate.question,
-        evidenceLocations: candidate.locations.map((location) => (
-          `L${String(location.line).padStart(6, '0')}:C${location.offset}`
-        )),
-        status: 'resolved',
-        resolution: 'Fixture runtime marked this candidate as covered by its contribution.'
-      })),
+      todos: todoStore.list(),
       modelCallCount: 1,
-      toolCalls: ['read_evidence', 'submit_knowledge_contribution']
+      toolCalls: ['read_evidence', 'complete_todos']
     }
   }
 }

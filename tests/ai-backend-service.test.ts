@@ -547,8 +547,8 @@ describe('AiBackendService', () => {
     await expect(service.withModelRuntime(
       connectionId,
       'test-model',
-      async () => { throw new Error('Knowledge Maintenance Agent 未提交 Knowledge Contribution') }
-    )).rejects.toThrow('未提交')
+      async () => { throw new Error('Knowledge Maintenance Agent 未正常完成') }
+    )).rejects.toThrow('未正常完成')
 
     expect(service.snapshot().connections.find((connection) => connection.id === connectionId)).toMatchObject({
       id: connectionId,
@@ -604,9 +604,9 @@ describe('AiBackendService', () => {
     await expect(service.withModelRuntime(
       connectionId,
       'test-model',
-      async () => { throw new Error('Knowledge Maintenance Agent 未提交 Knowledge Contribution') },
+      async () => { throw new Error('Knowledge Maintenance Agent 未正常完成') },
       { trackHealth: true }
-    )).rejects.toThrow('未提交')
+    )).rejects.toThrow('未正常完成')
     expect(service.snapshot().connections.find((connection) => connection.id === connectionId)).toEqual(unavailableState)
   })
 

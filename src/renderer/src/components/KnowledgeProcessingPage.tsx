@@ -25,6 +25,7 @@ import { ProcessingRunHistoryWorkspace } from './ProcessingRunHistoryWorkspace'
 import { ProcessingDebugTracePanel } from './ProcessingDebugTracePanel'
 import { SessionMetadata, sessionOptionLabel } from './SessionMetadata'
 import { StatementCandidateList } from './StatementCandidateList'
+import { AgentTodoList } from './AgentTodoList'
 
 function formatDuration(durationMs: number): string {
   if (durationMs < 1_000) return `${durationMs} ms`
@@ -245,10 +246,10 @@ function PreprocessingResult(props: { result: ObservationPreprocessingResult }) 
     <section class="processing-result" data-testid="processing-result-observation_preprocessor">
       <div class="processing-result__heading">
         <div><Icon name="check" /><h3>Statement Candidates</h3></div>
-        <span>{props.result.segmentCount} 个分段 · {props.result.statementCandidates.length} 个待裁决问题</span>
+        <span>{props.result.segmentCount} 个分段 · {props.result.statementCandidates.length} 个调查种子</span>
       </div>
       <p class="processing-result__description">
-        这是预处理器发现的开放候选清单，不是知识结论；知识维护 Agent 会结合原始证据逐项裁决。
+        这是预处理器产生的 Candidate Seed，不是知识结论；Host 会在启动知识维护 Agent 时将其绑定为普通 Todo。
       </p>
       <StatementCandidateList candidates={props.result.statementCandidates} />
       <ExecutionDetails
@@ -272,15 +273,15 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
     setSelectedTitle(contribution.statements[0]?.title)
   })
 
-  const resolvedCandidates = createMemo(() => props.result.statementCandidates.filter(
-    (candidate) => candidate.status === 'resolved'
+  const completedTodos = createMemo(() => props.result.todos.filter(
+    (todo) => todo.status === 'completed'
   ).length)
 
   return (
     <section class="processing-result" data-testid="processing-result-knowledge_maintenance_agent">
       <div class="processing-result__heading">
         <div><Icon name="check" /><h3>知识维护结果</h3></div>
-        <span>{resolvedCandidates()} / {props.result.statementCandidates.length} 个候选已裁决 · 尚未写入知识层</span>
+        <span>{completedTodos()} / {props.result.todos.length} 个 Todo 已完成 · 尚未写入知识层</span>
       </div>
       <Show
         when={props.result.contribution.statements.length}
@@ -317,17 +318,17 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
           </Show>
         </div>
       </Show>
-      <section class="processing-candidate-agenda" aria-label="Statement Candidate Agenda">
-        <div class="processing-candidate-agenda__heading">
+      <section class="processing-agent-todos" aria-label="Agent Todo List">
+        <div class="processing-agent-todos__heading">
           <div>
-            <h4>Statement Candidate Agenda</h4>
-            <p>查看每个名称或指代问题的最终处理结果。</p>
+            <h4>Agent Todos</h4>
+            <p>查看本次 Maintainer 运行绑定和补充的工作项。</p>
           </div>
-          <strong>{resolvedCandidates()} / {props.result.statementCandidates.length}</strong>
+          <strong>{completedTodos()} / {props.result.todos.length}</strong>
         </div>
-        <StatementCandidateList
-          candidates={props.result.statementCandidates}
-          emptyText="本次预处理没有发现需要裁决的 Statement 候选。"
+        <AgentTodoList
+          todos={props.result.todos}
+          emptyText="本次 Maintainer 运行没有 Todo。"
         />
       </section>
       <ExecutionDetails
@@ -716,7 +717,7 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
             onClick={() => setDebugStage('preprocessor')}
           >
             <span>1</span>
-            <div><strong>观察预处理</strong><small>{currentPreprocessingResult() ? '候选清单已生成' : '发现 Statement 候选'}</small></div>
+            <div><strong>观察预处理</strong><small>{currentPreprocessingResult() ? 'Candidate Seed 已生成' : '发现 Statement Candidate'}</small></div>
           </button>
           <button
             type="button"
@@ -727,7 +728,7 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
             onClick={() => setDebugStage('maintainer')}
           >
             <span>2</span>
-            <div><strong>知识维护</strong><small>{currentPreprocessingResult() ? '候选议程已准备' : '等待候选清单'}</small></div>
+            <div><strong>知识维护</strong><small>{currentPreprocessingResult() ? '初始 Todo 可绑定' : '等待 Candidate Seed'}</small></div>
           </button>
         </div>
 
@@ -958,7 +959,7 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
               >
                 <Show
                   when={!controller.isRunning(stage().id) ? currentPreprocessingResult() : undefined}
-                  fallback={<div class="processing-workspace-empty">完成预处理后，这里会展示 Statement 候选清单与本次执行配置。</div>}
+                  fallback={<div class="processing-workspace-empty">完成预处理后，这里会展示 Statement Candidate Seed 与本次执行配置。</div>}
                 >
                   {(result) => <PreprocessingResult result={result()} />}
                 </Show>
@@ -1026,7 +1027,7 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
                     fallback={<p>等待一次成功的观察预处理运行。</p>}
                   >
                     {(result) => (
-                      <p>将使用预处理产生的 {result().statementCandidates.length} 个开放候选，并按需回溯原始观察材料。</p>
+                      <p>将把预处理产生的 {result().statementCandidates.length} 个 Candidate 绑定为初始 Todo，并按需回溯原始观察材料。</p>
                     )}
                   </Show>
                 </div>

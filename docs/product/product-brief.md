@@ -80,7 +80,7 @@ Oyster 必须把三个相互区分的状态与权威域分开，避免把模型�
 
 本文将 `Artifact` 作为第三个权威域中单个协作产物的正式英文名称；观察中的来源侧对象使用 Activity Artifact 等限定名称，Discovery catalog 中的外部来源记录称为 Source Record。
 
-Observation Preprocessing 发现的 Candidate 是带回源线索的待调查问题，不是事实、Statement 或知识变更决定。它们进入一次运行的开放调查清单，由 Knowledge Maintenance Agent 依据当前知识和 Raw Evidence 补充、合并、拆分或判定无需变更；Candidate 与 Statement 不要求一一对应。开放清单与 Contribution Draft 都是可丢弃的运行期工作材料（Run-local Working Material），不构成第四个状态与权威域。只有经过统一知识提交边界成为 Knowledge Statement 的内容才进入知识层。正式知识应能够追溯到原始观察或输入知识，但追溯结构及其 MVP 实现范围尚未确定。
+Observation Preprocessing 发现的 Candidate 是带回源线索的待调查问题，不是事实、Statement 或知识变更决定。Host 在 Knowledge Maintenance Agent 启动时把每个 Candidate 格式化为普通 initial Todo；Agent 依据当前知识和 Raw Evidence 完成这些工作，也可以增加新的通用 Todo，但不维护 Candidate 专用清单或结构化 resolution。Candidate、Todo 与 Contribution Draft 都是可丢弃的运行期工作材料（Run-local Working Material），不构成第四个状态与权威域；Candidate 与 Statement 也不要求一一对应。只有经过统一知识提交边界成为 Knowledge Statement 的内容才进入知识层。正式知识应能够追溯到原始观察或输入知识，但追溯结构及其 MVP 实现范围尚未确定。
 
 三个域在状态和所有权上分离，但知识加工、Projection 和 Artifact 维护通过共享 Attention 耦合。Projection 是从知识、Attention 和必要的当前状态形成按需消费输出，或初始化、修订 Artifact 的活动，不是第三个持久状态域本身。同一个 Attention 可以指导 Observation Preprocessor、Knowledge Maintenance Agent 和通用管理 Agent；不同 Attention 产生的知识进入共享知识层并可以重叠、复用或相互修订，不按 Artifact 复制成独立真相。
 
@@ -130,13 +130,13 @@ MVP 的“实时”定义为 **turn 级近实时**，不是 token streaming。�
 
 开始加工前，用户选择一个已配置且能力匹配的 AI Connection。数据来源与执行连接相互独立：从某个 Agent Harness 读取观察，不要求使用同一 Provider 进行知识加工。
 
-1. 默认或自定义 Observation Preprocessor 从观察中发现带回源线索的 Candidate 问题，作为开放调查清单的初始内容，而不是生成 Session 摘要或拟定 Statement；
-2. 默认或自定义 Knowledge Maintenance Agent 以开放清单和相关已有 Knowledge Statement 为起点，按需读取 Raw Evidence，补充并裁决问题；默认策略优先维护细粒度、持久且可复用的对象、概念及其关系理解，而不是生成 Session 总结或工作日志；
-3. Agent 独立维护 Contribution Draft，并通过统一提交边界提出一条或多条 Knowledge Statement；Statement 使用当前知识视图中唯一、能够指称一个知识主体的 canonical title，以自由文本正文解释该主体的语境、含义、属性和关系，并通过 `[[canonical title]]` 或 `[[canonical title|local display text]]` 动态引用当前同名 Statement；
+1. 默认或自定义 Observation Preprocessor 从观察中发现带回源线索的 Candidate 问题，而不是生成 Session 摘要或拟定 Statement；
+2. Host 将 Candidate 格式化为普通 initial Todo；默认或自定义 Knowledge Maintenance Agent 以这些 Todo 和相关已有 Knowledge Statement 为起点，按需读取 Raw Evidence，并可用相同的通用工具补充、完成工作；默认策略优先维护细粒度、持久且可复用的对象、概念及其关系理解，而不是生成 Session 总结或工作日志；
+3. Agent 独立维护 Contribution Draft；所有 Todo 完成且 Agent 自然结束后，Host 冻结整份 Draft 并形成包含一条或多条 Knowledge Statement 的 Knowledge Contribution。Statement 使用当前知识视图中唯一、能够指称一个知识主体的 canonical title，以自由文本正文解释该主体的语境、含义、属性和关系，并通过 `[[canonical title]]` 或 `[[canonical title|local display text]]` 动态引用当前同名 Statement；
 4. Oyster Core 统一执行权限、提交和生命周期边界；
 5. 用户可以审查、纠正、删除或重新加工派生知识；如何向用户呈现其追溯关系随治理设计确定。
 
-Knowledge Maintenance Agent 是一个普通、可替换的工具使用 Agent：角色差异来自 System Prompt、Workspace、授权工具和最终 Knowledge Contribution 协议，而不是专用状态机或固定运行步骤。系统不预设模型轮次、工具次数或总时长；通用 Agent Runtime 在上下文增长时负责压缩临时 transcript。模型的实际上下文、单次请求、分页读取和持久化完整性仍有各自的边界，最终结果仍由 Oyster Core 校验和提交；这些边界不变成整次 Agent 的行为配额。
+Knowledge Maintenance Agent 是一个普通、可替换的工具使用 Agent：角色差异来自 System Prompt、Workspace、授权工具和 Host 对自然结束的解释，而不是专用状态机或固定运行步骤。系统不预设模型轮次、工具次数或总时长；通用 Agent Runtime 负责压缩临时 transcript，并向所有内置工具使用 Agent 提供通用 Todo 和结束检查。Candidate 只在启动时投影为 Todo，Todo 不作为每轮 Context 注入；存在 pending Todo 时，Runtime 通过结束反馈继续同一 Agent。Todo 全部完成且 Agent 自然结束后，Host 冻结 Draft，最终结果仍由 Oyster Core 校验和提交。模型上下文、单次请求、分页读取和持久化完整性仍有各自边界，但这些边界不变成整次 Agent 的行为配额。
 
 任何默认或自定义处理器产生的正式知识都没有不同的本体身份。系统应能解释其如何由观察或输入知识形成，但具体需要保存哪些运行元信息、如何持久化以及 MVP 覆盖到什么程度，留给后续验证。模型、Prompt、策略或 Agent 升级时可以重新加工知识，不重写 Raw Evidence。
 
@@ -146,7 +146,7 @@ Projection 可以根据共享 Knowledge、Attention 和必要的当前状态生�
 
 Oyster 固定使用 `app.getPath('userData')/artifacts/` 标准 Git Repository；一个带可读取的普通根 `AGENTS.md` 的一级目录是一个 Artifact，`AGENTS.md` 表达持久 Attention。除具体应用明确采用的最小约定外，其余结构保持任意；当前根 `output` 只承担 Skill 应用的派生识别语义。UI 直接扫描和刷新文件系统、创建 Artifact、显示 Attention，并可在系统文件管理器中打开 Repository 或 Artifact；缺少或无法读取根 `AGENTS.md` 的可见一级目录会被明确显示为无效目录。Repository 通过捆绑 Git Runtime 的绝对路径初始化，系统 Git 不是前置条件。
 
-所有通用管理 Agent Session 常驻 `read`、`edit`、`write`、`bash`、`search_knowledge`、`read_knowledge`、`upsert_knowledge` 和 `spawn_agent`。`spawn_agent` 以父 Agent 给出的完整任务创建空 transcript 的临时通用 Agent 运行，并把最终回答作为 Tool Result 返回；它不创建新的用户 Session、绑定 Artifact 或引入固定子 Agent 角色。四个 Coding 工具以 Artifact Repository 根作为初始 `cwd`，但这只是坐标起点：Session 不绑定 Artifact、Project 或目录，Harness 不建立 selector、router、Artifact 锁、路径权限边界、Shell 命令限制或 Bash 逐次审批。Agent 根据对话和文件系统识别相关的零个、一个或多个 Artifact，并读取各自根 `AGENTS.md`。文件与 Shell 工具以当前 OS 用户权限运行，因此这一 MVP 是高信任执行模型，不是安全隔离。
+所有通用管理 Agent Session 常驻 `read`、`edit`、`write`、`bash`、`search_knowledge`、`read_knowledge`、`upsert_knowledge`、`spawn_agent`、`add_todos`、`complete_todos` 和 `list_todos`。`spawn_agent` 以父 Agent 给出的完整任务创建空 transcript 的临时通用 Agent 运行，并把最终回答作为 Tool Result 返回；它不创建新的用户 Session、绑定 Artifact 或引入固定子 Agent 角色。Todo 是 Host 持有的运行期工作状态；初始 Todo 与消息输入独立，存在 pending Todo 时只通过通用结束检查阻止自然结束。四个 Coding 工具以 Artifact Repository 根作为初始 `cwd`，但这只是坐标起点：Session 不绑定 Artifact、Project 或目录，Harness 不建立 selector、router、Artifact 锁、路径权限边界、Shell 命令限制或 Bash 逐次审批。Agent 根据对话和文件系统识别相关的零个、一个或多个 Artifact，并读取各自根 `AGENTS.md`。文件与 Shell 工具以当前 OS 用户权限运行，因此这一 MVP 是高信任执行模型，不是安全隔离。
 
 `bash` 的局部 `PATH` 提供 APP 捆绑的标准 Git CLI，Agent 使用普通 `git` 命令，不增加专用 Git Tool。Harness 不自动 commit、branch、worktree、rollback、merge 或处理冲突，但也不通过命令限制阻止 Agent 根据当前任务使用 Git。当前计划中的 Context Packet 仍按临时消费视图处理，不与 Artifact 共用持久身份和修订生命周期；未来能否将其提升为 Artifact 仍待验证。具体范围见[《Artifact Repository MVP》](artifact-repository-mvp.md)与[《通用管理 Agent MVP》](chat-agent-mvp.md)。
 
@@ -197,7 +197,7 @@ Oyster 固定使用 `app.getPath('userData')/artifacts/` 标准 Git Repository�
 - 外部 Agent Skill 的只读发现与浏览：覆盖 Claude Code、Pi 和 Codex 的已知用户、项目及机器注册位置，展示 Agent、scope、项目路径和原始位置，并按需预览入口 Markdown；
 - 固定 `userData/artifacts/` Artifact Repository 的初始化、扫描、刷新、创建和系统打开入口；以带根 `AGENTS.md` 的一级目录作为当前 Artifact 最小单元，并明确展示无效目录；
 - 随 APP 捆绑私有标准 Git Runtime，APP 通过绝对路径调用它并在没有系统 Git 时仍能初始化标准 Repository；
-- 一个跨普通对话、Knowledge 与 Artifact 的通用管理 Agent；所有 Session 常驻八项工具并可创建独立上下文的临时子 Agent 运行，Session 不绑定 Artifact、Project 或 `cwd`；
+- 一个跨普通对话、Knowledge 与 Artifact 的通用管理 Agent；所有 Session 常驻十一项工具并可创建独立上下文的临时子 Agent 运行，Session 不绑定 Artifact、Project 或 `cwd`；
 - Coding 工具从固定 Artifact Repository 根开始，以当前 OS 用户权限运行；Harness 不增加路径 Sandbox、Bash 审批、Artifact selector/router/lock 或专用 Git Tool。
 
 正式知识可追溯是一项产品原则，但其持久形式、校验方式和 MVP 验收范围尚未确定；在形成独立决策前，不把它展开为固定字段或流程要求。
@@ -245,7 +245,7 @@ Oyster 把认证和计费通道与处理 Runtime 分开：
 - **Stage Configuration** 固定某个阶段使用的 Connection、Model 和可选思考强度；
 - **Runtime** 决定该阶段做一次直接生成，还是用同一模型驱动通用 Agent loop，并负责 Agent 的上下文生命周期。
 
-因此，Coding Plan 与 API 可以共享最小模型调用契约，同时仍保留各自不同的认证和计费语义。结构化知识加工链路中的 Knowledge Maintenance Agent 使用该次 Workspace 和 Contribution 协议；面向用户的通用管理 Agent 则在每个 Session 中常驻同一组 Knowledge、文件、Shell 与通用子 Agent 工具。二者可以共用负责模型—工具循环和上下文压缩的 Runtime，但通用管理 Agent 不再按当前职责动态切换工具或身份。Oyster 可以发现官方 Agent Runtime 中可公开读取的账号与套餐信息，但不会把该 Runtime 的内部 Agent loop 或凭据当作业务执行接口。
+因此，Coding Plan 与 API 可以共享最小模型调用契约，同时仍保留各自不同的认证和计费语义。结构化知识加工链路中的 Knowledge Maintenance Agent 使用该次 Workspace 和 Contribution 协议；面向用户的通用管理 Agent 则在每个 Session 中常驻同一组 Knowledge、文件、Shell、Todo 与通用子 Agent 工具。二者共用负责模型—工具循环、上下文压缩、通用 Todo 和结束检查的 Runtime，但通用管理 Agent 不再按当前职责动态切换工具或身份。Oyster 可以发现官方 Agent Runtime 中可公开读取的账号与套餐信息，但不会把该 Runtime 的内部 Agent loop 或凭据当作业务执行接口。
 
 LLM 适合承担：
 

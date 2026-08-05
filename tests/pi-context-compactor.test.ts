@@ -58,8 +58,7 @@ describe('Pi context compactor', () => {
     const compacted = await transform(messages)
 
     expect(contexts.length).toBeGreaterThan(1)
-    expect(contexts[0]?.systemPrompt).toContain('unresolved local names')
-    expect(contexts[0]?.systemPrompt).toContain('candidate Statement boundaries')
+    expect(contexts[0]?.systemPrompt).toContain('task-specific distinctions')
     expect(contexts.at(-1)?.messages[0]?.role).toBe('user')
     expect(JSON.stringify(contexts.at(-1))).toContain('<previous-summary>')
     expect(compacted).toHaveLength(1)

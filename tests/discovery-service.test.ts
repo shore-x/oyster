@@ -88,7 +88,7 @@ describe('DiscoveryService', () => {
     })
     expect(evidence.observationView.rawLines).toContainEqual(expect.stringContaining('"sessionId":"one"'))
     expect(evidence.observationView).toMatchObject({
-      formatVersion: 'claude-jsonl-v2',
+      formatVersion: 'claude-jsonl-v3',
       rawLines: expect.any(Array),
       units: expect.any(Array)
     })

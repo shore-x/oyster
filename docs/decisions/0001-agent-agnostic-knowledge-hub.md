@@ -8,7 +8,7 @@
 - 修订：2026-07-27，明确 Knowledge Maintenance Agent 使用通用 Agent Runtime，不由固定轮次、工具次数或总时长定义
 - 修订：2026-07-28，明确 Statement 是领域语义的 Source of Truth，多元关系由自由文本正文中的显式 Statement 名称引用表达
 - 修订：2026-07-28，确定正文采用读取时动态解析的 canonical title 引用；Statement 生命周期与追溯方式留给治理设计
-- 修订：2026-07-28，明确候选发现、开放调查与知识裁决的边界
+- 修订：2026-07-28，明确候选发现、调查与知识判断的边界
 - 修订：2026-07-29，明确 canonical title 只指称知识主体，语境、属性和关系由正文表达
 - 修订：2026-07-29，明确 Observation、Knowledge 与第三类协作产物状态是三个状态与权威域，Projection 是形成消费输出或维护协作产物的活动；英文命名留待后续修订
 - 修订：2026-07-30，正式采用 Artifact Domain / Artifact；无限定词 Artifact 专指第三个权威域，观察侧产物使用 Activity Artifact，Discovery 来源记录使用 Source Record
@@ -17,6 +17,7 @@
 - 修订：2026-07-31，将现有对话 Agent 扩展为单一通用管理 Agent：所有 Session 常驻 Knowledge 与 Coding 工具，不绑定 Artifact、Project 或 `cwd`，由 Agent 自主发现相关 Artifact
 - 修订：2026-07-31，确定通用 Agent 的高信任 MVP：Coding 工具从固定 Artifact Repository 根开始，但不设置路径边界、Shell Sandbox、逐次审批、selector/router/lock；System Prompt 只提供必要环境事实
 - 修订：2026-07-31，为通用管理 Agent 增加 `spawn_agent`：它创建独立上下文的临时通用 Agent 运行，不建立新的用户 Session、固定子 Agent 角色或专用工作流
+- 修订：2026-08-05，所有内置工具使用 Agent 复用通用 Todo 与结束检查能力；初始 Todo 作为 Host 运行状态绑定，不做每轮 Context 注入，pending Todo 只是阻止自然结束的一种通用原因
 - 关联文档：[Product Brief](../product/product-brief.md)、[本地 Agent 发现与外部证据访问](../product/local-agent-discovery-mvp.md)、[AI Backend MVP](../product/ai-backends-mvp.md)、[知识加工验证 MVP](../product/knowledge-processing-mvp.md)、[Artifact Repository MVP](../product/artifact-repository-mvp.md)、[知识加工、Projection 与 Artifact](../architecture/knowledge-model-and-projection.md)
 
 ## Context
@@ -37,7 +38,7 @@ Oyster 的主要产品身份是：本地优先、跨 Agent、跨项目的知识�
 
 Projection 是从知识、Attention 和必要的当前状态形成可消费输出的活动，而不是第三个持久状态域本身。它可以形成按需消费输出，也可以初始化 Artifact，或基于当前 Artifact 形成下一次修订。Context Packet 是当前临时消费输出的候选形式，其与持久 Artifact 之间的转换关系不由本 ADR 决定。
 
-三个域保持不同的数据所有权，但知识加工、Projection 和 Artifact 维护通过共享 Attention 耦合。Observation Preprocessor 负责从有界观察中发现带回源线索的待调查问题，而不生成 Session 摘要或提前决定 Knowledge Statement。候选进入一次运行的开放调查清单；Knowledge Maintenance Agent 依据当前知识和 Raw Evidence 补充并裁决这些问题，再独立形成 Contribution Draft。开放清单与 Contribution Draft 是可丢弃的运行期工作材料（Run-local Working Material），不是第四个状态域。候选不是事实或 Statement，也不与最终 Statement 一一对应。Oyster Core 统一执行该知识加工 Pipeline 的 Workspace 与提交边界。无论知识由 Agent、Pipeline 还是用户产生，都进入同一个知识层，不按处理器或 Artifact 建立不同的真相存储。
+三个域保持不同的数据所有权，但知识加工、Projection 和 Artifact 维护通过共享 Attention 耦合。Observation Preprocessor 负责从有界观察中发现带回源线索的待调查问题，而不生成 Session 摘要或提前决定 Knowledge Statement。Candidate 是 Preprocessor 的非权威输出；Host 在启动 Knowledge Maintenance Agent 时把每个 Candidate 格式化为普通 initial Todo，之后不维护 Candidate 专用清单、专用 resolution 或专用提交工具。Agent 依据当前知识和 Raw Evidence 完成 Todo，并独立维护 Contribution Draft；当所有 Todo 完成且 Agent 自然结束时，Host 冻结整份 Draft。Candidate、Todo 与 Contribution Draft 都是可丢弃的运行期工作材料（Run-local Working Material），不是第四个状态域；Candidate 也不与最终 Statement 一一对应。Oyster Core 统一执行该知识加工 Pipeline 的 Workspace、冻结与提交边界。无论知识由 Agent、Pipeline 还是用户产生，都进入同一个知识层，不按处理器或 Artifact 建立不同的真相存储。
 
 Attention 可以让 Artifact 自然形成分组，但是否正式引入 Project，以及这种分组的身份和生命周期，仍是未决定事项。任何 Artifact 分组都不得把共享知识划分为彼此隔离的真相。
 
@@ -47,7 +48,9 @@ Git 在这一 MVP 中只是文件历史基础。Oyster 随 APP 捆绑并始终�
 
 APP 自身不自动 commit，不创建 branch 或 worktree，也不实现 diff 审核、merge 或冲突处理。当前通用管理 Agent 可以在普通对话中完成 Artifact 初始化、修订和知识选择，不建立独立 Artifact Agent 或固定 Projection Pipeline。其 `bash` 局部 `PATH` 暴露同一个标准 Git CLI，让 Agent 使用普通 `git` 命令，不增加专用 Git Tool 或替代协议。Harness 不自动编排 Git 工作流，也不限制 Agent 根据当前任务使用普通 Git。外部终端和其他外部进程默认不获得这一 PATH 注入。该实现不把 Git、目录或 `AGENTS.md` 提升为 Artifact Domain 的长期本体。
 
-面向用户的现有对话 Agent 扩展为一个通用管理 Agent。每个 Session 始终拥有 `read`、`edit`、`write`、`bash`、`search_knowledge`、`read_knowledge`、`upsert_knowledge` 和 `spawn_agent`；Session 只保存对话与模型配置，不绑定 Artifact、Project、Workspace 或 `cwd`。`spawn_agent` 使用父 Agent 给出的完整任务启动空 transcript 的临时通用 Agent 运行，复用同一模型、System Prompt 和工具能力，并把最终回答作为 Tool Result 返回父 Agent。子运行不是新的用户 Session，也不按 Artifact 或 Project 绑定；Harness 不预设 reviewer、planner 等固定角色或专用编排模式。四个 Coding 工具以固定 Artifact Repository 根作为初始坐标，但工具按 APP 当前 OS 用户权限运行，该坐标不是访问或安全边界。Harness 不建立 Artifact selector、router、锁、路径限制、命令白名单、Shell Sandbox 或 Bash 逐次审批。
+面向用户的现有对话 Agent 扩展为一个通用管理 Agent。每个 Session 始终拥有 `read`、`edit`、`write`、`bash`、`search_knowledge`、`read_knowledge`、`upsert_knowledge`、`spawn_agent`、`add_todos`、`complete_todos` 和 `list_todos`；Session 只保存对话与模型配置，不绑定 Artifact、Project、Workspace 或 `cwd`。`spawn_agent` 使用父 Agent 给出的完整任务启动空 transcript 的临时通用 Agent 运行，复用同一模型、System Prompt 和工具能力，并把最终回答作为 Tool Result 返回父 Agent。子运行不是新的用户 Session，也不按 Artifact 或 Project 绑定；Harness 不预设 reviewer、planner 等固定角色或专用编排模式。四个 Coding 工具以固定 Artifact Repository 根作为初始坐标，但工具按 APP 当前 OS 用户权限运行，该坐标不是访问或安全边界。Harness 不建立 Artifact selector、router、锁、路径限制、命令白名单、Shell Sandbox 或 Bash 逐次审批。
+
+Todo 是每个 Agent 运行由 Host 持有的通用工作状态，不属于 Knowledge、Artifact 或新的权威域。启动 Agent 时可以把初始 Todo 直接绑定到 Runtime Store，但不把它们转换为 Prompt 或 transcript 消息，也不在每次模型调用前注入清单；Agent 通过三项通用工具主动读取和更新。当 Agent 正常自然结束时，Runtime 聚合所有“当前不能结束”的原因，pending Todo 是其中一种；存在原因时通过内部 Follow-up 再次唤起同一 Agent。业务 Agent 可以提供自己的结束原因，但通用 Runtime 不理解其领域含义，也不设置固定续跑次数、工具次数或总时长。
 
 没有预选 Artifact。通用管理 Agent 根据对话和当前文件系统识别相关的零个、一个或多个 Artifact，并读取各自根 `AGENTS.md` 以理解持久 Attention。Harness 不自动加载某个 Attention，也不把 Artifact 清单塞入上下文。System Prompt 只给出 Repository 绝对路径、一级目录 Artifact、根 `AGENTS.md` 和没有预选 Artifact 等必要环境事实，不加入允许/禁止清单或工具使用原则。
 
@@ -55,7 +58,7 @@ Knowledge Statement 是知识层领域语义的 Source of Truth。canonical titl
 
 正式 Knowledge Statement 应能够追溯到原始观察或输入知识；具体记录和校验方式，以及当前 MVP 是否完整实现，不由本 ADR 决定。
 
-Knowledge Maintenance Agent 是普通、可替换的工具使用 Agent，其角色由 System Prompt、Workspace、工具权限和提交边界定义，不引入专用状态机或任意的总轮次、工具次数和时长配额。具体 Runtime、上下文管理和工具协议属于可替换实现。
+Knowledge Maintenance Agent 是普通、可替换的工具使用 Agent，其角色由 System Prompt、Workspace、工具权限和 Host 对自然结束的解释定义，不引入专用状态机或任意的总轮次、工具次数和时长配额。具体 Runtime、上下文管理和工具协议属于可替换实现。
 
 Artifact 不是新的世界事实，也不是可由知识层覆盖式重建的纯派生物。用户可以直接创建或编辑 Artifact；Agent 的后续更新以当前 Artifact 状态为输入，并延续已经接纳的编辑。通用管理 Agent 同时拥有 Knowledge 与文件工具，但文件修改不会自动回流为知识；调用 `upsert_knowledge` 是对知识层作出的另一项明确修改。是否为需要深入核查的反馈建立 `Knowledge Need` 或其他异步协议尚未决定。
 
@@ -89,7 +92,7 @@ Artifact 不是新的世界事实，也不是可由知识层覆盖式重建的�
 - 产品价值不依赖单个 Agent、模型、浏览器或 Harness；
 - 大型历史可以按 Session 使用，无需维护第二份完整数据；
 - 原始证据和 LLM/Agent 推断分离，知识可审查、重建和删除；
-- Candidate Agenda、Contribution Draft、Knowledge Contribution 与 Knowledge Statement 的边界清晰，正式知识生产者复用统一的贡献和治理契约；
+- Candidate Seed、通用 Todo、Contribution Draft、Knowledge Contribution 与 Knowledge Statement 的边界清晰，正式知识生产者复用统一的贡献和治理契约；
 - Artifact 可以采用适合交付目标的异构形式，而不与共享知识或临时消费视图混为一种状态；
 - 固定 Repository、一级目录和根 `AGENTS.md` 提供了无需额外 Schema 或专用编辑器的最小可验证载体；
 - 捆绑的标准 Git Runtime 消除了系统 Git 和用户 `PATH` 差异，同时保留普通 Git 工具的互操作性；

@@ -4,10 +4,7 @@ import {
   MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH
 } from '../../shared/knowledge'
 import type { ProcessingToolView } from '../../shared/knowledge-processing'
-import {
-  MAX_STATEMENT_CANDIDATE_EXPRESSION_CHARACTERS,
-  MAX_STATEMENT_CANDIDATE_QUESTION_CHARACTERS
-} from './statement-candidate-agenda'
+import { AGENT_TODO_TOOL_CATALOG } from '../agent-runtime/agent-todos'
 
 export const MAX_KNOWLEDGE_SEARCH_RESULTS = 20
 export const MAX_KNOWLEDGE_WORKSPACE_LIST_RESULTS = 100
@@ -26,32 +23,6 @@ export const readEvidenceParameters = Type.Object({
   line: Type.Integer({ minimum: 1 }),
   offset: Type.Integer({ minimum: 0 }),
   limit: Type.Integer({ minimum: 2 })
-}, { additionalProperties: false })
-
-export const listStatementCandidatesParameters = Type.Object({
-  status: Type.Optional(Type.Union([Type.Literal('open'), Type.Literal('resolved')])),
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_KNOWLEDGE_WORKSPACE_LIST_RESULTS })),
-  offset: Type.Optional(Type.Integer({ minimum: 0 }))
-}, { additionalProperties: false })
-
-const candidateLocationParameters = Type.Object({
-  line: Type.Integer({ minimum: 1 }),
-  offset: Type.Integer({ minimum: 0 })
-}, { additionalProperties: false })
-
-export const addStatementCandidatesParameters = Type.Object({
-  candidates: Type.Array(Type.Object({
-    expression: Type.String({ minLength: 1, maxLength: MAX_STATEMENT_CANDIDATE_EXPRESSION_CHARACTERS }),
-    question: Type.String({ minLength: 1, maxLength: MAX_STATEMENT_CANDIDATE_QUESTION_CHARACTERS }),
-    locations: Type.Optional(Type.Array(candidateLocationParameters))
-  }, { additionalProperties: false }))
-}, { additionalProperties: false })
-
-export const resolveStatementCandidatesParameters = Type.Object({
-  resolutions: Type.Array(Type.Object({
-    ref: Type.String({ minLength: 1, maxLength: 64 }),
-    resolution: Type.String({ minLength: 1, maxLength: 16 * 1_024 })
-  }, { additionalProperties: false }))
 }, { additionalProperties: false })
 
 export const contributionStatementParameters = Type.Object({
@@ -80,8 +51,6 @@ export const removeContributionStatementParameters = Type.Object({
   title: Type.String({ minLength: 1, maxLength: MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH })
 }, { additionalProperties: false })
 
-export const submitContributionParameters = Type.Object({}, { additionalProperties: false })
-
 /**
  * Runtime tool definitions are the single source for both Pi AgentTool construction
  * and the read-only developer view. Keep parameter schemas here, beside metadata,
@@ -99,24 +68,6 @@ export const KNOWLEDGE_MAINTENANCE_TOOL_CATALOG = [
     label: '读取 Knowledge Statement',
     description: '按完整 canonical title 精确读取当前 Knowledge Statement。正文中的 [[canonical title]] 引用可用同一工具继续展开。',
     parameters: readKnowledgeParameters
-  },
-  {
-    name: 'list_statement_candidates',
-    label: '查看 Statement 候选',
-    description: '分页读取 Host 持有的开放调查清单。候选不是拟定的 canonical title，也不与 Statement 一一对应。',
-    parameters: listStatementCandidatesParameters
-  },
-  {
-    name: 'add_statement_candidates',
-    label: '补充 Statement 候选',
-    description: '把调查中新发现的名称、指代或必要背景问题加入开放清单；这不会创建 Knowledge Statement。',
-    parameters: addStatementCandidatesParameters
-  },
-  {
-    name: 'resolve_statement_candidates',
-    label: '裁决 Statement 候选',
-    description: '批量记录候选已经过调查及其自由文本处置结论；它不自动写入或更新 Statement。',
-    parameters: resolveStatementCandidatesParameters
   },
   {
     name: 'upsert_contribution_statement',
@@ -145,15 +96,10 @@ export const KNOWLEDGE_MAINTENANCE_TOOL_CATALOG = [
   {
     name: 'read_evidence',
     label: '读取原始观察证据',
-    description: '从候选提供的原始行与行内 offset 开始读取有界 Observation；offset 和 limit 使用 UTF-16 code unit，limit 至少为 2，并在需要时直接使用返回的 Next 位置续读。',
+    description: '从 Todo 中记录的原始行与行内 offset 开始读取有界 Observation；offset 和 limit 使用 UTF-16 code unit，limit 至少为 2，并在需要时直接使用返回的 Next 位置续读。',
     parameters: readEvidenceParameters
   },
-  {
-    name: 'submit_knowledge_contribution',
-    label: '提交 Knowledge Contribution',
-    description: '在所有 Statement 候选均已明确处置后，原子提交当前 Contribution Draft；开放候选仍存在时不会结束 Agent。',
-    parameters: submitContributionParameters
-  }
+  ...AGENT_TODO_TOOL_CATALOG
 ] as const
 
 export type KnowledgeMaintenanceToolName = (typeof KNOWLEDGE_MAINTENANCE_TOOL_CATALOG)[number]['name']

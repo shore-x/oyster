@@ -59,6 +59,8 @@ export interface PiChatAgentRunInput {
   binding: ChatSessionBinding
   runtime: ModelRuntime
   text: string
+  /** Host-owned initial work items bound to this Agent run, not transcript messages. */
+  initialTodos?: readonly string[]
   signal: AbortSignal
   onEvent?: (event: Exclude<ChatEvent, { type: 'snapshot_changed' | 'run_state_changed' }>) => void
 }

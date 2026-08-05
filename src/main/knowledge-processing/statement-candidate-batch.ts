@@ -2,13 +2,8 @@ import {
   formatEvidenceLocation,
   splitsSurrogatePair
 } from '../observation/evidence-location'
-import {
-  MAX_STATEMENT_CANDIDATE_EXPRESSION_CHARACTERS,
-  MAX_STATEMENT_CANDIDATE_QUESTION_CHARACTERS
-} from './statement-candidate-agenda'
-
-export const MAX_STATEMENT_CANDIDATE_EXPRESSION_LENGTH = MAX_STATEMENT_CANDIDATE_EXPRESSION_CHARACTERS
-export const MAX_STATEMENT_CANDIDATE_QUESTION_LENGTH = MAX_STATEMENT_CANDIDATE_QUESTION_CHARACTERS
+export const MAX_STATEMENT_CANDIDATE_EXPRESSION_LENGTH = 512
+export const MAX_STATEMENT_CANDIDATE_QUESTION_LENGTH = 16 * 1_024
 
 export interface StatementCandidateLocation {
   line: number

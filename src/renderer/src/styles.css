@@ -410,11 +410,11 @@ h1 { margin: 0 0 10px; font-size: var(--font-size-display); line-height: 1.25; l
 .processing-debug-timeline code { display: block; margin-top: 5px; padding: 6px 7px; color: var(--text-tertiary); background: #fff; border-radius: var(--radius-control); font-size: var(--font-size-caption); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .processing-contribution-knowledge { min-height: 300px; }
 .processing-contribution__empty { min-height: 120px; margin-top: 12px; border: 1px dashed var(--border-strong); border-radius: var(--radius-control); }
-.processing-candidate-agenda { margin-top: 15px; padding-top: 14px; border-top: 1px solid var(--border-default); }
-.processing-candidate-agenda__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
-.processing-candidate-agenda__heading h4 { margin: 0; color: var(--text-secondary); font-size: var(--font-size-label); font-weight: var(--font-weight-semibold); }
-.processing-candidate-agenda__heading p { margin: 4px 0 0; color: var(--text-muted); font-size: var(--font-size-caption); line-height: 1.5; }
-.processing-candidate-agenda__heading > strong { flex: 0 0 auto; color: var(--text-secondary); font-size: var(--font-size-label); }
+.processing-agent-todos { margin-top: 15px; padding-top: 14px; border-top: 1px solid var(--border-default); }
+.processing-agent-todos__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.processing-agent-todos__heading h4 { margin: 0; color: var(--text-secondary); font-size: var(--font-size-label); font-weight: var(--font-weight-semibold); }
+.processing-agent-todos__heading p { margin: 4px 0 0; color: var(--text-muted); font-size: var(--font-size-caption); line-height: 1.5; }
+.processing-agent-todos__heading > strong { flex: 0 0 auto; color: var(--text-secondary); font-size: var(--font-size-label); }
 
 .statement-candidates { display: grid; gap: 8px; max-height: 480px; margin-top: 12px; overflow: auto; }
 .statement-candidate { padding: 12px 13px; background: #fff; border: 1px solid var(--border-default); border-radius: var(--radius-control); }

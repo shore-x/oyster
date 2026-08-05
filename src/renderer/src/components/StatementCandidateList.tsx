@@ -1,13 +1,8 @@
 import { For, Show } from 'solid-js'
-import type {
-  StatementCandidateSeed,
-  StatementCandidateView
-} from '../../../shared/knowledge-processing'
-
-export type DisplayStatementCandidate = StatementCandidateSeed | StatementCandidateView
+import type { StatementCandidateSeed } from '../../../shared/knowledge-processing'
 
 export interface StatementCandidateListProps {
-  candidates: DisplayStatementCandidate[]
+  candidates: StatementCandidateSeed[]
   emptyText?: string
 }
 
@@ -22,30 +17,18 @@ export function StatementCandidateList(props: StatementCandidateListProps) {
       )}
     >
       <div class="statement-candidates" data-testid="statement-candidate-list">
-        <For each={props.candidates}>{(candidate, index) => {
-          const status = () => 'status' in candidate ? candidate.status : 'open'
-          const resolution = () => 'resolution' in candidate ? candidate.resolution : undefined
-          return (
+        <For each={props.candidates}>{(candidate, index) => (
             <article
-              class={`statement-candidate statement-candidate--${status()}`}
+              class="statement-candidate statement-candidate--open"
               data-testid={`statement-candidate-${index() + 1}`}
             >
               <div class="statement-candidate__heading">
                 <strong>{candidate.expression}</strong>
-                <span>{status() === 'resolved' ? '已裁决' : '待裁决'}</span>
+                <span>待调查</span>
               </div>
               <p>{candidate.question}</p>
-              <Show when={resolution()}>
-                {(value) => (
-                  <div class="statement-candidate__resolution">
-                    <span>裁决</span>
-                    <p>{value()}</p>
-                  </div>
-                )}
-              </Show>
             </article>
-          )
-        }}</For>
+        )}</For>
       </div>
     </Show>
   )

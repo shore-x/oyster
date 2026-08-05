@@ -125,7 +125,10 @@ describe('ChatAgentService', () => {
           'search_knowledge',
           'read_knowledge',
           'upsert_knowledge',
-          'spawn_agent'
+          'spawn_agent',
+          'add_todos',
+          'complete_todos',
+          'list_todos'
         ])
         return fauxAssistantMessage(fauxToolCall('search_knowledge', { query: 'Project P' }), {
           stopReason: 'toolUse'
@@ -212,7 +215,10 @@ describe('ChatAgentService', () => {
       'search_knowledge',
       'read_knowledge',
       'upsert_knowledge',
-      'spawn_agent'
+      'spawn_agent',
+      'add_todos',
+      'complete_todos',
+      'list_todos'
     ])
     expect(snapshot.agent.tools[6].parameters).toMatchObject({
       type: 'object',
@@ -242,7 +248,10 @@ describe('ChatAgentService', () => {
       'search_knowledge',
       'read_knowledge',
       'upsert_knowledge',
-      'spawn_agent'
+      'spawn_agent',
+      'add_todos',
+      'complete_todos',
+      'list_todos'
     ]
     const fixture = await serviceFixture(({ artifactRepositoryPath }) => [
       (context) => {

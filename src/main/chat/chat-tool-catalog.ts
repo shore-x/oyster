@@ -5,6 +5,7 @@ import {
   MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH
 } from '../../shared/knowledge'
 import type { ProcessingToolView } from '../../shared/knowledge-processing'
+import { AGENT_TODO_TOOL_CATALOG } from '../agent-runtime/agent-todos'
 import {
   knowledgeMaintenanceToolDefinition,
   readKnowledgeParameters,
@@ -56,7 +57,8 @@ const CHAT_AGENT_TOOL_CATALOG = [
     label: '创建子 Agent',
     description: 'Run a delegated task in a new general Agent with an independent conversation context. The new Agent does not see the current conversation; required context must be included in the task. Returns its final response.',
     parameters: spawnAgentParameters
-  }
+  },
+  ...AGENT_TODO_TOOL_CATALOG
 ] as const
 
 export type ChatAgentToolName = (typeof CHAT_AGENT_TOOL_CATALOG)[number]['name']

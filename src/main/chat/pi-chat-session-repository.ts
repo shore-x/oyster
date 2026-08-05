@@ -14,6 +14,7 @@ import type {
 } from '../../shared/chat'
 import type { ChatSessionRepository, PersistedChatSession } from './model'
 import { chatMessageView } from './chat-message-view'
+import { isAgentRuntimeFeedbackMessage } from '../agent-runtime/pi-agent-runtime'
 
 const CHAT_METADATA_KIND = 'oyster-chat'
 const MAX_CHAT_TITLE_LENGTH = 512
@@ -63,7 +64,7 @@ function metadataPayload(metadata: JsonlSessionMetadata): ChatSessionMetadataPay
 }
 
 function messageEntries(entries: readonly SessionTreeEntry[]): ChatTranscriptEntry[] {
-  return entries.flatMap((entry) => entry.type === 'message'
+  return entries.flatMap((entry) => entry.type === 'message' && !isAgentRuntimeFeedbackMessage(entry.message)
     ? [{ id: entry.id, createdAt: entry.timestamp, message: chatMessageView(entry.message) }]
     : [])
 }

@@ -4,6 +4,7 @@ import type { KnowledgeCommitResult } from '../../../shared/knowledge'
 import { KnowledgeStatementBrowser, statementPreview } from './KnowledgeStatementBrowser'
 import { ProcessingTraceExplorer } from './ProcessingDebugTracePanel'
 import { StatementCandidateList } from './StatementCandidateList'
+import { AgentTodoList } from './AgentTodoList'
 import type { FullChainResultView, FullChainStepView } from './FullChainWorkspace'
 import type {
   KnowledgeFullChainResult,
@@ -26,7 +27,8 @@ export function fullChainResultView(result: KnowledgeFullChainResult): FullChain
     runId: result.runId,
     completedAt: result.completedAt,
     durationMs: result.durationMs,
-    statementCandidates: result.maintenance.statementCandidates,
+    statementCandidates: result.preprocessing.statementCandidates,
+    todos: result.maintenance.todos,
     debugTrace: result.maintenance.debugTrace,
     steps: [
       {
@@ -175,8 +177,13 @@ export function FullChainResultDetail(props: {
       </div>
 
       <details class="chain-test__candidates ui-disclosure">
-        <summary>候选裁决（{props.result.statementCandidates.length}）</summary>
-        <StatementCandidateList candidates={props.result.statementCandidates} emptyText="本次测试没有发现需要裁决的 Statement 候选。" />
+        <summary>预处理候选（{props.result.statementCandidates.length}）</summary>
+        <StatementCandidateList candidates={props.result.statementCandidates} emptyText="本次测试没有发现 Statement 候选。" />
+      </details>
+
+      <details class="chain-test__candidates ui-disclosure">
+        <summary>Maintainer Todos（{props.result.todos.length}）</summary>
+        <AgentTodoList todos={props.result.todos} emptyText="本次 Maintainer 运行没有 Todo。" />
       </details>
     </section>
   )

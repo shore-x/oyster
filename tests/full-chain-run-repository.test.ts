@@ -40,12 +40,21 @@ function record(
     sandbox: { id: `sandbox:${runId}`, baselineCreatedAt: completedAt },
     sourceRef: `raw:${runId}`,
     preprocessing: {
+      statementCandidates: [{
+        expression: 'Database',
+        question: 'What does Database denote?',
+        locations: [{ line: 1, offset: 0 }]
+      }],
       execution: { model: 'small-preprocessor' },
       debugTrace
     },
     maintenance: {
       execution: { model: 'maintainer' },
-      statementCandidates: [{ expression: 'Database', status: 'resolved' }],
+      todos: [{
+        id: 'T000001',
+        content: 'Investigate the observed name or expression: Database',
+        status: 'completed'
+      }],
       debugTrace
     },
     commit: { statements: [] },
@@ -57,7 +66,7 @@ function record(
     completedAt
   } as unknown as KnowledgeFullChainResult
   return {
-    formatVersion: 1,
+    formatVersion: 2,
     runId,
     attention: 'Focus on names.',
     configuration: {
@@ -133,7 +142,7 @@ describe('SqliteKnowledgeFullChainRunRepository', () => {
     expect(row.payload_json.match(/\"debugTrace\"/g)).toHaveLength(1)
   })
 
-  it('normalizes the legacy artifactId in stored run history to sourceRecordId', async () => {
+  it('migrates V1 Candidate history and legacy artifactId into V2 Todos and sourceRecordId', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'oyster-processing-history-'))
     temporaryDirectories.push(directory)
     const databasePath = join(directory, 'history.sqlite')
@@ -148,10 +157,24 @@ describe('SqliteKnowledgeFullChainRunRepository', () => {
       WHERE run_id = ?
     `).get('legacy-run') as { payload_json: string }
     const payload = JSON.parse(row.payload_json) as {
-      result: { session: Record<string, unknown> }
+      formatVersion: number
+      result: {
+        session: Record<string, unknown>
+        maintenance: Record<string, unknown>
+      }
     }
+    payload.formatVersion = 1
     const { sourceRecordId, ...legacySession } = payload.result.session
     payload.result.session = { ...legacySession, artifactId: sourceRecordId }
+    delete payload.result.maintenance.todos
+    payload.result.maintenance.statementCandidates = [{
+      ref: 'C000001',
+      expression: 'Database',
+      question: 'What does Database denote?',
+      evidenceLocations: ['L000001:C0'],
+      status: 'resolved',
+      resolution: 'Covered by Database.'
+    }]
     database.prepare(`
       UPDATE knowledge_full_chain_runs
       SET payload_json = ?
@@ -161,8 +184,16 @@ describe('SqliteKnowledgeFullChainRunRepository', () => {
 
     const reopened = await SqliteKnowledgeFullChainRunRepository.open(databasePath)
     const restored = reopened.read('legacy-run')
+    expect(restored?.formatVersion).toBe(2)
     expect(restored?.result.session.sourceRecordId).toBe('source-record:legacy-run')
     expect(restored?.result.session).not.toHaveProperty('artifactId')
+    expect(restored?.result.maintenance.todos).toEqual([expect.objectContaining({
+      id: 'T000001',
+      content: expect.stringContaining('Database'),
+      status: 'completed'
+    })])
+    expect(restored?.result.maintenance).not.toHaveProperty('statementCandidates')
+    expect(JSON.stringify(restored?.result.maintenance)).not.toContain('Covered by Database')
     reopened.close()
   })
 
@@ -175,7 +206,7 @@ describe('SqliteKnowledgeFullChainRunRepository', () => {
     expect(() => repository.save(first)).toThrow()
     expect(() => repository.save({
       ...first,
-      formatVersion: 2
+      formatVersion: 1
     } as unknown as KnowledgeFullChainRunRecord)).toThrow('加工测试历史格式版本无效')
     expect(() => repository.read('')).toThrow('Run ID 格式无效')
     repository.close()

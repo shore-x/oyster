@@ -12,6 +12,7 @@ import type {
   KnowledgeContributionDraft,
   KnowledgeStatement
 } from './knowledge'
+import type { AgentTodo, AgentTodoCounts } from './agent-runtime'
 
 export const PROCESSING_STAGE_IDS = [
   'observation_preprocessor',
@@ -158,23 +159,8 @@ export interface StatementCandidateSeed {
   locations: StatementCandidateLocation[]
 }
 
-export interface StatementCandidateView {
-  ref: string
-  expression: string
-  question: string
-  evidenceLocations: string[]
-  status: 'open' | 'resolved'
-  resolution?: string
-}
-
-export interface StatementCandidateCounts {
-  total: number
-  open: number
-  resolved: number
-}
-
 export interface KnowledgeMaintenanceWorkspaceStatus {
-  candidates: StatementCandidateCounts
+  todos: AgentTodoCounts
   draftStatementCount: number
 }
 
@@ -251,7 +237,7 @@ export interface KnowledgeMaintenanceResult {
   stageId: 'knowledge_maintenance_agent'
   preprocessingRunId: string
   contribution: KnowledgeContributionDraft
-  statementCandidates: StatementCandidateView[]
+  todos: AgentTodo[]
   debugTrace: KnowledgeProcessingDebugTrace
   durationMs: number
   completedAt: string
@@ -294,7 +280,7 @@ export interface KnowledgeFullChainStageSnapshot {
 
 /** Immutable local record of one successfully completed full-chain test. */
 export interface KnowledgeFullChainRunRecord {
-  formatVersion: 1
+  formatVersion: 2
   runId: string
   attention?: string
   configuration: {

@@ -7,6 +7,11 @@ import {
   PiContextCompactionOutputError,
   PiContextWindowError
 } from '../agent-runtime/pi-context-compactor'
+import {
+  convertPiAgentMessages,
+  createPiAgentRuntime,
+  isAgentRuntimeFeedbackMessage
+} from '../agent-runtime/pi-agent-runtime'
 import type { KnowledgeStatement } from '../../shared/knowledge'
 import type { PiChatAgentRunInput, ChatKnowledgeStore } from './model'
 import { chatMessageView, serializableChatValue } from './chat-message-view'
@@ -217,9 +222,11 @@ export class PiChatAgent {
 
     const createRun: (
       agentRunId: string,
-      messages: AgentMessage[]
-    ) => CreatedAgentRun = (agentRunId, messages) => {
+      messages: AgentMessage[],
+      initialTodos?: readonly string[]
+    ) => CreatedAgentRun = (agentRunId, messages, initialTodos) => {
       let compactionError: Error | undefined
+      const agentRuntime = createPiAgentRuntime({ initialTodos })
       const tools: AgentTool[] = [
         ...codingTools(this.artifactRepositoryPath),
         ...knowledgeTools(this.knowledgeStore, agentRunId),
@@ -246,7 +253,8 @@ export class PiChatAgent {
               }
             }
           }
-        } as AgentTool<typeof spawnAgentParameters>
+        } as AgentTool<typeof spawnAgentParameters>,
+        ...agentRuntime.tools
       ]
       const compactContext = createPiContextCompactor({
         model: input.runtime.model,
@@ -269,6 +277,7 @@ export class PiChatAgent {
           messages
         },
         streamFn: input.runtime.streamFn,
+        convertToLlm: convertPiAgentMessages,
         transformContext: async (currentMessages, signal) => {
           try {
             return await compactContext(currentMessages, signal)
@@ -280,13 +289,14 @@ export class PiChatAgent {
         toolExecution: 'sequential',
         sessionId: agentRunId
       })
+      agentRuntime.attach(agent)
       return {
         agent,
         getCompactionError: () => compactionError
       }
     }
 
-    const rootRun = createRun(input.sessionId, context.messages)
+    const rootRun = createRun(input.sessionId, context.messages, input.initialTodos)
     const agent = rootRun.agent
 
     agent.subscribe(async (event) => {
@@ -300,6 +310,7 @@ export class PiChatAgent {
       }
       if (event.type === 'message_end') {
         const entryId = await input.session.appendMessage(event.message)
+        if (isAgentRuntimeFeedbackMessage(event.message)) return
         const entry = await input.session.getEntry(entryId)
         if (!entry || entry.type !== 'message') throw new Error('对话消息持久化失败')
         safeEmit(input, {

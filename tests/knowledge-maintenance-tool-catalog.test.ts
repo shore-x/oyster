@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest'
 import {
   KNOWLEDGE_MAINTENANCE_TOOL_CATALOG,
   KNOWLEDGE_MAINTENANCE_TOOL_VIEWS,
-  addStatementCandidatesParameters,
   knowledgeMaintenanceToolDefinition,
   searchKnowledgeParameters
 } from '../src/main/knowledge-processing/knowledge-maintenance-tool-catalog'
+import { addTodosParameters } from '../src/main/agent-runtime/agent-todos'
+import { chatAgentToolViews } from '../src/main/chat/chat-tool-catalog'
 
 describe('Knowledge Maintenance tool catalog', () => {
   it('projects the runtime parameter schemas into JSON-safe developer views', () => {
@@ -25,8 +26,8 @@ describe('Knowledge Maintenance tool catalog', () => {
   it('uses the catalog schema itself when constructing a runtime tool', () => {
     expect(knowledgeMaintenanceToolDefinition('search_knowledge').parameters)
       .toBe(searchKnowledgeParameters)
-    expect(knowledgeMaintenanceToolDefinition('add_statement_candidates').parameters)
-      .toBe(addStatementCandidatesParameters)
+    expect(knowledgeMaintenanceToolDefinition('add_todos').parameters)
+      .toBe(addTodosParameters)
   })
 
   it('retains required fields, nested objects, and constraints', () => {
@@ -44,33 +45,26 @@ describe('Knowledge Maintenance tool catalog', () => {
       }
     })
 
-    const candidatesView = KNOWLEDGE_MAINTENANCE_TOOL_VIEWS.find(
-      (tool) => tool.name === 'add_statement_candidates'
+    const todosView = KNOWLEDGE_MAINTENANCE_TOOL_VIEWS.find(
+      (tool) => tool.name === 'add_todos'
     )
-    expect(candidatesView?.parameters).toMatchObject({
-      required: ['candidates'],
+    expect(todosView?.parameters).toMatchObject({
+      required: ['todos'],
       properties: {
-        candidates: {
+        todos: {
           type: 'array',
-          items: {
-            required: ['expression', 'question'],
-            properties: {
-              expression: { type: 'string', minLength: 1, maxLength: 512 },
-              question: { type: 'string', minLength: 1, maxLength: 16 * 1_024 },
-              locations: {
-                type: 'array',
-                items: {
-                  required: ['line', 'offset'],
-                  properties: {
-                    line: { type: 'integer', minimum: 1 },
-                    offset: { type: 'integer', minimum: 0 }
-                  }
-                }
-              }
-            }
-          }
+          items: { type: 'string', minLength: 1, maxLength: 64 * 1_024 }
         }
       }
     })
+  })
+
+  it('exposes the same three general Todo tools from every built-in Agent', () => {
+    const todoNames = ['add_todos', 'complete_todos', 'list_todos']
+    const knowledgeNames = KNOWLEDGE_MAINTENANCE_TOOL_VIEWS.map((tool) => tool.name)
+    const chatNames = chatAgentToolViews('/tmp/oyster-artifacts').map((tool) => tool.name)
+
+    expect(knowledgeNames.filter((name) => todoNames.includes(name))).toEqual(todoNames)
+    expect(chatNames.filter((name) => todoNames.includes(name))).toEqual(todoNames)
   })
 })

@@ -27,6 +27,156 @@ function contentBlockTypes(value: unknown): string[] {
   }))].slice(0, 8)
 }
 
+/** Adapter-private navigation metadata, not a persisted fact or cross-Harness schema. */
+interface SkillHint {
+  name?: string
+  tool?: string
+  source: 'runtime_injection' | 'tool_call'
+}
+
+function skillName(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const name = value.trim()
+  return sourceToken(name)
+}
+
+function skillDocumentName(value: unknown, depth = 0): string | undefined {
+  if (depth > 6) return undefined
+  if (typeof value === 'string') {
+    return skillName(value.match(/(?:^|[\\/])([a-zA-Z0-9._-]{1,64})[\\/]SKILL\.md(?=$|[\s"',;)}\]])/)?.[1])
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const name = skillDocumentName(item, depth + 1)
+      if (name) return name
+    }
+    return undefined
+  }
+  const record = asRecord(value)
+  if (!record) return undefined
+  for (const item of Object.values(record)) {
+    const name = skillDocumentName(item, depth + 1)
+    if (name) return name
+  }
+  return undefined
+}
+
+function contentTexts(value: unknown): string[] {
+  if (typeof value === 'string') return [value]
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    const block = asRecord(item)
+    return typeof block?.text === 'string' ? [block.text] : []
+  })
+}
+
+function injectedSkillName(value: unknown): string | undefined {
+  for (const text of contentTexts(value)) {
+    const injection = text.trim()
+    if (!/^<skill(?:\s[^>]*)?>[\s\S]*<\/skill>$/i.test(injection)) continue
+    const attributeName = skillName(injection.match(/^<skill\b[^>]*\bname=["']([^"']+)["'][^>]*>/i)?.[1])
+    if (attributeName) return attributeName
+    const elementName = skillName(injection.match(/<name>([^<]+)<\/name>/i)?.[1])
+    if (elementName) return elementName
+  }
+  return undefined
+}
+
+function isReadTool(value: unknown): boolean {
+  if (typeof value !== 'string') return false
+  const normalized = value.toLowerCase().replace(/[^a-z]/g, '')
+  return normalized === 'read' || normalized === 'readfile'
+}
+
+function nativeSkillToolHint(block: Record<string, unknown>): SkillHint | undefined {
+  const tool = sourceToken(block.name)
+  if (!tool || tool.toLowerCase() !== 'skill') return undefined
+  const input = asRecord(block.input ?? block.arguments)
+  return {
+    name: skillName(input?.skill ?? input?.name),
+    tool,
+    source: 'tool_call'
+  }
+}
+
+function skillReadToolHint(block: Record<string, unknown>): SkillHint | undefined {
+  const tool = sourceToken(block.name)
+  if (!tool || !isReadTool(tool)) return undefined
+  const name = skillDocumentName(block.input ?? block.arguments)
+  return name ? { name, tool, source: 'tool_call' } : undefined
+}
+
+function claudeSkillHint(record: Record<string, unknown> | undefined): SkillHint | undefined {
+  const message = asRecord(record?.message)
+  if (!message) return undefined
+  if (message.role === 'user') {
+    const name = injectedSkillName(message.content)
+    if (name) return { name, source: 'runtime_injection' }
+  }
+  if (!Array.isArray(message.content)) return undefined
+  for (const item of message.content) {
+    const block = asRecord(item)
+    if (block?.type !== 'tool_use') continue
+    const hint = nativeSkillToolHint(block) ?? skillReadToolHint(block)
+    if (hint) return hint
+  }
+  return undefined
+}
+
+function piSkillHint(record: Record<string, unknown> | undefined): SkillHint | undefined {
+  const message = asRecord(record?.message)
+  const role = record?.role ?? message?.role
+  const content = record?.content ?? message?.content
+  if (role === 'user') {
+    const name = injectedSkillName(content)
+    if (name) return { name, source: 'runtime_injection' }
+  }
+  if (!Array.isArray(content)) return undefined
+  for (const item of content) {
+    const block = asRecord(item)
+    if (block?.type !== 'toolCall') continue
+    const hint = nativeSkillToolHint(block) ?? skillReadToolHint(block)
+    if (hint) return hint
+  }
+  return undefined
+}
+
+function codexSkillHint(payload: Record<string, unknown>): SkillHint | undefined {
+  if (payload.role === 'user') {
+    const name = injectedSkillName(payload.content)
+    if (name) return { name, source: 'runtime_injection' }
+  }
+
+  const payloadType = typeof payload.type === 'string'
+    ? payload.type.toLowerCase().replace(/[^a-z]/g, '')
+    : ''
+  if (!payloadType.includes('toolcall') && payloadType !== 'functioncall') return undefined
+  const tool = sourceToken(payload.name)
+  if (tool?.toLowerCase() === 'skill') {
+    const input = asRecord(payload.input ?? payload.arguments)
+    return {
+      name: skillName(input?.skill ?? input?.name),
+      tool,
+      source: 'tool_call'
+    }
+  }
+  const name = skillDocumentName(payload.input ?? payload.arguments)
+  return name ? { name, ...(tool ? { tool } : {}), source: 'tool_call' } : undefined
+}
+
+function skillHintContext(hint: SkillHint | undefined): string | undefined {
+  return hint ? hint.name ?? 'detected' : undefined
+}
+
+function skillHintModelContent(hint: SkillHint): string {
+  return JSON.stringify({
+    kind: 'skill_activation_hint',
+    source: hint.source,
+    ...(hint.name ? { name: hint.name } : {}),
+    ...(hint.tool ? { tool: hint.tool } : {})
+  })
+}
+
 function recordContext(agent: string, values: Array<[string, unknown]>): string {
   const details = values.flatMap(([label, value]) => {
     if (Array.isArray(value)) return value.length ? [`${label}=${value.join(',')}`] : []
@@ -111,19 +261,23 @@ function jsonlView(
 
 function claudeRecordContext(record: Record<string, unknown> | undefined): string {
   const message = asRecord(record?.message)
+  const hint = claudeSkillHint(record)
   return recordContext('Claude', [
     ['record', record?.type],
     ['role', message?.role],
-    ['blocks', contentBlockTypes(message?.content)]
+    ['blocks', contentBlockTypes(message?.content)],
+    ['skill_hint', skillHintContext(hint)]
   ])
 }
 
 function piRecordContext(record: Record<string, unknown> | undefined): string {
   const message = asRecord(record?.message)
+  const hint = piSkillHint(record)
   return recordContext('Pi', [
     ['record', record?.type],
     ['role', record?.role ?? message?.role],
-    ['blocks', contentBlockTypes(record?.content ?? message?.content)]
+    ['blocks', contentBlockTypes(record?.content ?? message?.content)],
+    ['skill_hint', skillHintContext(hint)]
   ])
 }
 
@@ -228,6 +382,17 @@ function codexUnits(rawLines: string[]): ObservationUnit[] {
     }
     if (!type && (record.role === 'user' || record.role === 'assistant')) {
       if (record.role === 'user' && isCodexRuntimeScaffold(record)) return []
+      const hint = codexSkillHint(record)
+      if (hint) {
+        return [{
+          units: [compactCodexUnit(
+            line,
+            lineNumber,
+            skillHintModelContent(hint),
+            [['record', 'skill_hint'], ['skill_hint', skillHintContext(hint)]]
+          )]
+        }]
+      }
       canonicalRoles.add(record.role)
       return [{ units: exactCodexUnits(line, lineNumber) }]
     }
@@ -244,6 +409,21 @@ function codexUnits(rawLines: string[]): ObservationUnit[] {
     }
 
     if (type === 'response_item' && payload) {
+      const hint = codexSkillHint(payload)
+      if (hint) {
+        return [{
+          units: [compactCodexUnit(
+            line,
+            lineNumber,
+            skillHintModelContent(hint),
+            [
+              ['record', type],
+              ['payload', payload.type],
+              ['skill_hint', skillHintContext(hint)]
+            ]
+          )]
+        }]
+      }
       if (payload.type === 'message') {
         if (payload.role !== 'user' && payload.role !== 'assistant') return []
         if (payload.role === 'user' && isCodexRuntimeScaffold(payload)) return []
@@ -261,17 +441,17 @@ function codexUnits(rawLines: string[]): ObservationUnit[] {
 }
 
 export function createClaudeObservationView(rawContent: string): ObservationView {
-  return jsonlView(rawContent, 'claude-jsonl-v2', claudeRecordContext)
+  return jsonlView(rawContent, 'claude-jsonl-v3', claudeRecordContext)
 }
 
 export function createPiObservationView(rawContent: string): ObservationView {
-  return jsonlView(rawContent, 'pi-jsonl-v2', piRecordContext)
+  return jsonlView(rawContent, 'pi-jsonl-v3', piRecordContext)
 }
 
 export function createCodexObservationView(rawContent: string): ObservationView {
   const rawLines = rawContent.split(/\r\n|\r|\n/)
   return {
-    formatVersion: 'codex-jsonl-v4',
+    formatVersion: 'codex-jsonl-v5',
     rawLines,
     units: codexUnits(rawLines)
   }

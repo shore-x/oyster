@@ -2,7 +2,7 @@
 
 > 状态：当前 MVP 规格
 >
-> 日期：2026-07-31
+> 日期：2026-08-05
 
 ## 1. 目的
 
@@ -12,7 +12,7 @@ Oyster 只提供一个面向用户的通用管理 Agent。它既可以进行普�
 
 ## 2. 常驻工具
 
-每个 Session 始终拥有同一组八项工具：
+每个 Session 始终拥有同一组十一项工具：
 
 - `read`：读取文本文件；
 - `edit`：对文件执行精确局部修改；
@@ -21,13 +21,22 @@ Oyster 只提供一个面向用户的通用管理 Agent。它既可以进行普�
 - `search_knowledge`：按标题和正文分页搜索正式知识库；
 - `read_knowledge`：按 canonical title 精确读取一条 Knowledge Statement；
 - `upsert_knowledge`：在一次事务中按 canonical title 创建或完整替换一组 Knowledge Statement；
-- `spawn_agent`：把一项完整任务委派给新的独立上下文通用 Agent，并将其最终回答返回当前 Agent。
+- `spawn_agent`：把一项完整任务委派给新的独立上下文通用 Agent，并将其最终回答返回当前 Agent；
+- `add_todos`：向当前 Agent 运行绑定的通用 Todo 列表增加工作项；
+- `complete_todos`：按 Host 分配的 ID 批量标记 Todo 完成；
+- `list_todos`：读取当前运行的 pending 与 completed Todo。
 
 工具名称、描述和参数 Schema 由运行时定义直接投影到 Agent 配置页，不维护第二份仅供 UI 使用的说明。知识写入继续采用当前 MVP 的“同名覆盖”语义，不增加 revision、冲突裁决或关系 Schema。
 
-`spawn_agent` 创建的是一次临时 Agent 运行，而不是新的用户 Session、Agent 类型或固定角色。子运行使用空 transcript，不继承父对话历史；它复用当前模型、System Prompt、Artifact Repository 起点和同一组八项工具，因此仍可根据委派任务使用 Knowledge、文件、Shell 或继续委派。父调用等待子运行完成，最终文本进入普通 Tool Result，子 transcript 保存在该结果的 details 中；取消父运行会沿当前委派链传播。
+`spawn_agent` 创建的是一次临时 Agent 运行，而不是新的用户 Session、Agent 类型或固定角色。子运行使用空 transcript，不继承父对话历史；它复用当前模型、System Prompt、Artifact Repository 起点和同一组十一项工具，因此仍可根据委派任务使用 Knowledge、文件、Shell、Todo 或继续委派。父调用等待子运行完成，最终文本进入普通 Tool Result，子 transcript 保存在该结果的 details 中；取消父运行会沿当前委派链传播。
 
 Agent 根据对话自行决定是否以及何时调用这些工具。Harness 不根据当前话题、Artifact 或预先识别的职责增删工具，也不引入 Artifact selector、router、专用 Git Tool、固定子 Agent 角色或预设编排模式。
+
+### 通用 Todo 与结束检查
+
+Todo 是当前 Agent 运行的 Host 状态，不是用户消息、业务状态机或长期知识。启动 Agent 时可以独立绑定初始 Todo，但不会把它们加入 Prompt 或 transcript，也不会在每次模型调用前注入 Todo 列表；Agent 通过 `list_todos` 按需读取。Todo 的完整 Runtime 定义见[《通用 Agent Runtime》](../architecture/agent-runtime.md)。
+
+当 Agent 正常自然结束时，通用 Runtime 聚合所有“当前不能结束”的原因。pending Todo 是其中一种原因；如果存在原因，Runtime 通过内部 Follow-up Feedback 再次唤起 Agent。该 Feedback 在模型边界可读，但不会在 Chat UI 中伪装成用户消息。错误、取消和 aborted turn 不因此重试，也不设置固定续跑次数或总运行时长。
 
 ## 3. 文件系统、Shell 与 Git
 
@@ -76,14 +85,14 @@ Other internal structure is arbitrary. No Artifact is preselected.
 
 “对话”页面继续使用一套持久 Session 和消息界面。新 Session 在首次发送时创建；完整的 user、assistant 和 tool-result 消息使用 Pi JSONL Session Repository 保存在 Oyster 用户数据目录中。模型输出按事件流更新，每次工具调用显示状态，并可展开查看 Input 与 Result。
 
-Agent 配置页只保留一个面向用户对话的通用管理 Agent 条目，并展示其八项实际工具；Observation Preprocessor 与 Knowledge Maintenance Agent 仍作为结构化知识加工角色单独展示。用户可以编辑或恢复默认 System Prompt；工具由代码拥有，在页面中只读展示。Artifact 页面可以通过普通对话入口帮助用户描述目标，但不创建隐藏绑定或不同类型的 Session。子 Agent 运行不进入 Session 列表，其内部 transcript 只随父 Session 的 `spawn_agent` Tool Result 保存。
+Agent 配置页只保留一个面向用户对话的通用管理 Agent 条目，并展示其十一项实际工具；Observation Preprocessor 与 Knowledge Maintenance Agent 仍作为结构化知识加工角色单独展示。用户可以编辑或恢复默认 System Prompt；工具由代码拥有，在页面中只读展示。Artifact 页面可以通过普通对话入口帮助用户描述目标，但不创建隐藏绑定或不同类型的 Session。子 Agent 运行不进入 Session 列表，其内部 transcript 只随父 Session 的 `spawn_agent` Tool Result 保存。
 
 ## 7. 当前边界与验证重点
 
 当前 MVP 明确采用：
 
 - 一个通用管理 Agent，而不是知识对话 Agent 与 Artifact 维护 Agent 两套身份；
-- 所有 Session 常驻同一组 Knowledge、文件、Shell 和通用子 Agent 工具；
+- 所有 Session 常驻同一组 Knowledge、文件、Shell、Todo 和通用子 Agent 工具；
 - 固定 Artifact Repository 根作为工具初始坐标，但不作为权限边界；
 - 由 Agent 自主发现零个、一个或多个相关 Artifact；
 - 最小环境事实 Prompt，不在 Harness 中编码语义路由和权限策略。

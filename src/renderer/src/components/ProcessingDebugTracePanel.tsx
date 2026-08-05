@@ -171,16 +171,16 @@ function MaintenanceTimeline(props: {
         {(workspace) => (
           <div class="processing-debug-workspace" data-testid="maintenance-workspace-status">
             <div>
-              <span>待裁决候选</span>
-              <strong>{workspace().candidates.open}</strong>
+              <span>待处理 Todo</span>
+              <strong>{workspace().todos.pending}</strong>
             </div>
             <div>
-              <span>已裁决候选</span>
-              <strong>{workspace().candidates.resolved}</strong>
+              <span>已完成 Todo</span>
+              <strong>{workspace().todos.completed}</strong>
             </div>
             <div>
-              <span>候选总数</span>
-              <strong>{workspace().candidates.total}</strong>
+              <span>Todo 总数</span>
+              <strong>{workspace().todos.total}</strong>
             </div>
             <div>
               <span>待写入知识</span>

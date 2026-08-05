@@ -1145,7 +1145,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const toolsReadOnlyCopy = page.querySelector('[data-testid="agent-config-tools-panel"]')?.textContent?.trim()
     const schemaPanelCount = page.querySelectorAll('.agent-config-tool__schema').length
     const searchSchemaDetails = page.querySelector('[data-testid="agent-tool-schema-search_knowledge"]')
-    const candidateSchemaDetails = page.querySelector('[data-testid="agent-tool-schema-add_statement_candidates"]')
+    const candidateSchemaDetails = page.querySelector('[data-testid="agent-tool-schema-add_todos"]')
     searchSchemaDetails.open = true
     candidateSchemaDetails.open = true
     await new Promise((resolve) => requestAnimationFrame(resolve))
@@ -1262,7 +1262,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const page = document.querySelector('[data-testid="page-agent-configuration"]')
     page.querySelector('[data-testid="agent-config-tab-tools"]')?.click()
     requestAnimationFrame(() => {
-      const schema = page.querySelector('[data-testid="agent-tool-schema-add_statement_candidates"]')
+      const schema = page.querySelector('[data-testid="agent-tool-schema-add_todos"]')
       if (schema) schema.open = true
       window.scrollTo(0, 0)
       requestAnimationFrame(resolve)
@@ -1527,15 +1527,15 @@ app.whenReady().then(async () => {
         },
         {
           title: 'Knowledge Maintenance Agent',
-          content: '负责读取[[Candidate Agenda|候选清单]]、按需回溯[[Raw Evidence|原始证据]]，并让知识层中的 Statement 可以互相解释。'
+          content: '负责通过通用 Todo 组织调查、按需回溯[[Raw Evidence|原始证据]]，并让知识层中的 Statement 可以互相解释。'
         },
         {
-          title: 'Candidate Agenda',
-          content: '记录 [[Knowledge Maintenance Agent]] 当前需要调查的问题，并连接相应的 [[Raw Evidence]]。'
+          title: 'Statement Candidate',
+          content: 'Observation Preprocessor 发现的带回源线索的待调查问题；Host 在启动 [[Knowledge Maintenance Agent]] 时将它投影为普通 Todo，它本身不是知识或 Maintainer 内部的业务状态。'
         },
         {
           title: 'Raw Evidence',
-          content: '为 [[Candidate Agenda]] 中的问题保留可回读的原始材料。'
+          content: '为 [[Statement Candidate]] 和后续调查保留可回读的原始材料。'
         }
       ]
     })

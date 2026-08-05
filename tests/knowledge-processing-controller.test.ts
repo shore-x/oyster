@@ -115,13 +115,10 @@ function maintenanceResult(): KnowledgeMaintenanceResult {
         content: 'Candidate content'
       }]
     },
-    statementCandidates: [{
-      ref: 'C000001',
-      expression: 'Candidate',
-      question: 'What does Candidate mean in this context?',
-      evidenceLocations: ['L000001:C0'],
-      status: 'resolved',
-      resolution: 'Represented by [[Candidate]].'
+    todos: [{
+      id: 'T000001',
+      content: 'Investigate the observed name or expression: Candidate',
+      status: 'completed'
     }],
     debugTrace: debugTrace('preprocess-1', 'knowledge_maintenance_agent'),
     durationMs: 20,
@@ -134,7 +131,7 @@ function maintenanceResult(): KnowledgeMaintenanceResult {
       model: 'fixture-model',
       runtime: 'pi_agent_core',
       modelCallCount: 2,
-      toolCalls: ['submit_knowledge_contribution']
+      toolCalls: ['complete_todos']
     }
   }
 }
@@ -339,7 +336,7 @@ describe('knowledge processing controller', () => {
   it('loads and opens persisted full-chain history', async () => {
     const result = fullChainResult()
     const record = {
-      formatVersion: 1 as const,
+      formatVersion: 2 as const,
       runId: result.runId,
       configuration: {
         preprocessor: { connectionId: 'model:fixture', modelId: 'fixture-model', instructions: 'Preprocess.' },
@@ -382,7 +379,7 @@ describe('knowledge processing controller', () => {
     const firstResult = { ...fullChainResult(), runId: 'full-chain-first' }
     const secondResult = { ...fullChainResult(), runId: 'full-chain-second' }
     const firstRecord = {
-      formatVersion: 1 as const,
+      formatVersion: 2 as const,
       runId: firstResult.runId,
       configuration: {
         preprocessor: { connectionId: 'model:fixture', modelId: 'fixture-model', instructions: 'Preprocess.' },
