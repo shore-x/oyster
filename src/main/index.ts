@@ -35,7 +35,6 @@ import {
 } from './knowledge-processing/full-chain-service'
 import { SqliteKnowledgeFullChainRunRepository } from './knowledge-processing/full-chain-run-repository'
 import { registerKnowledgeProcessingIpc } from './knowledge-processing/ipc'
-import { SessionPreprocessor } from './knowledge-processing/session-preprocessor'
 import { KnowledgeProcessingService } from './knowledge-processing/knowledge-processing-service'
 import { PiKnowledgeMaintenanceAgent } from './knowledge-processing/pi-knowledge-agent'
 import { JsonKnowledgeProcessingRepository } from './knowledge-processing/repository'
@@ -349,6 +348,9 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
         || !page.querySelector('.knowledge-reference-explorer'))
       && Date.now() < deadline
     ) await new Promise((resolve) => setTimeout(resolve, 25))
+    const initiallySelectedTitle = page.querySelector('.knowledge-browser__item[aria-selected="true"] strong')?.textContent?.trim()
+    const initialDetailTitle = page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
+    const initialDetailContent = page.querySelector('[data-testid="knowledge-statement-detail"]')?.textContent?.trim()
     const referenceExplorer = page.querySelector('.knowledge-reference-explorer')
     const referenceViewport = referenceExplorer?.querySelector('.knowledge-local-graph__viewport')
     const referenceGraph = referenceExplorer?.querySelector('.knowledge-local-graph')
@@ -409,19 +411,6 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       title: node.dataset.title,
       distance: Number(node.dataset.distance)
     }))
-    const referenceCenterAnchor = referenceAnchors.find((anchor) => anchor.distance === 0)
-    const referenceRadius = (anchor) => referenceCenterAnchor
-      ? Math.hypot(anchor.x - referenceCenterAnchor.x, anchor.y - referenceCenterAnchor.y)
-      : 0
-    const referenceFirstHopRadii = referenceAnchors
-      .filter((anchor) => anchor.distance === 1)
-      .map(referenceRadius)
-    const referenceSecondHopRadii = referenceAnchors
-      .filter((anchor) => anchor.distance >= 2)
-      .map(referenceRadius)
-    const referenceSecondHopPeripheral = referenceFirstHopRadii.length > 0
-      && referenceSecondHopRadii.length > 0
-      && Math.min(...referenceSecondHopRadii) > Math.max(...referenceFirstHopRadii)
     const referenceLabelsCentered = Boolean(graphBounds) && referenceNodes.every((node) => {
       const labelBounds = node.querySelector('.knowledge-local-graph__label')?.getBoundingClientRect()
       if (!labelBounds) return false
@@ -641,9 +630,9 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     return {
       title: page.querySelector('h1')?.textContent?.trim(),
       statementCount: page.querySelectorAll('.knowledge-browser__item').length,
-      selectedTitle: page.querySelector('.knowledge-browser__item[aria-selected="true"] strong')?.textContent?.trim(),
-      detailTitle: page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim(),
-      detailContent: page.querySelector('[data-testid="knowledge-statement-detail"]')?.textContent?.trim(),
+      selectedTitle: initiallySelectedTitle,
+      detailTitle: initialDetailTitle,
+      detailContent: initialDetailContent,
       linkLabel,
       linkPreviewTitle,
       linkPreview,
@@ -666,7 +655,6 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       referenceDisclosureKeepsHeight,
       referenceNodeNavigationTitle,
       referenceNodesTransparent: referenceNodeBackgrounds.every((color) => color === 'rgba(0, 0, 0, 0)'),
-      referenceSecondHopPeripheral,
       referenceMarkerFree,
       referenceLabelsCentered,
       referenceNodesDoNotOverlap,
@@ -816,7 +804,6 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
         if (error) return { completed, runningStateVisible, error }
         const overviewHasTraceExplorer = Boolean(page.querySelector('[data-testid="processing-trace-explorer"]'))
         const summaryStatementCount = page.querySelector('[data-testid="full-chain-result-statement-count"]')?.textContent?.trim()
-        const summaryCandidateCount = page.querySelector('[data-testid="full-chain-result-candidate-count"]')?.textContent?.trim()
         page.querySelector('[data-testid="open-full-chain-activity"]')?.click()
         await new Promise((resolve) => requestAnimationFrame(resolve))
         const traceExplorerExists = Boolean(page.querySelector('[data-testid="processing-trace-explorer"]'))
@@ -833,7 +820,6 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
         page.querySelector('[data-testid="open-full-chain-result"]')?.click()
         await new Promise((resolve) => requestAnimationFrame(resolve))
         const resultDetailExists = Boolean(page.querySelector('[data-testid="full-chain-result-detail"]'))
-        const candidateCount = page.querySelectorAll('[data-testid="statement-candidate-list"] .statement-candidate').length
         const todoCount = page.querySelectorAll('[data-testid="agent-todo-list"] .statement-candidate').length
         const completedTodoCount = page.querySelectorAll('[data-testid="agent-todo-list"] .statement-candidate--resolved').length
         const statementCount = page.querySelectorAll('.knowledge-browser--sandbox .knowledge-browser__item').length
@@ -872,14 +858,12 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
           runningStateVisible,
           overviewHasTraceExplorer,
           summaryStatementCount,
-          summaryCandidateCount,
           traceExplorerExists,
           traceEventCount,
           modelOutput,
           toolInput,
           toolOutput,
           resultDetailExists,
-          candidateCount,
           todoCount,
           completedTodoCount,
           statementCount,
@@ -968,7 +952,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     .sort()
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="processing-view-stage-debug"]').click()`)
   await new Promise((resolve) => setTimeout(resolve, 120))
-  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="processing-preprocessor-session"]')?.scrollIntoView({ block: 'center' })`)
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="processing-maintainer-session"]')?.scrollIntoView({ block: 'center' })`)
   await new Promise((resolve) => setTimeout(resolve, 80))
   const stageDebugImage = await window.webContents.capturePage()
   await writeFile(join(dirname(capturePath), 'knowledge-processing-stage-debug.png'), stageDebugImage.toPNG())
@@ -982,7 +966,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const buttons = Array.from(page.querySelectorAll('button'))
     return {
       title: page.querySelector('h1')?.textContent,
-      stageCount: page.querySelectorAll('[data-testid="processing-stage-observation_preprocessor"], [data-testid="processing-stage-knowledge_maintenance_agent"]').length,
+      stageCount: page.querySelectorAll('[data-testid="processing-stage-knowledge_maintenance_agent"]').length,
       promptCount: prompts.length,
       promptValues: prompts.map((prompt) => prompt.value),
       badgeValues: badges.map((badge) => badge.textContent?.trim()),
@@ -990,20 +974,15 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       modelValues: models.map((model) => model.value),
       reasoningValues: reasoning.map((effort) => effort.value),
       configurationText: Array.from(page.querySelectorAll('[data-testid^="processing-config-"]')).map((node) => node.textContent?.trim()),
-      preprocessorSessionSourceSelected: page.querySelector('[data-testid="preprocessor-source-session"]')?.getAttribute('aria-pressed'),
-      preprocessorSessionOptionCount: page.querySelector('[data-testid="processing-preprocessor-session"]')?.options.length,
-      preprocessorSessionValue: page.querySelector('[data-testid="processing-preprocessor-session"]')?.value,
-      preprocessorReadyReason: page.querySelector('[data-testid="preprocessor-disabled-reason"]')?.textContent?.trim(),
-      manualObservationVisible: Boolean(page.querySelector('[data-testid="processing-observation-input"]')),
-      preprocessorButtonExists: Boolean(page.querySelector('[data-testid="run-preprocessor"]')),
-      preprocessorDisabled: page.querySelector('[data-testid="run-preprocessor"]')?.disabled,
+      maintainerSessionOptionCount: page.querySelector('[data-testid="processing-maintainer-session"]')?.options.length,
+      maintainerSessionValue: page.querySelector('[data-testid="processing-maintainer-session"]')?.value,
+      maintainerReadyReason: page.querySelector('[data-testid="maintainer-disabled-reason"]')?.textContent?.trim(),
       maintainerButtonExists: Boolean(page.querySelector('[data-testid="run-maintainer"]')),
       maintainerDisabled: page.querySelector('[data-testid="run-maintainer"]')?.disabled,
       resultCount: page.querySelectorAll('[data-testid^="processing-result-"]').length,
       buttonCount: buttons.length,
       sharedButtonCount: page.querySelectorAll('.ui-button').length,
       tabButtonCount: page.querySelectorAll('button[role="tab"]').length,
-      sourceSwitchButtonCount: page.querySelectorAll('.processing-input-source button').length,
       statementButtonCount: page.querySelectorAll('.sandbox-statement').length,
       chainStatementButtonCount: page.querySelectorAll('.knowledge-browser--sandbox .knowledge-browser__item').length,
       buttonIconCount: buttons.filter((button) => button.querySelector('.ui-button__icon .ui-icon')?.childElementCount > 0).length,
@@ -1013,9 +992,9 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   })()`)
   const promptRestoreSemantics = await window.webContents.executeJavaScript(`(() => {
     const page = document.querySelector('[data-testid="page-knowledge-processing"]')
-    const editor = page.querySelector('[data-testid="processing-instructions-observation_preprocessor"]')
-    const badge = page.querySelector('[data-testid="processing-prompt-badge-observation_preprocessor"]')
-    const restore = page.querySelector('[data-testid="restore-processing-instructions-observation_preprocessor"]')
+    const editor = page.querySelector('[data-testid="processing-instructions-knowledge_maintenance_agent"]')
+    const badge = page.querySelector('[data-testid="processing-prompt-badge-knowledge_maintenance_agent"]')
+    const restore = page.querySelector('[data-testid="restore-processing-instructions-knowledge_maintenance_agent"]')
     const original = editor.value
     editor.value = original + '\\n未保存的测试草稿'
     editor.dispatchEvent(new Event('input', { bubbles: true }))
@@ -1030,25 +1009,24 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       }), 120)
     }))
   })()`)
-  const fixturePreprocessing = await knowledgeProcessingService!.runObservationPreprocessor({
-    observation: FIXTURE_SESSION_CONTENT,
-    attention: '验证调试轨迹'
-  })
-  await knowledgeProcessingService!.runKnowledgeMaintenance({
-    preprocessingRunId: fixturePreprocessing.runId
-  })
-  await new Promise((resolve) => setTimeout(resolve, 120))
+  await window.webContents.executeJavaScript(`(async () => {
+    const page = document.querySelector('[data-testid="page-knowledge-processing"]')
+    const button = page.querySelector('[data-testid="run-maintainer"]')
+    button?.click()
+    const deadline = Date.now() + 5_000
+    while (Date.now() < deadline) {
+      if (page.querySelector('[data-testid="processing-result-knowledge_maintenance_agent"]')) return
+      if (page.querySelector('.page-error')) return
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+  })()`)
   const traceSemantics = await window.webContents.executeJavaScript(`(() => {
     const page = document.querySelector('[data-testid="page-knowledge-processing"]')
     const stageTraces = Array.from(page.querySelectorAll('.processing-stage [data-testid="processing-debug-trace"]'))
-    const calls = Array.from(page.querySelectorAll('.processing-stage [data-testid^="preprocessing-call-"]'))
     const workspace = page.querySelector('.processing-stage [data-testid="maintenance-workspace-status"]')
-    if (calls[0]) calls[0].open = true
-    calls[0]?.scrollIntoView({ block: 'center' })
+    workspace?.scrollIntoView({ block: 'center' })
     return {
       panelCount: stageTraces.length,
-      preprocessingCallCount: calls.length,
-      preprocessingOutput: calls[0]?.querySelector('pre')?.textContent,
       maintenanceEventCount: page.querySelectorAll('.processing-stage [data-testid^="maintenance-event-"]').length,
       workspaceValues: Array.from(workspace?.querySelectorAll('strong') ?? []).map((node) => node.textContent?.trim()),
       bodyText: page.innerText,
@@ -1056,12 +1034,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     }
   })()`)
   await new Promise((resolve) => setTimeout(resolve, 80))
-  const preprocessingTraceImage = await window.webContents.capturePage()
-  await writeFile(
-    join(dirname(capturePath), 'knowledge-processing-trace-preprocessing.png'),
-    preprocessingTraceImage.toPNG()
-  )
-  await window.webContents.executeJavaScript(`document.querySelectorAll('.processing-stage [data-testid="processing-debug-trace"]')[1]?.scrollIntoView({ block: 'center' })`)
+  await window.webContents.executeJavaScript(`document.querySelector('.processing-stage [data-testid="processing-debug-trace"]')?.scrollIntoView({ block: 'center' })`)
   await new Promise((resolve) => setTimeout(resolve, 80))
   const maintenanceTraceImage = await window.webContents.capturePage()
   await writeFile(
@@ -1132,9 +1105,6 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     }
     const title = page.querySelector('h1')?.textContent?.trim()
     const roleCount = page.querySelectorAll('.agent-config-role').length
-    const preprocessorRolePresent = Boolean(
-      page.querySelector('[data-testid="agent-config-role-observation_preprocessor"]')
-    )
 
     page.querySelector('[data-testid="agent-config-role-knowledge_maintenance_agent"]')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
@@ -1234,7 +1204,6 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     return {
       title,
       roleCount,
-      preprocessorRolePresent,
       maintenanceToolNames,
       toolsReadOnlyCopy,
       schemaPanelCount,
@@ -1521,19 +1490,19 @@ app.whenReady().then(async () => {
       statements: [
         {
           title: 'Oyster 知识加工链路',
-          content: '将外部 Agent 对话中的候选概念交给 [[Knowledge Maintenance Agent|知识维护 Agent]] 判断，并在隔离空间中验证写入结果。'
+          content: '将外部 Agent Session 交给 [[Knowledge Maintenance Agent|知识维护 Agent]] 调查；Host 把完整 [[Raw Evidence|原始证据]] 分段绑定为 Todo，并在隔离空间中验证写入结果。'
         },
         {
           title: 'Knowledge Maintenance Agent',
           content: '负责通过通用 Todo 组织调查、按需回溯[[Raw Evidence|原始证据]]，并让知识层中的 Statement 可以互相解释。'
         },
         {
-          title: 'Statement Candidate',
-          content: 'Observation Preprocessor 发现的带回源线索的待调查问题；Host 在启动 [[Knowledge Maintenance Agent]] 时将它投影为普通 Todo，它本身不是知识或 Maintainer 内部的业务状态。'
+          title: 'Raw Evidence',
+          content: '外部 Agent Session 的不可变原始材料；Host 将其确定性分段并绑定为 [[Knowledge Maintenance Agent]] 的初始 Todo。不同 Harness 的 Skill 激活探测只提供待核查的位置提示。'
         },
         {
-          title: 'Raw Evidence',
-          content: '为 [[Statement Candidate]] 和后续调查保留可回读的原始材料。'
+          title: 'Skill 激活探测',
+          content: 'Source Adapter 按 Agent Harness 的记录格式识别 Skill 工具调用、`SKILL.md` 读取和运行时注入，并向 [[Knowledge Maintenance Agent|知识维护 Agent]] 提供回到原始证据核查的导航提示。'
         }
       ]
     })
@@ -1543,8 +1512,8 @@ app.whenReady().then(async () => {
   registerArtifactIpc(artifactRepository, () => mainWindow)
   registerAiBackendIpc(aiBackendService, () => mainWindow)
   registerKnowledgeProcessingIpc(
+    service,
     knowledgeProcessingService,
-    new SessionPreprocessor(service, knowledgeProcessingService),
     knowledgeFullChainService,
     () => mainWindow
   )

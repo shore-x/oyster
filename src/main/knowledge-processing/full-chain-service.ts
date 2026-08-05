@@ -26,7 +26,6 @@ import {
 import type { KnowledgeFullChainRunHistory } from './full-chain-run-repository'
 
 export interface KnowledgeFullChainBindings {
-  preprocessor: ProcessingStageRunBinding
   maintainer: ProcessingStageRunBinding
 }
 
@@ -100,30 +99,19 @@ export class KnowledgeFullChainService {
       active.sandboxId = sandbox.id
       controller.signal.throwIfAborted()
 
-      const preprocessing = await this.processing.runObservationPreprocessorView(
-        evidence.observationView,
-        input.attention,
-        undefined,
-        {
-          binding: structuredClone(bindings.preprocessor),
-          lease,
-          sourceRef,
-          debugTrace
-        }
-      )
-      controller.signal.throwIfAborted()
-
       const contributionRunRef = `full-chain:${runId}`
-      const maintenance = await this.processing.runKnowledgeMaintenance({
-        preprocessingRunId: preprocessing.runId,
-        attention: input.attention
-      }, undefined, {
+      const maintenance = await this.processing.runKnowledgeMaintenance(
+        evidence.rawEvidence,
+        sourceRef,
+        input.attention,
+        {
         binding: structuredClone(bindings.maintainer),
         lease,
         knowledgeAgent: this.knowledgeAgentFactory(sandbox.store),
         contributionRunRef,
         debugTrace
-      })
+        }
+      )
       controller.signal.throwIfAborted()
 
       validateContribution(maintenance.contribution, contributionRunRef)
@@ -152,7 +140,6 @@ export class KnowledgeFullChainService {
         session: structuredClone(session),
         sandbox: { id: sandbox.id, baselineCreatedAt: sandbox.baselineCreatedAt },
         sourceRef,
-        preprocessing: { ...preprocessing, debugTrace: completedDebugTrace },
         maintenance: { ...maintenance, debugTrace: completedDebugTrace },
         commit,
         knowledge: {
@@ -163,11 +150,10 @@ export class KnowledgeFullChainService {
         completedAt: new Date().toISOString()
       }
       this.history?.save({
-        formatVersion: 2,
+        formatVersion: 3,
         runId,
         ...(input.attention ? { attention: input.attention } : {}),
         configuration: {
-          preprocessor: structuredClone(bindings.preprocessor),
           maintainer: structuredClone(bindings.maintainer)
         },
         result
@@ -198,7 +184,6 @@ export class KnowledgeFullChainService {
     const active = this.active
     if (!active) return
     active.controller.abort(new Error('用户取消了完整链路运行'))
-    this.processing.cancelRun('observation_preprocessor')
     this.processing.cancelRun('knowledge_maintenance_agent')
   }
 

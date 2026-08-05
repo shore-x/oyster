@@ -2,19 +2,12 @@ import { DatabaseSync } from 'node:sqlite'
 import { mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type {
-  KnowledgeFullChainResult,
   KnowledgeFullChainRunRecord,
-  KnowledgeFullChainRunSummary,
-  KnowledgeMaintenanceResult,
-  KnowledgeProcessingDebugTrace
+  KnowledgeFullChainRunSummary
 } from '../../shared/knowledge-processing'
 
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 const MAX_RUN_ID_LENGTH = 256
-
-interface FullChainRunRow {
-  payload_json: string
-}
 
 interface FullChainRunSummaryRow {
   run_id: string
@@ -26,60 +19,7 @@ interface FullChainRunSummaryRow {
   started_at: string | null
   ended_at: string | null
   statement_count: number
-  candidate_count: number
-  preprocessor_model: string
   maintainer_model: string
-}
-
-interface LegacyStatementCandidate {
-  ref: string
-  expression: string
-  question: string
-  evidenceLocations: string[]
-  status: 'open' | 'resolved'
-  resolution?: string
-}
-
-type LegacyKnowledgeMaintenanceResult = Omit<KnowledgeMaintenanceResult, 'todos'> & {
-  statementCandidates: LegacyStatementCandidate[]
-}
-
-type LegacyKnowledgeFullChainResult = Omit<KnowledgeFullChainResult, 'maintenance'> & {
-  maintenance: LegacyKnowledgeMaintenanceResult
-}
-
-type StoredKnowledgeFullChainRunRecordV1 = Omit<
-  KnowledgeFullChainRunRecord,
-  'formatVersion' | 'result'
-> & {
-  formatVersion: 1
-  result: Omit<LegacyKnowledgeFullChainResult, 'preprocessing'> & {
-    preprocessing: Omit<LegacyKnowledgeFullChainResult['preprocessing'], 'debugTrace'>
-  }
-}
-
-type StoredKnowledgeFullChainRunRecordV2 = Omit<KnowledgeFullChainRunRecord, 'result'> & {
-  result: Omit<KnowledgeFullChainRunRecord['result'], 'preprocessing'> & {
-    preprocessing: Omit<KnowledgeFullChainRunRecord['result']['preprocessing'], 'debugTrace'>
-  }
-}
-
-type StoredSessionV1 = Omit<
-  KnowledgeFullChainRunRecord['result']['session'],
-  'sourceRecordId'
-> & {
-  sourceRecordId?: unknown
-  /** Legacy field written before source records were distinguished from user-facing Artifacts. */
-  artifactId?: unknown
-}
-
-type ReadableStoredKnowledgeFullChainRunRecord<TRecord extends { result: { session: unknown } }> = Omit<
-  TRecord,
-  'result'
-> & {
-  result: Omit<TRecord['result'], 'session'> & {
-    session: StoredSessionV1
-  }
 }
 
 export interface KnowledgeFullChainRunHistory {
@@ -95,163 +35,16 @@ function normalizedRunId(value: unknown): string {
   return runId
 }
 
-function summaryFromRow(row: FullChainRunSummaryRow): KnowledgeFullChainRunSummary {
-  return {
-    runId: row.run_id,
-    completedAt: row.completed_at,
-    durationMs: row.duration_ms,
-    sessionTitle: row.session_title ?? undefined,
-    sourceDisplayName: row.source_display_name,
-    projectPath: row.project_path ?? undefined,
-    startedAt: row.started_at ?? undefined,
-    endedAt: row.ended_at ?? undefined,
-    statementCount: row.statement_count,
-    candidateCount: row.candidate_count,
-    preprocessorModel: row.preprocessor_model,
-    maintainerModel: row.maintainer_model
-  }
-}
-
-function normalizedStoredSession(
-  session: StoredSessionV1 | undefined,
-  expectedRunId: string
-): KnowledgeFullChainRunRecord['result']['session'] {
-  const storedSourceRecordId = session?.sourceRecordId
-  const legacyArtifactId = session?.artifactId
-  const sourceRecordId = typeof storedSourceRecordId === 'string' && storedSourceRecordId
-    ? storedSourceRecordId
-    : typeof legacyArtifactId === 'string' && legacyArtifactId
-      ? legacyArtifactId
-      : undefined
-  if (!session || !sourceRecordId) throw new Error(`加工测试历史记录格式无效：${expectedRunId}`)
-  const {
-    artifactId: _legacyArtifactId,
-    sourceRecordId: _storedSourceRecordId,
-    ...storedSession
-  } = session
-  return { ...storedSession, sourceRecordId }
-}
-
-function migrateLegacyDebugTrace(
-  trace: KnowledgeProcessingDebugTrace
-): KnowledgeProcessingDebugTrace {
-  const migrated = structuredClone(trace)
-  const legacyWorkspace = migrated.maintenance?.workspace as unknown as {
-    candidates?: { total: number; open: number; resolved: number }
-    draftStatementCount?: number
-  } | undefined
-  if (migrated.maintenance && legacyWorkspace?.candidates) {
-    migrated.maintenance.workspace = {
-      todos: {
-        total: legacyWorkspace.candidates.total,
-        pending: legacyWorkspace.candidates.open,
-        completed: legacyWorkspace.candidates.resolved
-      },
-      draftStatementCount: legacyWorkspace.draftStatementCount ?? 0
-    }
-  }
-  return migrated
-}
-
-function legacyCandidateTodos(candidates: readonly LegacyStatementCandidate[]) {
-  return candidates.map((candidate, index) => ({
-    id: `T${String(index + 1).padStart(6, '0')}`,
-    content: [
-      `Investigate the observed name or expression: ${candidate.expression}`,
-      `Question: ${candidate.question}`,
-      `Evidence starting locations: ${candidate.evidenceLocations.join(', ')}`
-    ].join('\n'),
-    status: candidate.status === 'resolved' ? 'completed' as const : 'pending' as const
-  }))
-}
-
 function parseRecord(payload: string, expectedRunId: string): KnowledgeFullChainRunRecord {
-  const parsed = JSON.parse(payload) as { formatVersion?: unknown }
-  if (parsed?.formatVersion !== 1 && parsed?.formatVersion !== 2) {
-    throw new Error(`加工测试历史记录格式无效：${expectedRunId}`)
-  }
-  if (parsed.formatVersion === 1) {
-    return migrateV1Record(
-      parsed as ReadableStoredKnowledgeFullChainRunRecord<StoredKnowledgeFullChainRunRecordV1>,
-      expectedRunId
-    )
-  }
-  const stored = parsed as ReadableStoredKnowledgeFullChainRunRecord<StoredKnowledgeFullChainRunRecordV2>
+  const record = JSON.parse(payload) as KnowledgeFullChainRunRecord
   if (
-    stored.runId !== expectedRunId
-    || stored.result?.runId !== expectedRunId
-    || !stored.result.completedAt
-    || !stored.result.maintenance?.debugTrace
+    record?.formatVersion !== 3
+    || record.runId !== expectedRunId
+    || record.result?.runId !== expectedRunId
+    || !record.result.completedAt
+    || !record.result.maintenance?.debugTrace
   ) throw new Error(`加工测试历史记录格式无效：${expectedRunId}`)
-  const session = normalizedStoredSession(stored.result.session, expectedRunId)
-  return {
-    ...stored,
-    result: {
-      ...stored.result,
-      session,
-      preprocessing: {
-        ...stored.result.preprocessing,
-        debugTrace: stored.result.maintenance.debugTrace
-      }
-    }
-  }
-}
-
-function migrateV1Record(
-  stored: ReadableStoredKnowledgeFullChainRunRecord<StoredKnowledgeFullChainRunRecordV1>,
-  expectedRunId: string
-): KnowledgeFullChainRunRecord {
-  const storedSourceRecordId = stored?.result?.session?.sourceRecordId
-  const legacyArtifactId = stored?.result?.session?.artifactId
-  const sourceRecordId = typeof storedSourceRecordId === 'string' && storedSourceRecordId
-    ? storedSourceRecordId
-    : typeof legacyArtifactId === 'string' && legacyArtifactId
-      ? legacyArtifactId
-      : undefined
-  if (
-    !stored
-    || stored.runId !== expectedRunId
-    || stored.result?.runId !== expectedRunId
-    || !stored.result.completedAt
-    || !stored.result.maintenance?.debugTrace
-    || !sourceRecordId
-  ) {
-    throw new Error(`加工测试历史记录格式无效：${expectedRunId}`)
-  }
-  const session = normalizedStoredSession(stored.result.session, expectedRunId)
-  const debugTrace = migrateLegacyDebugTrace(stored.result.maintenance.debugTrace)
-  const {
-    statementCandidates,
-    ...legacyMaintenance
-  } = stored.result.maintenance
-  return {
-    ...stored,
-    formatVersion: 2,
-    result: {
-      ...stored.result,
-      session,
-      maintenance: {
-        ...legacyMaintenance,
-        todos: legacyCandidateTodos(statementCandidates),
-        debugTrace
-      },
-      preprocessing: {
-        ...stored.result.preprocessing,
-        debugTrace
-      }
-    }
-  }
-}
-
-function storedRecord(record: KnowledgeFullChainRunRecord): StoredKnowledgeFullChainRunRecordV2 {
-  const { debugTrace: _duplicateTrace, ...preprocessing } = record.result.preprocessing
-  return {
-    ...record,
-    result: {
-      ...record.result,
-      preprocessing
-    }
-  }
+  return record
 }
 
 /** Stores immutable completed-run snapshots separately from production knowledge. */
@@ -281,9 +74,9 @@ export class SqliteKnowledgeFullChainRunRepository implements KnowledgeFullChain
       throw new Error(`加工测试历史 Schema ${version} 高于当前支持版本 ${SCHEMA_VERSION}`)
     }
     if (version === SCHEMA_VERSION) return
-    if (version !== 0) throw new Error(`不支持的加工测试历史 Schema：${version}`)
     this.database.exec(`
       BEGIN IMMEDIATE;
+      DROP TABLE IF EXISTS knowledge_full_chain_runs;
       CREATE TABLE knowledge_full_chain_runs (
         run_id TEXT PRIMARY KEY,
         completed_at TEXT NOT NULL,
@@ -294,8 +87,6 @@ export class SqliteKnowledgeFullChainRunRepository implements KnowledgeFullChain
         started_at TEXT,
         ended_at TEXT,
         statement_count INTEGER NOT NULL CHECK(statement_count >= 0),
-        candidate_count INTEGER NOT NULL CHECK(candidate_count >= 0),
-        preprocessor_model TEXT NOT NULL,
         maintainer_model TEXT NOT NULL,
         payload_json TEXT NOT NULL
       ) STRICT;
@@ -313,10 +104,9 @@ export class SqliteKnowledgeFullChainRunRepository implements KnowledgeFullChain
   save(record: KnowledgeFullChainRunRecord): void {
     this.assertOpen()
     const runId = normalizedRunId(record?.runId)
-    if (record.formatVersion !== 2) throw new Error('加工测试历史格式版本无效')
+    if (record.formatVersion !== 3) throw new Error('加工测试历史格式版本无效')
     if (record.result?.runId !== runId) throw new Error('加工测试历史与运行结果不匹配')
     const { result } = record
-    const payload = JSON.stringify(storedRecord(record))
     this.database.prepare(`
       INSERT INTO knowledge_full_chain_runs (
         run_id,
@@ -328,11 +118,9 @@ export class SqliteKnowledgeFullChainRunRepository implements KnowledgeFullChain
         started_at,
         ended_at,
         statement_count,
-        candidate_count,
-        preprocessor_model,
         maintainer_model,
         payload_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       runId,
       result.completedAt,
@@ -343,10 +131,8 @@ export class SqliteKnowledgeFullChainRunRepository implements KnowledgeFullChain
       result.session.startedAt ?? null,
       result.session.endedAt ?? null,
       result.knowledge.statements.length,
-      result.preprocessing.statementCandidates.length,
-      result.preprocessing.execution.model,
       result.maintenance.execution.model,
-      payload
+      JSON.stringify(record)
     )
   }
 
@@ -363,13 +149,22 @@ export class SqliteKnowledgeFullChainRunRepository implements KnowledgeFullChain
         started_at,
         ended_at,
         statement_count,
-        candidate_count,
-        preprocessor_model,
         maintainer_model
       FROM knowledge_full_chain_runs
       ORDER BY completed_at DESC, run_id
     `).all() as unknown as FullChainRunSummaryRow[]
-    return rows.map(summaryFromRow)
+    return rows.map((row) => ({
+      runId: row.run_id,
+      completedAt: row.completed_at,
+      durationMs: row.duration_ms,
+      sessionTitle: row.session_title ?? undefined,
+      sourceDisplayName: row.source_display_name,
+      projectPath: row.project_path ?? undefined,
+      startedAt: row.started_at ?? undefined,
+      endedAt: row.ended_at ?? undefined,
+      statementCount: row.statement_count,
+      maintainerModel: row.maintainer_model
+    }))
   }
 
   read(runId: string): KnowledgeFullChainRunRecord | undefined {
@@ -379,7 +174,7 @@ export class SqliteKnowledgeFullChainRunRepository implements KnowledgeFullChain
       SELECT payload_json
       FROM knowledge_full_chain_runs
       WHERE run_id = ?
-    `).get(normalized) as FullChainRunRow | undefined
+    `).get(normalized) as { payload_json: string } | undefined
     return row ? parseRecord(row.payload_json, normalized) : undefined
   }
 

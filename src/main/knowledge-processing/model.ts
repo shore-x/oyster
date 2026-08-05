@@ -10,7 +10,6 @@ import type {
   ProcessingStageId
 } from '../../shared/knowledge-processing'
 import type { AgentTodo, AgentTodoCounts } from '../../shared/agent-runtime'
-import type { StatementCandidate as DiscoveredStatementCandidate } from './statement-candidate-batch'
 
 export interface StoredProcessingStage {
   stageId: ProcessingStageId
@@ -66,9 +65,8 @@ export interface KnowledgeReader {
 export interface KnowledgeAgentRunInput {
   runtime: ModelRuntime
   systemPrompt: string
-  statementCandidates: DiscoveredStatementCandidate[]
-  observationLines: readonly string[]
-  observationFormatVersion: string
+  evidenceLines: readonly string[]
+  evidenceFormatVersion: string
   sourceRef: string
   contributionRunRef: string
   attention?: string
@@ -116,16 +114,6 @@ export interface KnowledgeAgentRunResult {
 
 export interface KnowledgeAgentRuntime {
   run(input: KnowledgeAgentRunInput): Promise<KnowledgeAgentRunResult>
-}
-
-export interface PreprocessingWorkspace {
-  runId: string
-  sourceRef: string
-  observationLines: readonly string[]
-  observationFormatVersion: string
-  statementCandidates: DiscoveredStatementCandidate[]
-  attention?: string
-  createdAt: number
 }
 
 export type ProcessingSnapshotListener = (snapshot: KnowledgeProcessingSnapshot) => void

@@ -37,8 +37,6 @@ export const knowledgeProcessingChannels = {
   getSnapshot: 'knowledge-processing:get-snapshot',
   saveStage: 'knowledge-processing:save-stage',
   saveDefaultInstructions: 'knowledge-processing:save-default-instructions',
-  runObservationPreprocessor: 'knowledge-processing:run-observation-preprocessor',
-  runSessionPreprocessor: 'knowledge-processing:run-session-preprocessor',
   runKnowledgeMaintenance: 'knowledge-processing:run-knowledge-maintenance',
   runFullChain: 'knowledge-processing:run-full-chain',
   listFullChainRuns: 'knowledge-processing:list-full-chain-runs',

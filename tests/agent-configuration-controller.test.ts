@@ -23,14 +23,12 @@ function processingStage(
     inputDescription: 'input',
     outputDescription: 'output',
     capabilities: [],
-    tools: overrides.runtime === 'pi_agent_core'
-      ? [{
-          name: 'list_todos',
-          label: '查看待办事项',
-          description: 'List Todos.',
-          parameters: { type: 'object' }
-        }]
-      : [],
+    tools: [{
+      name: 'list_todos',
+      label: '查看待办事项',
+      description: 'List Todos.',
+      parameters: { type: 'object' }
+    }],
     connectionId: 'model:test',
     modelId: 'test-model',
     builtInInstructions: `${overrides.displayName} built in`,
@@ -43,11 +41,6 @@ function processingStage(
 
 const PROCESSING_SNAPSHOT: KnowledgeProcessingSnapshot = {
   stages: [
-    processingStage({
-      id: 'observation_preprocessor',
-      displayName: '观察预处理',
-      runtime: 'direct_model_call'
-    }),
     processingStage({
       id: 'knowledge_maintenance_agent',
       displayName: 'Knowledge Maintenance Agent',
@@ -106,8 +99,6 @@ describe('agent configuration controller', () => {
           CHAT_AGENT_ID
         ])
         expect(controller.roles().every((role) => role.runtime === 'pi_agent_core')).toBe(true)
-        expect(controller.roles().some((role) => role.id === 'observation_preprocessor')).toBe(false)
-
         await expect(controller.saveDefaultInstructions(
           'knowledge_maintenance_agent',
           'Maintainer override'

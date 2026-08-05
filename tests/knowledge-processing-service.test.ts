@@ -1,1606 +1,171 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { AiBackendSnapshot, AiConnection } from '../src/shared/ai-backends'
-import type { ProcessingStageId } from '../src/shared/knowledge-processing'
-import type {
-  ModelGenerationRequest,
-  ModelRuntime
-} from '../src/main/ai-backends/model'
-import {
-  ModelContextOverflowError,
-  ModelOutputTruncatedError
-} from '../src/main/ai-backends/model'
-import type { ObservationView } from '../src/main/observation/model'
-import {
-  KnowledgeProcessingService,
-  type KnowledgeProcessingServiceOptions
-} from '../src/main/knowledge-processing/knowledge-processing-service'
-import { MAX_OBSERVATION_SEGMENT_SELECTOR_BYTES } from '../src/main/knowledge-processing/observation-segment-planner'
+import type { ModelGenerationRequest, ModelRuntime } from '../src/main/ai-backends/model'
 import type {
   AiBackendPort,
   KnowledgeAgentRunInput,
   KnowledgeAgentRunResult,
-  KnowledgeAgentRuntime,
-  KnowledgeProcessingRepository
+  KnowledgeAgentRuntime
 } from '../src/main/knowledge-processing/model'
-import {
-  KNOWLEDGE_MAINTENANCE_AGENT_PROMPT,
-  OBSERVATION_PREPROCESSOR_PROMPT
-} from '../src/main/knowledge-processing/prompts'
+import { KnowledgeProcessingService } from '../src/main/knowledge-processing/knowledge-processing-service'
 import { InMemoryKnowledgeProcessingRepository } from '../src/main/knowledge-processing/repository'
+import { KNOWLEDGE_MAINTENANCE_AGENT_PROMPT } from '../src/main/knowledge-processing/prompts'
 
-function modelConnection(
-  id: string,
-  model = id,
-  reasoningEfforts: NonNullable<AiConnection['modelConfig']>['reasoningEfforts'] = [],
-  contextWindowTokens?: number
-): AiConnection {
+function connection(): AiConnection {
   return {
-    id,
+    id: 'model:maintainer',
     adapterId: 'openai-compatible',
     backendKind: 'api',
     providerId: 'openai_compatible',
-    displayName: `Model ${id}`,
+    displayName: 'Maintainer Model',
     credentialMode: 'oyster_keychain',
     status: 'ready',
-    models: [{
-      id: model,
-      displayName: model,
-      reasoningEfforts: reasoningEfforts ?? [],
-      ...(contextWindowTokens ? { contextWindowTokens, maxOutputTokens: 4_096 } : {})
-    }],
-    defaultModelId: model,
+    models: [{ id: 'maintainer', displayName: 'Maintainer', reasoningEfforts: ['low'] }],
+    defaultModelId: 'maintainer',
     modelConfig: {
       providerId: 'openai_compatible',
       protocol: 'openai_responses',
-      baseUrl: `https://${id}.example.test/v1`,
-      model,
+      baseUrl: 'https://example.test/v1',
+      model: 'maintainer',
       hasApiKey: true,
-      reasoningEfforts
+      reasoningEfforts: ['low']
     }
   }
 }
 
-function agentConnection(): AiConnection {
-  return {
-    id: 'runtime:codex',
-    adapterId: 'codex',
-    backendKind: 'coding_plan',
-    providerId: 'openai_codex',
-    displayName: 'OpenAI Codex',
-    credentialMode: 'provider_runtime',
-    status: 'ready',
-    models: [{
-      id: 'codex-small',
-      displayName: 'Codex small',
-      reasoningEfforts: ['low', 'medium', 'high']
-    }],
-    defaultModelId: 'codex-small'
-  }
+const MODEL_RUNTIME: ModelRuntime = {
+  model: { id: 'maintainer' } as ModelRuntime['model'],
+  streamFn: (() => { throw new Error('not used') }) as ModelRuntime['streamFn']
 }
 
-function modelRuntime(modelId: string): ModelRuntime {
-  return {
-    model: { id: modelId } as ModelRuntime['model'],
-    streamFn: (() => {
-      throw new Error('fake stream is not called directly')
-    }) as ModelRuntime['streamFn']
-  }
-}
-
-function statementCandidateOutput(
-  request: Pick<ModelGenerationRequest, 'prompt'>,
-  expression = 'Candidate',
-  question = `What does ${expression} denote in this context?`
-): string {
-  const location = /BEGIN_AUTHORIZED_OBSERVATION\nL(?<line>\d{6})(?: C(?<offset>\d+):)?/u.exec(
-    request.prompt
-  )?.groups
-  return JSON.stringify({
-    candidates: [{
-      expression,
-      question,
-      locations: [{
-        line: Number(location?.line ?? 1),
-        offset: Number(location?.offset ?? 0)
-      }]
-    }]
-  })
-}
-
-class FakeAiBackend implements AiBackendPort {
-  readonly generationCalls: Array<{
-    connectionId: string
-    modelId: string
-    request: ModelGenerationRequest
-  }> = []
-  readonly runtimeCalls: Array<{ connectionId: string; modelId: string }> = []
-  readonly runtimeHealthTracking: boolean[] = []
-  generationHandler?: (
-    connectionId: string,
-    modelId: string,
-    request: ModelGenerationRequest
-  ) => Promise<{ text: string }>
-
-  constructor(readonly connections: AiConnection[]) {}
-
+class FakeBackend implements AiBackendPort {
   snapshot(): AiBackendSnapshot {
-    return { options: [], connections: structuredClone(this.connections) }
+    return { options: [], connections: [connection()] }
   }
 
-  subscribe(_listener: (snapshot: AiBackendSnapshot) => void): () => void {
+  subscribe(): () => void {
     return () => undefined
   }
 
   async generateWithModel(
-    connectionId: string,
-    modelId: string,
-    request: ModelGenerationRequest
+    _connectionId: string,
+    _modelId: string,
+    _request: ModelGenerationRequest
   ): Promise<{ text: string }> {
-    this.generationCalls.push({ connectionId, modelId, request })
-    request.signal?.throwIfAborted()
-    if (this.generationHandler) return this.generationHandler(connectionId, modelId, request)
-    return { text: statementCandidateOutput(request) }
+    throw new Error('standalone generation is not part of knowledge maintenance')
   }
 
   async withModelRuntime<T>(
-    connectionId: string,
-    modelId: string,
-    operation: (runtime: ModelRuntime) => Promise<T>,
-    options?: { trackHealth?: boolean }
+    _connectionId: string,
+    _modelId: string,
+    operation: (runtime: ModelRuntime) => Promise<T>
   ): Promise<T> {
-    this.runtimeCalls.push({ connectionId, modelId })
-    this.runtimeHealthTracking.push(Boolean(options?.trackHealth))
-    const connection = this.connections.find((candidate) => candidate.id === connectionId)
-    if (!connection?.models.some((model) => model.id === modelId)) throw new Error('未找到 Model')
-    return operation(modelRuntime(modelId))
+    return operation(MODEL_RUNTIME)
   }
 }
 
-class FakeKnowledgeAgent implements KnowledgeAgentRuntime {
-  readonly calls: KnowledgeAgentRunInput[] = []
-  handler?: (input: KnowledgeAgentRunInput) => Promise<KnowledgeAgentRunResult>
+class CapturingAgent implements KnowledgeAgentRuntime {
+  calls: KnowledgeAgentRunInput[] = []
 
   async run(input: KnowledgeAgentRunInput): Promise<KnowledgeAgentRunResult> {
     this.calls.push(input)
-    input.signal.throwIfAborted()
-    if (this.handler) return this.handler(input)
     input.onTrace?.({ type: 'model_started', callNumber: 1 })
-    input.onTrace?.({
-      type: 'model_completed',
-      callNumber: 1,
-      status: 'completed',
-      detail: 'stop=toolUse · tokens=120'
-    })
-    input.onTrace?.({ type: 'tool_started', toolCallId: 'read-1', toolName: 'read_evidence' })
-    input.onTrace?.({
-      type: 'tool_completed',
-      toolCallId: 'read-1',
-      toolName: 'read_evidence',
-      status: 'completed',
-      detail: 'L000001-L000001 · 1 行'
-    })
-    input.onTrace?.({ type: 'model_started', callNumber: 2 })
-    input.onTrace?.({
-      type: 'model_completed',
-      callNumber: 2,
-      status: 'completed',
-      detail: 'stop=toolUse · tokens=80'
-    })
-    input.onTrace?.({
-      type: 'tool_started',
-      toolCallId: 'complete-1',
-      toolName: 'complete_todos'
-    })
-    input.onTrace?.({
-      type: 'tool_completed',
-      toolCallId: 'complete-1',
-      toolName: 'complete_todos',
-      status: 'completed',
-      detail: 'Todo · 0 个待处理'
-    })
+    input.onTrace?.({ type: 'model_completed', callNumber: 1, status: 'completed', output: 'done' })
     return {
       contribution: {
         runRef: input.contributionRunRef,
-        statements: [{
-          title: 'Candidate',
-          content: 'Candidate Knowledge Statement'
-        }]
+        statements: [{ title: 'Raw Evidence', content: 'Raw Evidence is inspected by the Maintainer.' }]
       },
-      todos: input.statementCandidates.map((candidate, index) => ({
+      todos: (input.initialTodos ?? []).map((content, index) => ({
         id: `T${String(index + 1).padStart(6, '0')}`,
-        content: `Investigate the observed name or expression: ${candidate.expression}`,
+        content,
         status: 'completed'
       })),
-      modelCallCount: 2,
-      toolCalls: ['read_evidence', 'complete_todos']
+      modelCallCount: 1,
+      toolCalls: ['list_todos', 'read_evidence', 'complete_todos']
     }
   }
 }
 
-function createService(options: {
-  repository?: KnowledgeProcessingRepository
-  connections?: AiConnection[]
-  agent?: FakeKnowledgeAgent
-  serviceOptions?: KnowledgeProcessingServiceOptions
-} = {}) {
-  const repository = options.repository ?? new InMemoryKnowledgeProcessingRepository()
-  const backend = new FakeAiBackend(options.connections ?? [agentConnection(), modelConnection('model:a'), modelConnection('model:b')])
-  const agent = options.agent ?? new FakeKnowledgeAgent()
-  const service = new KnowledgeProcessingService(repository, backend, agent, options.serviceOptions)
-  return { service, repository, backend, agent }
-}
-
-async function configure(
-  service: KnowledgeProcessingService,
-  stageId: ProcessingStageId,
-  connectionId = 'model:a',
-  instructionsOverride: string | null = null,
-  modelId = connectionId
-): Promise<void> {
-  await service.saveStage({ stageId, connectionId, modelId, instructionsOverride })
-}
-
-function rejectWhenAborted(signal: AbortSignal): Promise<never> {
-  return new Promise((_resolve, reject) => {
-    const rejectFromSignal = (): void => reject(signal.reason ?? new Error('aborted'))
-    if (signal.aborted) rejectFromSignal()
-    else signal.addEventListener('abort', rejectFromSignal, { once: true })
-  })
-}
-
-function deferred<T>(): {
-  promise: Promise<T>
-  resolve(value: T): void
-} {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((resolvePromise) => {
-    resolve = resolvePromise
-  })
-  return { promise, resolve }
+async function harness() {
+  const agent = new CapturingAgent()
+  const service = new KnowledgeProcessingService(
+    new InMemoryKnowledgeProcessingRepository({
+      stages: [{
+        stageId: 'knowledge_maintenance_agent',
+        connectionId: 'model:maintainer',
+        modelId: 'maintainer'
+      }]
+    }),
+    new FakeBackend(),
+    agent
+  )
+  await service.initialize()
+  return { service, agent }
 }
 
 describe('KnowledgeProcessingService', () => {
-  it('exposes both fixed stages with their actual default and effective prompts', async () => {
-    const { service } = createService()
-    await service.initialize()
-
+  it('exposes one Pi Agent stage with generic Todo and knowledge tools', async () => {
+    const { service } = await harness()
     const snapshot = service.snapshot()
-    expect(snapshot.stages).toHaveLength(2)
-    expect(snapshot.stages).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        id: 'observation_preprocessor',
-        builtInInstructions: OBSERVATION_PREPROCESSOR_PROMPT,
-        defaultInstructions: OBSERVATION_PREPROCESSOR_PROMPT,
-        effectiveInstructions: OBSERVATION_PREPROCESSOR_PROMPT,
-        isDefaultCustomized: false,
-        tools: [],
-        isCustomized: false
-      }),
-      expect.objectContaining({
-        id: 'knowledge_maintenance_agent',
-        builtInInstructions: KNOWLEDGE_MAINTENANCE_AGENT_PROMPT,
-        defaultInstructions: KNOWLEDGE_MAINTENANCE_AGENT_PROMPT,
-        effectiveInstructions: KNOWLEDGE_MAINTENANCE_AGENT_PROMPT,
-        isDefaultCustomized: false,
-        tools: expect.arrayContaining([
-          expect.objectContaining({ name: 'search_knowledge' }),
-          expect.objectContaining({ name: 'read_evidence' }),
-          expect.objectContaining({ name: 'add_todos' }),
-          expect.objectContaining({ name: 'complete_todos' }),
-          expect.objectContaining({ name: 'list_todos' })
-        ]),
-        isCustomized: false
-      })
+
+    expect(snapshot.stages).toHaveLength(1)
+    expect(snapshot.stages[0]).toMatchObject({
+      id: 'knowledge_maintenance_agent',
+      runtime: 'pi_agent_core',
+      builtInInstructions: KNOWLEDGE_MAINTENANCE_AGENT_PROMPT,
+      effectiveInstructions: KNOWLEDGE_MAINTENANCE_AGENT_PROMPT
+    })
+    expect(snapshot.stages[0].tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
+      'read_evidence',
+      'list_todos',
+      'add_todos',
+      'complete_todos',
+      'upsert_contribution_statement'
     ]))
-    expect(snapshot.stages.find((stage) => stage.id === 'knowledge_maintenance_agent')?.tools)
-      .toHaveLength(10)
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/Skill activation/i)
+    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/SKILL\.md/i)
   })
 
-  it('uses product-agnostic English defaults that follow the source language', () => {
-    for (const prompt of [OBSERVATION_PREPROCESSOR_PROMPT, KNOWLEDGE_MAINTENANCE_AGENT_PROMPT]) {
-      expect(prompt).not.toContain('Oyster')
-      expect(prompt).not.toMatch(/[\u3400-\u9fff]/u)
-      expect(prompt).toContain('primary language of the original')
-      expect(prompt).toMatch(/preserv(?:e|ing) important original (?:terms|names)/i)
-    }
-
-    expect(OBSERVATION_PREPROCESSOR_PROMPT).toContain('Output only strict JSON')
-    expect(OBSERVATION_PREPROCESSOR_PROMPT).toMatch(/local names or expressions/i)
-    expect(OBSERVATION_PREPROCESSOR_PROMPT).toMatch(/not draft Knowledge Statements/i)
-    expect(OBSERVATION_PREPROCESSOR_PROMPT).toMatch(/not a generated topic heading/i)
-    expect(OBSERVATION_PREPROCESSOR_PROMPT).toMatch(/exact raw starting location/i)
-    expect(OBSERVATION_PREPROCESSOR_PROMPT).toContain('skill_hint')
-    expect(OBSERVATION_PREPROCESSOR_PROMPT).toContain('skill_activation_hint')
-    expect(OBSERVATION_PREPROCESSOR_PROMPT).toMatch(/do not infer that activation succeeded/i)
-
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/not a Session digest/i)
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/anchor each Statement in one independently searchable named referent/i)
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/canonical title names that subject/i)
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/An observed expression in a Todo is evidence to investigate, not a proposed title/i)
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/title a Statement "Northstar"/i)
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/must not summarize "what does this Statement say\?"/i)
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/Put context, scope, meaning, property, and relationship in the body/i)
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/Make the body, not an overloaded title, self-explaining/i)
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/must not require the reader to know which Session, run, task, or conversation produced it/i)
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/Do not leave unresolved deictic phrases/i)
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('"this project"')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/omit that claim instead of preserving or paraphrasing it/i)
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).not.toMatch(/context-rich canonical title/i)
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('[[canonical title]]')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('list_todos')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toContain('complete_todos')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).not.toContain('submit_knowledge_contribution')
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/new title in that Contribution creates a Statement/i)
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/existing title replaces its current content/i)
-  })
-
-  it('passes the entity-oriented default prompts through both processing runtimes', async () => {
-    const { service, backend, agent } = createService({
-      serviceOptions: {
-        observationSegmentPlanner: {
-          segmentBytes: 48,
-          adjacentContextBytes: 16
-        }
-      }
-    })
-    await service.initialize()
-    await configure(service, 'observation_preprocessor')
-    await configure(service, 'knowledge_maintenance_agent')
-
-    const preprocessing = await service.runObservationPreprocessor({
-      observation: 'Oyster repository\nthe database\nlocal alias'
-    })
-
-    expect(backend.generationCalls.every(
-      (call) => call.request.systemPrompt === OBSERVATION_PREPROCESSOR_PROMPT
-    )).toBe(true)
-    expect(backend.generationCalls.every(
-      (call) => call.request.prompt.includes('Discover Statement candidates')
-    )).toBe(true)
-
-    await service.runKnowledgeMaintenance({ preprocessingRunId: preprocessing.runId })
-
-    expect(agent.calls[0].systemPrompt).toBe(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT)
-  })
-
-  it('persists prompt overrides and restores the default by removing the override', async () => {
-    const repository = new InMemoryKnowledgeProcessingRepository()
-    const first = createService({ repository })
-    await first.service.initialize()
-
-    let snapshot = await first.service.saveStage({
-      stageId: 'observation_preprocessor',
-      connectionId: 'model:a',
-      modelId: 'model:a',
-      instructionsOverride: '  custom preprocessor instructions  '
-    })
-    expect(snapshot.stages[0]).toMatchObject({
-      connectionId: 'model:a',
-      modelId: 'model:a',
-      effectiveInstructions: 'custom preprocessor instructions',
-      isCustomized: true
-    })
-
-    const restarted = createService({ repository })
-    await restarted.service.initialize()
-    expect(restarted.service.snapshot().stages[0]).toMatchObject({
-      connectionId: 'model:a',
-      modelId: 'model:a',
-      effectiveInstructions: 'custom preprocessor instructions',
-      isCustomized: true
-    })
-
-    snapshot = await restarted.service.saveStage({
-      stageId: 'observation_preprocessor',
-      connectionId: 'model:a',
-      modelId: 'model:a',
-      instructionsOverride: null
-    })
-    expect(snapshot.stages[0]).toMatchObject({
-      effectiveInstructions: OBSERVATION_PREPROCESSOR_PROMPT,
-      isCustomized: false
-    })
-    expect(await repository.load()).toEqual({
-      stages: [{
-        stageId: 'observation_preprocessor',
-        connectionId: 'model:a',
-        modelId: 'model:a'
+  it('binds deterministic evidence pages and Skill hints as ordinary initial Todos', async () => {
+    const { service, agent } = await harness()
+    const result = await service.runKnowledgeMaintenance({
+      formatVersion: 'codex-jsonl-raw-v1',
+      lines: ['first line', 'Skill call evidence'],
+      skillHints: [{
+        name: 'deep-research',
+        tool: 'Skill',
+        source: 'tool_call',
+        location: { line: 2, offset: 0 }
       }]
-    })
-  })
-
-  it('keeps code defaults, configured defaults, and processing-stage overrides distinct', async () => {
-    const repository = new InMemoryKnowledgeProcessingRepository()
-    const { service } = createService({ repository })
-    await service.initialize()
-
-    let snapshot = await service.saveDefaultInstructions({
-      stageId: 'observation_preprocessor',
-      instructionsOverride: '  configured default prompt  '
-    })
-    expect(snapshot.stages[0]).toMatchObject({
-      builtInInstructions: OBSERVATION_PREPROCESSOR_PROMPT,
-      defaultInstructions: 'configured default prompt',
-      effectiveInstructions: 'configured default prompt',
-      isDefaultCustomized: true,
-      isCustomized: false
+    }, 'session:codex:one@revision', 'Inspect Skill use', {
+      initialTodos: ['Check a user-requested concern.']
     })
 
-    snapshot = await service.saveStage({
-      stageId: 'observation_preprocessor',
-      connectionId: 'model:a',
-      modelId: 'model:a',
-      instructionsOverride: 'processing-stage override'
-    })
-    expect(snapshot.stages[0]).toMatchObject({
-      defaultInstructions: 'configured default prompt',
-      effectiveInstructions: 'processing-stage override',
-      isDefaultCustomized: true,
-      isCustomized: true
-    })
-
-    snapshot = await service.saveDefaultInstructions({
-      stageId: 'observation_preprocessor',
-      instructionsOverride: 'new configured default'
-    })
-    expect(snapshot.stages[0]).toMatchObject({
-      defaultInstructions: 'new configured default',
-      effectiveInstructions: 'processing-stage override',
-      isDefaultCustomized: true,
-      isCustomized: true
-    })
-
-    snapshot = await service.saveStage({
-      stageId: 'observation_preprocessor',
-      connectionId: 'model:a',
-      modelId: 'model:a',
-      instructionsOverride: null
-    })
-    expect(snapshot.stages[0]).toMatchObject({
-      defaultInstructions: 'new configured default',
-      effectiveInstructions: 'new configured default',
-      isDefaultCustomized: true,
-      isCustomized: false
-    })
-
-    snapshot = await service.saveDefaultInstructions({
-      stageId: 'observation_preprocessor',
-      instructionsOverride: null
-    })
-    expect(snapshot.stages[0]).toMatchObject({
-      builtInInstructions: OBSERVATION_PREPROCESSOR_PROMPT,
-      defaultInstructions: OBSERVATION_PREPROCESSOR_PROMPT,
-      effectiveInstructions: OBSERVATION_PREPROCESSOR_PROMPT,
-      isDefaultCustomized: false,
-      isCustomized: false
-    })
-    await expect(repository.load()).resolves.toEqual({
-      stages: [{
-        stageId: 'observation_preprocessor',
-        connectionId: 'model:a',
-        modelId: 'model:a'
-      }]
-    })
-  })
-
-  it('does not impose a separate fixed character ceiling on editable stage prompts', async () => {
-    const repository = new InMemoryKnowledgeProcessingRepository()
-    const { service } = createService({ repository })
-    await service.initialize()
-    const instructions = `Maintain the configured role.\n${'context '.repeat(3_000)}`.trim()
-
-    const snapshot = await service.saveStage({
-      stageId: 'knowledge_maintenance_agent',
-      connectionId: 'model:a',
-      modelId: 'model:a',
-      instructionsOverride: instructions
-    })
-
-    expect(instructions.length).toBeGreaterThan(20_000)
-    expect(snapshot.stages.find((stage) => stage.id === 'knowledge_maintenance_agent'))
-      .toMatchObject({ effectiveInstructions: instructions, isCustomized: true })
-    await expect(repository.load()).resolves.toMatchObject({
-      stages: [expect.objectContaining({ instructionsOverride: instructions })]
-    })
-  })
-
-  it('persists a supported per-stage reasoning effort and passes it through both runtimes', async () => {
-    const connection = modelConnection('model:reasoning', 'reasoning-model', ['low', 'high'])
-    const repository = new InMemoryKnowledgeProcessingRepository()
-    const { service, backend, agent } = createService({ repository, connections: [connection] })
-    await service.initialize()
-
-    await service.saveStage({
-      stageId: 'observation_preprocessor',
-      connectionId: connection.id,
-      modelId: 'reasoning-model',
-      instructionsOverride: null,
-      reasoningEffort: 'low'
-    })
-    await service.saveStage({
-      stageId: 'knowledge_maintenance_agent',
-      connectionId: connection.id,
-      modelId: 'reasoning-model',
-      instructionsOverride: null,
-      reasoningEffort: 'high'
-    })
-
-    expect(service.snapshot().stages.map((stage) => stage.reasoningEffort)).toEqual(['low', 'high'])
-    const preprocessing = await service.runObservationPreprocessor({ observation: 'Observation' })
-    await service.runKnowledgeMaintenance({ preprocessingRunId: preprocessing.runId })
-
-    expect(backend.generationCalls[0].request.reasoningEffort).toBe('low')
-    expect(agent.calls[0].reasoningEffort).toBe('high')
-    expect(preprocessing.execution.reasoningEffort).toBe('low')
-    expect(await repository.load()).toMatchObject({
-      stages: [
-        { stageId: 'observation_preprocessor', reasoningEffort: 'low' },
-        { stageId: 'knowledge_maintenance_agent', reasoningEffort: 'high' }
-      ]
-    })
-
-    await expect(service.saveStage({
-      stageId: 'observation_preprocessor',
-      connectionId: connection.id,
-      modelId: 'reasoning-model',
-      instructionsOverride: null,
-      reasoningEffort: 'medium'
-    })).rejects.toThrow('不支持')
-  })
-
-  it('isolates damaged configuration without hiding model connections or overwriting the file', async () => {
-    let saveCount = 0
-    const repository: KnowledgeProcessingRepository = {
-      load: async () => { throw new Error('invalid JSON') },
-      save: async () => { saveCount += 1 }
-    }
-    const { service } = createService({ repository })
-
-    await expect(service.initialize()).resolves.toBeUndefined()
-    expect(service.snapshot()).toMatchObject({
-      connections: [{ id: 'runtime:codex' }, { id: 'model:a' }, { id: 'model:b' }],
-      configurationError: expect.stringContaining('invalid JSON')
-    })
-    await expect(service.saveStage({
-      stageId: 'observation_preprocessor',
-      connectionId: 'model:a',
-      modelId: 'model:a',
-      instructionsOverride: null
-    })).rejects.toThrow('不可修改')
-    expect(saveCount).toBe(0)
-  })
-
-  it('lists both Coding Plan and API Connections and validates each selected model', async () => {
-    const { service, backend } = createService()
-    await service.initialize()
-
-    expect(service.snapshot().connections.map((connection) => connection.id)).toEqual([
-      'runtime:codex',
-      'model:a',
-      'model:b'
-    ])
-    await expect(service.saveStage({
-      stageId: 'knowledge_maintenance_agent',
-      connectionId: 'runtime:codex',
-      modelId: 'codex-small',
-      instructionsOverride: null
-    })).resolves.toMatchObject({
-      stages: expect.arrayContaining([
-        expect.objectContaining({
-          id: 'knowledge_maintenance_agent',
-          connectionId: 'runtime:codex',
-          modelId: 'codex-small'
-        })
-      ])
-    })
-    await expect(service.saveStage({
-      stageId: 'knowledge_maintenance_agent',
-      connectionId: 'runtime:codex',
-      modelId: 'not-a-codex-model',
-      instructionsOverride: null
-    })).rejects.toThrow('不属于该 Connection')
-
-    await configure(service, 'observation_preprocessor', 'model:a')
-    backend.connections.splice(backend.connections.findIndex((item) => item.id === 'model:a'), 1)
-    expect(service.snapshot().stages[0]).toMatchObject({
-      connectionId: 'model:a',
-      modelId: 'model:a'
-    })
-    await expect(service.runObservationPreprocessor({ observation: 'test' }))
-      .rejects.toThrow('已配置的 Model Connection 不再可用')
-  })
-
-  it('never falls back when the explicitly selected Model or reasoning effort disappears', async () => {
-    const connection = modelConnection('model:dynamic', 'selected', ['high'])
-    connection.models.push({
-      id: 'fallback',
-      displayName: 'Fallback',
-      reasoningEfforts: []
-    })
-    connection.defaultModelId = 'fallback'
-    const { service, backend } = createService({ connections: [connection] })
-    await service.initialize()
-    await service.saveStage({
-      stageId: 'observation_preprocessor',
-      connectionId: connection.id,
-      modelId: 'selected',
-      instructionsOverride: null,
-      reasoningEffort: 'high'
-    })
-
-    connection.models.splice(connection.models.findIndex((model) => model.id === 'selected'), 1)
-    expect(service.snapshot().stages[0]).toMatchObject({
-      connectionId: connection.id,
-      modelId: 'selected',
-      reasoningEffort: 'high'
-    })
-    await expect(service.runObservationPreprocessor({ observation: 'test' }))
-      .rejects.toThrow('系统不会自动回退到其他 Model')
-    expect(backend.generationCalls).toHaveLength(0)
-
-    connection.models.unshift({
-      id: 'selected',
-      displayName: 'Selected',
-      reasoningEfforts: []
-    })
-    await expect(service.runObservationPreprocessor({ observation: 'test' }))
-      .rejects.toThrow('系统不会自动改用模型默认值')
-    expect(backend.generationCalls).toHaveLength(0)
-  })
-
-  it('requires each stage to have an explicitly saved Connection and Model', async () => {
-    const { service, backend, agent } = createService()
-    await service.initialize()
-
-    await expect(service.runObservationPreprocessor({ observation: 'test' }))
-      .rejects.toThrow('先为该阶段选择并保存')
-    await expect(service.runKnowledgeMaintenance({ preprocessingRunId: 'missing' }))
-      .rejects.toThrow('先为该阶段选择并保存')
-    expect(backend.generationCalls).toHaveLength(0)
-    expect(backend.runtimeCalls).toHaveLength(0)
-    expect(agent.calls).toHaveLength(0)
-  })
-
-  it('sends the effective System Prompt, numbered observation, and attention to the selected model', async () => {
-    const { service, backend } = createService()
-    await service.initialize()
-    await configure(service, 'observation_preprocessor', 'model:b', 'custom system prompt')
-
-    const result = await service.runObservationPreprocessor({
-      observation: 'first line\rsecond line\r\nthird line',
-      attention: '  decisions only  '
-    })
-
-    expect(result.runId).toBeTruthy()
-    expect(result.sourceRef).toBe(`workspace:${result.runId}:observation`)
-    expect(result.execution).toMatchObject({
-      connectionId: 'model:b',
-      model: 'model:b',
-      backendKind: 'api',
-      runtime: 'direct_model_call',
-      modelCallCount: 1
-    })
-    expect(backend.generationCalls).toHaveLength(1)
-    expect(backend.generationCalls[0].connectionId).toBe('model:b')
-    expect(backend.generationCalls[0].modelId).toBe('model:b')
-    expect(backend.generationCalls[0].request.systemPrompt).toBe('custom system prompt')
-    expect(backend.generationCalls[0].request.prompt).toContain('Operator attention:\ndecisions only')
-    expect(backend.generationCalls[0].request.prompt).toContain(`Source reference: ${result.sourceRef}`)
-    expect(backend.generationCalls[0].request.prompt).toContain(
-      'L000001 | first line\nL000002 | second line\nL000003 | third line'
-    )
-    expect(result.segmentCount).toBe(1)
-  })
-
-  it('lets the selected model context budget, rather than a fixed Attention length, govern preprocessing', async () => {
-    const connection = modelConnection('model:attention', 'attention-model', [], 100_000)
-    const { service, backend } = createService({ connections: [connection] })
-    await service.initialize()
-    await configure(service, 'observation_preprocessor', connection.id, null, 'attention-model')
-    const attention = 'important context '.repeat(700)
-
-    await expect(service.runObservationPreprocessor({
-      observation: 'one fact',
-      attention
-    })).resolves.toMatchObject({ segmentCount: 1 })
-
-    expect(attention.length).toBeGreaterThan(10_000)
-    expect(backend.generationCalls[0].request.prompt).toContain(attention.trim())
-  })
-
-  it('parses strict candidate JSON and keeps the complete structured result outside bounded debug output', async () => {
-    const { service, backend } = createService()
-    await service.initialize()
-    await configure(service, 'observation_preprocessor')
-    const longQuestion = 'context '.repeat(1_500).trim()
-    backend.generationHandler = async (_connectionId, _modelId, request) => ({
-      text: statementCandidateOutput(request, 'one line', longQuestion)
-    })
-
-    const result = await service.runObservationPreprocessor({ observation: 'one line' })
-
-    expect(result.statementCandidates).toEqual([{
-      expression: 'one line',
-      question: longQuestion,
-      locations: [{ line: 1, offset: 0 }]
-    }])
-    expect(result.debugTrace.preprocessing?.calls[0]).toMatchObject({
-      kind: 'candidate_discovery',
-      status: 'completed',
-      outputTruncated: true
-    })
-    expect(result.debugTrace.preprocessing?.calls[0].output).toHaveLength(8 * 1_024)
-    expect(result.debugTrace.preprocessing?.calls[0].output?.endsWith('…')).toBe(true)
-  })
-
-  it('splits sparse selectors and concatenates every segment candidate without a merge call', async () => {
-    const connection = modelConnection('model:large-context', 'large-context', [], 400_000)
-    const { service, backend, agent } = createService({ connections: [connection] })
-    await service.initialize()
-    await configure(
-      service,
-      'observation_preprocessor',
-      connection.id,
-      null,
-      'large-context'
-    )
-    await configure(
-      service,
-      'knowledge_maintenance_agent',
-      connection.id,
-      null,
-      'large-context'
-    )
-    backend.generationHandler = async (_connectionId, _modelId, request) => ({
-      text: statementCandidateOutput(request, `candidate-${backend.generationCalls.length}`)
-    })
-    // The serialized Observation plus selectors fits the normal 120 KB material
-    // budget; the per-section selector boundary must still prevent one huge root.
-    const rawLines = Array.from({ length: 3_999 }, (_, index) => index % 2 === 0 ? 'x' : '')
-    const view: ObservationView = {
-      formatVersion: 'sparse-test-v1',
-      rawLines,
-      units: rawLines.flatMap((content, index) => content
-        ? [{
-            lineNumber: index + 1,
-            content,
-            startCharacter: 0,
-            endCharacter: content.length,
-            totalCharacters: content.length
-          }]
-        : [])
-    }
-
-    const result = await service.runObservationPreprocessorView(view)
-
-    expect(result.segmentCount).toBeGreaterThan(1)
-    expect(result.execution.modelCallCount).toBe(result.segmentCount)
-    expect(result.statementCandidates).toHaveLength(result.segmentCount)
-    expect(backend.generationCalls).toHaveLength(result.segmentCount)
-    expect(backend.generationCalls.every((call) => (
-      call.request.prompt.includes('Discover Statement candidates')
-    ))).toBe(true)
-    expect(result.debugTrace.preprocessing?.calls.every((call) => (
-      Buffer.byteLength(call.selectors.join(', '), 'utf8')
-        <= MAX_OBSERVATION_SEGMENT_SELECTOR_BYTES
-    ))).toBe(true)
-
-    await service.runKnowledgeMaintenance({ preprocessingRunId: result.runId })
-    expect(agent.calls[0].statementCandidates).toEqual(result.statementCandidates)
-  })
-
-  it('discovers a long Observation in independent global ranges without LLM merge or deduplication', async () => {
-    const { service, backend, agent } = createService({
-      serviceOptions: {
-        observationSegmentPlanner: {
-          segmentBytes: 55,
-          adjacentContextBytes: 18
-        }
-      }
-    })
-    await service.initialize()
-    await configure(service, 'observation_preprocessor', 'model:b', 'custom system prompt')
-    await configure(service, 'knowledge_maintenance_agent', 'runtime:codex', null, 'codex-small')
-    const progress: Array<ReturnType<typeof service.snapshot>['preprocessingProgress']> = []
-    const debugTraces: Array<ReturnType<typeof service.snapshot>['debugTraces'][number]> = []
-    service.subscribe((snapshot) => {
-      progress.push(snapshot.preprocessingProgress)
-      const trace = snapshot.debugTraces.find((candidate) => candidate.origin === 'stage_debug')
-      if (trace) debugTraces.push(trace)
-    })
-    backend.generationHandler = async (_connectionId, _modelId, request) => {
-      const prompt = request.prompt
-      if (prompt.includes('source ranges L000001-L000002')) {
-        return { text: statementCandidateOutput(request, 'shared-name', 'question from first range') }
-      }
-      if (prompt.includes('source ranges L000003-L000004')) {
-        return { text: statementCandidateOutput(request, 'shared-name', 'question from second range') }
-      }
-      throw new Error('unexpected preprocessing prompt')
-    }
-
-    const result = await service.runObservationPreprocessor({
-      observation: 'line-one\nline-two\nline-three\nline-four',
-      attention: 'preserve corrections'
-    })
-
-    expect(result).toMatchObject({
-      segmentCount: 2,
-      execution: { modelCallCount: 2 }
-    })
-    expect(result.statementCandidates).toEqual([
-      {
-        expression: 'shared-name',
-        question: 'question from first range',
-        locations: [{ line: 1, offset: 0 }]
-      },
-      {
-        expression: 'shared-name',
-        question: 'question from second range',
-        locations: [{ line: 3, offset: 0 }]
-      }
-    ])
-    expect(backend.generationCalls).toHaveLength(2)
-    const firstPrompt = backend.generationCalls[0].request.prompt
-    const secondPrompt = backend.generationCalls[1].request.prompt
-    expect(firstPrompt).toContain('L000001 | line-one\nL000002 | line-two')
-    expect(secondPrompt).toContain('BEGIN_ADJACENT_CONTEXT\nL000002 | line-two')
-    expect(secondPrompt).toContain('BEGIN_AUTHORIZED_OBSERVATION\nL000003 | line-three\nL000004 | line-four')
-    expect(backend.generationCalls.every((call) => call.connectionId === 'model:b')).toBe(true)
-    expect(backend.generationCalls.every((call) => call.request.systemPrompt === 'custom system prompt')).toBe(true)
-    expect(progress).toEqual(expect.arrayContaining([
-      { phase: 'discovering', completedSegments: 0, totalSegments: 2 },
-      { phase: 'discovering', completedSegments: 2, totalSegments: 2 }
-    ]))
-    expect(result.debugTrace).toMatchObject({
-      id: result.runId,
-      origin: 'stage_debug',
-      status: 'completed',
-      preprocessing: {
-        phase: 'completed',
-        completedSegments: 2,
-        totalSegments: 2,
-        calls: [
-          { sequence: 1, kind: 'candidate_discovery', selectors: ['L000001-L000002'], status: 'completed' },
-          { sequence: 2, kind: 'candidate_discovery', selectors: ['L000003-L000004'], status: 'completed' }
-        ]
-      }
-    })
-    expect(debugTraces.some((trace) => trace.preprocessing?.calls.some(
-      (call) => call.status === 'completed' && call.output?.includes('question from first range')
-    ))).toBe(true)
-
-    await service.runKnowledgeMaintenance({ preprocessingRunId: result.runId })
-    expect(agent.calls[0].statementCandidates).toEqual(result.statementCandidates)
-  })
-
-  it('processes an external Observation above the former 120000-byte read limit with default budgets', async () => {
-    const { service, backend } = createService()
-    await service.initialize()
-    await configure(service, 'observation_preprocessor')
-    backend.generationHandler = async (_connectionId, _modelId, request) => ({
-      text: statementCandidateOutput(request)
-    })
-    const observation = `${'a'.repeat(70_000)}\n${'b'.repeat(70_000)}`
-
-    const result = await service.runObservationPreprocessor(
-      { observation },
-      undefined,
-      { sourceRef: 'raw:test-large@sha256:revision' }
-    )
-
-    expect(result.segmentCount).toBeGreaterThan(2)
-    expect(result.execution.modelCallCount).toBe(result.segmentCount)
-    expect(backend.generationCalls).toHaveLength(result.execution.modelCallCount)
-    expect(backend.generationCalls[0].request.prompt).toContain('L000001 C0:')
-    expect(backend.generationCalls.some((call) => call.request.prompt.includes('L000002 C0:'))).toBe(true)
-    expect(result.statementCandidates).toHaveLength(result.segmentCount)
-  })
-
-  it('bounds every complete preprocessing request by the selected model context window', async () => {
-    const connection = modelConnection('model:bounded', 'bounded', [], 32_768)
-    const { service, backend } = createService({ connections: [connection] })
-    await service.initialize()
-    await configure(service, 'observation_preprocessor', connection.id, 'short system', 'bounded')
-    backend.generationHandler = async (_connectionId, _modelId, request) => ({
-      text: statementCandidateOutput(request)
-    })
-
-    const result = await service.runObservationPreprocessor({
-      observation: `中文${'😀abc'.repeat(20_000)}`,
-      attention: 'preserve details'
-    })
-
-    const maximumInputBytes = 32_768 - 4_096 - 4_096
-    expect(result.segmentCount).toBeGreaterThan(1)
-    expect(backend.generationCalls.every((call) => (
-      Buffer.byteLength(call.request.systemPrompt ?? '', 'utf8')
-        + Buffer.byteLength(call.request.prompt, 'utf8')
-    ) <= maximumInputBytes)).toBe(true)
-    expect(backend.generationCalls.every((call) => (
-      typeof call.request.maxOutputTokens === 'number'
-      && call.request.maxOutputTokens > 0
-      && call.request.maxOutputTokens <= 4_096
-    ))).toBe(true)
-  })
-
-  it('automatically replans smaller segments after a provider reports context overflow', async () => {
-    const connection = modelConnection('model:adaptive', 'adaptive')
-    const { service, backend } = createService({ connections: [connection] })
-    await service.initialize()
-    await configure(service, 'observation_preprocessor', connection.id, null, 'adaptive')
-    let overflowed = false
-    backend.generationHandler = async (_connectionId, _modelId, request) => {
-      if (!overflowed) {
-        overflowed = true
-        throw new ModelContextOverflowError('provider context overflow')
-      }
-      return { text: statementCandidateOutput(request) }
-    }
-
-    const result = await service.runObservationPreprocessor({ observation: 'x'.repeat(30_000) })
-
-    expect(result.segmentCount).toBeGreaterThan(2)
-    expect(result.execution.modelCallCount).toBe(backend.generationCalls.length)
-    expect(result.debugTrace.preprocessing?.calls[0]).toMatchObject({
-      status: 'failed',
-      error: '观察预处理模型调用失败'
-    })
-    expect(result.debugTrace.status).toBe('completed')
-  })
-
-  it('automatically replans smaller segments when candidate discovery output is truncated', async () => {
-    const connection = modelConnection('model:output-adaptive', 'output-adaptive')
-    const { service, backend } = createService({ connections: [connection] })
-    await service.initialize()
-    await configure(
-      service,
-      'observation_preprocessor',
-      connection.id,
-      null,
-      'output-adaptive'
-    )
-    let truncated = false
-    backend.generationHandler = async (_connectionId, _modelId, request) => {
-      if (!truncated) {
-        truncated = true
-        throw new ModelOutputTruncatedError('candidate output truncated')
-      }
-      return { text: statementCandidateOutput(request) }
-    }
-
-    const result = await service.runObservationPreprocessor({ observation: 'x'.repeat(30_000) })
-
-    expect(result.segmentCount).toBeGreaterThan(2)
-    expect(result.execution.modelCallCount).toBe(backend.generationCalls.length)
-    expect(result.debugTrace.preprocessing?.calls[0]).toMatchObject({
-      status: 'failed',
-      error: '观察预处理模型调用失败'
-    })
-    expect(result.debugTrace.status).toBe('completed')
-  })
-
-  it('publishes each preprocessing call and its output while the remaining calls are still running', async () => {
-    const { service, backend } = createService({
-      serviceOptions: {
-        observationSegmentPlanner: {
-          segmentBytes: 32,
-          adjacentContextBytes: 16
-        }
-      }
-    })
-    await service.initialize()
-    await configure(service, 'observation_preprocessor')
-    const responses = [deferred<{ text: string }>(), deferred<{ text: string }>()]
-    backend.generationHandler = async () => responses[backend.generationCalls.length - 1].promise
-
-    const running = service.runObservationPreprocessor({ observation: 'line-1\nline-2' })
-    await vi.waitFor(() => {
-      expect(service.snapshot().debugTraces[0]?.preprocessing).toMatchObject({
-        totalSegments: 2,
-        calls: [{ sequence: 1, status: 'running' }]
-      })
-    })
-
-    responses[0].resolve({
-      text: statementCandidateOutput(backend.generationCalls[0].request, 'first-candidate')
-    })
-    await vi.waitFor(() => {
-      expect(service.snapshot().debugTraces[0]?.preprocessing?.calls).toMatchObject([
-        { sequence: 1, status: 'completed', output: expect.stringContaining('first-candidate') },
-        { sequence: 2, status: 'running' }
-      ])
-    })
-
-    responses[1].resolve({
-      text: statementCandidateOutput(backend.generationCalls[1].request, 'second-candidate')
-    })
-    await expect(running).resolves.toMatchObject({
-      statementCandidates: [
-        { expression: 'first-candidate' },
-        { expression: 'second-candidate' }
-      ],
-      debugTrace: {
-        status: 'completed',
-        preprocessing: {
-          calls: [
-            { output: expect.stringContaining('first-candidate'), status: 'completed' },
-            { output: expect.stringContaining('second-candidate'), status: 'completed' }
-          ]
-        }
-      }
-    })
-  })
-
-  it('does not let a throwing snapshot listener change preprocessing results', async () => {
-    const { service } = createService()
-    await service.initialize()
-    await configure(service, 'observation_preprocessor')
-    service.subscribe(() => {
-      throw new Error('renderer snapshot sink failed')
-    })
-
-    await expect(service.runObservationPreprocessor({ observation: 'safe run' })).resolves.toMatchObject({
-      statementCandidates: [{ expression: 'Candidate' }],
-      debugTrace: { status: 'completed' }
-    })
-  })
-
-  it('rejects candidate locations that point outside the call\'s primary segment', async () => {
-    const { service, backend } = createService({
-      serviceOptions: {
-        observationSegmentPlanner: {
-          segmentBytes: 32,
-          adjacentContextBytes: 16
-        }
-      }
-    })
-    await service.initialize()
-    await configure(service, 'observation_preprocessor')
-    backend.generationHandler = async () => ({
-      text: JSON.stringify({
-        candidates: [{
-          expression: 'adjacent-only',
-          question: 'What does adjacent-only mean?',
-          locations: [{ line: 1, offset: 0 }]
-        }]
-      })
-    })
-
-    await expect(service.runObservationPreprocessor({ observation: 'line-1\nline-2' }))
-      .rejects.toThrow('不属于当前分段的主要 Observation 材料')
-    expect(backend.generationCalls).toHaveLength(2)
-    expect(service.snapshot().debugTraces[0]?.preprocessing?.calls).toMatchObject([
-      { status: 'completed' },
-      {
-        status: 'failed',
-        error: '观察预处理模型调用失败',
-        output: expect.stringContaining('adjacent-only')
-      }
-    ])
-  })
-
-  it('automatically segments a manual Observation instead of imposing a total character limit', async () => {
-    const { service, backend } = createService()
-    await service.initialize()
-    await configure(service, 'observation_preprocessor')
-    backend.generationHandler = async (_connectionId, _modelId, request) => ({
-      text: statementCandidateOutput(request)
-    })
-
-    const result = await service.runObservationPreprocessor({ observation: 'x'.repeat(120_001) })
-
-    expect(result.segmentCount).toBeGreaterThan(1)
-    expect(backend.generationCalls).toHaveLength(result.execution.modelCallCount)
-    expect(backend.generationCalls[0].request.prompt).toContain('L000001 C0:')
-    expect(service.snapshot().runningStageIds).toEqual([])
-  })
-
-  it('preprocesses a selective view while keeping the complete raw revision for Agent evidence reads', async () => {
-    const { service, backend, agent } = createService()
-    await service.initialize()
-    await configure(service, 'observation_preprocessor')
-    await configure(service, 'knowledge_maintenance_agent')
-    const rawLines = [
-      '{"type":"session_meta","payload":{"cwd":"/work/oyster","base_instructions":"runtime-only"}}',
-      '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Keep the explicit rejection."}]}}',
-      '{"type":"turn_context","payload":{"cwd":"/work/oyster","runtime_only":true}}',
-      `{"type":"response_item","payload":{"type":"function_call_output","output":"${'DO_NOT_SEND_FULL_TOOL_OUTPUT'.repeat(500)}"}}`
-    ]
-    const view: ObservationView = {
-      formatVersion: 'codex-jsonl-v4-test',
-      rawLines,
-      units: [
-        {
-          lineNumber: 1,
-          content: rawLines[0],
-          startCharacter: 0,
-          endCharacter: rawLines[0].length,
-          totalCharacters: rawLines[0].length,
-          modelContent: '{"kind":"session_context","workingDirectory":"/work/oyster"}',
-          recordContext: 'Codex · record=session_context'
-        },
-        {
-          lineNumber: 2,
-          content: rawLines[1],
-          startCharacter: 0,
-          endCharacter: rawLines[1].length,
-          totalCharacters: rawLines[1].length,
-          recordContext: 'Codex · record=message · role=user'
-        }
-      ]
-    }
-
-    const result = await service.runObservationPreprocessorView(view)
-    const modelPrompt = backend.generationCalls[0].request.prompt
-
-    expect(modelPrompt).toContain('L000001')
-    expect(modelPrompt).toContain('exact source ranges L000001-L000002')
-    expect(modelPrompt).toContain('Keep the explicit rejection.')
-    expect(modelPrompt).toContain('workingDirectory')
-    expect(modelPrompt).not.toContain('base_instructions')
-    expect(modelPrompt).not.toContain('runtime_only')
-    expect(modelPrompt).not.toContain('DO_NOT_SEND_FULL_TOOL_OUTPUT')
-    expect(result.debugTrace.preprocessing?.view).toMatchObject({
-      formatVersion: 'codex-jsonl-v4-test',
-      sourceLineCount: 4,
-      selectedLineCount: 2,
-      selectedUnitCount: 2
-    })
-    expect(result.debugTrace.preprocessing?.view?.modelMaterialBytes)
-      .toBeLessThan(result.debugTrace.preprocessing!.view!.sourceBytes)
-    expect(result.debugTrace.preprocessing?.calls[0].selectors).toEqual([
-      'L000001-L000002'
-    ])
-
-    await service.runKnowledgeMaintenance({ preprocessingRunId: result.runId })
-    expect(agent.calls[0].observationLines).toEqual(rawLines)
-  })
-
-  it('losslessly splits one oversized physical line before model calls', async () => {
-    const { service, backend, agent } = createService({
-      serviceOptions: {
-        observationSegmentPlanner: {
-          segmentBytes: 5_000,
-          adjacentContextBytes: 1_000
-        }
-      }
-    })
-    await service.initialize()
-    await configure(service, 'observation_preprocessor')
-    await configure(service, 'knowledge_maintenance_agent')
-    backend.generationHandler = async (_connectionId, _modelId, request) => ({
-      text: statementCandidateOutput(request, 'chunk-candidate')
-    })
-
-    const observation = '1234567890'.repeat(1_200)
-    const result = await service.runObservationPreprocessor({ observation })
-
-    expect(result.segmentCount).toBeGreaterThan(1)
-    expect(backend.generationCalls.filter(
-      (call) => call.request.prompt.includes('BEGIN_AUTHORIZED_OBSERVATION')
-    ).every((call) => call.request.prompt.includes('L000001 C'))).toBe(true)
-    await service.runKnowledgeMaintenance({ preprocessingRunId: result.runId })
-    const locations = agent.calls[0].statementCandidates.map(
-      (candidate) => candidate.locations[0]
-    )
-    expect(locations).toHaveLength(result.segmentCount)
-    expect(locations[0]).toEqual({ line: 1, offset: 0 })
-    expect(locations.every((location, index) => (
-      index === 0 || location.offset > locations[index - 1].offset
-    ))).toBe(true)
-    expect(service.snapshot().runningStageIds).toEqual([])
-    expect(service.snapshot().preprocessingProgress).toBeUndefined()
-  })
-
-  it('processes more than 32 segments without a run-level segment or call ceiling', async () => {
-    const { service, backend } = createService({
-      serviceOptions: {
-        observationSegmentPlanner: {
-          segmentBytes: 30,
-          adjacentContextBytes: 2
-        }
-      }
-    })
-    await service.initialize()
-    await configure(service, 'observation_preprocessor')
-    backend.generationHandler = async (_connectionId, _modelId, request) => ({
-      text: statementCandidateOutput(request)
-    })
-
-    const result = await service.runObservationPreprocessor({
-      observation: Array.from({ length: 33 }, () => '12345').join('\n')
-    })
-
-    expect(result.segmentCount).toBe(33)
-    expect(result.execution.modelCallCount).toBe(33)
-    expect(result.statementCandidates).toHaveLength(33)
-    expect(backend.generationCalls).toHaveLength(result.execution.modelCallCount)
-    expect(service.snapshot().runningStageIds).toEqual([])
-    expect(service.snapshot().preprocessingProgress).toBeUndefined()
-  })
-
-  it('does not publish a partial workspace when a later segment fails', async () => {
-    const { service, backend, agent } = createService({
-      serviceOptions: {
-        observationSegmentPlanner: {
-          segmentBytes: 32,
-          adjacentContextBytes: 16
-        }
-      }
-    })
-    await service.initialize()
-    await configure(service, 'observation_preprocessor')
-    await configure(service, 'knowledge_maintenance_agent')
-    let failedRunId = ''
-    backend.generationHandler = async (_connectionId, _modelId, request) => {
-      failedRunId ||= request.prompt.match(/Source reference: workspace:([^:]+):observation/)?.[1] ?? ''
-      if (backend.generationCalls.length === 1) {
-        return { text: statementCandidateOutput(request, 'first-candidate') }
-      }
-      throw new Error('segment two failed')
-    }
-
-    await expect(service.runObservationPreprocessor({
-      observation: 'line-1\nline-2\nline-3'
-    })).rejects.toThrow('segment two failed')
-
-    expect(failedRunId).toBeTruthy()
-    expect(backend.generationCalls).toHaveLength(2)
-    await expect(service.runKnowledgeMaintenance({ preprocessingRunId: failedRunId }))
-      .rejects.toThrow('工作区已不存在')
-    expect(agent.calls).toHaveLength(0)
-    expect(service.snapshot().runningStageIds).toEqual([])
-    expect(service.snapshot().preprocessingProgress).toBeUndefined()
-    expect(service.snapshot().debugTraces.find((trace) => trace.origin === 'stage_debug'))
-      .toMatchObject({
-        status: 'failed',
-        preprocessing: {
-          completedSegments: 1,
-          calls: [
-            { status: 'completed', output: expect.stringContaining('first-candidate') },
-            { status: 'failed', error: '观察预处理模型调用失败' }
-          ]
-        }
-      })
-  })
-
-  it('propagates cancellation to a later discovery segment without publishing a workspace', async () => {
-    const { service, backend } = createService({
-      serviceOptions: {
-        observationSegmentPlanner: {
-          segmentBytes: 32,
-          adjacentContextBytes: 16
-        }
-      }
-    })
-    await service.initialize()
-    await configure(service, 'observation_preprocessor')
-    let secondStarted!: () => void
-    const enteredSecondSegment = new Promise<void>((resolve) => { secondStarted = resolve })
-    backend.generationHandler = async (_connectionId, _modelId, request) => {
-      if (backend.generationCalls.length === 1) {
-        return { text: statementCandidateOutput(request, 'first-candidate') }
-      }
-      secondStarted()
-      return rejectWhenAborted(request.signal!)
-    }
-
-    const running = service.runObservationPreprocessor({ observation: 'line-1\nline-2' })
-    await enteredSecondSegment
-    service.cancelRun('observation_preprocessor')
-
-    await expect(running).rejects.toThrow('用户取消')
-    expect(backend.generationCalls).toHaveLength(2)
-    expect(service.snapshot().runningStageIds).toEqual([])
-    expect(service.snapshot().preprocessingProgress).toBeUndefined()
-    expect(service.snapshot().debugTraces.find((trace) => trace.origin === 'stage_debug'))
-      .toMatchObject({
-        status: 'cancelled',
-        preprocessing: {
-          calls: [
-            { status: 'completed', output: expect.stringContaining('first-candidate') },
-            { status: 'cancelled' }
-          ]
-        }
-      })
-  })
-
-  it('does not impose a fixed whole-run deadline on long preprocessing jobs', async () => {
-    vi.useFakeTimers()
-    try {
-      const { service, backend } = createService()
-      await service.initialize()
-      await configure(service, 'observation_preprocessor')
-      backend.generationHandler = async (_connectionId, _modelId, request) => (
-        rejectWhenAborted(request.signal!)
-      )
-
-      const running = service.runObservationPreprocessor({ observation: 'one line' })
-      expect(backend.generationCalls).toHaveLength(1)
-
-      await vi.advanceTimersByTimeAsync(31 * 60_000)
-      expect(service.snapshot().runningStageIds).toContain('observation_preprocessor')
-      service.cancelRun('observation_preprocessor')
-      await expect(running).rejects.toThrow('用户取消')
-      expect(service.snapshot().runningStageIds).toEqual([])
-      expect(service.snapshot().preprocessingProgress).toBeUndefined()
-      expect(service.snapshot().debugTraces.find((trace) => trace.origin === 'stage_debug'))
-        .toMatchObject({
-          status: 'cancelled',
-          preprocessing: { calls: [{ status: 'cancelled' }] }
-        })
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('passes only a valid temporary preprocessing workspace to the Agent and does not persist results', async () => {
-    const repository = new InMemoryKnowledgeProcessingRepository()
-    const { service, backend, agent } = createService({ repository })
-    await service.initialize()
-    await configure(service, 'observation_preprocessor', 'model:a')
-    await configure(
-      service,
-      'knowledge_maintenance_agent',
-      'runtime:codex',
-      'custom maintainer prompt',
-      'codex-small'
-    )
-
-    await expect(service.runKnowledgeMaintenance({ preprocessingRunId: 'unknown' }))
-      .rejects.toThrow('工作区已不存在')
-    expect(agent.calls).toHaveLength(0)
-
-    const preprocessing = await service.runObservationPreprocessor({
-      observation: 'alpha\nbeta',
-      attention: 'original attention'
-    })
-    const stateBeforeMaintenance = await repository.load()
-    const maintenance = await service.runKnowledgeMaintenance({
-      preprocessingRunId: preprocessing.runId,
-      attention: 'maintenance attention'
-    })
-
-    expect(backend.runtimeCalls).toEqual([{
-      connectionId: 'runtime:codex',
-      modelId: 'codex-small'
-    }])
-    expect(backend.runtimeHealthTracking).toEqual([true])
     expect(agent.calls).toHaveLength(1)
     expect(agent.calls[0]).toMatchObject({
-      systemPrompt: 'custom maintainer prompt',
-      statementCandidates: preprocessing.statementCandidates,
-      observationLines: ['alpha', 'beta'],
-      sourceRef: preprocessing.sourceRef,
-      attention: 'maintenance attention',
-      runtime: { model: { id: 'codex-small' } }
+      evidenceLines: ['first line', 'Skill call evidence'],
+      evidenceFormatVersion: 'codex-jsonl-raw-v1',
+      sourceRef: 'session:codex:one@revision',
+      attention: 'Inspect Skill use'
     })
-    expect(maintenance).toMatchObject({
-      preprocessingRunId: preprocessing.runId,
-      contribution: {
-        statements: [{ title: 'Candidate' }]
-      },
-      execution: {
-        connectionId: 'runtime:codex',
-        backendKind: 'coding_plan',
-        model: 'codex-small',
-        runtime: 'pi_agent_core',
-        modelCallCount: 2,
-        toolCalls: ['read_evidence', 'complete_todos']
-      },
-      debugTrace: {
-        id: preprocessing.runId,
-        origin: 'stage_debug',
-        status: 'completed',
-        maintenance: {
-          modelCallCount: 2,
-          toolCallCount: 2,
-          events: [
-            { kind: 'model_call', label: '模型轮次 1', status: 'completed' },
-            { kind: 'tool_call', label: '读取原始观察证据', status: 'completed', detail: 'L000001-L000001 · 1 行' },
-            { kind: 'model_call', label: '模型轮次 2', status: 'completed' },
-            { kind: 'tool_call', label: '完成待办事项', status: 'completed', detail: 'Todo · 0 个待处理' }
-          ]
-        }
-      }
-    })
-    expect(await repository.load()).toEqual(stateBeforeMaintenance)
-
-    service.dispose()
-    await expect(service.runKnowledgeMaintenance({ preprocessingRunId: preprocessing.runId }))
-      .rejects.toThrow('工作区已不存在')
+    expect(agent.calls[0].initialTodos).toHaveLength(2)
+    expect(agent.calls[0].initialTodos?.[0]).toContain('Inspect Raw Evidence segment 1 of 1')
+    expect(agent.calls[0].initialTodos?.[0]).toContain('possible Skill activation “deep-research”')
+    expect(agent.calls[0].initialTodos?.[1]).toBe('Check a user-requested concern.')
+    expect(result.evidenceSegmentCount).toBe(1)
+    expect(result.sourceRef).toBe('session:codex:one@revision')
+    expect(result.todos.every((todo) => todo.status === 'completed')).toBe(true)
+    expect(result.debugTrace.maintenance.modelCallCount).toBe(1)
   })
 
-  it('keeps only the Workspace owned by the current visible stage-debug result', async () => {
-    const { service, agent } = createService()
-    await service.initialize()
-    await configure(service, 'observation_preprocessor')
-    await configure(service, 'knowledge_maintenance_agent')
-    const first = await service.runObservationPreprocessor({ observation: 'workspace-first' })
-    const second = await service.runObservationPreprocessor({ observation: 'workspace-second' })
-
+  it('rejects malformed Raw Evidence before starting the Agent', async () => {
+    const { service, agent } = await harness()
     await expect(service.runKnowledgeMaintenance({
-      preprocessingRunId: first.runId
-    })).rejects.toThrow('工作区已不存在')
-    await expect(service.runKnowledgeMaintenance({
-      preprocessingRunId: second.runId
-    })).resolves.toMatchObject({ preprocessingRunId: second.runId })
-    expect(agent.calls.at(-1)?.observationLines).toEqual(['workspace-second'])
-  })
-
-  it('releases a full-chain Workspace when its exclusive run ends before maintenance', async () => {
-    const { service } = createService()
-    await service.initialize()
-    await configure(service, 'observation_preprocessor')
-    await configure(service, 'knowledge_maintenance_agent')
-    const lease = service.acquireExclusiveRun()
-    const preprocessing = await service.runObservationPreprocessor(
-      { observation: 'temporary full-chain workspace' },
-      undefined,
-      { lease }
-    )
-
-    service.releaseExclusiveRun(lease)
-
-    await expect(service.runKnowledgeMaintenance({
-      preprocessingRunId: preprocessing.runId
-    })).rejects.toThrow('工作区已不存在')
-  })
-
-  it('pairs same-name Knowledge Agent tool events by their internal tool call ID', async () => {
-    const { service, agent } = createService()
-    await service.initialize()
-    await configure(service, 'observation_preprocessor')
-    await configure(service, 'knowledge_maintenance_agent')
-    const preprocessing = await service.runObservationPreprocessor({ observation: 'evidence' })
-    agent.handler = async (input) => {
-      input.onTrace?.({ type: 'model_started', callNumber: 1 })
-      input.onTrace?.({
-        type: 'model_completed',
-        callNumber: 1,
-        status: 'completed',
-        detail: 'stop=toolUse · tokens=10'
-      })
-      input.onTrace?.({
-        type: 'tool_started',
-        toolCallId: 'first',
-        toolName: 'read_evidence',
-        input: '{"line":1}'
-      })
-      input.onTrace?.({
-        type: 'tool_started',
-        toolCallId: 'second',
-        toolName: 'read_evidence',
-        input: '{"line":2}'
-      })
-      input.onTrace?.({
-        type: 'tool_completed',
-        toolCallId: 'first',
-        toolName: 'read_evidence',
-        status: 'completed',
-        detail: 'FIRST RESULT',
-        output: 'first tool payload'
-      })
-      input.onTrace?.({
-        type: 'tool_completed',
-        toolCallId: 'second',
-        toolName: 'read_evidence',
-        status: 'completed',
-        detail: 'SECOND RESULT',
-        output: 'second tool payload'
-      })
-      return {
-        contribution: {
-          runRef: input.contributionRunRef,
-          statements: [{
-            title: 'Candidate',
-            content: 'Candidate content'
-          }]
-        },
-        todos: [],
-        modelCallCount: 1,
-        toolCalls: ['read_evidence', 'read_evidence']
-      }
-    }
-
-    const result = await service.runKnowledgeMaintenance({ preprocessingRunId: preprocessing.runId })
-    const toolEvents = result.debugTrace.maintenance?.events.filter(
-      (event) => event.kind === 'tool_call'
-    )
-    expect(toolEvents).toMatchObject([
-      {
-        id: 'tool-call-1',
-        detail: 'FIRST RESULT',
-        input: '{"line":1}',
-        output: 'first tool payload',
-        status: 'completed'
-      },
-      {
-        id: 'tool-call-2',
-        detail: 'SECOND RESULT',
-        input: '{"line":2}',
-        output: 'second tool payload',
-        status: 'completed'
-      }
-    ])
-    expect(JSON.stringify(toolEvents)).not.toContain('toolCallId')
-  })
-
-  it('protects each stage from concurrent runs and propagates cancellation', async () => {
-    const { service, backend, agent } = createService()
-    await service.initialize()
-    await configure(service, 'observation_preprocessor')
-    await configure(service, 'knowledge_maintenance_agent')
-
-    backend.generationHandler = async (_connectionId, _modelId, request) => rejectWhenAborted(request.signal!)
-    const preprocessingRun = service.runObservationPreprocessor({ observation: 'wait' })
-    expect(service.snapshot().runningStageIds).toContain('observation_preprocessor')
-    await expect(service.runObservationPreprocessor({ observation: 'second' }))
-      .rejects.toThrow('正在运行')
-    service.cancelRun('observation_preprocessor')
-    await expect(preprocessingRun).rejects.toThrow('用户取消')
-    expect(service.snapshot().runningStageIds).not.toContain('observation_preprocessor')
-
-    backend.generationHandler = undefined
-    const preprocessing = await service.runObservationPreprocessor({ observation: 'ready' })
-    agent.handler = async (input) => rejectWhenAborted(input.signal)
-    const maintenanceRun = service.runKnowledgeMaintenance({ preprocessingRunId: preprocessing.runId })
-    expect(service.snapshot().runningStageIds).toContain('knowledge_maintenance_agent')
-    await expect(service.runKnowledgeMaintenance({ preprocessingRunId: preprocessing.runId }))
-      .rejects.toThrow('正在运行')
-    service.cancelRun('knowledge_maintenance_agent')
-    await expect(maintenanceRun).rejects.toThrow('用户取消')
-    expect(service.snapshot().runningStageIds).not.toContain('knowledge_maintenance_agent')
-  })
-
-  it('rejects cross-stage concurrency before it can replace the active debug trace', async () => {
-    const { service, backend } = createService()
-    await service.initialize()
-    await configure(service, 'observation_preprocessor')
-    await configure(service, 'knowledge_maintenance_agent')
-    const ready = await service.runObservationPreprocessor({ observation: 'ready workspace' })
-    backend.generationHandler = async (_connectionId, _modelId, request) => (
-      rejectWhenAborted(request.signal!)
-    )
-
-    const activePreprocessing = service.runObservationPreprocessor({ observation: 'active run' })
-    await expect(service.runKnowledgeMaintenance({ preprocessingRunId: ready.runId }))
-      .rejects.toThrow('已有知识加工阶段正在运行')
-    expect(service.snapshot().debugTraces.find((trace) => trace.origin === 'stage_debug'))
-      .toMatchObject({
-        status: 'running',
-        currentStageId: 'observation_preprocessor'
-      })
-
-    service.cancelRun('observation_preprocessor')
-    await expect(activePreprocessing).rejects.toThrow('用户取消')
-  })
-
-  it('never falls back when the explicitly selected Connection fails', async () => {
-    const { service, backend, agent } = createService()
-    await service.initialize()
-    await configure(service, 'observation_preprocessor', 'model:b')
-    backend.generationHandler = async (connectionId) => {
-      throw new Error(`${connectionId} unavailable`)
-    }
-
-    await expect(service.runObservationPreprocessor({ observation: 'test' }))
-      .rejects.toThrow('model:b unavailable')
-    expect(backend.generationCalls.map((call) => call.connectionId)).toEqual(['model:b'])
-    expect(backend.runtimeCalls).toEqual([])
+      formatVersion: 'test-v1',
+      lines: ['line'],
+      skillHints: [{ source: 'tool_call', location: { line: 2, offset: 0 } }]
+    }, 'session:test')).rejects.toThrow('Raw Evidence Skill hint 无效')
     expect(agent.calls).toHaveLength(0)
-  })
-
-  it('binds a confirmed run to the Connection that was shown to the user', async () => {
-    const { service, backend } = createService()
-    await service.initialize()
-    await configure(service, 'observation_preprocessor', 'model:a')
-
-    await expect(service.runObservationPreprocessor(
-      { observation: 'test' },
-      'model:b'
-    )).rejects.toThrow('确认后 Model Connection 已发生变化')
-    expect(backend.generationCalls).toHaveLength(0)
   })
 })

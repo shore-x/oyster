@@ -38,14 +38,14 @@ describe('processing configuration presentation', () => {
       defaultModelId: 'large'
     }
     const stage = {
-      id: 'observation_preprocessor',
+      id: 'knowledge_maintenance_agent',
       modelId: 'small'
     } as ProcessingStageView
 
     expect(selectedStageModel(stage, connection)?.id).toBe('small')
     expect(backendLabel(connection.backendKind)).toBe('Coding Plan')
     expect(providerLabel(connection.providerId)).toBe('OpenAI Codex')
-    expect(runtimeLabel('direct_model_call')).toBe('Direct Model')
+    expect(runtimeLabel('pi_agent_core')).toBe('Pi Agent Core')
     expect(reasoningLabel()).toBe('模型默认')
   })
 

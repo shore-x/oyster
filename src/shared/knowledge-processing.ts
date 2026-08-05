@@ -14,13 +14,9 @@ import type {
 } from './knowledge'
 import type { AgentTodo, AgentTodoCounts } from './agent-runtime'
 
-export const PROCESSING_STAGE_IDS = [
-  'observation_preprocessor',
-  'knowledge_maintenance_agent'
-] as const
-
+export const PROCESSING_STAGE_IDS = ['knowledge_maintenance_agent'] as const
 export type ProcessingStageId = (typeof PROCESSING_STAGE_IDS)[number]
-export type ProcessingRuntime = 'direct_model_call' | 'pi_agent_core'
+export type ProcessingRuntime = 'pi_agent_core'
 
 export type SerializableJsonValue =
   | string
@@ -64,11 +60,8 @@ export interface ProcessingStageView {
   connectionId?: string
   modelId?: string
   reasoningEffort?: ReasoningEffort
-  /** Versioned fallback shipped in source code. */
   builtInInstructions: string
-  /** User-configured default, or the built-in fallback when none is configured. */
   defaultInstructions: string
-  /** Stage override first, then the configured default. */
   effectiveInstructions: string
   isDefaultCustomized: boolean
   isCustomized: boolean
@@ -78,52 +71,12 @@ export interface KnowledgeProcessingSnapshot {
   stages: ProcessingStageView[]
   connections: ProcessingConnectionView[]
   runningStageIds: ProcessingStageId[]
-  preprocessingProgress?: ObservationPreprocessingProgress
   debugTraces: KnowledgeProcessingDebugTrace[]
   configurationError?: string
 }
 
-export interface ObservationPreprocessingProgress {
-  phase: 'preparing' | 'discovering'
-  completedSegments: number
-  totalSegments?: number
-}
-
 export type ProcessingDebugTraceOrigin = 'stage_debug' | 'full_chain'
 export type ProcessingDebugStatus = 'running' | 'completed' | 'failed' | 'cancelled'
-
-export interface PreprocessingModelCallTrace {
-  id: string
-  sequence: number
-  kind: 'candidate_discovery'
-  status: ProcessingDebugStatus
-  /** Exact, sorted and coalesced raw source ranges represented by this call. */
-  selectors: string[]
-  /** First host-derived raw position represented by this call. */
-  readLocation: { line: number; offset: number }
-  startedAt: string
-  completedAt?: string
-  durationMs?: number
-  output?: string
-  outputTruncated?: boolean
-  error?: string
-}
-
-export interface ObservationPreprocessingDebugTrace {
-  phase: 'preparing' | 'discovering' | 'completed'
-  completedSegments: number
-  totalSegments?: number
-  view?: {
-    formatVersion: string
-    sourceLineCount: number
-    sourceBytes: number
-    selectedLineCount: number
-    selectedUnitCount: number
-    selectedSourceBytes: number
-    modelMaterialBytes: number
-  }
-  calls: PreprocessingModelCallTrace[]
-}
 
 export interface KnowledgeMaintenanceTraceEvent {
   id: string
@@ -141,6 +94,11 @@ export interface KnowledgeMaintenanceTraceEvent {
   outputTruncated?: boolean
 }
 
+export interface KnowledgeMaintenanceWorkspaceStatus {
+  todos: AgentTodoCounts
+  draftStatementCount: number
+}
+
 export interface KnowledgeMaintenanceDebugTrace {
   modelCallCount: number
   toolCallCount: number
@@ -148,33 +106,15 @@ export interface KnowledgeMaintenanceDebugTrace {
   events: KnowledgeMaintenanceTraceEvent[]
 }
 
-export interface StatementCandidateLocation {
-  line: number
-  offset: number
-}
-
-export interface StatementCandidateSeed {
-  expression: string
-  question: string
-  locations: StatementCandidateLocation[]
-}
-
-export interface KnowledgeMaintenanceWorkspaceStatus {
-  todos: AgentTodoCounts
-  draftStatementCount: number
-}
-
 /** Bounded, in-memory diagnostics for the latest confirmed run in each UI origin. */
 export interface KnowledgeProcessingDebugTrace {
   id: string
   origin: ProcessingDebugTraceOrigin
   status: ProcessingDebugStatus
-  currentStageId: ProcessingStageId
   startedAt: string
   completedAt?: string
   error?: string
-  preprocessing?: ObservationPreprocessingDebugTrace
-  maintenance?: KnowledgeMaintenanceDebugTrace
+  maintenance: KnowledgeMaintenanceDebugTrace
 }
 
 export interface SaveProcessingStageInput {
@@ -182,32 +122,22 @@ export interface SaveProcessingStageInput {
   connectionId: string | null
   modelId: string | null
   instructionsOverride: string | null
-  /** undefined preserves the current value; null uses the model/provider default. */
   reasoningEffort?: ReasoningEffort | null
 }
 
 export interface SaveProcessingDefaultInstructionsInput {
   stageId: ProcessingStageId
-  /** null restores the source-code default. */
   instructionsOverride: string | null
 }
 
-export interface RunObservationPreprocessorInput {
-  observation: string
-  attention?: string
-}
-
-/** Selects one discovered Session revision without exposing its path or raw content to the renderer. */
-export interface RunSessionPreprocessorInput {
+/** Selects one immutable external Session revision for a Maintainer run. */
+export interface RunKnowledgeMaintenanceInput {
   sourceRecordId: string
   expectedRevision: string
   attention?: string
 }
 
-export interface RunKnowledgeMaintenanceInput {
-  preprocessingRunId: string
-  attention?: string
-}
+export type RunKnowledgeFullChainInput = RunKnowledgeMaintenanceInput
 
 export interface ProcessingExecutionSummary {
   connectionId: string
@@ -221,33 +151,16 @@ export interface ProcessingExecutionSummary {
   reasoningEffort?: ReasoningEffort
 }
 
-export interface ObservationPreprocessingResult {
-  stageId: 'observation_preprocessor'
-  runId: string
-  statementCandidates: StatementCandidateSeed[]
-  sourceRef: string
-  segmentCount: number
-  debugTrace: KnowledgeProcessingDebugTrace
-  durationMs: number
-  completedAt: string
-  execution: ProcessingExecutionSummary
-}
-
 export interface KnowledgeMaintenanceResult {
   stageId: 'knowledge_maintenance_agent'
-  preprocessingRunId: string
+  sourceRef: string
+  evidenceSegmentCount: number
   contribution: KnowledgeContributionDraft
   todos: AgentTodo[]
   debugTrace: KnowledgeProcessingDebugTrace
   durationMs: number
   completedAt: string
   execution: ProcessingExecutionSummary
-}
-
-export interface RunKnowledgeFullChainInput {
-  sourceRecordId: string
-  expectedRevision: string
-  attention?: string
 }
 
 export interface KnowledgeSandboxView {
@@ -260,7 +173,6 @@ export interface KnowledgeFullChainResult {
   session: AvailableSessionSummary
   sandbox: KnowledgeSandboxView
   sourceRef: string
-  preprocessing: ObservationPreprocessingResult
   maintenance: KnowledgeMaintenanceResult
   commit: KnowledgeCommitResult
   knowledge: {
@@ -278,19 +190,16 @@ export interface KnowledgeFullChainStageSnapshot {
   reasoningEffort?: ReasoningEffort
 }
 
-/** Immutable local record of one successfully completed full-chain test. */
 export interface KnowledgeFullChainRunRecord {
-  formatVersion: 2
+  formatVersion: 3
   runId: string
   attention?: string
   configuration: {
-    preprocessor: KnowledgeFullChainStageSnapshot
     maintainer: KnowledgeFullChainStageSnapshot
   }
   result: KnowledgeFullChainResult
 }
 
-/** Compact fields used to browse history without loading trace payloads. */
 export interface KnowledgeFullChainRunSummary {
   runId: string
   completedAt: string
@@ -301,8 +210,6 @@ export interface KnowledgeFullChainRunSummary {
   startedAt?: string
   endedAt?: string
   statementCount: number
-  candidateCount: number
-  preprocessorModel: string
   maintainerModel: string
 }
 
@@ -312,12 +219,6 @@ export interface KnowledgeProcessingApi {
   saveDefaultInstructions(
     input: SaveProcessingDefaultInstructionsInput
   ): Promise<KnowledgeProcessingSnapshot>
-  runObservationPreprocessor(
-    input: RunObservationPreprocessorInput
-  ): Promise<ObservationPreprocessingResult | undefined>
-  runSessionPreprocessor(
-    input: RunSessionPreprocessorInput
-  ): Promise<ObservationPreprocessingResult | undefined>
   runKnowledgeMaintenance(
     input: RunKnowledgeMaintenanceInput
   ): Promise<KnowledgeMaintenanceResult | undefined>

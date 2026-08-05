@@ -4,10 +4,8 @@ import type { KnowledgeCommitResult, KnowledgeStatement } from '../../../shared/
 import type { AgentTodo } from '../../../shared/agent-runtime'
 import type {
   KnowledgeProcessingDebugTrace,
-  ObservationPreprocessingProgress,
   ProcessingConnectionView,
-  ProcessingStageView,
-  StatementCandidateSeed
+  ProcessingStageView
 } from '../../../shared/knowledge-processing'
 import {
   backendLabel,
@@ -33,7 +31,6 @@ export interface FullChainResultView {
   runId: string
   completedAt?: string
   durationMs?: number
-  statementCandidates: StatementCandidateSeed[]
   todos: AgentTodo[]
   debugTrace: KnowledgeProcessingDebugTrace
   steps: FullChainStepView[]
@@ -45,13 +42,9 @@ export interface FullChainWorkspaceProps {
   sessionsLoading: boolean
   selectedSessionId?: string
   attention: string
-  preprocessor?: ProcessingStageView
-  preprocessorConnection?: ProcessingConnectionView
   maintainer?: ProcessingStageView
   maintainerConnection?: ProcessingConnectionView
   running: boolean
-  preprocessingProgress?: ObservationPreprocessingProgress
-  maintenanceRunning: boolean
   debugTrace?: KnowledgeProcessingDebugTrace
   locked: boolean
   importingResult: boolean
@@ -96,40 +89,21 @@ function stageSummary(stage?: ProcessingStageView, connection?: ProcessingConnec
   }
 }
 
-function progressText(
-  progress: ObservationPreprocessingProgress | undefined,
-  maintenanceRunning: boolean
-): string {
-  if (progress?.phase === 'preparing') return '正在准备对话材料…'
-  if (progress?.phase === 'discovering') {
-    return progress.totalSegments
-      ? `正在发现知识候选 · ${progress.completedSegments} / ${progress.totalSegments}`
-      : '正在发现知识候选…'
-  }
-  if (maintenanceRunning) return 'Knowledge Maintenance Agent 正在调查和维护知识…'
-  return '正在启动链路测试…'
-}
-
 export function FullChainWorkspace(props: FullChainWorkspaceProps) {
   const [page, setPage] = createSignal<'overview' | 'activity' | 'result'>('overview')
   const selectedSession = createMemo(() => props.sessions.find(
     (session) => session.sourceRecordId === props.selectedSessionId
   ))
-  const preprocessor = createMemo(() => stageSummary(props.preprocessor, props.preprocessorConnection))
   const maintainer = createMemo(() => stageSummary(props.maintainer, props.maintainerConnection))
   const disabledReason = createMemo(() => {
     if (props.locked) return '已有知识加工任务正在运行。'
     if (!selectedSession()) return '请选择一个 Session。'
-    if (!preprocessor().runnable) return `${preprocessor().name} 尚未完成可用的模型配置。`
     if (!maintainer().runnable) return `${maintainer().name} 尚未完成可用的模型配置。`
     return undefined
   })
   const visibleDebugTrace = createMemo(() => props.debugTrace ?? props.result?.debugTrace)
   const completedTodoCount = createMemo(() => props.result?.todos.filter(
     (todo) => todo.status === 'completed'
-  ).length ?? 0)
-  const completedPreprocessingCalls = createMemo(() => visibleDebugTrace()?.preprocessing?.calls.filter(
-    (call) => call.status === 'completed'
   ).length ?? 0)
 
   createEffect(() => {
@@ -149,7 +123,7 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
             <div class="chain-test__section-heading">
               <div>
                 <h2>运行设置</h2>
-                <p>选择输入和关注点，然后启动两阶段测试。</p>
+                <p>选择输入和关注点，然后启动知识维护测试。</p>
               </div>
             </div>
 
@@ -192,7 +166,6 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
             </label>
 
             <div class="chain-test__models" aria-label="链路模型配置">
-              <div><span>预处理</span><strong>{preprocessor().detail}</strong></div>
               <div><span>知识维护</span><strong>{maintainer().detail}</strong></div>
               <p>模型与提示词可在“高级调试”中查看和修改。</p>
             </div>
@@ -200,7 +173,7 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
             <div class="chain-test__actions">
               <p data-testid="full-chain-disabled-reason">
                 {props.running
-                  ? progressText(props.preprocessingProgress, props.maintenanceRunning)
+                  ? 'Knowledge Maintenance Agent 正在读取证据并维护知识…'
                   : disabledReason() || '输入和模型已经准备完成。'}
               </p>
               <Show
@@ -233,18 +206,14 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
             </div>
             <Show
               when={visibleDebugTrace()}
-              fallback={<div class="chain-test__empty">运行开始后，这里会显示两个阶段的实时进度。</div>}
+              fallback={<div class="chain-test__empty">运行开始后，这里会显示知识维护的实时进度。</div>}
             >
               {(trace) => (
                 <>
                   <div class="chain-test__activity-summary" data-testid="full-chain-activity-summary">
                     <div>
                       <span class="processing-debug__marker" aria-hidden="true" />
-                      <div><strong>观察预处理</strong><p>{trace().preprocessing ? `${trace().preprocessing!.completedSegments}${trace().preprocessing!.totalSegments ? ` / ${trace().preprocessing!.totalSegments}` : ''} 个分段 · ${completedPreprocessingCalls()} / ${trace().preprocessing!.calls.length} 次调用完成` : '等待开始'}</p></div>
-                    </div>
-                    <div>
-                      <span class="processing-debug__marker" aria-hidden="true" />
-                      <div><strong>知识维护</strong><p>{trace().maintenance ? `${trace().maintenance!.modelCallCount} 次模型 · ${trace().maintenance!.toolCallCount} 次工具 · ${trace().maintenance!.workspace?.todos.pending ?? 0} 个 Todo 待处理` : '等待预处理完成'}</p></div>
+                      <div><strong>知识维护</strong><p>{`${trace().maintenance.modelCallCount} 次模型 · ${trace().maintenance.toolCallCount} 次工具 · ${trace().maintenance.workspace?.todos.pending ?? 0} 个 Todo 待处理`}</p></div>
                     </div>
                   </div>
                   <Show when={trace().error}>{(error) => <p class="processing-debug__error">{error()}</p>}</Show>
@@ -268,13 +237,12 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
               <div class="chain-test__result-heading">
                 <div>
                   <h2>Sandbox 结果</h2>
-                  <p>隔离知识已经生成；正文、预处理候选与 Maintainer Todo 放在结果详情中。</p>
+                  <p>隔离知识已经生成；正文与 Maintainer Todo 放在结果详情中。</p>
                 </div>
                 <span>{result().completedAt ? `完成于 ${formatTime(result().completedAt)}` : ''}</span>
               </div>
               <div class="chain-test__result-metrics">
                 <div><strong data-testid="full-chain-result-statement-count">{result().statements.length}</strong><span>Statements</span></div>
-                <div><strong data-testid="full-chain-result-candidate-count">{result().statementCandidates.length}</strong><span>候选</span></div>
                 <div><strong>{completedTodoCount()}</strong><span>Todo 已完成</span></div>
                 <div><strong>{result().durationMs === undefined ? '—' : formatDuration(result().durationMs!)}</strong><span>耗时</span></div>
               </div>

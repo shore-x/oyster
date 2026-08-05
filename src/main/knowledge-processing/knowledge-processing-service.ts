@@ -4,79 +4,36 @@ import {
   type KnowledgeMaintenanceResult,
   type KnowledgeProcessingDebugTrace,
   type KnowledgeProcessingSnapshot,
-  type ObservationPreprocessingProgress,
-  type ObservationPreprocessingResult,
   type ProcessingConnectionView,
-  type ProcessingDebugStatus,
   type ProcessingDebugTraceOrigin,
   type ProcessingExecutionSummary,
   type ProcessingStageId,
-  type RunKnowledgeMaintenanceInput,
-  type RunObservationPreprocessorInput,
   type SaveProcessingDefaultInstructionsInput,
   type SaveProcessingStageInput
 } from '../../shared/knowledge-processing'
 import {
   REASONING_EFFORTS,
   type AiConnection,
-  type AvailableModel,
   type ReasoningEffort
 } from '../../shared/ai-backends'
-import {
-  ModelContextOverflowError,
-  ModelOutputTruncatedError
-} from '../ai-backends/model'
-import type { EvidenceLocation, ObservationView } from '../observation/model'
-import {
-  MAX_OBSERVATION_UNIT_BYTES,
-  createPlainTextObservationView
-} from '../observation/observation-view'
+import type { RawEvidence } from '../observation/model'
 import type {
   AiBackendPort,
   KnowledgeAgentTraceEvent,
   KnowledgeAgentRuntime,
   KnowledgeProcessingRepository,
   KnowledgeProcessingStateData,
-  PreprocessingWorkspace,
   ProcessingSnapshotListener,
   StoredProcessingStage
 } from './model'
-import {
-  numberedObservationUnits,
-  observationSourceSelectors,
-  observationSourceSelectorsText,
-  observationUnitsMaterialBytes,
-  planObservationSegments,
-  resolveObservationSegmentPlannerOptions,
-  type ObservationSegment,
-  type ObservationSegmentPlannerOptions,
-  type ResolvedObservationSegmentPlannerOptions
-} from './observation-segment-planner'
 import { PROCESSING_STAGE_DEFINITIONS, stageDefinition } from './prompts'
 import { KNOWLEDGE_MAINTENANCE_TOOL_CATALOG } from './knowledge-maintenance-tool-catalog'
-import {
-  parseStatementCandidateBatch,
-  type StatementCandidate
-} from './statement-candidate-batch'
+import { planEvidenceSegmentTodos } from './evidence-segment-todos'
 
 const MAX_SOURCE_REF_CHARACTERS = 512
 const MAX_DEBUG_TRACE_ERROR_CHARACTERS = 2 * 1_024
 const MAX_DEBUG_TRACE_DETAIL_CHARACTERS = 1 * 1_024
-const MAX_DEBUG_TRACE_PREPROCESSOR_OUTPUT_CHARACTERS = 8 * 1_024
 const MAX_DEBUG_TRACE_EVENT_PAYLOAD_CHARACTERS = 64 * 1_024
-const PREPROCESSOR_OUTPUT_TOKENS = 4_096
-const PREPROCESSOR_CONTEXT_SAFETY_TOKENS = 2_048
-const UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS = 32_768
-const MIN_PREPROCESSOR_MATERIAL_BYTES = 1
-const PREPROCESSOR_PROMPT_ENVELOPE_BYTES = 2 * 1_024
-
-interface PreprocessorContextBudget {
-  maxInputBytes: number
-  maxOutputTokens: number
-  planner: ResolvedObservationSegmentPlannerOptions
-}
-
-class PreprocessorInputBudgetError extends Error {}
 
 export interface ProcessingStageRunBinding {
   connectionId: string
@@ -94,23 +51,13 @@ export interface ProcessingDebugTraceContext {
   origin: ProcessingDebugTraceOrigin
 }
 
-export interface ObservationPreprocessorRunOptions {
-  binding?: ProcessingStageRunBinding
-  lease?: ProcessingRunLease
-  sourceRef?: string
-  debugTrace?: ProcessingDebugTraceContext
-}
-
 export interface KnowledgeMaintenanceRunOptions {
   binding?: ProcessingStageRunBinding
   lease?: ProcessingRunLease
   knowledgeAgent?: KnowledgeAgentRuntime
   contributionRunRef?: string
   debugTrace?: ProcessingDebugTraceContext
-}
-
-export interface KnowledgeProcessingServiceOptions {
-  observationSegmentPlanner?: ObservationSegmentPlannerOptions
+  initialTodos?: readonly string[]
 }
 
 function errorText(error: unknown): string {
@@ -140,60 +87,6 @@ function setBoundedEventPayload(
 
 function debugError(error: unknown): string {
   return boundedDebugText(errorText(error), MAX_DEBUG_TRACE_ERROR_CHARACTERS)
-}
-
-function utf8Bytes(value: string): number {
-  return Buffer.byteLength(value, 'utf8')
-}
-
-function preprocessorContextBudget(
-  model: AvailableModel,
-  stage: ProcessingStageRunBinding,
-  sourceRef: string,
-  attention: string | undefined,
-  configuredPlanner: ResolvedObservationSegmentPlannerOptions,
-  divisor = 1
-): PreprocessorContextBudget {
-  const contextWindow = model.contextWindowTokens ?? UNKNOWN_MODEL_CONTEXT_WINDOW_TOKENS
-  const maxOutputTokens = Math.min(
-    PREPROCESSOR_OUTPUT_TOKENS,
-    model.maxOutputTokens ?? PREPROCESSOR_OUTPUT_TOKENS
-  )
-  const maxInputBytes = contextWindow - maxOutputTokens - PREPROCESSOR_CONTEXT_SAFETY_TOKENS
-  const fixedBytes = utf8Bytes(stage.instructions)
-    + utf8Bytes(sourceRef)
-    + utf8Bytes(attention ?? '')
-    + PREPROCESSOR_PROMPT_ENVELOPE_BYTES
-  const availableMaterialBytes = Math.floor((maxInputBytes - fixedBytes) / divisor)
-  if (availableMaterialBytes < MIN_PREPROCESSOR_MATERIAL_BYTES) {
-    throw new Error('所选模型的上下文不足以容纳当前 Observation Preprocessor System Prompt')
-  }
-  const adjacentContextBytes = Math.min(
-    configuredPlanner.adjacentContextBytes,
-    Math.max(1, Math.floor(availableMaterialBytes / 5))
-  )
-  const segmentBytes = Math.min(
-    configuredPlanner.segmentBytes,
-    availableMaterialBytes - adjacentContextBytes
-  )
-  if (segmentBytes < MIN_PREPROCESSOR_MATERIAL_BYTES) {
-    throw new Error('所选模型的上下文不足以容纳 Observation 预处理材料')
-  }
-  return {
-    maxInputBytes,
-    maxOutputTokens,
-    planner: {
-      ...configuredPlanner,
-      segmentBytes,
-      adjacentContextBytes
-    }
-  }
-}
-
-function retryablePreprocessorEnvelopeError(error: unknown): boolean {
-  return error instanceof ModelContextOverflowError
-    || error instanceof ModelOutputTruncatedError
-    || error instanceof PreprocessorInputBudgetError
 }
 
 function traceTerminalStatus(signal: AbortSignal): 'failed' | 'cancelled' {
@@ -258,120 +151,45 @@ function normalizeAttention(value: unknown): string | undefined {
   if (value === undefined || value === null || value === '') return undefined
   if (typeof value !== 'string') throw new Error('关注点格式无效')
   const normalized = value.trim()
-  if (!normalized) return undefined
-  return normalized
+  return normalized || undefined
 }
 
-function assertObservationInput(input: unknown): asserts input is RunObservationPreprocessorInput {
-  if (!input || typeof input !== 'object') throw new Error('观察预处理输入无效')
-  const observation = (input as Record<string, unknown>).observation
-  if (typeof observation !== 'string' || !observation.trim()) throw new Error('请输入需要处理的 Observation')
-  normalizeAttention((input as Record<string, unknown>).attention)
-}
-
-function assertObservationView(view: ObservationView): void {
+function assertRawEvidence(evidence: RawEvidence): void {
   if (
-    !view
-    || typeof view !== 'object'
-    || typeof view.formatVersion !== 'string'
-    || !view.formatVersion.trim()
-    || view.formatVersion.length > 128
-    || !Array.isArray(view.rawLines)
-    || !view.rawLines.length
-    || view.rawLines.some((line) => typeof line !== 'string' || /[\r\n]/.test(line))
-    || !view.rawLines.some((line) => line.trim())
-    || !Array.isArray(view.units)
-    || !view.units.length
+    !evidence
+    || typeof evidence !== 'object'
+    || typeof evidence.formatVersion !== 'string'
+    || !evidence.formatVersion.trim()
+    || evidence.formatVersion.length > 128
+    || !Array.isArray(evidence.lines)
+    || !evidence.lines.length
+    || evidence.lines.some((line) => typeof line !== 'string' || /[\r\n]/.test(line))
+    || !evidence.lines.some((line) => line.trim())
+    || !Array.isArray(evidence.skillHints)
   ) {
-    throw new Error('Observation View 无效')
+    throw new Error('Raw Evidence 无效')
   }
-
-  let previousLineNumber = 0
-  let previousEndCharacter = 0
-  for (const unit of view.units) {
-    const line = view.rawLines[unit.lineNumber - 1]
-    const sameLine = unit.lineNumber === previousLineNumber
-    const splitsSurrogatePair = (offset: number): boolean => (
-      offset > 0
-      && offset < (line?.length ?? 0)
-      && line!.charCodeAt(offset - 1) >= 0xd800
-      && line!.charCodeAt(offset - 1) <= 0xdbff
-      && line!.charCodeAt(offset) >= 0xdc00
-      && line!.charCodeAt(offset) <= 0xdfff
-    )
+  for (const hint of evidence.skillHints) {
+    const line = hint?.location?.line
+    const offset = hint?.location?.offset
+    const sourceLine = Number.isSafeInteger(line) ? evidence.lines[line - 1] : undefined
     if (
-      line === undefined
-      || !Number.isSafeInteger(unit.lineNumber)
-      || unit.lineNumber < 1
-      || unit.lineNumber < previousLineNumber
-      || !Number.isSafeInteger(unit.startCharacter)
-      || !Number.isSafeInteger(unit.endCharacter)
-      || !Number.isSafeInteger(unit.totalCharacters)
-      || unit.totalCharacters !== line.length
-      || unit.startCharacter < 0
-      || (sameLine && unit.startCharacter < previousEndCharacter)
-      || unit.endCharacter < unit.startCharacter
-      || (line.length > 0 && unit.endCharacter === unit.startCharacter)
-      || unit.endCharacter > line.length
-      || splitsSurrogatePair(unit.startCharacter)
-      || splitsSurrogatePair(unit.endCharacter)
-      || unit.content !== line.slice(unit.startCharacter, unit.endCharacter)
-      || (
-        unit.modelContent !== undefined
-        && (
-          typeof unit.modelContent !== 'string'
-          || !unit.modelContent.trim()
-          || /[\r\n]/.test(unit.modelContent)
-          || utf8Bytes(unit.modelContent) > MAX_OBSERVATION_UNIT_BYTES
-        )
-      )
-      || (
-        unit.recordContext !== undefined
-        && (
-          typeof unit.recordContext !== 'string'
-          || !unit.recordContext.trim()
-          || utf8Bytes(unit.recordContext) > 512
-          || /[\r\n]/.test(unit.recordContext)
-        )
-      )
-    ) {
-      throw new Error('Observation View unit 与原始证据不一致')
-    }
-    previousEndCharacter = unit.endCharacter
-    previousLineNumber = unit.lineNumber
+      !Number.isSafeInteger(line)
+      || !Number.isSafeInteger(offset)
+      || line < 1
+      || offset < 0
+      || sourceLine === undefined
+      || offset > sourceLine.length
+      || (hint.name !== undefined && (typeof hint.name !== 'string' || !hint.name.trim()))
+      || (hint.tool !== undefined && (typeof hint.tool !== 'string' || !hint.tool.trim()))
+      || (hint.source !== 'runtime_injection' && hint.source !== 'tool_call')
+    ) throw new Error('Raw Evidence Skill hint 无效')
   }
-}
-
-function observationViewDebugSummary(
-  view: ObservationView
-): NonNullable<NonNullable<KnowledgeProcessingDebugTrace['preprocessing']>['view']> {
-  return {
-    formatVersion: view.formatVersion,
-    sourceLineCount: view.rawLines.length,
-    sourceBytes: view.rawLines.reduce(
-      (total, line, index) => total + utf8Bytes(line) + (index ? 1 : 0),
-      0
-    ),
-    selectedLineCount: new Set(view.units.map((unit) => unit.lineNumber)).size,
-    selectedUnitCount: view.units.length,
-    selectedSourceBytes: view.units.reduce((total, unit) => total + utf8Bytes(unit.content), 0),
-    modelMaterialBytes: observationUnitsMaterialBytes(view.units)
-  }
-}
-
-function assertMaintenanceInput(input: unknown): asserts input is RunKnowledgeMaintenanceInput {
-  if (!input || typeof input !== 'object') throw new Error('知识维护输入无效')
-  const runId = (input as Record<string, unknown>).preprocessingRunId
-  if (typeof runId !== 'string' || !runId.trim() || runId.length > 200) {
-    throw new Error('预处理 Run ID 无效')
-  }
-  normalizeAttention((input as Record<string, unknown>).attention)
 }
 
 function executionSummary(
   connection: AiConnection,
   modelId: string,
-  runtime: ProcessingExecutionSummary['runtime'],
   modelCallCount: number,
   toolCalls: string[],
   reasoningEffort?: ReasoningEffort
@@ -382,53 +200,10 @@ function executionSummary(
     backendKind: connection.backendKind,
     providerId: connection.providerId,
     model: modelId,
-    runtime,
+    runtime: 'pi_agent_core',
     modelCallCount,
     toolCalls,
     ...(reasoningEffort ? { reasoningEffort } : {})
-  }
-}
-
-function segmentPrompt(
-  segment: ObservationSegment,
-  sourceRef: string,
-  attention?: string
-): string {
-  const context = segment.contextUnits.length
-    ? `\nBEGIN_ADJACENT_CONTEXT\n${numberedObservationUnits(segment.contextUnits)}\nEND_ADJACENT_CONTEXT\n`
-    : ''
-  return `Discover Statement candidates in the primary Observation material within exact source ranges ${observationSourceSelectorsText(segment.sourceRanges)}. This is one independently processed part of a potentially longer Session. Follow the System Prompt's language and strict JSON output contract. Preserve global one-based L line numbers and zero-based UTF-16 C offsets exactly. Lines between the listed ranges are not primary material for this call; do not infer that their raw evidence does not exist.
-
-Start from serious local names, aliases, overloaded expressions, and context-bound implicit references in the primary material. Each candidate is an investigation question, not a fact, title, draft Statement, topic summary, or Session summary. Keep distinct uses distinct when their identity is uncertain.
-Adjacent context, when present, is provided only to resolve continuity, names, aliases, and implicit references at the boundary. Do not emit a candidate found only in adjacent context.${context}
-When a long physical line is shown in multiple Cstart:end/total character windows, those windows are transport-only fragments of the same L line. Every candidate location must point into a primary window, so the downstream Agent can begin a bounded read_evidence call there.
-The owning source adapter may replace routine execution detail with a deterministic, bounded representation and bracketed record context. Treat that representation as navigation to the cited raw line, not as a replacement for Raw Evidence. Runtime configuration, telemetry, duplicate representations, and low-level execution traces may be omitted intentionally.
-Operator attention:
-${attention ?? 'No additional focus.'}
-
-Source reference: ${sourceRef}
-BEGIN_AUTHORIZED_OBSERVATION
-${numberedObservationUnits(segment.units)}
-END_AUTHORIZED_OBSERVATION`
-}
-
-function assertCandidateLocationsBelongToSegment(
-  candidates: readonly StatementCandidate[],
-  segment: ObservationSegment
-): void {
-  for (const candidate of candidates) {
-    for (const location of candidate.locations) {
-      const belongsToPrimaryMaterial = segment.units.some((unit) => (
-        unit.lineNumber === location.line
-        && location.offset >= unit.startCharacter
-        && location.offset < unit.endCharacter
-      ))
-      if (!belongsToPrimaryMaterial) {
-        throw new Error(
-          `Statement candidate “${candidate.expression}” 的证据位置不属于当前分段的主要 Observation 材料`
-        )
-      }
-    }
   }
 }
 
@@ -437,28 +212,20 @@ export class KnowledgeProcessingService {
   private configurationError?: string
   private mutationQueue: Promise<void> = Promise.resolve()
   private readonly listeners = new Set<ProcessingSnapshotListener>()
-  private readonly workspaces = new Map<string, PreprocessingWorkspace>()
-  private readonly workspaceRunIds = new Map<ProcessingDebugTraceOrigin, string>()
   private readonly activeRuns = new Map<ProcessingStageId, AbortController>()
   private readonly debugTraces = new Map<ProcessingDebugTraceOrigin, KnowledgeProcessingDebugTrace>()
   private readonly maintenanceToolTraceIds = new Map<ProcessingDebugTraceOrigin, {
     traceId: string
     eventIds: Map<string, string>
   }>()
-  private preprocessingProgress?: ObservationPreprocessingProgress
   private exclusiveLease?: ProcessingRunLease
   private readonly unsubscribeAiBackend: () => void
-  private readonly observationSegmentPlanner: ResolvedObservationSegmentPlannerOptions
 
   constructor(
     private readonly repository: KnowledgeProcessingRepository,
     private readonly aiBackend: AiBackendPort,
-    private readonly knowledgeAgent: KnowledgeAgentRuntime,
-    options: KnowledgeProcessingServiceOptions = {}
+    private readonly knowledgeAgent: KnowledgeAgentRuntime
   ) {
-    this.observationSegmentPlanner = resolveObservationSegmentPlannerOptions(
-      options.observationSegmentPlanner
-    )
     this.unsubscribeAiBackend = aiBackend.subscribe(() => this.emit())
   }
 
@@ -500,9 +267,6 @@ export class KnowledgeProcessingService {
       connections,
       runningStageIds: [...this.activeRuns.keys()],
       debugTraces: [...this.debugTraces.values()],
-      ...(this.preprocessingProgress
-        ? { preprocessingProgress: { ...this.preprocessingProgress } }
-        : {}),
       configurationError: this.configurationError
     })
   }
@@ -529,18 +293,12 @@ export class KnowledgeProcessingService {
         throw new Error('Model Connection 配置无效')
       }
       const connection = processingConnections(this.aiBackend).find((item) => item.id === input.connectionId)
-      if (input.connectionId && !connection) {
-        throw new Error('未找到可用于知识加工的 Connection')
-      }
-      if (input.modelId !== null && typeof input.modelId !== 'string') {
-        throw new Error('Model 配置无效')
-      }
+      if (input.connectionId && !connection) throw new Error('未找到可用于知识加工的 Connection')
+      if (input.modelId !== null && typeof input.modelId !== 'string') throw new Error('Model 配置无效')
       if (input.connectionId && !selectedModel(connection, input.modelId ?? undefined)) {
         throw new Error('所选 Model 不属于该 Connection')
       }
-      if (!input.connectionId && input.modelId) {
-        throw new Error('选择 Model 前必须先选择 Connection')
-      }
+      if (!input.connectionId && input.modelId) throw new Error('选择 Model 前必须先选择 Connection')
       if (input.instructionsOverride !== null && typeof input.instructionsOverride !== 'string') {
         throw new Error('System Prompt 配置无效')
       }
@@ -551,9 +309,7 @@ export class KnowledgeProcessingService {
           typeof input.reasoningEffort !== 'string'
           || !REASONING_EFFORTS.includes(input.reasoningEffort)
         )
-      ) {
-        throw new Error('思考强度配置无效')
-      }
+      ) throw new Error('思考强度配置无效')
 
       const currentStage = this.state.stages.find((candidate) => candidate.stageId === input.stageId)
       let instructionsOverride: string | undefined
@@ -584,12 +340,7 @@ export class KnowledgeProcessingService {
           : {}),
         ...(instructionsOverride ? { instructionsOverride } : {})
       }
-      const nextState: KnowledgeProcessingStateData = {
-        stages: [
-          ...this.state.stages.filter((candidate) => candidate.stageId !== input.stageId),
-          nextStage
-        ]
-      }
+      const nextState = { stages: [nextStage] }
       await this.repository.save(nextState)
       this.state = nextState
       this.emit()
@@ -608,7 +359,6 @@ export class KnowledgeProcessingService {
       if (input.instructionsOverride !== null && typeof input.instructionsOverride !== 'string') {
         throw new Error('默认 System Prompt 配置无效')
       }
-
       let configuredDefault: string | undefined
       if (typeof input.instructionsOverride === 'string') {
         configuredDefault = input.instructionsOverride.trim()
@@ -617,7 +367,6 @@ export class KnowledgeProcessingService {
           configuredDefault = undefined
         }
       }
-
       const currentStage = this.state.stages.find((candidate) => candidate.stageId === input.stageId)
       const nextStage: StoredProcessingStage = {
         ...currentStage,
@@ -625,12 +374,7 @@ export class KnowledgeProcessingService {
         ...(configuredDefault ? { defaultInstructionsOverride: configuredDefault } : {})
       }
       if (!configuredDefault) delete nextStage.defaultInstructionsOverride
-      const nextState: KnowledgeProcessingStateData = {
-        stages: [
-          ...this.state.stages.filter((candidate) => candidate.stageId !== input.stageId),
-          nextStage
-        ]
-      }
+      const nextState = { stages: [nextStage] }
       await this.repository.save(nextState)
       this.state = nextState
       this.emit()
@@ -638,15 +382,9 @@ export class KnowledgeProcessingService {
     })
   }
 
-  private configuredStage(
-    stageId: ProcessingStageId,
-    expectedConnectionId?: string
-  ): ProcessingStageRunBinding {
+  private configuredStage(stageId: ProcessingStageId): ProcessingStageRunBinding {
     const stored = this.state.stages.find((candidate) => candidate.stageId === stageId)
     if (!stored?.connectionId) throw new Error('请先为该阶段选择并保存 Model Connection')
-    if (expectedConnectionId && stored.connectionId !== expectedConnectionId) {
-      throw new Error('确认后 Model Connection 已发生变化，请重新运行并确认数据目的地')
-    }
     const connection = processingConnections(this.aiBackend).find((candidate) => candidate.id === stored.connectionId)
     if (!connection) throw new Error('已配置的 Model Connection 不再可用')
     if (!stored.modelId) throw new Error('请先为该阶段选择并保存 Model')
@@ -679,83 +417,44 @@ export class KnowledgeProcessingService {
   releaseExclusiveRun(lease: ProcessingRunLease): void {
     if (this.exclusiveLease !== lease) throw new Error('知识加工运行租约无效')
     if (this.activeRuns.size) throw new Error('知识加工阶段尚未结束，不能释放运行租约')
-    const workspaceRunId = this.workspaceRunIds.get('full_chain')
-    if (workspaceRunId) this.releaseWorkspace(workspaceRunId, 'full_chain')
     this.exclusiveLease = undefined
   }
 
-  private beginRun(stageId: ProcessingStageId, lease?: ProcessingRunLease): AbortController {
+  private beginRun(lease?: ProcessingRunLease): AbortController {
     if (this.exclusiveLease && this.exclusiveLease !== lease) {
       throw new Error('完整链路正在运行，不能启动独立阶段')
     }
     if (!this.exclusiveLease && lease) throw new Error('知识加工运行租约已失效')
     if (this.activeRuns.size) throw new Error('已有知识加工阶段正在运行')
     const controller = new AbortController()
-    this.activeRuns.set(stageId, controller)
+    this.activeRuns.set('knowledge_maintenance_agent', controller)
     this.emit()
     return controller
   }
 
-  private finishRun(stageId: ProcessingStageId, controller: AbortController): void {
-    if (this.activeRuns.get(stageId) === controller) this.activeRuns.delete(stageId)
-    this.emit()
-  }
-
-  private updatePreprocessingProgress(progress?: ObservationPreprocessingProgress): void {
-    this.preprocessingProgress = progress
-    this.emit()
-  }
-
-  private beginPreprocessingDebugTrace(context: ProcessingDebugTraceContext): void {
-    const current = this.debugTraces.get(context.origin)
-    const trace: KnowledgeProcessingDebugTrace = context.origin === 'full_chain'
-      && current?.id === context.id
-      ? current
-      : {
-          id: context.id,
-          origin: context.origin,
-          status: 'running',
-          currentStageId: 'observation_preprocessor',
-          startedAt: new Date().toISOString()
-        }
-    trace.status = 'running'
-    trace.currentStageId = 'observation_preprocessor'
-    delete trace.completedAt
-    delete trace.error
-    delete trace.maintenance
-    trace.preprocessing = {
-      phase: 'preparing',
-      completedSegments: 0,
-      calls: []
+  private finishRun(controller: AbortController): void {
+    if (this.activeRuns.get('knowledge_maintenance_agent') === controller) {
+      this.activeRuns.delete('knowledge_maintenance_agent')
     }
-    this.debugTraces.set(context.origin, trace)
     this.emit()
   }
 
   beginFullChainDebugTrace(context: ProcessingDebugTraceContext): void {
     if (context.origin !== 'full_chain') throw new Error('完整链路调试轨迹来源无效')
-    this.beginPreprocessingDebugTrace(context)
+    this.beginMaintenanceDebugTrace(context)
   }
 
   private beginMaintenanceDebugTrace(context: ProcessingDebugTraceContext): void {
-    const current = this.debugTraces.get(context.origin)
-    const trace: KnowledgeProcessingDebugTrace = current?.id === context.id
-      ? current
-      : {
-          id: context.id,
-          origin: context.origin,
-          status: 'running',
-          currentStageId: 'knowledge_maintenance_agent',
-          startedAt: new Date().toISOString()
-        }
-    trace.status = 'running'
-    trace.currentStageId = 'knowledge_maintenance_agent'
-    delete trace.completedAt
-    delete trace.error
-    trace.maintenance = {
-      modelCallCount: 0,
-      toolCallCount: 0,
-      events: []
+    const trace: KnowledgeProcessingDebugTrace = {
+      id: context.id,
+      origin: context.origin,
+      status: 'running',
+      startedAt: new Date().toISOString(),
+      maintenance: {
+        modelCallCount: 0,
+        toolCallCount: 0,
+        events: []
+      }
     }
     this.maintenanceToolTraceIds.set(context.origin, {
       traceId: context.id,
@@ -775,50 +474,31 @@ export class KnowledgeProcessingService {
     this.emit()
   }
 
-  private completeDebugTrace(
-    context: ProcessingDebugTraceContext,
-    stageId: ProcessingStageId
-  ): KnowledgeProcessingDebugTrace {
+  private finishMaintenanceToolTrace(context: ProcessingDebugTraceContext): void {
+    const toolTraceIds = this.maintenanceToolTraceIds.get(context.origin)
+    if (toolTraceIds?.traceId === context.id) this.maintenanceToolTraceIds.delete(context.origin)
+  }
+
+  private completeStageDebugTrace(context: ProcessingDebugTraceContext): KnowledgeProcessingDebugTrace {
+    this.finishMaintenanceToolTrace(context)
+    this.updateDebugTrace(context, (trace) => {
+      if (context.origin === 'stage_debug') {
+        trace.status = 'completed'
+        trace.completedAt = new Date().toISOString()
+      }
+      delete trace.error
+    })
+    return this.debugTraceSnapshot(context)
+  }
+
+  completeFullChainDebugTrace(context: ProcessingDebugTraceContext): KnowledgeProcessingDebugTrace {
+    if (context.origin !== 'full_chain') throw new Error('完整链路调试轨迹来源无效')
     this.updateDebugTrace(context, (trace) => {
       trace.status = 'completed'
-      trace.currentStageId = stageId
       trace.completedAt = new Date().toISOString()
       delete trace.error
-      if (stageId === 'observation_preprocessor' && trace.preprocessing) {
-        trace.preprocessing.phase = 'completed'
-      }
     })
     return this.debugTraceSnapshot(context)
-  }
-
-  private completeProcessingStageDebugTrace(
-    context: ProcessingDebugTraceContext,
-    stageId: ProcessingStageId
-  ): KnowledgeProcessingDebugTrace {
-    if (stageId === 'knowledge_maintenance_agent') {
-      const toolTraceIds = this.maintenanceToolTraceIds.get(context.origin)
-      if (toolTraceIds?.traceId === context.id) this.maintenanceToolTraceIds.delete(context.origin)
-    }
-    if (context.origin !== 'full_chain') return this.completeDebugTrace(context, stageId)
-    this.updateDebugTrace(context, (trace) => {
-      trace.status = 'running'
-      trace.currentStageId = stageId
-      delete trace.completedAt
-      delete trace.error
-      if (stageId === 'observation_preprocessor' && trace.preprocessing) {
-        trace.preprocessing.phase = 'completed'
-      }
-    })
-    return this.debugTraceSnapshot(context)
-  }
-
-  completeFullChainDebugTrace(
-    context: ProcessingDebugTraceContext
-  ): KnowledgeProcessingDebugTrace {
-    if (context.origin !== 'full_chain') throw new Error('完整链路调试轨迹来源无效')
-    const trace = this.debugTraces.get(context.origin)
-    if (!trace || trace.id !== context.id) throw new Error('知识加工调试轨迹已失效')
-    return this.completeDebugTrace(context, trace.currentStageId)
   }
 
   failFullChainDebugTrace(
@@ -826,45 +506,26 @@ export class KnowledgeProcessingService {
     status: 'failed' | 'cancelled',
     error: unknown
   ): void {
-    if (context.origin !== 'full_chain') return
-    const trace = this.debugTraces.get(context.origin)
-    if (!trace || trace.id !== context.id) return
-    this.failDebugTrace(context, trace.currentStageId, status, error)
+    if (context.origin === 'full_chain') this.failDebugTrace(context, status, error)
   }
 
   private failDebugTrace(
     context: ProcessingDebugTraceContext,
-    stageId: ProcessingStageId,
     status: 'failed' | 'cancelled',
     error: unknown
   ): void {
     const completedAt = new Date().toISOString()
     this.updateDebugTrace(context, (trace) => {
-      const hasFailedPreprocessingCall = trace.preprocessing?.calls.some(
-        (call) => call.status === 'failed' || call.status === 'cancelled'
-      )
-      const hasFailedMaintenanceEvent = trace.maintenance?.events.some(
+      const hasFailedEvent = trace.maintenance.events.some(
         (event) => event.status === 'failed' || event.status === 'cancelled'
       )
       const message = status === 'cancelled'
         ? '知识加工运行已取消'
-        : stageId === 'observation_preprocessor' && hasFailedPreprocessingCall
-          ? '观察预处理模型调用失败'
-          : stageId === 'knowledge_maintenance_agent' && hasFailedMaintenanceEvent
-            ? '知识维护 Agent 运行失败'
-            : debugError(error)
+        : hasFailedEvent ? '知识维护 Agent 运行失败' : debugError(error)
       trace.status = status
-      trace.currentStageId = stageId
       trace.completedAt = completedAt
       trace.error = message
-      for (const call of trace.preprocessing?.calls ?? []) {
-        if (call.status !== 'running') continue
-        call.status = status
-        call.completedAt = completedAt
-        call.durationMs = Date.now() - new Date(call.startedAt).getTime()
-        call.error = message
-      }
-      for (const event of trace.maintenance?.events ?? []) {
+      for (const event of trace.maintenance.events) {
         if (event.status !== 'running') continue
         event.status = status
         event.completedAt = completedAt
@@ -872,10 +533,7 @@ export class KnowledgeProcessingService {
         event.detail ??= message
       }
     })
-    if (stageId === 'knowledge_maintenance_agent') {
-      const toolTraceIds = this.maintenanceToolTraceIds.get(context.origin)
-      if (toolTraceIds?.traceId === context.id) this.maintenanceToolTraceIds.delete(context.origin)
-    }
+    this.finishMaintenanceToolTrace(context)
   }
 
   private debugTraceSnapshot(context: ProcessingDebugTraceContext): KnowledgeProcessingDebugTrace {
@@ -884,67 +542,12 @@ export class KnowledgeProcessingService {
     return structuredClone(trace)
   }
 
-  private updatePreprocessingDebug(
-    context: ProcessingDebugTraceContext,
-    update: (trace: NonNullable<KnowledgeProcessingDebugTrace['preprocessing']>) => void
-  ): void {
-    this.updateDebugTrace(context, (trace) => {
-      if (trace.preprocessing) update(trace.preprocessing)
-    })
-  }
-
-  private beginPreprocessingCall(
-    context: ProcessingDebugTraceContext,
-    selectors: string[],
-    readLocation: EvidenceLocation
-  ): string {
-    let callId = ''
-    this.updatePreprocessingDebug(context, (trace) => {
-      const sequence = trace.calls.length + 1
-      callId = `preprocessing-call-${sequence}`
-      trace.calls.push({
-        id: callId,
-        sequence,
-        kind: 'candidate_discovery',
-        status: 'running',
-        selectors: [...selectors],
-        readLocation: { ...readLocation },
-        startedAt: new Date().toISOString()
-      })
-    })
-    return callId
-  }
-
-  private finishPreprocessingCall(
-    context: ProcessingDebugTraceContext,
-    callId: string,
-    status: ProcessingDebugStatus,
-    output?: string
-  ): void {
-    this.updatePreprocessingDebug(context, (trace) => {
-      const call = trace.calls.find((candidate) => candidate.id === callId)
-      if (!call || call.status !== 'running') return
-      call.status = status
-      call.completedAt = new Date().toISOString()
-      call.durationMs = Date.now() - new Date(call.startedAt).getTime()
-      if (output !== undefined) {
-        call.output = boundedDebugText(output, MAX_DEBUG_TRACE_PREPROCESSOR_OUTPUT_CHARACTERS)
-        if (output.length > MAX_DEBUG_TRACE_PREPROCESSOR_OUTPUT_CHARACTERS) {
-          call.outputTruncated = true
-        }
-      }
-      if (status === 'failed') call.error = '观察预处理模型调用失败'
-      if (status === 'cancelled') call.error = '观察预处理模型调用已取消'
-    })
-  }
-
   private recordKnowledgeAgentTrace(
     context: ProcessingDebugTraceContext,
     event: KnowledgeAgentTraceEvent
   ): void {
     this.updateDebugTrace(context, (trace) => {
       const maintenance = trace.maintenance
-      if (!maintenance) return
       if (event.type === 'model_started') {
         maintenance.modelCallCount = Math.max(maintenance.modelCallCount, event.callNumber)
         maintenance.events.push({
@@ -967,9 +570,7 @@ export class KnowledgeProcessingService {
         modelEvent.status = event.status
         modelEvent.completedAt = new Date().toISOString()
         modelEvent.durationMs = Date.now() - new Date(modelEvent.startedAt).getTime()
-        if (event.detail) {
-          modelEvent.detail = boundedDebugText(event.detail, MAX_DEBUG_TRACE_DETAIL_CHARACTERS)
-        }
+        if (event.detail) modelEvent.detail = boundedDebugText(event.detail, MAX_DEBUG_TRACE_DETAIL_CHARACTERS)
         setBoundedEventPayload(modelEvent, 'output', event.output)
         return
       }
@@ -983,7 +584,6 @@ export class KnowledgeProcessingService {
 
       const toolName = safeKnowledgeToolName(event.toolName)
       const traceToolName = toolName ?? 'unknown_tool'
-      const toolLabel = knowledgeToolLabel(event.toolName)
       if (event.type === 'tool_started') {
         maintenance.toolCallCount++
         const eventId = `tool-call-${maintenance.toolCallCount}`
@@ -995,16 +595,12 @@ export class KnowledgeProcessingService {
           id: eventId,
           sequence: maintenance.events.length + 1,
           kind: 'tool_call',
-          label: toolLabel,
+          label: knowledgeToolLabel(event.toolName),
           status: 'running',
           startedAt: new Date().toISOString(),
           detail: traceToolName
         })
-        setBoundedEventPayload(
-          maintenance.events[maintenance.events.length - 1]!,
-          'input',
-          event.input
-        )
+        setBoundedEventPayload(maintenance.events.at(-1)!, 'input', event.input)
         return
       }
       const toolTraceIds = this.maintenanceToolTraceIds.get(context.origin)
@@ -1019,282 +615,28 @@ export class KnowledgeProcessingService {
       toolEvent.status = event.status
       toolEvent.completedAt = new Date().toISOString()
       toolEvent.durationMs = Date.now() - new Date(toolEvent.startedAt).getTime()
-      if (event.detail) {
-        toolEvent.detail = boundedDebugText(event.detail, MAX_DEBUG_TRACE_DETAIL_CHARACTERS)
-      }
+      if (event.detail) toolEvent.detail = boundedDebugText(event.detail, MAX_DEBUG_TRACE_DETAIL_CHARACTERS)
       setBoundedEventPayload(toolEvent, 'output', event.output)
     })
   }
 
-  private rememberWorkspace(
-    workspace: PreprocessingWorkspace,
-    owner: ProcessingDebugTraceOrigin
-  ): void {
-    const previousRunId = this.workspaceRunIds.get(owner)
-    if (previousRunId && previousRunId !== workspace.runId) {
-      this.workspaces.delete(previousRunId)
-    }
-    this.workspaces.set(workspace.runId, workspace)
-    this.workspaceRunIds.set(owner, workspace.runId)
-  }
-
-  private releaseWorkspace(runId: string, owner: ProcessingDebugTraceOrigin): void {
-    if (this.workspaceRunIds.get(owner) !== runId) return
-    this.workspaceRunIds.delete(owner)
-    this.workspaces.delete(runId)
-  }
-
-  private async discoverStatementCandidates(
-    stage: ProcessingStageRunBinding,
-    prompt: string,
-    budget: PreprocessorContextBudget,
-    signal: AbortSignal,
-    modelCallCount: { value: number },
-    traceContext: ProcessingDebugTraceContext,
-    call: {
-      selectors: string[]
-      readLocation: EvidenceLocation
-    },
-    observationLines: readonly string[],
-    segment: ObservationSegment
-  ): Promise<StatementCandidate[]> {
-    const traceCallId = this.beginPreprocessingCall(
-      traceContext,
-      call.selectors,
-      call.readLocation
-    )
-    let generatedOutput: string | undefined
-    try {
-      if (!stage.instructions.trim()) throw new Error('Observation Preprocessor System Prompt 不能为空')
-      if (utf8Bytes(stage.instructions) + utf8Bytes(prompt) > budget.maxInputBytes) {
-        throw new PreprocessorInputBudgetError('模型输入预算不足，正在自动缩小预处理分段')
-      }
-      modelCallCount.value++
-      const generated = await this.aiBackend.generateWithModel(stage.connectionId, stage.modelId, {
-        systemPrompt: stage.instructions,
-        prompt,
-        maxOutputTokens: budget.maxOutputTokens,
-        timeoutMs: 5 * 60_000,
-        maxResponseBytes: 8 * 1_024 * 1_024,
-        reasoningEffort: stage.reasoningEffort,
-        signal
-      })
-      signal.throwIfAborted()
-      const content = generated.text.trim()
-      generatedOutput = content
-      if (!content) throw new Error('观察预处理器未返回 Statement candidate batch')
-      const batch = parseStatementCandidateBatch(content, observationLines)
-      assertCandidateLocationsBelongToSegment(batch.candidates, segment)
-      this.finishPreprocessingCall(traceContext, traceCallId, 'completed', content)
-      return batch.candidates
-    } catch (error) {
-      const terminalStatus = traceTerminalStatus(signal)
-      this.finishPreprocessingCall(
-        traceContext,
-        traceCallId,
-        terminalStatus,
-        generatedOutput
-      )
-      throw error
-    }
-  }
-
-  async runObservationPreprocessor(
-    input: RunObservationPreprocessorInput,
-    expectedConnectionId?: string,
-    options: ObservationPreprocessorRunOptions = {}
-  ): Promise<ObservationPreprocessingResult> {
-    assertObservationInput(input)
-    return this.runObservationPreprocessorView(
-      createPlainTextObservationView(input.observation),
-      input.attention,
-      expectedConnectionId,
-      options
-    )
-  }
-
-  /** Main-process entry for an Agent adapter's deterministic Observation View. */
-  async runObservationPreprocessorView(
-    observationView: ObservationView,
-    attentionInput?: string,
-    expectedConnectionId?: string,
-    options: ObservationPreprocessorRunOptions = {}
-  ): Promise<ObservationPreprocessingResult> {
-    assertObservationView(observationView)
-    const stageId = 'observation_preprocessor' as const
-    const stage = options.binding ?? this.configuredStage(stageId, expectedConnectionId)
-    const connection = this.aiBackend.snapshot().connections.find((item) => item.id === stage.connectionId)
-    if (!connection) throw new Error('已配置的 Connection 不再可用')
-    const model = connection.models.find((candidate) => candidate.id === stage.modelId)
-    if (!model) throw new Error('已配置的 Model 不再可用')
-
-    const startedAt = Date.now()
-    const runId = randomUUID()
-    const debugTrace = options.debugTrace ?? {
-      id: runId,
-      origin: options.lease ? 'full_chain' : 'stage_debug'
-    }
-    const sourceRef = options.sourceRef ?? `workspace:${runId}:observation`
-    if (!sourceRef.trim() || sourceRef.length > MAX_SOURCE_REF_CHARACTERS) {
-      throw new Error('Observation sourceRef 无效')
-    }
-    const attention = normalizeAttention(attentionInput)
-    const observationLines = observationView.rawLines
-    const controller = this.beginRun(stageId, options.lease)
-    this.beginPreprocessingDebugTrace(debugTrace)
-    this.updatePreprocessingDebug(debugTrace, (trace) => {
-      trace.view = observationViewDebugSummary(observationView)
-    })
-
-    try {
-      this.updatePreprocessingProgress({
-        phase: 'preparing',
-        completedSegments: 0
-      })
-      const modelCallCount = { value: 0 }
-      let divisor = 1
-      let segments: ObservationSegment[] = []
-      let statementCandidates: StatementCandidate[] = []
-      for (;;) {
-        controller.signal.throwIfAborted()
-        const budget = preprocessorContextBudget(
-          model,
-          stage,
-          sourceRef,
-          attention,
-          this.observationSegmentPlanner,
-          divisor
-        )
-        try {
-          segments = planObservationSegments(observationView.units, budget.planner)
-        } catch (error) {
-          if (
-            divisor > 1
-            || budget.planner.segmentBytes < this.observationSegmentPlanner.segmentBytes
-          ) {
-            throw new Error('所选模型的上下文不足以容纳 Observation Preprocessor 的固定指令与最小证据片段')
-          }
-          throw error
-        }
-        this.updatePreprocessingProgress({
-          phase: 'discovering',
-          completedSegments: 0,
-          totalSegments: segments.length
-        })
-        this.updatePreprocessingDebug(debugTrace, (trace) => {
-          trace.phase = 'discovering'
-          trace.completedSegments = 0
-          trace.totalSegments = segments.length
-        })
-
-        const discovered: StatementCandidate[] = []
-        try {
-          let completedSegments = 0
-          for (const segment of segments) {
-            controller.signal.throwIfAborted()
-            const selectors = observationSourceSelectors(segment.sourceRanges)
-            const candidates = await this.discoverStatementCandidates(
-              stage,
-              segmentPrompt(segment, sourceRef, attention),
-              budget,
-              controller.signal,
-              modelCallCount,
-              debugTrace,
-              {
-                selectors,
-                readLocation: { ...segment.readLocation }
-              },
-              observationLines,
-              segment
-            )
-            discovered.push(...candidates)
-            completedSegments++
-            this.updatePreprocessingProgress({
-              phase: 'discovering',
-              completedSegments,
-              totalSegments: segments.length
-            })
-            this.updatePreprocessingDebug(debugTrace, (trace) => {
-              trace.completedSegments = completedSegments
-            })
-          }
-          statementCandidates = discovered
-          break
-        } catch (error) {
-          if (!retryablePreprocessorEnvelopeError(error) || controller.signal.aborted) throw error
-          divisor *= 2
-          if (!Number.isSafeInteger(divisor)) {
-            throw new Error('所选模型的上下文不足以容纳 Observation 预处理指令')
-          }
-          this.updatePreprocessingProgress({ phase: 'preparing', completedSegments: 0 })
-          this.updatePreprocessingDebug(debugTrace, (trace) => {
-            trace.phase = 'preparing'
-            trace.completedSegments = 0
-            delete trace.totalSegments
-          })
-        }
-      }
-      this.rememberWorkspace({
-        runId,
-        sourceRef,
-        observationLines,
-        observationFormatVersion: observationView.formatVersion,
-        statementCandidates,
-        attention,
-        createdAt: Date.now()
-      }, debugTrace.origin)
-
-      const completedDebugTrace = this.completeProcessingStageDebugTrace(debugTrace, stageId)
-      return {
-        stageId,
-        runId,
-        statementCandidates,
-        sourceRef,
-        segmentCount: segments.length,
-        debugTrace: completedDebugTrace,
-        durationMs: Date.now() - startedAt,
-        completedAt: new Date().toISOString(),
-        execution: executionSummary(
-          connection,
-          stage.modelId,
-          'direct_model_call',
-          modelCallCount.value,
-          [],
-          stage.reasoningEffort
-        )
-      }
-    } catch (error) {
-      this.failDebugTrace(
-        debugTrace,
-        stageId,
-        traceTerminalStatus(controller.signal),
-        error
-      )
-      throw error
-    } finally {
-      this.updatePreprocessingProgress(undefined)
-      this.finishRun(stageId, controller)
-    }
-  }
-
   async runKnowledgeMaintenance(
-    input: RunKnowledgeMaintenanceInput,
-    expectedConnectionId?: string,
+    evidence: RawEvidence,
+    sourceRef: string,
+    attention?: string,
     options: KnowledgeMaintenanceRunOptions = {}
   ): Promise<KnowledgeMaintenanceResult> {
-    assertMaintenanceInput(input)
-    const stageId = 'knowledge_maintenance_agent' as const
-    const stage = options.binding ?? this.configuredStage(stageId, expectedConnectionId)
-    const connectionView = this.aiBackend.snapshot().connections.find((item) => item.id === stage.connectionId)
-    if (!connectionView) throw new Error('已配置的 Connection 不再可用')
-    const workspace = this.workspaces.get(input.preprocessingRunId)
-    if (!workspace) throw new Error('预处理工作区已不存在，请重新运行观察预处理')
-    const attention = normalizeAttention(input.attention)
-    const controller = this.beginRun(stageId, options.lease)
-    const debugTrace = options.debugTrace ?? {
-      id: input.preprocessingRunId,
-      origin: options.lease ? 'full_chain' : 'stage_debug'
+    assertRawEvidence(evidence)
+    if (typeof sourceRef !== 'string' || !sourceRef.trim() || sourceRef.length > MAX_SOURCE_REF_CHARACTERS) {
+      throw new Error('Raw Evidence sourceRef 无效')
     }
+    const normalizedAttention = normalizeAttention(attention)
+    const stage = options.binding ?? this.configuredStage('knowledge_maintenance_agent')
+    const connection = this.aiBackend.snapshot().connections.find((item) => item.id === stage.connectionId)
+    if (!connection) throw new Error('已配置的 Connection 不再可用')
+    const plan = planEvidenceSegmentTodos(evidence)
+    const controller = this.beginRun(options.lease)
+    const debugTrace = options.debugTrace ?? { id: randomUUID(), origin: 'stage_debug' }
     this.beginMaintenanceDebugTrace(debugTrace)
     const startedAt = Date.now()
 
@@ -1305,15 +647,12 @@ export class KnowledgeProcessingService {
         (runtime) => (options.knowledgeAgent ?? this.knowledgeAgent).run({
           runtime,
           systemPrompt: stage.instructions,
-          statementCandidates: workspace.statementCandidates.map((candidate) => ({
-            ...candidate,
-            locations: candidate.locations.map((location) => ({ ...location }))
-          })),
-          observationLines: workspace.observationLines,
-          observationFormatVersion: workspace.observationFormatVersion,
-          sourceRef: workspace.sourceRef,
+          evidenceLines: evidence.lines,
+          evidenceFormatVersion: evidence.formatVersion,
+          sourceRef,
           contributionRunRef: options.contributionRunRef ?? `manual:${randomUUID()}`,
-          attention,
+          attention: normalizedAttention,
+          initialTodos: [...plan.todos, ...(options.initialTodos ?? [])],
           reasoningEffort: stage.reasoningEffort,
           onTrace: (event) => {
             try {
@@ -1328,38 +667,32 @@ export class KnowledgeProcessingService {
       )
       controller.signal.throwIfAborted()
       this.updateDebugTrace(debugTrace, (trace) => {
-        if (!trace.maintenance) return
         trace.maintenance.modelCallCount = result.modelCallCount
         trace.maintenance.toolCallCount = result.toolCalls.length
       })
-      const completedDebugTrace = this.completeProcessingStageDebugTrace(debugTrace, stageId)
+      const completedDebugTrace = this.completeStageDebugTrace(debugTrace)
       return {
-        stageId,
-        preprocessingRunId: workspace.runId,
+        stageId: 'knowledge_maintenance_agent',
+        sourceRef,
+        evidenceSegmentCount: plan.segmentCount,
         contribution: result.contribution,
         todos: result.todos.map((todo) => ({ ...todo })),
         debugTrace: completedDebugTrace,
         durationMs: Date.now() - startedAt,
         completedAt: new Date().toISOString(),
         execution: executionSummary(
-          connectionView,
+          connection,
           stage.modelId,
-          'pi_agent_core',
           result.modelCallCount,
           result.toolCalls,
           stage.reasoningEffort
         )
       }
     } catch (error) {
-      this.failDebugTrace(
-        debugTrace,
-        stageId,
-        traceTerminalStatus(controller.signal),
-        error
-      )
+      this.failDebugTrace(debugTrace, traceTerminalStatus(controller.signal), error)
       throw error
     } finally {
-      this.finishRun(stageId, controller)
+      this.finishRun(controller)
     }
   }
 
@@ -1388,10 +721,7 @@ export class KnowledgeProcessingService {
     this.unsubscribeAiBackend()
     for (const controller of this.activeRuns.values()) controller.abort(new Error('Oyster 正在退出'))
     this.activeRuns.clear()
-    this.preprocessingProgress = undefined
     this.exclusiveLease = undefined
-    this.workspaces.clear()
-    this.workspaceRunIds.clear()
     this.debugTraces.clear()
     this.maintenanceToolTraceIds.clear()
     this.listeners.clear()

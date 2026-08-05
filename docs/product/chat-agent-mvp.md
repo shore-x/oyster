@@ -85,7 +85,7 @@ Other internal structure is arbitrary. No Artifact is preselected.
 
 “对话”页面继续使用一套持久 Session 和消息界面。新 Session 在首次发送时创建；完整的 user、assistant 和 tool-result 消息使用 Pi JSONL Session Repository 保存在 Oyster 用户数据目录中。模型输出按事件流更新，每次工具调用显示状态，并可展开查看 Input 与 Result。
 
-Agent 配置页展示实际使用通用 Agent Runtime 的 Agent，包括面向用户对话的通用管理 Agent 和 Knowledge Maintenance Agent，并投影各自实际工具。Observation Preprocessor 是直接模型调用阶段，只在知识加工的配置和调试工作面展示，不作为 Agent 配置项。用户可以编辑或恢复 Agent 的默认 System Prompt；工具由代码拥有，在页面中只读展示。Artifact 页面可以通过普通对话入口帮助用户描述目标，但不创建隐藏绑定或不同类型的 Session。子 Agent 运行不进入 Session 列表，其内部 transcript 只随父 Session 的 `spawn_agent` Tool Result 保存。
+Agent 配置页展示实际使用通用 Agent Runtime 的 Agent，包括面向用户对话的通用管理 Agent 和 Knowledge Maintenance Agent，并投影各自实际工具。用户可以编辑或恢复 Agent 的默认 System Prompt；工具由代码拥有，在页面中只读展示。Artifact 页面可以通过普通对话入口帮助用户描述目标，但不创建隐藏绑定或不同类型的 Session。子 Agent 运行不进入 Session 列表，其内部 transcript 只随父 Session 的 `spawn_agent` Tool Result 保存。
 
 ## 7. 当前边界与验证重点
 

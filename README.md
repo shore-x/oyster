@@ -13,10 +13,10 @@ Oyster 是一个独立于外部 Agent Harness 的本地知识与协作产物中�
 - 展示扫描状态、来源统计和异常文件数；
 - Codex `sessions` / `archived_sessions` 去重；
 - 配置 Codex Coding Plan、OpenAI API 或自定义 OpenAI-compatible Connection，发现其可用模型，OAuth 与 API Key 凭据保存在系统 Keychain；
-- 为知识加工的每个阶段独立选择 Connection、具体 Model 和模型支持的思考强度；
+- 为 Knowledge Maintenance Agent 选择 Connection、具体 Model 和模型支持的思考强度；
 - 通过独立的 Agent 配置页查看当前已注册的模型运行角色、代码内置 System Prompt 和实际工具清单，并为各角色配置默认 System Prompt；
-- 从可用外部 Session 的确定 revision 运行 Observation Preprocessor，分段发现带 Raw Evidence 位置的开放 Candidate 问题；
-- 使用 Pi Agent Core 调查开放 Candidate Agenda、按需读取 Raw Evidence、增量维护 Contribution Draft，并在全部 Candidate 得到处置后提交 Knowledge Contribution；
+- 从可用外部 Session 的确定 revision 读取完整 Raw Evidence，由 Host 确定性分段并绑定为 Maintainer 的初始 Todo；
+- 使用 Pi Agent Core 逐段读取 Raw Evidence、调查名称与指代、核查 Harness 标记的 Skill 激活线索，并增量维护 Contribution Draft；
 - 在独立 SQLite Knowledge Sandbox 中按 canonical title 原子创建、覆盖并回读自由文本 Statement；
 - 持久保存成功的完整链路测试快照，按需查看历史结果、模型输出和工具结果；
 - 将当前或历史测试结果显式导入正式知识库，并按 canonical title 创建或覆盖 Statement；
@@ -75,7 +75,7 @@ src/main/discovery
 src/main/ai-backends
   Connection、Keychain、Coding Plan OAuth、模型目录与 OpenAI-compatible 调用
 src/main/knowledge-processing
-  Prompt 与工具目录、临时 Workspace、Observation Preprocessor、Pi Agent Runtime 与完整链路编排
+  Maintainer Prompt、证据段 Todo、Contribution Draft、Pi Agent Runtime 与完整链路编排
 src/main/knowledge-store
   当前 SQLite Knowledge Store 验证实现、按 title 读写 Statement 与隔离 Sandbox
 src/main/chat
@@ -89,7 +89,7 @@ src/shared       Main / Preload / Renderer 共用契约
 
 生产模式只把外部来源的 catalog 状态写入 Electron `userData/discovery-state.json`，不复制 Agent 历史正文。上游 Agent 目录始终只读；记录变化或消失后，已保存的出处身份继续存在，但原文可能无法再次展开。JSON repository 是当前 bootstrap 实现，接口已与业务层隔离，数据量验证后可以替换为 SQLite。
 
-AI Connection 元数据，以及知识加工阶段的 Connection、Model 和用户默认 Prompt 配置，分别保存在 `userData/ai-connections.json` 与 `userData/knowledge-processing.json`；OAuth 与 API Key 凭据只保存在系统 Keychain。通用管理 Agent 的默认 Prompt 保存在 `userData/chat-agent.json`，完整对话与工具消息使用 Pi JSONL 格式独立保存在 `userData/chat-sessions/`。Session 不绑定 Artifact、Project 或 `cwd`。Observation Workspace 只存在于主进程内存中，Candidate Agenda 和 Contribution Draft 只存在于一次知识维护运行中。当前验证 Knowledge Store 位于 `userData/knowledge-store/knowledge.sqlite`；完整链路使用 `userData/knowledge-store/sandboxes/` 下的独立快照，失败或取消时立即丢弃，成功重跑会替换当前 Sandbox。成功的完整链路结果另存于 `userData/knowledge-processing-history.sqlite`，不依赖 Sandbox 继续存在；它默认与正式知识隔离，只有用户显式导入时才按 canonical title 写入正式 Store。SQLite 是当前实现选择，不代表正式知识层的长期存储介质已经确定。
+AI Connection 元数据，以及 Maintainer 的 Connection、Model 和 Prompt 配置，分别保存在 `userData/ai-connections.json` 与 `userData/knowledge-processing.json`；OAuth 与 API Key 凭据只保存在系统 Keychain。通用管理 Agent 的默认 Prompt 保存在 `userData/chat-agent.json`，完整对话与工具消息使用 Pi JSONL 格式独立保存在 `userData/chat-sessions/`。Session 不绑定 Artifact、Project 或 `cwd`。证据段 Todo 与 Contribution Draft 只存在于一次知识维护运行中。当前验证 Knowledge Store 位于 `userData/knowledge-store/knowledge.sqlite`；完整链路使用 `userData/knowledge-store/sandboxes/` 下的独立快照，失败或取消时立即丢弃，成功重跑会替换当前 Sandbox。成功的完整链路结果另存于 `userData/knowledge-processing-history.sqlite`，不依赖 Sandbox 继续存在；它默认与正式知识隔离，只有用户显式导入时才按 canonical title 写入正式 Store。SQLite 是当前实现选择，不代表正式知识层的长期存储介质已经确定。
 
 Artifact Repository 固定在 `userData/artifacts/`，由 APP 创建并初始化为标准 Git Repository；用户不选择其他目录。每个带根 `AGENTS.md` 的一级目录是一个 Artifact，`AGENTS.md` 表达持久 Attention，其余内容保持包容。根部存在 `output` 时，Skill 应用派生出 Skill Artifact 视图，但不增加 manifest 或核心 Artifact 类型。Artifact 页面只显示这一身份和摘要；绑定管理集中在 Skills 页面。UI 直接读取文件系统，不维护数据库镜像；当前路径暂作身份，APP 不自动 commit、创建 branch/worktree、审核 diff、merge 或处理冲突。
 

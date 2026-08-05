@@ -80,14 +80,6 @@ const knowledgeProcessing: KnowledgeProcessingApi = {
     knowledgeProcessingChannels.saveDefaultInstructions,
     input
   ),
-  runObservationPreprocessor: (input) => ipcRenderer.invoke(
-    knowledgeProcessingChannels.runObservationPreprocessor,
-    input
-  ),
-  runSessionPreprocessor: (input) => ipcRenderer.invoke(
-    knowledgeProcessingChannels.runSessionPreprocessor,
-    input
-  ),
   runKnowledgeMaintenance: (input) => ipcRenderer.invoke(
     knowledgeProcessingChannels.runKnowledgeMaintenance,
     input

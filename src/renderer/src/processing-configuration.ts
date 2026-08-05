@@ -63,7 +63,7 @@ export function connectionCanAttemptRun(
 }
 
 export function runtimeLabel(runtime: ProcessingRuntime): string {
-  return runtime === 'direct_model_call' ? 'Direct Model' : 'Pi Agent Core'
+  return runtime === 'pi_agent_core' ? 'Pi Agent Core' : runtime
 }
 
 export function reasoningLabel(reasoningEffort?: ReasoningEffort): string {

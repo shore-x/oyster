@@ -1,12 +1,12 @@
 import type { AvailableSessionSummary } from '../../shared/discovery'
-import type { RunSessionPreprocessorInput } from '../../shared/knowledge-processing'
+import type { RunKnowledgeMaintenanceInput } from '../../shared/knowledge-processing'
 import type {
   AvailableSessionEvidence,
   DiscoveryService
 } from '../discovery/discovery-service'
 
 type SessionSelection = Pick<
-  RunSessionPreprocessorInput,
+  RunKnowledgeMaintenanceInput,
   'sourceRecordId' | 'expectedRevision'
 >
 
@@ -51,8 +51,7 @@ export async function loadSessionMaterial(
     expectedRevision: input.expectedRevision
   })
   if (
-    !evidence.observationView.rawLines.some((line) => line.trim())
-    || !evidence.observationView.units.length
+    !evidence.rawEvidence.lines.some((line) => line.trim())
   ) {
     throw new Error('所选 Session 没有可处理的 Observation 内容')
   }

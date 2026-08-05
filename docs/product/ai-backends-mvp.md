@@ -18,7 +18,7 @@ AI Backend 是 Oyster 获得模型调用能力的边界。MVP 只区分两种计
 - **Model** 表示该 Connection 当前可调用的具体模型；
 - **Stage Configuration** 表示某个处理阶段明确选择的 Connection、Model 和可选思考强度。
 
-Connection 不等于 Model。同一个 Connection 可以暴露多个 Model，Observation Preprocessor 与 Knowledge Maintenance Agent 可以分别选择不同组合。Direct Model Call 或通用 Agent Runtime 是阶段的执行方式，不是另一类 Backend；当前 Agent Runtime 由 Pi Agent Core 实现，但不构成知识模型的一部分。
+Connection 不等于 Model。同一个 Connection 可以暴露多个 Model，Knowledge Maintenance Agent 明确选择其中一个组合。通用 Agent Runtime 是执行方式，不是另一类 Backend；当前 Agent Runtime 由 Pi Agent Core 实现，但不构成知识模型的一部分。
 
 Agent 数据来源与 AI Connection 也是两个独立概念。不建立 Subscription 领域对象；套餐和账号信息只是认证后显示的 Connection 上下文。
 

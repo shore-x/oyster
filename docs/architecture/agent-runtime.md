@@ -6,7 +6,7 @@
 
 ## 1. 目的与边界
 
-Oyster 的内置工具使用 Agent 共享同一套通用 Runtime 能力。Runtime 只负责模型—工具循环、上下文管理、运行期 Todo 和结束检查，不理解 Knowledge Maintainer、Reviewer、Candidate、Evidence 或 Artifact 等业务职责。角色差异继续由各次运行的 System Prompt、Workspace、授权工具与 Host 对运行结果的解释定义。
+Oyster 的内置工具使用 Agent 共享同一套通用 Runtime 能力。Runtime 只负责模型—工具循环、上下文管理、运行期 Todo 和结束检查，不理解 Knowledge Maintainer、Reviewer、Evidence 或 Artifact 等业务职责。角色差异继续由各次运行的 System Prompt、Workspace、授权工具与 Host 对运行结果的解释定义。
 
 Todo 是 Agent 为当前运行组织工作的通用清单，不是业务状态机、Knowledge、Artifact、Raw Evidence 或长期审计记录。业务层可以把需要处理的工作投影为初始 Todo，但 Todo 不因此获得业务 Schema；Contribution Draft 等具有独立内容语义的运行期工作材料仍由对应业务层持有。
 
@@ -47,7 +47,7 @@ End Check 不判断 Agent 的工作质量，也不证明 Todo 已被正确完成
 - Todo Store 独立于 `transformContext`，现有 transcript compaction 不负责保存、重建或注入 Todo；
 - Runtime Feedback 通过统一 `convertToLlm` 转换，保持 Host 内部消息与真实用户消息的身份区别。
 
-Knowledge Maintenance Agent 使用同一 Todo Store 跟踪本次调查工作，并独立持有 Contribution Draft。Observation Preprocessor 产生的 Candidate 只在启动时被 Host 格式化为普通 initial Todo；之后没有 Candidate Agenda、专用 resolution 状态或专用列表工具。Agent 主动使用 `list_todos`、`add_todos` 和 `complete_todos`，Runtime 不在每次模型调用前注入工作清单。
+Knowledge Maintenance Agent 使用同一 Todo Store 跟踪本次调查工作，并独立持有 Contribution Draft。Host 在启动时把完整 Raw Evidence 确定性分页，每一页作为普通 initial Todo 绑定到运行；Agent 可继续增加调查 Todo，但 Runtime 不引入证据专用状态或工具。Agent 主动使用 `list_todos`、`add_todos` 和 `complete_todos`，Runtime 不在每次模型调用前注入工作清单。
 
 Knowledge Maintenance Agent 也没有专用的提交或终止工具。只要仍有 pending Todo，通用结束检查就会拒绝自然结束并续跑；当 Todo 全部完成且 Agent 自然结束时，Host 才把完整的当前 Draft 冻结为本次 Knowledge Contribution。这是 Host 对整次运行的解释，不是单次工具调用的提交。
 

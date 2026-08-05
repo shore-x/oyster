@@ -1,12 +1,10 @@
 import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
+import type { ReasoningEffort } from '../../../shared/ai-backends'
 import type {
   KnowledgeMaintenanceResult,
-  ObservationPreprocessingResult,
   ProcessingConnectionView,
-  ProcessingExecutionSummary,
   ProcessingStageView
 } from '../../../shared/knowledge-processing'
-import type { ReasoningEffort } from '../../../shared/ai-backends'
 import { createKnowledgeProcessingController } from '../knowledge-processing-controller'
 import {
   REASONING_LABELS,
@@ -19,13 +17,12 @@ import {
   selectedStageModel
 } from '../processing-configuration'
 import { Button, Icon } from '../ui'
+import { AgentTodoList } from './AgentTodoList'
 import { FullChainWorkspace } from './FullChainWorkspace'
 import { fullChainResultView } from './FullChainRunDetails'
-import { ProcessingRunHistoryWorkspace } from './ProcessingRunHistoryWorkspace'
 import { ProcessingDebugTracePanel } from './ProcessingDebugTracePanel'
+import { ProcessingRunHistoryWorkspace } from './ProcessingRunHistoryWorkspace'
 import { SessionMetadata, sessionOptionLabel } from './SessionMetadata'
-import { StatementCandidateList } from './StatementCandidateList'
-import { AgentTodoList } from './AgentTodoList'
 
 function formatDuration(durationMs: number): string {
   if (durationMs < 1_000) return `${durationMs} ms`
@@ -37,245 +34,16 @@ function formatTime(value: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN')
 }
 
-function ExecutionDetails(props: {
-  execution: ProcessingExecutionSummary
-  segmentCount?: number
-  durationMs: number
-  completedAt: string
-}) {
-  return (
-    <dl class="processing-run-details">
-      <div><dt>Connection</dt><dd>{props.execution.connectionName}</dd></div>
-      <div><dt>Backend</dt><dd>{backendLabel(props.execution.backendKind)}</dd></div>
-      <div><dt>Provider</dt><dd>{providerLabel(props.execution.providerId)}</dd></div>
-      <div><dt>Model</dt><dd>{props.execution.model}</dd></div>
-      <div><dt>思考强度</dt><dd>{props.execution.reasoningEffort ? REASONING_LABELS[props.execution.reasoningEffort] : '模型默认'}</dd></div>
-      <div><dt>Runtime</dt><dd>{runtimeLabel(props.execution.runtime)}</dd></div>
-      <div><dt>模型调用</dt><dd>{props.execution.modelCallCount} 次</dd></div>
-      <Show when={props.segmentCount !== undefined}>
-        <div><dt>Observation 分段</dt><dd>{props.segmentCount} 个</dd></div>
-      </Show>
-      <div><dt>工具活动</dt><dd>{props.execution.toolCalls.length} 类</dd></div>
-      <div><dt>耗时</dt><dd>{formatDuration(props.durationMs)}</dd></div>
-      <div><dt>完成时间</dt><dd>{formatTime(props.completedAt)}</dd></div>
-    </dl>
-  )
-}
-
-function ConnectionConfiguration(props: {
-  stage: ProcessingStageView
-  connections: ProcessingConnectionView[]
-  selected?: ProcessingConnectionView
-  saving: boolean
-  locked: boolean
-  onChange(connectionId: string | null): void
-  onModelChange(modelId: string): void
-  onReasoningEffortChange(reasoningEffort: ReasoningEffort | null): void
-}) {
-  const selectedModel = () => selectedStageModel(props.stage, props.selected)
-  const unavailableConnectionId = () => (
-    props.stage.connectionId && !props.selected ? props.stage.connectionId : undefined
-  )
-  const unavailableModelId = () => (
-    props.stage.modelId && props.selected && !selectedModel() ? props.stage.modelId : undefined
-  )
-  const unsupportedReasoningEffort = () => {
-    const effort = props.stage.reasoningEffort
-    const model = selectedModel()
-    return effort && model && !model.reasoningEfforts.includes(effort) ? effort : undefined
-  }
-  return (
-    <div class="processing-connection">
-      <div class="processing-connection__selectors">
-        <label class="ai-field">
-          <span>Connection</span>
-          <select
-            data-testid={`processing-connection-${props.stage.id}`}
-            value={props.stage.connectionId || ''}
-            disabled={props.saving || props.locked}
-            onChange={(event) => props.onChange(event.currentTarget.value || null)}
-          >
-            <option value="" selected={!props.stage.connectionId}>选择已配置的 Connection</option>
-            <Show when={unavailableConnectionId()}>{(connectionId) => (
-              <option value={connectionId()} disabled selected>
-                已保存但当前不可用 · {connectionId()}
-              </option>
-            )}</Show>
-            <For each={props.connections}>{(connection) => (
-              <option value={connection.id} selected={connection.id === props.stage.connectionId}>
-                {connection.displayName} · {backendLabel(connection.backendKind)} · {connectionStatusLabel(connection.status)}
-              </option>
-            )}</For>
-          </select>
-        </label>
-        <label class="ai-field">
-          <span>Model</span>
-          <select
-            data-testid={`processing-model-${props.stage.id}`}
-            value={props.stage.modelId || ''}
-            disabled={!props.selected || props.saving || props.locked}
-            onChange={(event) => props.onModelChange(event.currentTarget.value)}
-          >
-            <option value="" selected={!props.stage.modelId}>选择 Model</option>
-            <Show when={unavailableModelId()}>{(modelId) => (
-              <option value={modelId()} disabled selected>
-                已保存但当前不可用 · {modelId()}
-              </option>
-            )}</Show>
-            <For each={props.selected?.models ?? []}>{(model) => (
-              <option value={model.id} selected={model.id === props.stage.modelId}>
-                {model.displayName === model.id ? model.id : `${model.displayName} · ${model.id}`}
-              </option>
-            )}</For>
-          </select>
-        </label>
-        <label class="ai-field">
-          <span>思考强度</span>
-          <select
-            data-testid={`processing-reasoning-${props.stage.id}`}
-            value={props.stage.reasoningEffort || ''}
-            disabled={!selectedModel()?.reasoningEfforts.length || props.saving || props.locked}
-            onChange={(event) => props.onReasoningEffortChange(
-              (event.currentTarget.value || null) as ReasoningEffort | null
-            )}
-          >
-            <option value="">模型默认</option>
-            <Show when={unsupportedReasoningEffort()}>{(effort) => (
-              <option value={effort()} disabled>
-                已保存但当前不受支持 · {REASONING_LABELS[effort()]}
-              </option>
-            )}</Show>
-            <For each={selectedModel()?.reasoningEfforts ?? []}>{(effort) => (
-              <option value={effort}>{REASONING_LABELS[effort]}</option>
-            )}</For>
-          </select>
-        </label>
-      </div>
-      <Show
-        when={props.selected}
-        fallback={(
-          <p class="processing-connection__empty">
-            {props.stage.connectionId
-              ? `已保存的 Connection 当前不可用：${props.stage.connectionId}；Model：${props.stage.modelId || '未选择'}。系统不会自动切换或回退。`
-              : '请先选择执行此阶段的 Connection；系统不会自动切换或回退。'}
-          </p>
-        )}
-      >
-        {(connection) => (
-          <dl
-            class="processing-connection__details"
-            data-testid={`processing-config-${props.stage.id}`}
-          >
-            <div><dt>Connection</dt><dd>{connection().displayName}</dd></div>
-            <div><dt>Backend</dt><dd data-testid={`processing-config-backend-${props.stage.id}`}>{backendLabel(connection().backendKind)}</dd></div>
-            <div><dt>Provider</dt><dd data-testid={`processing-config-provider-${props.stage.id}`}>{providerLabel(connection().providerId)}</dd></div>
-            <Show when={connection().backendKind === 'api'}>
-              <div><dt>Endpoint</dt><dd title={connection().destination}>{connection().destination}</dd></div>
-            </Show>
-            <Show when={connection().backendKind === 'coding_plan'}>
-              <div><dt>Account</dt><dd>{connection().accountLabel || '—'}</dd></div>
-              <div><dt>Plan</dt><dd>{connection().planType || '—'}</dd></div>
-            </Show>
-            <div><dt>Model</dt><dd data-testid={`processing-config-model-${props.stage.id}`}>
-              {selectedModel()?.id || (props.stage.modelId ? `当前不可用 · ${props.stage.modelId}` : '未选择')}
-            </dd></div>
-            <div><dt>Reasoning</dt><dd data-testid={`processing-config-reasoning-${props.stage.id}`}>{reasoningLabel(props.stage.reasoningEffort)}</dd></div>
-            <div><dt>Runtime</dt><dd data-testid={`processing-config-runtime-${props.stage.id}`}>{runtimeLabel(props.stage.runtime)}</dd></div>
-            <div><dt>状态</dt><dd>{connectionStatusLabel(connection().status)}</dd></div>
-          </dl>
-        )}
-      </Show>
-    </div>
-  )
-}
-
-function PromptConfiguration(props: {
-  stage: ProcessingStageView
-  draft: string
-  saving: boolean
-  locked: boolean
-  onInput(value: string): void
-  onSave(): void
-  onRestore(): void
-}) {
-  const dirty = () => props.draft !== props.stage.effectiveInstructions
-  const customized = () => props.draft !== props.stage.defaultInstructions
-  return (
-    <section class="processing-prompt" aria-label={`${props.stage.displayName}提示词`}>
-      <div class="processing-prompt__heading">
-        <div>
-          <h3>处理指令</h3>
-          <p>作为此阶段的 System Prompt 使用。</p>
-        </div>
-        <span
-          class={`processing-mode-badge${customized() ? ' processing-mode-badge--custom' : ''}`}
-          data-testid={`processing-prompt-badge-${props.stage.id}`}
-        >{customized() ? 'Customized' : 'Default'}</span>
-      </div>
-      <textarea
-        class="processing-prompt__editor"
-        data-testid={`processing-instructions-${props.stage.id}`}
-        value={props.draft}
-        rows={10}
-        spellcheck={false}
-        disabled={props.locked || props.saving}
-        onInput={(event) => props.onInput(event.currentTarget.value)}
-      />
-      <div class="processing-prompt__actions">
-        <Button
-          variant="ghost"
-          icon="refresh"
-          data-testid={`restore-processing-instructions-${props.stage.id}`}
-          disabled={props.saving || props.locked || (!props.stage.isCustomized && props.draft === props.stage.defaultInstructions)}
-          onClick={props.onRestore}
-        >恢复默认</Button>
-        <Button
-          variant="secondary"
-          icon="check"
-          data-testid={`save-processing-instructions-${props.stage.id}`}
-          disabled={props.saving || props.locked || !dirty() || !props.draft.trim()}
-          onClick={props.onSave}
-        >{props.saving ? '保存中…' : '保存提示词'}</Button>
-      </div>
-    </section>
-  )
-}
-
-function PreprocessingResult(props: { result: ObservationPreprocessingResult }) {
-  return (
-    <section class="processing-result" data-testid="processing-result-observation_preprocessor">
-      <div class="processing-result__heading">
-        <div><Icon name="check" /><h3>Statement Candidates</h3></div>
-        <span>{props.result.segmentCount} 个分段 · {props.result.statementCandidates.length} 个调查种子</span>
-      </div>
-      <p class="processing-result__description">
-        这是预处理器产生的 Candidate Seed，不是知识结论；Host 会在启动知识维护 Agent 时将其绑定为普通 Todo。
-      </p>
-      <StatementCandidateList candidates={props.result.statementCandidates} />
-      <ExecutionDetails
-        execution={props.result.execution}
-        segmentCount={props.result.segmentCount}
-        durationMs={props.result.durationMs}
-        completedAt={props.result.completedAt}
-      />
-    </section>
-  )
-}
-
 function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
   const [selectedTitle, setSelectedTitle] = createSignal<string>()
   const selectedStatement = createMemo(() => props.result.contribution.statements.find(
     (statement) => statement.title === selectedTitle()
   ) ?? props.result.contribution.statements[0])
-
-  createEffect(() => {
-    const contribution = props.result.contribution
-    setSelectedTitle(contribution.statements[0]?.title)
-  })
-
   const completedTodos = createMemo(() => props.result.todos.filter(
     (todo) => todo.status === 'completed'
   ).length)
+
+  createEffect(() => setSelectedTitle(props.result.contribution.statements[0]?.title))
 
   return (
     <section class="processing-result" data-testid="processing-result-knowledge_maintenance_agent">
@@ -309,9 +77,7 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
             {(statement) => (
               <article class="sandbox-knowledge__detail">
                 <h3>{statement().title}</h3>
-                <div class="sandbox-knowledge__detail-meta">
-                  <span>按标题创建或更新</span>
-                </div>
+                <div class="sandbox-knowledge__detail-meta"><span>按标题创建或更新</span></div>
                 <div class="sandbox-knowledge__content">{statement().content}</div>
               </article>
             )}
@@ -322,20 +88,23 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
         <div class="processing-agent-todos__heading">
           <div>
             <h4>Agent Todos</h4>
-            <p>查看本次 Maintainer 运行绑定和补充的工作项。</p>
+            <p>包括 Host 绑定的证据段和 Agent 在调查中补充的工作项。</p>
           </div>
           <strong>{completedTodos()} / {props.result.todos.length}</strong>
         </div>
-        <AgentTodoList
-          todos={props.result.todos}
-          emptyText="本次 Maintainer 运行没有 Todo。"
-        />
+        <AgentTodoList todos={props.result.todos} emptyText="本次 Maintainer 运行没有 Todo。" />
       </section>
-      <ExecutionDetails
-        execution={props.result.execution}
-        durationMs={props.result.durationMs}
-        completedAt={props.result.completedAt}
-      />
+      <dl class="processing-run-details">
+        <div><dt>Connection</dt><dd>{props.result.execution.connectionName}</dd></div>
+        <div><dt>Backend</dt><dd>{backendLabel(props.result.execution.backendKind)}</dd></div>
+        <div><dt>Provider</dt><dd>{providerLabel(props.result.execution.providerId)}</dd></div>
+        <div><dt>Model</dt><dd>{props.result.execution.model}</dd></div>
+        <div><dt>Runtime</dt><dd>{runtimeLabel(props.result.execution.runtime)}</dd></div>
+        <div><dt>证据段</dt><dd>{props.result.evidenceSegmentCount} 个</dd></div>
+        <div><dt>模型调用</dt><dd>{props.result.execution.modelCallCount} 次</dd></div>
+        <div><dt>耗时</dt><dd>{formatDuration(props.result.durationMs)}</dd></div>
+        <div><dt>完成时间</dt><dd>{formatTime(props.result.completedAt)}</dd></div>
+      </dl>
     </section>
   )
 }
@@ -343,238 +112,121 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
 export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }) {
   const controller = createKnowledgeProcessingController()
   const [view, setView] = createSignal<'full_chain' | 'history' | 'stage_debug'>('full_chain')
-  const [debugStage, setDebugStage] = createSignal<'preprocessor' | 'maintainer'>('preprocessor')
   const [selectedSessionId, setSelectedSessionId] = createSignal<string>()
   const [fullChainAttention, setFullChainAttention] = createSignal('')
-  const [preprocessorInputSource, setPreprocessorInputSource] = createSignal<'session' | 'manual'>('session')
-  const [observation, setObservation] = createSignal('')
   const [attention, setAttention] = createSignal('')
-  const [preprocessorPrompt, setPreprocessorPrompt] = createSignal('')
-  const [maintenancePrompt, setMaintenancePrompt] = createSignal('')
+  const [instructions, setInstructions] = createSignal('')
 
   createEffect(() => {
     if (props.knowledgeResetVersion > 0) controller.resetFullChainResult()
   })
 
-  const preprocessor = createMemo(() => controller.snapshot().stages.find(
-    (stage) => stage.id === 'observation_preprocessor'
-  ))
   const maintainer = createMemo(() => controller.snapshot().stages.find(
     (stage) => stage.id === 'knowledge_maintenance_agent'
   ))
   const selectedConnection = (stage?: ProcessingStageView) => controller.snapshot().connections.find(
     (connection) => connection.id === stage?.connectionId
   )
-  const stageModel = (stage?: ProcessingStageView) => selectedStageModel(stage, selectedConnection(stage))
-  const stageConfigurationIssue = (stage?: ProcessingStageView): string | undefined => {
-    if (!stage) return '正在读取阶段配置…'
-    if (!stage.connectionId) return `请先为 ${stage.displayName} 选择 Connection。`
-    const connection = selectedConnection(stage)
-    if (!connection) return `${stage.displayName} 已保存的 Connection 当前不可用：${stage.connectionId}。`
-    if (!stage.modelId) return `请先为 ${stage.displayName} 选择 Model。`
-    const model = stageModel(stage)
-    if (!model) return `${stage.displayName} 已保存的 Model 当前不可用：${stage.modelId}。`
-    if (stage.reasoningEffort && !model.reasoningEfforts.includes(stage.reasoningEffort)) {
-      return `${stage.displayName} 已保存的思考强度不再受当前 Model 支持。`
-    }
-    if (!connectionCanAttemptRun(connection)) {
-      return `${stage.displayName} 的 Connection 状态为“${connectionStatusLabel(connection.status)}”，需要先完成认证或配置。`
-    }
-    return undefined
-  }
-  const stageConfigured = (stage?: ProcessingStageView) => !stageConfigurationIssue(stage)
-  const preprocessorPromptDirty = createMemo(() => {
-    const stage = preprocessor()
-    return stage ? preprocessorPrompt() !== stage.effectiveInstructions : false
-  })
-  const maintenancePromptDirty = createMemo(() => {
-    const stage = maintainer()
-    return stage ? maintenancePrompt() !== stage.effectiveInstructions : false
-  })
-  const fullChainResult = createMemo(() => {
-    const result = controller.fullChainResult()
-    return result ? fullChainResultView(result) : undefined
-  })
-  const stageDebugTrace = createMemo(() => controller.debugTrace('stage_debug'))
-  const fullChainDebugTrace = createMemo(() => {
-    const liveTrace = controller.debugTrace('full_chain')
-    const resultTrace = controller.fullChainResult()?.maintenance.debugTrace
-    if (
-      !controller.isFullChainRunning()
-      && resultTrace
-      && (!liveTrace || liveTrace.id === resultTrace.id)
-    ) {
-      return resultTrace
-    }
-    return liveTrace ?? resultTrace
-  })
-  const currentPreprocessingResult = createMemo(() => {
-    const result = controller.preprocessingResult()
-    const trace = stageDebugTrace()
-    return result && (!trace || trace.id === result.debugTrace.id) ? result : undefined
-  })
-  const currentMaintenanceResult = createMemo(() => {
-    const result = controller.maintenanceResult()
-    const trace = stageDebugTrace()
-    if (!result) return undefined
-    if (!trace) return result
-    return trace.id === result.debugTrace.id
-      && trace.status === 'completed'
-      && trace.currentStageId === 'knowledge_maintenance_agent'
-      && trace.completedAt === result.debugTrace.completedAt
-      ? result
-      : undefined
-  })
   const selectedSession = createMemo(() => controller.availableSessions().find(
     (session) => session.sourceRecordId === selectedSessionId()
   ))
-  const anyStageRunning = createMemo(
-    () => controller.isFullChainRunning()
-      || controller.isRunning('observation_preprocessor')
-      || controller.isRunning('knowledge_maintenance_agent')
-  )
-  const preprocessorDisabledReason = createMemo(() => {
-    const stage = preprocessor()
-    if (!stage) return '正在读取 Observation Preprocessor 配置…'
-    if (anyStageRunning()) return '已有知识加工任务正在运行。'
-    if (controller.isSaving(stage.id)) return '正在保存 Observation Preprocessor 配置…'
-    const configurationIssue = stageConfigurationIssue(stage)
-    if (configurationIssue) return configurationIssue
-    if (preprocessorPromptDirty()) return '处理指令有未保存修改，请先保存。'
-    if (preprocessorInputSource() === 'manual') {
-      return observation().trim() ? undefined : '请输入用于调试的 Observation。'
+  const maintenanceTrace = createMemo(() => controller.debugTrace('stage_debug'))
+  const fullChainTrace = createMemo(() => {
+    const live = controller.debugTrace('full_chain')
+    const completed = controller.fullChainResult()?.maintenance.debugTrace
+    return live ?? completed
+  })
+  const currentMaintenanceResult = createMemo(() => {
+    const result = controller.maintenanceResult()
+    const trace = maintenanceTrace()
+    if (!result || (trace && trace.id !== result.debugTrace.id)) return undefined
+    return result
+  })
+  const anyRunning = createMemo(() => (
+    controller.isFullChainRunning() || controller.isRunning('knowledge_maintenance_agent')
+  ))
+  const instructionsDirty = createMemo(() => {
+    const stage = maintainer()
+    return stage ? instructions() !== stage.effectiveInstructions : false
+  })
+
+  let previousInstructions: string | undefined
+  createEffect(() => {
+    const value = maintainer()?.effectiveInstructions
+    if (value !== undefined && value !== previousInstructions) {
+      previousInstructions = value
+      setInstructions(value)
     }
+  })
+
+  function configurationIssue(stage?: ProcessingStageView): string | undefined {
+    if (!stage) return '正在读取 Knowledge Maintenance Agent 配置…'
+    if (!stage.connectionId) return '请先选择 Connection。'
+    const connection = selectedConnection(stage)
+    if (!connection) return `已保存的 Connection 当前不可用：${stage.connectionId}。`
+    if (!stage.modelId) return '请先选择 Model。'
+    const model = selectedStageModel(stage, connection)
+    if (!model) return `已保存的 Model 当前不可用：${stage.modelId}。`
+    if (stage.reasoningEffort && !model.reasoningEfforts.includes(stage.reasoningEffort)) {
+      return '已保存的思考强度不受当前 Model 支持。'
+    }
+    if (!connectionCanAttemptRun(connection)) {
+      return `Connection 状态为“${connectionStatusLabel(connection.status)}”，需要先完成认证或配置。`
+    }
+    return undefined
+  }
+
+  const disabledReason = createMemo(() => {
+    const stage = maintainer()
+    if (anyRunning()) return '已有知识加工任务正在运行。'
+    if (stage && controller.isSaving(stage.id)) return '正在保存 Agent 配置…'
+    const issue = configurationIssue(stage)
+    if (issue) return issue
+    if (instructionsDirty()) return '处理指令有未保存修改，请先保存。'
     if (controller.sessionsLoading()) return '正在读取可用 Session…'
     if (!controller.availableSessions().length) return '暂无可用 Session，请先在“数据来源”中完成扫描。'
-    const session = selectedSession()
-    if (!session) return '请先选择一个 Session。'
+    if (!selectedSession()) return '请先选择一个 Session。'
     return undefined
   })
 
-  let previousPreprocessorInstructions: string | undefined
-  let previousMaintenanceInstructions: string | undefined
-  createEffect(() => {
-    const instructions = preprocessor()?.effectiveInstructions
-    if (instructions !== undefined && instructions !== previousPreprocessorInstructions) {
-      previousPreprocessorInstructions = instructions
-      setPreprocessorPrompt(instructions)
-    }
-  })
-  createEffect(() => {
-    const instructions = maintainer()?.effectiveInstructions
-    if (instructions !== undefined && instructions !== previousMaintenanceInstructions) {
-      previousMaintenanceInstructions = instructions
-      setMaintenancePrompt(instructions)
-    }
-  })
-
-  let previousDebugStage: string | undefined
-  createEffect(() => {
-    const stageId = stageDebugTrace()?.currentStageId
-    if (!stageId || stageId === previousDebugStage) return
-    previousDebugStage = stageId
-    setDebugStage(stageId === 'knowledge_maintenance_agent' ? 'maintainer' : 'preprocessor')
-  })
-
-  function storedInstructions(stage: ProcessingStageView): string | null {
+  function savedInstructions(stage: ProcessingStageView): string | null {
     return stage.isCustomized ? stage.effectiveInstructions : null
   }
 
-  function saveConnection(stage: ProcessingStageView, connectionId: string | null): void {
-    const connection = controller.snapshot().connections.find((candidate) => candidate.id === connectionId)
-    const modelId = connection
-      ? connection.models.find((model) => model.id === connection.defaultModelId)?.id
-        ?? connection.models[0]?.id
-        ?? null
-      : null
-    const model = connection?.models.find((candidate) => candidate.id === modelId)
-    const reasoningEffort = stage.reasoningEffort
-      && model?.reasoningEfforts.includes(stage.reasoningEffort)
-      ? stage.reasoningEffort
-      : null
+  function saveConfiguration(
+    stage: ProcessingStageView,
+    connectionId: string | null,
+    modelId: string | null,
+    reasoningEffort: ReasoningEffort | null = stage.reasoningEffort ?? null
+  ): void {
     void controller.saveStage({
       stageId: stage.id,
       connectionId,
       modelId,
-      instructionsOverride: storedInstructions(stage),
+      instructionsOverride: savedInstructions(stage),
       reasoningEffort
     })
   }
 
-  function saveModel(stage: ProcessingStageView, modelId: string): void {
+  function selectConnection(stage: ProcessingStageView, connectionId: string): void {
+    const connection = controller.snapshot().connections.find((item) => item.id === connectionId)
+    const modelId = connection?.models.find((model) => model.id === connection.defaultModelId)?.id
+      ?? connection?.models[0]?.id
+      ?? null
+    saveConfiguration(stage, connection?.id ?? null, modelId, null)
+  }
+
+  function selectModel(stage: ProcessingStageView, modelId: string): void {
     const connection = selectedConnection(stage)
-    const model = connection?.models.find((candidate) => candidate.id === modelId)
-    const reasoningEffort = stage.reasoningEffort
-      && model?.reasoningEfforts.includes(stage.reasoningEffort)
+    const model = connection?.models.find((item) => item.id === modelId)
+    const effort = stage.reasoningEffort && model?.reasoningEfforts.includes(stage.reasoningEffort)
       ? stage.reasoningEffort
       : null
-    void controller.saveStage({
-      stageId: stage.id,
-      connectionId: stage.connectionId || null,
-      modelId: model?.id || null,
-      instructionsOverride: storedInstructions(stage),
-      reasoningEffort
-    })
-  }
-
-  function saveReasoningEffort(
-    stage: ProcessingStageView,
-    reasoningEffort: ReasoningEffort | null
-  ): void {
-    void controller.saveStage({
-      stageId: stage.id,
-      connectionId: stage.connectionId || null,
-      modelId: stage.modelId || null,
-      instructionsOverride: storedInstructions(stage),
-      reasoningEffort
-    })
-  }
-
-  function savePrompt(stage: ProcessingStageView, draft: string): void {
-    void controller.saveStage({
-      stageId: stage.id,
-      connectionId: stage.connectionId || null,
-      modelId: stage.modelId || null,
-      instructionsOverride: draft === stage.defaultInstructions ? null : draft,
-      reasoningEffort: stage.reasoningEffort ?? null
-    })
-  }
-
-  async function restorePrompt(
-    stage: ProcessingStageView,
-    setDraft: (value: string) => void
-  ): Promise<void> {
-    const saved = await controller.saveStage({
-      stageId: stage.id,
-      connectionId: stage.connectionId || null,
-      modelId: stage.modelId || null,
-      instructionsOverride: null,
-      reasoningEffort: stage.reasoningEffort ?? null
-    })
-    if (saved) setDraft(stage.defaultInstructions)
-  }
-
-  const runAttention = () => attention().trim() || undefined
-
-  function updateObservation(value: string): void {
-    setObservation(value)
-    controller.invalidateInputResults()
-  }
-
-  function updatePreprocessorInputSource(source: 'session' | 'manual'): void {
-    if (source === preprocessorInputSource()) return
-    setPreprocessorInputSource(source)
-    controller.invalidateInputResults()
+    saveConfiguration(stage, stage.connectionId ?? null, model?.id ?? null, effort)
   }
 
   function updateSelectedSession(value: string): void {
-    const sourceRecordId = value || undefined
-    setSelectedSessionId(sourceRecordId)
-    controller.invalidateInputResults()
-  }
-
-  function updateAttention(value: string): void {
-    setAttention(value)
+    setSelectedSessionId(value || undefined)
     controller.invalidateInputResults()
   }
 
@@ -590,77 +242,33 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
           </div>
         </div>
         <div class="processing-mode-nav" role="tablist" aria-label="加工测试工作面">
-          <button
-            type="button"
-            role="tab"
-            data-testid="processing-view-full-chain"
-            aria-selected={view() === 'full_chain'}
-            onClick={() => setView('full_chain')}
-          >链路测试</button>
-          <button
-            type="button"
-            role="tab"
-            data-testid="processing-view-history"
-            aria-selected={view() === 'history'}
-            onClick={() => {
-              setView('history')
-              void controller.loadFullChainRuns()
-            }}
-          >历史记录</button>
-          <button
-            type="button"
-            role="tab"
-            data-testid="processing-view-stage-debug"
-            aria-selected={view() === 'stage_debug'}
-            onClick={() => setView('stage_debug')}
-          >高级调试</button>
+          <button type="button" role="tab" data-testid="processing-view-full-chain" aria-selected={view() === 'full_chain'} onClick={() => setView('full_chain')}>链路测试</button>
+          <button type="button" role="tab" data-testid="processing-view-history" aria-selected={view() === 'history'} onClick={() => { setView('history'); void controller.loadFullChainRuns() }}>历史记录</button>
+          <button type="button" role="tab" data-testid="processing-view-stage-debug" aria-selected={view() === 'stage_debug'} onClick={() => setView('stage_debug')}>高级调试</button>
         </div>
       </header>
 
-      <Show when={controller.error()}>
-        <div class="page-error"><Icon name="warning" />{controller.error()}</div>
-      </Show>
-      <Show when={controller.snapshot().configurationError}>
-        <div class="page-error"><Icon name="warning" />{controller.snapshot().configurationError}</div>
-      </Show>
+      <Show when={controller.error()}>{(error) => <div class="page-error"><Icon name="warning" />{error()}</div>}</Show>
+      <Show when={controller.snapshot().configurationError}>{(error) => <div class="page-error"><Icon name="warning" />{error()}</div>}</Show>
 
-      <div
-        class="processing-page-panel processing-tab-panel"
-        role="tabpanel"
-        hidden={view() !== 'full_chain'}
-      >
+      <div class="processing-page-panel processing-tab-panel" role="tabpanel" hidden={view() !== 'full_chain'}>
         <FullChainWorkspace
           sessions={controller.availableSessions()}
           sessionsLoading={controller.sessionsLoading()}
           selectedSessionId={selectedSessionId()}
           attention={fullChainAttention()}
-          preprocessor={preprocessor()}
-          preprocessorConnection={selectedConnection(preprocessor())}
           maintainer={maintainer()}
           maintainerConnection={selectedConnection(maintainer())}
           running={controller.isFullChainRunning()}
-          preprocessingProgress={controller.isFullChainRunning()
-            ? controller.snapshot().preprocessingProgress
-            : undefined}
-          maintenanceRunning={controller.isFullChainRunning()
-            && controller.snapshot().runningStageIds.includes('knowledge_maintenance_agent')}
-          debugTrace={fullChainDebugTrace()}
-          locked={anyStageRunning()}
-          importingResult={Boolean(
-            controller.fullChainResult()
-            && controller.isImportingFullChainRun(controller.fullChainResult()!.runId)
-          )}
-          importResult={controller.fullChainResult()
-            && controller.fullChainImportResult()?.runId === controller.fullChainResult()!.runId
-            ? controller.fullChainImportResult()!.commit
-            : undefined}
-          result={fullChainResult()}
+          debugTrace={fullChainTrace()}
+          locked={anyRunning()}
+          importingResult={Boolean(controller.fullChainResult() && controller.isImportingFullChainRun(controller.fullChainResult()!.runId))}
+          importResult={controller.fullChainResult() && controller.fullChainImportResult()?.runId === controller.fullChainResult()!.runId ? controller.fullChainImportResult()!.commit : undefined}
+          result={controller.fullChainResult() ? fullChainResultView(controller.fullChainResult()!) : undefined}
           onSelectSession={updateSelectedSession}
           onAttentionInput={setFullChainAttention}
           onRun={() => {
-            const session = controller.availableSessions().find(
-              (candidate) => candidate.sourceRecordId === selectedSessionId()
-            )
+            const session = selectedSession()
             if (!session) return
             void controller.runFullChain({
               sourceRecordId: session.sourceRecordId,
@@ -676,460 +284,131 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
         />
       </div>
 
-      <div
-        class="processing-page-panel processing-tab-panel"
-        role="tabpanel"
-        hidden={view() !== 'history'}
-      >
+      <div class="processing-page-panel processing-tab-panel" role="tabpanel" hidden={view() !== 'history'}>
         <ProcessingRunHistoryWorkspace
           runs={controller.fullChainRuns()}
           loading={controller.fullChainRunsLoading()}
           selected={controller.selectedFullChainRun()}
-          loadingRunId={controller.fullChainRuns().find(
-            (run) => controller.isLoadingFullChainRun(run.runId)
-          )?.runId}
-          importingRunId={controller.fullChainRuns().find(
-            (run) => controller.isImportingFullChainRun(run.runId)
-          )?.runId}
+          loadingRunId={controller.fullChainRuns().find((run) => controller.isLoadingFullChainRun(run.runId))?.runId}
+          importingRunId={controller.fullChainRuns().find((run) => controller.isImportingFullChainRun(run.runId))?.runId}
           importResult={controller.fullChainImportResult()}
           onOpen={controller.readFullChainRun}
           onImport={controller.importFullChainRun}
         />
       </div>
 
-      <div
-        class="processing-page-panel processing-tab-panel"
-        role="tabpanel"
-        hidden={view() !== 'stage_debug'}
-      >
-        <div class="processing-notice">
-          <Icon name="warning" />
-          <span>这是显式阶段调试工作面。点击运行后会直接调用所选 Connection，可能消耗额度；输入、实时进度、错误和结果都在当前页面展示。两个阶段不会自动串联。</span>
+      <div class="processing-page-panel processing-tab-panel" role="tabpanel" hidden={view() !== 'stage_debug'}>
+        <div class="stage-debug-intro">
+          <strong>高级调试</strong>
+          <span>单独运行 Maintainer，检查证据读取、Todo、工具活动和候选贡献。</span>
         </div>
-
-        <div class="processing-stage-switch" role="tablist" aria-label="调试阶段">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={debugStage() === 'preprocessor'}
-            aria-controls="processing-stage-observation_preprocessor"
-            data-testid="processing-stage-tab-observation_preprocessor"
-            onClick={() => setDebugStage('preprocessor')}
-          >
-            <span>1</span>
-            <div><strong>观察预处理</strong><small>{currentPreprocessingResult() ? 'Candidate Seed 已生成' : '发现 Statement Candidate'}</small></div>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={debugStage() === 'maintainer'}
-            aria-controls="processing-stage-knowledge_maintenance_agent"
-            data-testid="processing-stage-tab-knowledge_maintenance_agent"
-            onClick={() => setDebugStage('maintainer')}
-          >
-            <span>2</span>
-            <div><strong>知识维护</strong><small>{currentPreprocessingResult() ? '初始 Todo 可绑定' : '等待 Candidate Seed'}</small></div>
-          </button>
-        </div>
-
         <section class="processing-list" aria-label="知识加工阶段">
-        <Show when={preprocessor()}>
-          {(stage) => (
-            <article
-              id="processing-stage-observation_preprocessor"
-              class="processing-stage stage-debug-workspace"
-              data-testid="processing-stage-observation_preprocessor"
-              hidden={debugStage() !== 'preprocessor'}
-            >
-              <div class="processing-stage__header">
-                <span class="processing-stage__index">1</span>
-                <div>
-                  <h2>{stage().displayName}</h2>
-                  <p>{stage().description}</p>
-                </div>
-                <span class="processing-runtime">{runtimeLabel(stage().runtime)}</span>
-              </div>
-              <div class="processing-capabilities">
-                <For each={stage().capabilities}>{(capability) => <span>{capability}</span>}</For>
-              </div>
-
-              <div
-                id="observation-preprocessor-panel-configuration"
-                class="processing-workspace-panel stage-debug__configuration"
-                aria-label="模型与提示词"
-              >
-                <ConnectionConfiguration
-                  stage={stage()}
-                  connections={controller.snapshot().connections}
-                  selected={selectedConnection(stage())}
-                  saving={controller.isSaving(stage().id)}
-                  locked={anyStageRunning()}
-                  onChange={(connectionId) => saveConnection(stage(), connectionId)}
-                  onModelChange={(modelId) => saveModel(stage(), modelId)}
-                  onReasoningEffortChange={(effort) => saveReasoningEffort(stage(), effort)}
-                />
-                <PromptConfiguration
-                  stage={stage()}
-                  draft={preprocessorPrompt()}
-                  saving={controller.isSaving(stage().id)}
-                  locked={anyStageRunning()}
-                  onInput={setPreprocessorPrompt}
-                  onSave={() => savePrompt(stage(), preprocessorPrompt())}
-                  onRestore={() => void restorePrompt(stage(), setPreprocessorPrompt)}
-                />
-              </div>
-
-              <div
-                id="observation-preprocessor-panel-input"
-                class="processing-workspace-panel stage-debug__input"
-                aria-label="运行输入"
-              >
-              <section class="processing-input" aria-label="观察预处理输入">
-                <div class="processing-input__heading">
-                  <h3>{stage().inputDescription}</h3>
-                  <span>不会自动运行</span>
-                </div>
-                <div class="processing-input-source">
-                  <span>输入来源</span>
-                  <div role="group" aria-label="预处理输入来源">
-                    <button
-                      type="button"
-                      data-testid="preprocessor-source-session"
-                      aria-pressed={preprocessorInputSource() === 'session'}
-                      disabled={anyStageRunning()}
-                      onClick={() => updatePreprocessorInputSource('session')}
-                    >本地 Session</button>
-                    <button
-                      type="button"
-                      data-testid="preprocessor-source-manual"
-                      aria-pressed={preprocessorInputSource() === 'manual'}
-                      disabled={anyStageRunning()}
-                      onClick={() => updatePreprocessorInputSource('manual')}
-                    >手工输入</button>
+          <Show when={maintainer()}>
+            {(stage) => {
+              const connection = () => selectedConnection(stage())
+              const model = () => selectedStageModel(stage(), connection())
+              return (
+                <article id="processing-stage-knowledge_maintenance_agent" class="processing-stage stage-debug-workspace" data-testid="processing-stage-knowledge_maintenance_agent">
+                  <div class="processing-stage__header">
+                    <span class="processing-stage__index">1</span>
+                    <div><h2>{stage().displayName}</h2><p>{stage().description}</p></div>
+                    <span class="processing-runtime">{runtimeLabel(stage().runtime)}</span>
                   </div>
-                </div>
-                <Show
-                  when={preprocessorInputSource() === 'session'}
-                  fallback={(
-                    <label class="ai-field ai-field--wide">
-                      <span>Observation（调试 fallback）</span>
-                      <textarea
-                        data-testid="processing-observation-input"
-                        value={observation()}
-                        rows={8}
-                        placeholder="粘贴一段用于排查特定预处理问题的观察材料…"
-                        disabled={anyStageRunning()}
-                        onInput={(event) => updateObservation(event.currentTarget.value)}
-                      />
-                    </label>
-                  )}
-                >
-                  <label class="ai-field ai-field--wide">
-                    <span>可用 Session</span>
-                    <select
-                      data-testid="processing-preprocessor-session"
-                      value={selectedSessionId() || ''}
-                      disabled={
-                        anyStageRunning()
-                        || controller.sessionsLoading()
-                        || controller.availableSessions().length === 0
-                      }
-                      onChange={(event) => updateSelectedSession(event.currentTarget.value)}
-                    >
-                      <option value="">
-                        {controller.sessionsLoading()
-                          ? '正在读取可用 Session…'
-                          : controller.availableSessions().length
-                            ? '选择一个 Session'
-                            : '暂无可用 Session'}
-                      </option>
-                      <For each={controller.availableSessions()}>{(session) => (
-                        <option value={session.sourceRecordId}>{sessionOptionLabel(session)}</option>
-                      )}</For>
-                    </select>
-                  </label>
-                  <Show
-                    when={selectedSession()}
-                    fallback={(
-                      <p class="processing-input__hint">
-                        {controller.availableSessions().length
-                          ? '选择后将在运行时从 Agent 的原始位置读取；原记录发生变化或消失时需要重新扫描。'
-                          : '请先在“数据来源”中扫描 Agent 对话；手工输入仅用于特殊调试。'}
-                      </p>
-                    )}
-                  >
-                    {(session) => (
-                      <SessionMetadata
-                        session={session()}
-                        class="processing-session-summary"
-                        testId="preprocessor-session-meta"
-                      />
-                    )}
-                  </Show>
-                </Show>
-                <label class="ai-field ai-field--wide">
-                  <span>Attention（可选，两个阶段共用）</span>
-                  <input
-                    data-testid="processing-attention-input"
-                    value={attention()}
-                    placeholder="例如：重点关注用户明确否定过的设计选择"
-                    disabled={anyStageRunning()}
-                    onInput={(event) => updateAttention(event.currentTarget.value)}
-                  />
-                </label>
-                <p
-                  class={`processing-stage__run-status${preprocessorDisabledReason() ? ' processing-stage__run-status--blocked' : ''}`}
-                  data-testid="preprocessor-disabled-reason"
-                >
-                  {preprocessorDisabledReason() || '配置和输入已准备，可以运行预处理。'}
-                </p>
-                <div class="processing-stage__actions">
-                  <Show
-                    when={controller.isRunning(stage().id)}
-                    fallback={(
-                      <Button
-                        variant="primary"
-                        icon="play"
-                        data-testid="run-preprocessor"
-                        disabled={Boolean(preprocessorDisabledReason())}
-                        onClick={() => {
-                          const session = selectedSession()
-                          if (preprocessorInputSource() === 'session') {
-                            if (!session) return
-                            void controller.runSessionPreprocessor({
-                              sourceRecordId: session.sourceRecordId,
-                              expectedRevision: session.revision,
-                              attention: runAttention()
-                            })
-                            return
-                          }
-                          void controller.runObservationPreprocessor({
-                            observation: observation(),
-                            attention: runAttention()
-                          })
-                        }}
-                      >运行预处理</Button>
-                    )}
-                  >
-                    <Button
-                      variant="danger"
-                      icon="stop"
-                      data-testid="cancel-preprocessor"
-                      onClick={() => void controller.cancelRun(stage().id)}
-                    >停止预处理</Button>
-                  </Show>
-                </div>
-              </section>
-              </div>
-
-              <div
-                id="observation-preprocessor-panel-process"
-                class="processing-workspace-panel stage-debug__process"
-                aria-label="调用过程"
-              >
-                <Show
-                  when={stageDebugTrace()?.preprocessing ? stageDebugTrace() : undefined}
-                  fallback={<div class="processing-workspace-empty">运行预处理后，这里会逐段展示模型调用、进度和 Statement 候选输出。</div>}
-                >
-                  {(trace) => (
-                    <ProcessingDebugTracePanel
-                      trace={trace()}
-                      showMaintenance={false}
-                      title="预处理调用调试"
-                    />
-                  )}
-                </Show>
-                <Show when={controller.isRunning(stage().id)}>
-                  <div class="processing-workspace-running-actions">
-                    <span>预处理正在运行，可以继续查看逐段输出。</span>
-                    <Button
-                      variant="danger"
-                      icon="stop"
-                      data-testid="cancel-preprocessor-process"
-                      onClick={() => void controller.cancelRun(stage().id)}
-                    >停止预处理</Button>
+                  <div class="processing-capabilities">
+                    <For each={stage().capabilities}>{(capability) => <span>{capability}</span>}</For>
                   </div>
-                </Show>
-              </div>
 
-              <div
-                id="observation-preprocessor-panel-output"
-                class="processing-workspace-panel stage-debug__output"
-                aria-label="输出结果"
-              >
-                <Show
-                  when={!controller.isRunning(stage().id) ? currentPreprocessingResult() : undefined}
-                  fallback={<div class="processing-workspace-empty">完成预处理后，这里会展示 Statement Candidate Seed 与本次执行配置。</div>}
-                >
-                  {(result) => <PreprocessingResult result={result()} />}
-                </Show>
-              </div>
-            </article>
-          )}
-        </Show>
-
-        <Show when={maintainer()}>
-          {(stage) => (
-            <article
-              id="processing-stage-knowledge_maintenance_agent"
-              class="processing-stage stage-debug-workspace"
-              data-testid="processing-stage-knowledge_maintenance_agent"
-              hidden={debugStage() !== 'maintainer'}
-            >
-              <div class="processing-stage__header">
-                <span class="processing-stage__index">2</span>
-                <div>
-                  <h2>{stage().displayName}</h2>
-                  <p>{stage().description}</p>
-                </div>
-                <span class="processing-runtime">{runtimeLabel(stage().runtime)}</span>
-              </div>
-              <div class="processing-capabilities">
-                <For each={stage().capabilities}>{(capability) => <span>{capability}</span>}</For>
-              </div>
-
-              <div
-                id="knowledge-maintainer-panel-configuration"
-                class="processing-workspace-panel stage-debug__configuration"
-                aria-label="模型与提示词"
-              >
-                <ConnectionConfiguration
-                  stage={stage()}
-                  connections={controller.snapshot().connections}
-                  selected={selectedConnection(stage())}
-                  saving={controller.isSaving(stage().id)}
-                  locked={anyStageRunning()}
-                  onChange={(connectionId) => saveConnection(stage(), connectionId)}
-                  onModelChange={(modelId) => saveModel(stage(), modelId)}
-                  onReasoningEffortChange={(effort) => saveReasoningEffort(stage(), effort)}
-                />
-                <PromptConfiguration
-                  stage={stage()}
-                  draft={maintenancePrompt()}
-                  saving={controller.isSaving(stage().id)}
-                  locked={anyStageRunning()}
-                  onInput={setMaintenancePrompt}
-                  onSave={() => savePrompt(stage(), maintenancePrompt())}
-                  onRestore={() => void restorePrompt(stage(), setMaintenancePrompt)}
-                />
-              </div>
-
-              <div
-                id="knowledge-maintainer-panel-input"
-                class="processing-workspace-panel stage-debug__input"
-                aria-label="运行输入"
-              >
-              <section class="processing-dependency" aria-label="知识维护输入">
-                <div>
-                  <h3>{stage().inputDescription}</h3>
-                  <Show
-                    when={currentPreprocessingResult()}
-                    fallback={<p>等待一次成功的观察预处理运行。</p>}
-                  >
-                    {(result) => (
-                      <p>将把预处理产生的 {result().statementCandidates.length} 个 Candidate 绑定为初始 Todo，并按需回溯原始观察材料。</p>
-                    )}
-                  </Show>
-                </div>
-                <span class={`processing-dependency__state${currentPreprocessingResult() ? ' processing-dependency__state--ready' : ''}`}>
-                  {currentPreprocessingResult() ? '已准备' : '未准备'}
-                </span>
-              </section>
-
-              <Show when={maintenancePromptDirty()}>
-                <p class="processing-stage__action-note">请先保存处理指令，再运行知识维护。</p>
-              </Show>
-              <Show when={stageConfigurationIssue(stage())}>
-                {(issue) => <p class="processing-stage__action-note">{issue()}</p>}
-              </Show>
-              <div class="processing-stage__actions">
-                <Show
-                  when={controller.isRunning(stage().id)}
-                  fallback={(
-                    <Button
-                      variant="primary"
-                      icon="play"
-                      data-testid="run-maintainer"
-                      disabled={
-                        !stageConfigured(stage())
-                        || !currentPreprocessingResult()
-                        || maintenancePromptDirty()
-                        || controller.isSaving(stage().id)
-                        || anyStageRunning()
-                      }
-                      onClick={() => {
-                        const result = currentPreprocessingResult()
-                        if (!result) return
-                        void controller.runKnowledgeMaintenance({
-                          preprocessingRunId: result.runId,
-                          attention: runAttention()
-                        })
-                      }}
-                    >运行知识维护</Button>
-                  )}
-                >
-                  <Button
-                    variant="danger"
-                    icon="stop"
-                    data-testid="cancel-maintainer"
-                    onClick={() => void controller.cancelRun(stage().id)}
-                  >停止知识维护</Button>
-                  </Show>
-                </div>
-              </div>
-
-              <div
-                id="knowledge-maintainer-panel-process"
-                class="processing-workspace-panel stage-debug__process"
-                aria-label="调用过程"
-              >
-                <Show
-                  when={stageDebugTrace()?.maintenance ? stageDebugTrace() : undefined}
-                  fallback={<div class="processing-workspace-empty">运行知识维护后，这里会展示模型轮次和 Agent 的工具活动。</div>}
-                >
-                  {(trace) => (
-                    <ProcessingDebugTracePanel
-                      trace={trace()}
-                      showPreprocessing={false}
-                      title="知识维护 Agent 调试"
-                    />
-                  )}
-                </Show>
-                <Show when={controller.isRunning(stage().id)}>
-                  <div class="processing-workspace-running-actions">
-                    <span>知识维护正在运行，可以继续查看模型与工具活动。</span>
-                    <Button
-                      variant="danger"
-                      icon="stop"
-                      data-testid="cancel-maintainer-process"
-                      onClick={() => void controller.cancelRun(stage().id)}
-                    >停止知识维护</Button>
+                  <div class="processing-workspace-panel stage-debug__configuration" aria-label="模型与提示词">
+                    <div class="processing-connection">
+                      <div class="processing-connection__selectors">
+                        <label class="ai-field">
+                          <span>Connection</span>
+                          <select data-testid="processing-connection-knowledge_maintenance_agent" value={stage().connectionId || ''} disabled={anyRunning() || controller.isSaving(stage().id)} onChange={(event) => selectConnection(stage(), event.currentTarget.value)}>
+                            <option value="">选择 Connection</option>
+                            <For each={controller.snapshot().connections}>{(item) => <option value={item.id}>{item.displayName} · {connectionStatusLabel(item.status)}</option>}</For>
+                          </select>
+                        </label>
+                        <label class="ai-field">
+                          <span>Model</span>
+                          <select data-testid="processing-model-knowledge_maintenance_agent" value={stage().modelId || ''} disabled={!connection() || anyRunning() || controller.isSaving(stage().id)} onChange={(event) => selectModel(stage(), event.currentTarget.value)}>
+                            <option value="">选择 Model</option>
+                            <For each={connection()?.models ?? []}>{(item) => <option value={item.id} selected={item.id === stage().modelId}>{item.displayName === item.id ? item.id : `${item.displayName} · ${item.id}`}</option>}</For>
+                          </select>
+                        </label>
+                        <label class="ai-field">
+                          <span>思考强度</span>
+                          <select data-testid="processing-reasoning-knowledge_maintenance_agent" value={stage().reasoningEffort || ''} disabled={!model()?.reasoningEfforts.length || anyRunning() || controller.isSaving(stage().id)} onChange={(event) => saveConfiguration(stage(), stage().connectionId ?? null, stage().modelId ?? null, (event.currentTarget.value || null) as ReasoningEffort | null)}>
+                            <option value="">模型默认</option>
+                            <For each={model()?.reasoningEfforts ?? []}>{(effort) => <option value={effort}>{REASONING_LABELS[effort]}</option>}</For>
+                          </select>
+                        </label>
+                      </div>
+                      <Show when={connection()}>
+                        {(item) => (
+                          <dl class="processing-connection__details" data-testid="processing-config-knowledge_maintenance_agent">
+                            <div><dt>Connection</dt><dd>{item().displayName}</dd></div>
+                            <div><dt>Backend</dt><dd>{backendLabel(item().backendKind)}</dd></div>
+                            <div><dt>Provider</dt><dd>{providerLabel(item().providerId)}</dd></div>
+                            <div><dt>Model</dt><dd>{model()?.id || '未选择'}</dd></div>
+                            <div><dt>Reasoning</dt><dd>{reasoningLabel(stage().reasoningEffort)}</dd></div>
+                            <div><dt>Runtime</dt><dd>{runtimeLabel(stage().runtime)}</dd></div>
+                          </dl>
+                        )}
+                      </Show>
+                    </div>
+                    <section class="processing-prompt" aria-label="Knowledge Maintenance Agent 提示词">
+                      <div class="processing-prompt__heading">
+                        <div><h3>处理指令</h3><p>作为 Maintainer 的 System Prompt 使用。</p></div>
+                        <span class={`processing-mode-badge${instructions() !== stage().defaultInstructions ? ' processing-mode-badge--custom' : ''}`} data-testid="processing-prompt-badge-knowledge_maintenance_agent">{instructions() !== stage().defaultInstructions ? 'Customized' : 'Default'}</span>
+                      </div>
+                      <textarea class="processing-prompt__editor" data-testid="processing-instructions-knowledge_maintenance_agent" value={instructions()} rows={12} spellcheck={false} disabled={anyRunning() || controller.isSaving(stage().id)} onInput={(event) => setInstructions(event.currentTarget.value)} />
+                      <div class="processing-prompt__actions">
+                        <Button variant="ghost" icon="refresh" data-testid="restore-processing-instructions-knowledge_maintenance_agent" disabled={anyRunning() || controller.isSaving(stage().id) || (!stage().isCustomized && instructions() === stage().defaultInstructions)} onClick={() => { setInstructions(stage().defaultInstructions); void controller.saveStage({ stageId: stage().id, connectionId: stage().connectionId ?? null, modelId: stage().modelId ?? null, instructionsOverride: null, reasoningEffort: stage().reasoningEffort ?? null }) }}>恢复默认</Button>
+                        <Button variant="secondary" icon="check" data-testid="save-processing-instructions-knowledge_maintenance_agent" disabled={anyRunning() || controller.isSaving(stage().id) || !instructionsDirty() || !instructions().trim()} onClick={() => void controller.saveStage({ stageId: stage().id, connectionId: stage().connectionId ?? null, modelId: stage().modelId ?? null, instructionsOverride: instructions() === stage().defaultInstructions ? null : instructions(), reasoningEffort: stage().reasoningEffort ?? null })}>保存提示词</Button>
+                      </div>
+                    </section>
                   </div>
-                </Show>
-                <p class="processing-workspace-disclosure">
-                  调试记录不会展示完整模型上下文；模型输出可能复述原始材料，请按原始证据的敏感级别查看。
-                </p>
-              </div>
 
-              <div
-                id="knowledge-maintainer-panel-output"
-                class="processing-workspace-panel stage-debug__output"
-                aria-label="输出结果"
-              >
-                <Show
-                  when={
-                    !controller.isRunning(stage().id) && !controller.isRunning('observation_preprocessor')
-                      ? currentMaintenanceResult()
-                      : undefined
-                  }
-                  fallback={<div class="processing-workspace-empty">完成知识维护后，这里会以 Statement 列表和详情展示候选 Knowledge Contribution。</div>}
-                >
-                  {(result) => <MaintenanceResult result={result()} />}
-                </Show>
-              </div>
-            </article>
-          )}
-        </Show>
+                  <div class="processing-workspace-panel stage-debug__input" aria-label="运行输入">
+                    <section class="processing-input" aria-label="知识维护输入">
+                      <div class="processing-input__heading"><h3>{stage().inputDescription}</h3><span>不会自动运行</span></div>
+                      <label class="ai-field ai-field--wide">
+                        <span>可用 Session</span>
+                        <select data-testid="processing-maintainer-session" value={selectedSessionId() || ''} disabled={anyRunning() || controller.sessionsLoading() || controller.availableSessions().length === 0} onChange={(event) => updateSelectedSession(event.currentTarget.value)}>
+                          <option value="">{controller.sessionsLoading() ? '正在读取可用 Session…' : controller.availableSessions().length ? '选择一个 Session' : '暂无可用 Session'}</option>
+                          <For each={controller.availableSessions()}>{(session) => <option value={session.sourceRecordId}>{sessionOptionLabel(session)}</option>}</For>
+                        </select>
+                      </label>
+                      <Show when={selectedSession()}>{(session) => <SessionMetadata session={session()} class="processing-session-summary" testId="maintainer-session-meta" />}</Show>
+                      <label class="ai-field ai-field--wide">
+                        <span>Attention（可选）</span>
+                        <input data-testid="processing-attention-input" value={attention()} placeholder="例如：重点关注用户明确否定过的设计选择" disabled={anyRunning()} onInput={(event) => { setAttention(event.currentTarget.value); controller.invalidateInputResults() }} />
+                      </label>
+                      <p class={`processing-stage__run-status${disabledReason() ? ' processing-stage__run-status--blocked' : ''}`} data-testid="maintainer-disabled-reason">{disabledReason() || '配置和 Session 已准备，可以运行知识维护。'}</p>
+                      <div class="processing-stage__actions">
+                        <Show when={controller.isRunning(stage().id)} fallback={(
+                          <Button variant="primary" icon="play" data-testid="run-maintainer" disabled={Boolean(disabledReason())} onClick={() => { const session = selectedSession(); if (session) void controller.runKnowledgeMaintenance({ sourceRecordId: session.sourceRecordId, expectedRevision: session.revision, attention: attention().trim() || undefined }) }}>运行知识维护</Button>
+                        )}>
+                          <Button variant="danger" icon="stop" data-testid="cancel-maintainer" onClick={() => void controller.cancelRun(stage().id)}>停止知识维护</Button>
+                        </Show>
+                      </div>
+                    </section>
+                  </div>
+
+                  <div class="processing-workspace-panel stage-debug__process" aria-label="调用过程">
+                    <Show when={maintenanceTrace()} fallback={<div class="processing-workspace-empty">运行知识维护后，这里会展示模型轮次和 Agent 工具活动。</div>}>
+                      {(trace) => <ProcessingDebugTracePanel trace={trace()} title="知识维护 Agent 调试" />}
+                    </Show>
+                  </div>
+                  <div class="processing-workspace-panel stage-debug__output" aria-label="输出结果">
+                    <Show when={!controller.isRunning(stage().id) ? currentMaintenanceResult() : undefined} fallback={<div class="processing-workspace-empty">完成知识维护后，这里会展示候选 Knowledge Contribution。</div>}>
+                      {(result) => <MaintenanceResult result={result()} />}
+                    </Show>
+                  </div>
+                </article>
+              )
+            }}
+          </Show>
         </section>
       </div>
     </>

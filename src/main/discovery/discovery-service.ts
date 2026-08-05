@@ -24,7 +24,7 @@ import {
   type SourceEvidenceReader,
   type SourceEvidenceReadResult
 } from './source-evidence-reader'
-import type { ObservationView } from '../observation/model'
+import type { RawEvidence } from '../observation/model'
 
 type SnapshotListener = (snapshot: DiscoverySnapshot) => void
 
@@ -48,7 +48,7 @@ export interface AvailableSessionEvidence {
   revision: string
   contentHash: string
   sizeBytes: number
-  observationView: ObservationView
+  rawEvidence: RawEvidence
 }
 
 interface RefreshedConversationRecord {
@@ -274,7 +274,7 @@ export class DiscoveryService {
       revision: currentRecord.fingerprint,
       contentHash: evidence.contentHash,
       sizeBytes: evidence.sizeBytes,
-      observationView: adapter.createObservationView(content)
+      rawEvidence: adapter.createRawEvidence(content)
     }
   }
 

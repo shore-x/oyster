@@ -9,11 +9,11 @@ import type {
   DetectionResult,
   ScanEntry
 } from './model'
-import type { ObservationView } from '../observation/model'
+import type { RawEvidence } from '../observation/model'
 import {
-  createClaudeObservationView,
-  createCodexObservationView,
-  createPiObservationView
+  createClaudeRawEvidence,
+  createCodexRawEvidence,
+  createPiRawEvidence
 } from './agent-observation-views'
 
 const HEAD_LIMIT_BYTES = 96 * 1024
@@ -379,8 +379,8 @@ export class ClaudeHistoryAdapter implements AgentHistoryAdapter {
     return resolveRecordPath(rootPath, record)
   }
 
-  createObservationView(rawContent: string): ObservationView {
-    return createClaudeObservationView(rawContent)
+  createRawEvidence(rawContent: string): RawEvidence {
+    return createClaudeRawEvidence(rawContent)
   }
 
   async *scan(
@@ -507,8 +507,8 @@ export class PiHistoryAdapter implements AgentHistoryAdapter {
     return resolveRecordPath(rootPath, record)
   }
 
-  createObservationView(rawContent: string): ObservationView {
-    return createPiObservationView(rawContent)
+  createRawEvidence(rawContent: string): RawEvidence {
+    return createPiRawEvidence(rawContent)
   }
 
   async *scan(
@@ -602,8 +602,8 @@ export class CodexHistoryAdapter implements AgentHistoryAdapter {
     return resolveRecordPath(rootPath, record)
   }
 
-  createObservationView(rawContent: string): ObservationView {
-    return createCodexObservationView(rawContent)
+  createRawEvidence(rawContent: string): RawEvidence {
+    return createCodexRawEvidence(rawContent)
   }
 
   async *scan(

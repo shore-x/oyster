@@ -7,17 +7,7 @@ import { KnowledgeProcessingService } from './knowledge-processing-service'
 export class FixtureKnowledgeAgentRuntime implements KnowledgeAgentRuntime {
   async run(input: KnowledgeAgentRunInput): Promise<KnowledgeAgentRunResult> {
     input.signal.throwIfAborted()
-    const candidateTodoContents = input.statementCandidates.map((candidate) => [
-      `Investigate the observed name or expression: ${candidate.expression}`,
-      `Question: ${candidate.question}`,
-      `Evidence starting locations: ${candidate.locations.map((location) => (
-        `L${String(location.line).padStart(6, '0')}:C${location.offset}`
-      )).join(', ')}`
-    ].join('\n'))
-    const todoStore = new AgentTodoStore([
-      ...candidateTodoContents,
-      ...(input.initialTodos ?? [])
-    ])
+    const todoStore = new AgentTodoStore(input.initialTodos)
     const pendingTodos = todoStore.list()
     input.onTrace?.({
       type: 'workspace_status',
@@ -80,7 +70,7 @@ export class FixtureKnowledgeAgentRuntime implements KnowledgeAgentRuntime {
         statements: [
           {
             title: '知识加工链路',
-            content: '知识加工链路应保持简洁，由 [[Knowledge Maintenance Agent|知识维护 Agent]] 处理候选知识，并保留可回溯的来源。'
+            content: '知识加工链路应保持简洁，由 [[Knowledge Maintenance Agent|知识维护 Agent]] 覆盖完整证据并维护知识，同时保留可回溯的来源。'
           },
           {
             title: 'Knowledge Maintenance Agent',
@@ -101,7 +91,6 @@ export function createFixtureKnowledgeProcessingService(
   return new KnowledgeProcessingService(
     new InMemoryKnowledgeProcessingRepository({
       stages: [
-        { stageId: 'observation_preprocessor', connectionId: 'model:fixture', modelId: 'fixture-model' },
         { stageId: 'knowledge_maintenance_agent', connectionId: 'model:fixture', modelId: 'fixture-model' }
       ]
     }),

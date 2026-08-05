@@ -3,7 +3,6 @@ import { Button } from '../ui'
 import type { KnowledgeCommitResult } from '../../../shared/knowledge'
 import { KnowledgeStatementBrowser, statementPreview } from './KnowledgeStatementBrowser'
 import { ProcessingTraceExplorer } from './ProcessingDebugTracePanel'
-import { StatementCandidateList } from './StatementCandidateList'
 import { AgentTodoList } from './AgentTodoList'
 import type { FullChainResultView, FullChainStepView } from './FullChainWorkspace'
 import type {
@@ -27,7 +26,6 @@ export function fullChainResultView(result: KnowledgeFullChainResult): FullChain
     runId: result.runId,
     completedAt: result.completedAt,
     durationMs: result.durationMs,
-    statementCandidates: result.preprocessing.statementCandidates,
     todos: result.maintenance.todos,
     debugTrace: result.maintenance.debugTrace,
     steps: [
@@ -38,15 +36,9 @@ export function fullChainResultView(result: KnowledgeFullChainResult): FullChain
         state: 'completed'
       },
       {
-        id: 'preprocessing',
-        label: '观察预处理',
-        detail: `${result.preprocessing.segmentCount} 个分段 · ${result.preprocessing.execution.modelCallCount} 次模型调用 · ${formatDuration(result.preprocessing.durationMs)}`,
-        state: 'completed'
-      },
-      {
         id: 'maintenance',
         label: '知识维护与写入',
-        detail: `${result.maintenance.execution.modelCallCount} 次模型调用 · ${result.commit.statements.length} 条 Statement`,
+        detail: `${result.maintenance.evidenceSegmentCount} 个证据段 · ${result.maintenance.execution.modelCallCount} 次模型调用 · ${result.commit.statements.length} 条 Statement`,
         state: 'completed'
       }
     ],
@@ -175,11 +167,6 @@ export function FullChainResultDetail(props: {
           onRead={async (title) => props.result.statements.find((statement) => statement.title === title)}
         />
       </div>
-
-      <details class="chain-test__candidates ui-disclosure">
-        <summary>预处理候选（{props.result.statementCandidates.length}）</summary>
-        <StatementCandidateList candidates={props.result.statementCandidates} emptyText="本次测试没有发现 Statement 候选。" />
-      </details>
 
       <details class="chain-test__candidates ui-disclosure">
         <summary>Maintainer Todos（{props.result.todos.length}）</summary>

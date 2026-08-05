@@ -43,7 +43,7 @@ Oyster 向用户提供六个核心能力：
 
 1. **发现与接入**：发现本机 Agent 的可执行程序、应用、配置和数据目录，明确展示每个来源支持历史访问、实时通知或上下文输出中的哪些能力。
 2. **保真访问**：为聊天 transcript 与人类编写的 Agent 指令建立轻量 catalog，并在需要时由 Source Adapter 从原始位置读取确定版本；不同 Harness 的原始格式不因统一模型而丢失，Agent 自动生成的 memory 不作为历史来源。
-3. **知识加工与管理**：用 Observation Preprocessing 从原始活动中发现值得调查的问题，再由 Knowledge Maintenance Agent 在用户 Attention 下核查现有知识与 Raw Evidence、形成可复用的理解；通用管理 Agent 也可以直接搜索、读取和维护正式 Knowledge。
+3. **知识加工与管理**：由 Knowledge Maintenance Agent 在用户 Attention 下覆盖完整 Raw Evidence、核查现有知识并形成可复用的理解；通用管理 Agent 也可以直接搜索、读取和维护正式 Knowledge。
 4. **协作产物**：在 APP 管理的本地 Artifact Repository 中保存围绕持久 Attention 组织的任意文件产物；通用管理 Agent 根据对话和文件系统自主发现相关 Artifact，并与用户共同维护当前状态。
 5. **Skill 发现与管理**：在专门的 Skills 页面中分开展示 Oyster 管理的 Skill Artifact 与其他 Agent 的外部注册事实；前者可以预览统一输出并通过显式 symlink Binding 注入已支持的用户级目标，后者保持只读发现。两者不因名称或路径相似而合并身份。
 6. **安全供给**：通过本地 API 和 MCP 等开放边界向第三方 Agent 提供检索；未来可在用户授权、Scope 和 Token Budget 内生成并注入 Context Packet。
@@ -56,7 +56,7 @@ Oyster 是：
 - 本地 Agent 活动的可检查数据层和控制面；
 - 外部历史的出处 catalog，以及内部标准化事件和派生知识的长期所有者；
 - 跨项目、跨仓库路径和跨 Harness 的关系维护者；
-- 通过 Observation Preprocessor 和受控 Agent 共同维护知识、但不把模型输出自动当作真相的系统；
+- 通过完整 Raw Evidence 和受控 Agent 维护知识、但不把模型输出自动当作真相的系统；
 - 以一个跨 Knowledge 与 Artifact 的通用管理 Agent 作为主要人机协作界面的平台。
 
 Oyster 不是：
@@ -80,9 +80,9 @@ Oyster 必须把三个相互区分的状态与权威域分开，避免把模型�
 
 本文将 `Artifact` 作为第三个权威域中单个协作产物的正式英文名称；观察中的来源侧对象使用 Activity Artifact 等限定名称，Discovery catalog 中的外部来源记录称为 Source Record。
 
-Observation Preprocessing 发现的 Candidate 是带回源线索的待调查问题，不是事实、Statement 或知识变更决定。Host 在 Knowledge Maintenance Agent 启动时把每个 Candidate 格式化为普通 initial Todo；Agent 依据当前知识和 Raw Evidence 完成这些工作，也可以增加新的通用 Todo，但不维护 Candidate 专用清单或结构化 resolution。Candidate、Todo 与 Contribution Draft 都是可丢弃的运行期工作材料（Run-local Working Material），不构成第四个状态与权威域；Candidate 与 Statement 也不要求一一对应。只有经过统一知识提交边界成为 Knowledge Statement 的内容才进入知识层。正式知识应能够追溯到原始观察或输入知识，但追溯结构及其 MVP 实现范围尚未确定。
+Host 在 Knowledge Maintenance Agent 启动时把完整 Raw Evidence 确定性分页为普通 initial Todo；Agent 逐页读取证据，识别名称、指代、背景问题和疑似 Skill 激活，也可以增加新的通用 Todo。Todo 与 Contribution Draft 都是可丢弃的运行期工作材料（Run-local Working Material），不构成第四个状态与权威域。只有经过统一知识提交边界成为 Knowledge Statement 的内容才进入知识层。正式知识应能够追溯到原始观察或输入知识，但追溯结构及其 MVP 实现范围尚未确定。
 
-三个域在状态和所有权上分离，但知识加工、Projection 和 Artifact 维护通过共享 Attention 耦合。Projection 是从知识、Attention 和必要的当前状态形成按需消费输出，或初始化、修订 Artifact 的活动，不是第三个持久状态域本身。同一个 Attention 可以指导 Observation Preprocessor、Knowledge Maintenance Agent 和通用管理 Agent；不同 Attention 产生的知识进入共享知识层并可以重叠、复用或相互修订，不按 Artifact 复制成独立真相。
+三个域在状态和所有权上分离，但知识加工、Projection 和 Artifact 维护通过共享 Attention 耦合。Projection 是从知识、Attention 和必要的当前状态形成按需消费输出，或初始化、修订 Artifact 的活动，不是第三个持久状态域本身。同一个 Attention 可以指导 Knowledge Maintenance Agent 和通用管理 Agent；不同 Attention 产生的知识进入共享知识层并可以重叠、复用或相互修订，不按 Artifact 复制成独立真相。
 
 Artifact 可以随用户 Attention 自然形成分组。是否把这种分组正式建模为 Project，以及它的身份和生命周期，仍是未决定事项；无论采用何种形式，Artifact 分组都不得把共享 Knowledge 分割成彼此隔离的真相。
 
@@ -130,13 +130,13 @@ MVP 的“实时”定义为 **turn 级近实时**，不是 token streaming。�
 
 开始加工前，用户选择一个已配置且能力匹配的 AI Connection。数据来源与执行连接相互独立：从某个 Agent Harness 读取观察，不要求使用同一 Provider 进行知识加工。
 
-1. 默认或自定义 Observation Preprocessor 从观察中发现带回源线索的 Candidate 问题，而不是生成 Session 摘要或拟定 Statement；
-2. Host 将 Candidate 格式化为普通 initial Todo；默认或自定义 Knowledge Maintenance Agent 以这些 Todo 和相关已有 Knowledge Statement 为起点，按需读取 Raw Evidence，并可用相同的通用工具补充、完成工作；默认策略优先维护细粒度、持久且可复用的对象、概念及其关系理解，而不是生成 Session 总结或工作日志；
+1. Source Adapter 读取所选 Session 的完整 Raw Evidence，并按 Harness 的格式标记疑似 Skill 激活位置；
+2. Host 将证据确定性分页为普通 initial Todo；默认或自定义 Knowledge Maintenance Agent 逐页读取 Raw Evidence，以这些 Todo 和相关已有 Knowledge Statement 为起点，并可用相同的通用工具补充、完成工作；默认策略优先维护细粒度、持久且可复用的对象、概念及其关系理解，而不是生成 Session 总结或工作日志；
 3. Agent 独立维护 Contribution Draft；所有 Todo 完成且 Agent 自然结束后，Host 冻结整份 Draft 并形成包含一条或多条 Knowledge Statement 的 Knowledge Contribution。Statement 使用当前知识视图中唯一、能够指称一个知识主体的 canonical title，以自由文本正文解释该主体的语境、含义、属性和关系，并通过 `[[canonical title]]` 或 `[[canonical title|local display text]]` 动态引用当前同名 Statement；
 4. Oyster Core 统一执行权限、提交和生命周期边界；
 5. 用户可以审查、纠正、删除或重新加工派生知识；如何向用户呈现其追溯关系随治理设计确定。
 
-Knowledge Maintenance Agent 是一个普通、可替换的工具使用 Agent：角色差异来自 System Prompt、Workspace、授权工具和 Host 对自然结束的解释，而不是专用状态机或固定运行步骤。系统不预设模型轮次、工具次数或总时长；通用 Agent Runtime 负责压缩临时 transcript，并向所有内置工具使用 Agent 提供通用 Todo 和结束检查。Candidate 只在启动时投影为 Todo，Todo 不作为每轮 Context 注入；存在 pending Todo 时，Runtime 通过结束反馈继续同一 Agent。Todo 全部完成且 Agent 自然结束后，Host 冻结 Draft，最终结果仍由 Oyster Core 校验和提交。模型上下文、单次请求、分页读取和持久化完整性仍有各自边界，但这些边界不变成整次 Agent 的行为配额。
+Knowledge Maintenance Agent 是一个普通、可替换的工具使用 Agent：角色差异来自 System Prompt、Workspace、授权工具和 Host 对自然结束的解释，而不是专用状态机或固定运行步骤。系统不预设模型轮次、工具次数或总时长；通用 Agent Runtime 负责压缩临时 transcript，并向所有内置工具使用 Agent 提供通用 Todo 和结束检查。证据页在启动时绑定为 Todo，Todo 不作为每轮 Context 注入；存在 pending Todo 时，Runtime 通过结束反馈继续同一 Agent。Todo 全部完成且 Agent 自然结束后，Host 冻结 Draft，最终结果仍由 Oyster Core 校验和提交。模型上下文、单次请求、分页读取和持久化完整性仍有各自边界，但这些边界不变成整次 Agent 的行为配额。
 
 任何默认或自定义处理器产生的正式知识都没有不同的本体身份。系统应能解释其如何由观察或输入知识形成，但具体需要保存哪些运行元信息、如何持久化以及 MVP 覆盖到什么程度，留给后续验证。模型、Prompt、策略或 Agent 升级时可以重新加工知识，不重写 Raw Evidence。
 
@@ -187,7 +187,7 @@ Oyster 固定使用 `app.getPath('userData')/artifacts/` 标准 Git Repository�
 - 三个 Harness 的 turn/session 级实时增量采集路径；
 - 可重复的 catalog 扫描，以及来源变化、移动、删除和权限失效的确定行为；
 - 项目/会话 catalog 浏览、基础筛选和出处可用性展示；
-- 提供至少一个可替换的默认 Attention、Observation Preprocessor 和受控 Knowledge Maintenance Agent，优先维护细粒度、持久且可复用的对象与概念理解；任务事件只在形成这类理解或 Attention 明确要求时保留，且不将其固化为核心本体；
+- 提供至少一个可替换的默认 Attention 和受控 Knowledge Maintenance Agent，优先维护细粒度、持久且可复用的对象与概念理解；任务事件只在形成这类理解或 Attention 明确要求时保留，且不将其固化为核心本体；
 - 默认和自定义知识处理器遵循统一的知识提交与权限边界；
 - 用户审查、纠正、删除和重新加工；
 - 可替换的 AI Connection；首个实现支持 Codex Coding Plan 与 OpenAI-compatible API，并允许每个加工阶段独立选择 Connection、Model 和思考强度；
@@ -232,7 +232,7 @@ source_formats: names and supported version ranges
 permissions: requested paths and operations
 ```
 
-Source Adapter / Connector 只拥有发现、定位、版本校验、读取、解析和来源游标。它以引用方式提供 Raw Evidence，并可以产生 Canonical Activity，但不能复制外部历史、创建 Knowledge Contribution、运行 Knowledge Maintenance Agent，也不能绕过权限将数据发给 LLM。Observation Preprocessing、Agent 运行、Scope、审查、删除和供给由 Oyster Core 统一拥有。
+Source Adapter / Connector 只拥有发现、定位、版本校验、读取、解析和来源游标。它以引用方式提供 Raw Evidence，并可以产生 Canonical Activity，但不能复制外部历史、创建 Knowledge Contribution、运行 Knowledge Maintenance Agent，也不能绕过权限将数据发给 LLM。Agent 运行、Scope、审查、删除和供给由 Oyster Core 统一拥有。
 
 MVP 只内置和签名第一方 Connector。未来第三方 Connector 必须在独立进程中运行，使用显式文件范围、本地网络范围和版本化协议；Harness 插件通常拥有与 Agent 相同的本机权限，安装前必须展示这一风险。
 
@@ -249,7 +249,7 @@ Oyster 把认证和计费通道与处理 Runtime 分开：
 
 LLM 适合承担：
 
-- 在 Observation Preprocessor 中有界发现需要回到 Raw Evidence 调查的名称和指代问题；
+- 驱动 Knowledge Maintenance Agent 覆盖完整 Raw Evidence，并调查名称、指代、背景和 Skill 激活线索；
 - 驱动受控 Knowledge Maintenance Agent 多步搜索、核查、复用和维护共享知识；
 - 驱动通用管理 Agent 在普通对话、Knowledge 与一个或多个 Artifact 之间自主选择必要工作；
 - 由通用管理 Agent 将适合独立上下文处理的完整任务委派给临时子 Agent，并继续判断返回结果；

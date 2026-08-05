@@ -72,11 +72,9 @@ export function ProcessingRunHistoryWorkspace(props: {
                     </div>
                     <div class="processing-history-run__metrics">
                       <span><strong>{run.statementCount}</strong> Statements</span>
-                      <span><strong>{run.candidateCount}</strong> 候选</span>
                       <span><strong>{formatDuration(run.durationMs)}</strong> 耗时</span>
                     </div>
                     <div class="processing-history-run__models">
-                      <span>预处理 · {run.preprocessorModel}</span>
                       <span>知识维护 · {run.maintainerModel}</span>
                     </div>
                     <div class="processing-history-run__actions">

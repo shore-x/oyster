@@ -137,7 +137,10 @@ if (knowledge.browse.statementCount !== 4) {
 if (!knowledge.browse.selectedTitle || knowledge.browse.detailTitle !== knowledge.browse.selectedTitle) {
   throw new Error('Knowledge browser did not load the selected Statement detail')
 }
-if (!knowledge.browse.detailContent?.includes('Knowledge Maintenance Agent')) {
+if (
+  !knowledge.browse.detailContent?.includes('知识维护 Agent')
+  || !knowledge.browse.detailContent?.includes('原始证据')
+) {
   throw new Error('Knowledge browser did not render the current Statement body')
 }
 if (
@@ -181,7 +184,6 @@ if (
   || !knowledge.browse.referenceDisclosureKeepsHeight
   || knowledge.browse.referenceNodeNavigationTitle !== knowledge.browse.referenceTwoHopTitle
   || !knowledge.browse.referenceNodesTransparent
-  || !knowledge.browse.referenceSecondHopPeripheral
 ) {
   throw new Error('Knowledge references are not rendered as a directionless, clustered two-hop local graph')
 }
@@ -294,9 +296,6 @@ if (!semantics.ai.model.bodyText.includes('OpenAI-compatible')) throw new Error(
 const agentConfiguration = semantics.agentConfiguration
 if (agentConfiguration?.title !== 'Agent 配置' || agentConfiguration.roleCount !== 2) {
   throw new Error('Agent configuration page does not list the registered Agents')
-}
-if (agentConfiguration.preprocessorRolePresent) {
-  throw new Error('The direct-model Observation Preprocessor is incorrectly listed as an Agent')
 }
 if (
   agentConfiguration.maintenanceToolNames?.length !== 10
@@ -421,7 +420,7 @@ if (selectedSessionDetails?.project !== '/Users/demo/projects/oyster') {
 if (!processing.fullChain.readyReason?.includes('准备完成')) {
   throw new Error('Full-chain view does not report that the selected configuration is runnable')
 }
-for (const requiredCopy of ['预处理', '知识维护', 'API', 'OpenAI-compatible', 'Fixture Model', '模型默认']) {
+for (const requiredCopy of ['知识维护', 'API', 'OpenAI-compatible', 'Fixture Model', '模型默认']) {
   if (!processing.fullChain.modelSummary?.includes(requiredCopy)) {
     throw new Error(`Full-chain stage configuration is missing: ${requiredCopy}`)
   }
@@ -441,10 +440,10 @@ if (!processing.fullChainRun?.runningStateVisible || !processing.fullChainRun?.c
 if (processing.fullChainRun.overviewHasTraceExplorer) {
   throw new Error('The full-chain overview still renders the unbounded detailed trace')
 }
-if (processing.fullChainRun.summaryStatementCount !== '2' || processing.fullChainRun.summaryCandidateCount !== '1') {
+if (processing.fullChainRun.summaryStatementCount !== '2') {
   throw new Error('The full-chain overview does not expose compact result counts')
 }
-if (!processing.fullChainRun.traceExplorerExists || processing.fullChainRun.traceEventCount < 4) {
+if (!processing.fullChainRun.traceExplorerExists || processing.fullChainRun.traceEventCount !== 3) {
   throw new Error('The secondary run-detail page does not expose the complete event list')
 }
 if (!processing.fullChainRun.modelOutput?.includes('Tool call · read_evidence')) {
@@ -457,11 +456,10 @@ if (!processing.fullChainRun.resultDetailExists || !processing.fullChainRun.retu
   throw new Error('The full-chain result detail is not a navigable secondary page')
 }
 if (
-  processing.fullChainRun.candidateCount !== 1
-  || processing.fullChainRun.todoCount !== 1
+  processing.fullChainRun.todoCount !== 1
   || processing.fullChainRun.completedTodoCount !== 1
 ) {
-  throw new Error('Full-chain result does not expose preprocessing candidates and Maintainer Todos separately')
+  throw new Error('Full-chain result does not expose completed Maintainer Todos')
 }
 if (processing.fullChainRun.statementCount !== 2) {
   throw new Error('Full-chain result does not expose the committed Knowledge Statement')
@@ -506,7 +504,7 @@ if (processing.history.overflowAfterStatementBack) {
 }
 if (
   !processing.history.activityDetailExists
-  || processing.history.traceEventCount < 4
+  || processing.history.traceEventCount !== 3
   || !processing.history.traceText?.includes('Fixture raw evidence')
 ) {
   throw new Error('Historical run details do not expose the persisted model and tool trace')
@@ -518,18 +516,13 @@ if (processing.fullChain.bodyText.includes('已导入 Session')) {
   throw new Error('Full-chain view still exposes the removed import model')
 }
 if (processing.fullChain.overflowX) throw new Error('Full-chain view has unexpected horizontal overflow')
-if (processing.stageCount !== 2) throw new Error(`Expected 2 fixed processing stages, got ${processing.stageCount}`)
-if (processing.promptCount !== 2) throw new Error(`Expected 2 processing prompt editors, got ${processing.promptCount}`)
+if (processing.stageCount !== 1) throw new Error(`Expected 1 fixed processing stage, got ${processing.stageCount}`)
+if (processing.promptCount !== 1) throw new Error(`Expected 1 processing prompt editor, got ${processing.promptCount}`)
 if (processing.promptValues.some((prompt) => typeof prompt !== 'string' || !prompt.trim())) {
   throw new Error('A processing default prompt is empty')
 }
-const [preprocessorPrompt, maintainerPrompt] = processing.promptValues
-for (const requiredCopy of ['general-purpose initial Todo', 'not draft Knowledge Statements', 'not a generated topic heading', 'primary language of the original material']) {
-  if (!preprocessorPrompt.includes(requiredCopy)) {
-    throw new Error(`Observation Preprocessor prompt is missing its responsibility: ${requiredCopy}`)
-  }
-}
-for (const requiredCopy of ['Knowledge Maintenance Agent', 'canonical title names that subject', 'Make the body, not an overloaded title, self-explaining', '[[canonical title]]', 'primary language of the original observation', 'list_todos', 'complete_todos', 'there is no separate submit tool']) {
+const [maintainerPrompt] = processing.promptValues
+for (const requiredCopy of ['Knowledge Maintenance Agent', 'Initial Todos cover every deterministic Raw Evidence segment', 'Skill activation', 'SKILL.md', 'Make the body, not an overloaded title, self-explaining', '[[canonical title]]', 'list_todos', 'complete_todos', 'there is no submit tool']) {
   if (!maintainerPrompt.includes(requiredCopy)) {
     throw new Error(`Knowledge Maintenance Agent prompt is missing its responsibility: ${requiredCopy}`)
   }
@@ -537,51 +530,42 @@ for (const requiredCopy of ['Knowledge Maintenance Agent', 'canonical title name
 if (processing.promptValues.some((prompt) => prompt.includes('Oyster'))) {
   throw new Error('A default processing prompt assumes product-specific context')
 }
-if (processing.badgeValues.length !== 2 || processing.badgeValues.some((badge) => badge !== 'Default')) {
-  throw new Error('Both processing stages must show the Default prompt badge in fixture mode')
+if (processing.badgeValues.length !== 1 || processing.badgeValues.some((badge) => badge !== 'Default')) {
+  throw new Error('The processing stage must show the Default prompt badge in fixture mode')
 }
-if (processing.connectionValues.length !== 2 || processing.connectionValues.some((value) => value !== 'model:fixture')) {
-  throw new Error('Both processing stages must select the fixture Model Connection')
+if (processing.connectionValues.length !== 1 || processing.connectionValues.some((value) => value !== 'model:fixture')) {
+  throw new Error('The processing stage must select the fixture Model Connection')
 }
-if (processing.modelValues.length !== 2 || processing.modelValues.some((value) => value !== 'fixture-model')) {
-  throw new Error('Both processing stages must select an explicit fixture model')
+if (processing.modelValues.length !== 1 || processing.modelValues.some((value) => value !== 'fixture-model')) {
+  throw new Error('The processing stage must select an explicit fixture model')
 }
-if (processing.reasoningValues.length !== 2 || processing.reasoningValues.some((value) => value !== '')) {
-  throw new Error('Both processing stages must expose their effective model-default reasoning')
+if (processing.reasoningValues.length !== 1 || processing.reasoningValues.some((value) => value !== '')) {
+  throw new Error('The processing stage must expose its effective model-default reasoning')
 }
 const stageConfiguration = processing.configurationText.join('\n')
-for (const requiredCopy of ['API', 'OpenAI-compatible', 'fixture-model', '模型默认', 'Direct Model', 'Pi Agent Core']) {
+for (const requiredCopy of ['API', 'OpenAI-compatible', 'fixture-model', '模型默认', 'Pi Agent Core']) {
   if (!stageConfiguration.includes(requiredCopy)) {
     throw new Error(`Stage debugging configuration is missing: ${requiredCopy}`)
   }
 }
-if (processing.preprocessorSessionSourceSelected !== 'true' || processing.manualObservationVisible) {
-  throw new Error('Stage debugging must default to an available Session instead of manual paste')
-}
-if (!processing.bodyText.includes('点击运行后会直接调用所选 Connection')) {
-  throw new Error('Stage debugging does not explain direct model execution in the page')
-}
-if (processing.preprocessorSessionOptionCount !== 2) {
-  throw new Error(`Expected one available fixture Session in stage debugging, got ${processing.preprocessorSessionOptionCount - 1}`)
+if (processing.maintainerSessionOptionCount !== 2) {
+  throw new Error(`Expected one available fixture Session in stage debugging, got ${processing.maintainerSessionOptionCount - 1}`)
 }
 if (processing.bodyText.includes('已导入 Session')) {
   throw new Error('Stage debugging still exposes the removed import model')
 }
-if (processing.preprocessorSessionValue !== processing.fullChain.selectedSession) {
+if (processing.maintainerSessionValue !== processing.fullChain.selectedSession) {
   throw new Error('Stage debugging did not preserve the Session selected in the full-chain view')
 }
-if (!processing.preprocessorButtonExists || processing.preprocessorDisabled !== false) {
-  throw new Error('Preprocessor action must be runnable with the preserved Session and ready configuration')
+if (!processing.maintainerButtonExists || processing.maintainerDisabled !== false) {
+  throw new Error('Knowledge maintenance action must be runnable with the preserved Session and ready configuration')
 }
-if (!processing.preprocessorReadyReason?.includes('可以运行预处理')) {
-  throw new Error('Stage debugging does not report that preprocessing is ready to run')
-}
-if (!processing.maintainerButtonExists || processing.maintainerDisabled !== true) {
-  throw new Error('Knowledge maintenance action must remain disabled before preprocessing succeeds')
+if (!processing.maintainerReadyReason?.includes('可以运行知识维护')) {
+  throw new Error('Stage debugging does not report that knowledge maintenance is ready to run')
 }
 if (processing.resultCount !== 0) throw new Error('Knowledge processing produced a candidate without an explicit run')
 if (processing.overflowX) throw new Error('Knowledge processing page has unexpected horizontal overflow')
-if (processing.buttonCount !== processing.sharedButtonCount + processing.tabButtonCount + processing.sourceSwitchButtonCount + processing.statementButtonCount + processing.chainStatementButtonCount) {
+if (processing.buttonCount !== processing.sharedButtonCount + processing.tabButtonCount + processing.statementButtonCount + processing.chainStatementButtonCount) {
   throw new Error('A knowledge processing action button bypasses the shared UI component')
 }
 if (processing.buttonIconCount !== processing.sharedButtonCount) {
@@ -593,21 +577,11 @@ if (processing.promptRestore.customizedBeforeRestore !== 'Customized') {
 if (!processing.promptRestore.matchesOriginal || processing.promptRestore.defaultAfterRestore !== 'Default') {
   throw new Error('Restore default did not reset an unsaved prompt draft after a successful save')
 }
-if (processing.trace.panelCount !== 2) throw new Error('Both processing debug trace panels must be rendered')
-if (processing.trace.preprocessingCallCount !== 1) throw new Error('The fixture preprocessing call is missing')
-if (
-  !processing.trace.preprocessingOutput?.includes('"candidates"')
-  || !processing.trace.preprocessingOutput?.includes('知识加工链路')
-) {
-  throw new Error('The preprocessing model output is not visible in the debug trace')
-}
-if (processing.trace.preprocessingOutput.includes('"locations"') || /L\d{6}/.test(processing.trace.preprocessingOutput)) {
-  throw new Error('The preprocessing trace exposes internal evidence coordinates')
-}
+if (processing.trace.panelCount !== 1) throw new Error('The processing debug trace panel must be rendered')
 if (processing.trace.maintenanceEventCount !== 3) {
   throw new Error(`Expected 3 safe maintenance trace events, got ${processing.trace.maintenanceEventCount}`)
 }
-for (const requiredCopy of ['模型输出可能复述原始材料', '模型轮次 1', '读取原始观察证据', '完成待办事项']) {
+for (const requiredCopy of ['模型轮次 1', '读取原始观察证据', '完成待办事项']) {
   if (!processing.trace.bodyText.includes(requiredCopy)) {
     throw new Error(`Knowledge processing trace is missing: ${requiredCopy}`)
   }
@@ -626,8 +600,6 @@ const processingImage = await readFile(join(dirname(capturePath), 'knowledge-pro
 if (processingImage.length === 0) throw new Error('Knowledge processing screenshot is empty')
 const stageDebugImage = await readFile(join(dirname(capturePath), 'knowledge-processing-stage-debug.png'))
 if (stageDebugImage.length === 0) throw new Error('Knowledge processing stage-debug screenshot is empty')
-const preprocessingTraceImage = await readFile(join(dirname(capturePath), 'knowledge-processing-trace-preprocessing.png'))
-if (preprocessingTraceImage.length === 0) throw new Error('Preprocessing trace screenshot is empty')
 const maintenanceTraceImage = await readFile(join(dirname(capturePath), 'knowledge-processing-trace-maintenance.png'))
 if (maintenanceTraceImage.length === 0) throw new Error('Maintenance trace screenshot is empty')
 const knowledgeImage = await readFile(join(dirname(capturePath), 'knowledge.png'))

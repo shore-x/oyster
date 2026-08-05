@@ -71,25 +71,16 @@ function runInput(overrides: Partial<KnowledgeAgentRunInput> = {}): KnowledgeAge
       streamFn: (() => { throw new Error('test must supply a Model Runtime') }) as StreamFn
     },
     systemPrompt: 'Maintain knowledge using only authorized tools.',
-    statementCandidates: [],
-    observationLines: [
+    evidenceLines: [
       'Project P uses the local database for durable statements.',
       'The user says the database is SQLite, not a graph database.'
     ],
-    observationFormatVersion: 'test-v1',
+    evidenceFormatVersion: 'test-v1',
     sourceRef: 'observation:test:1',
     contributionRunRef: 'test-run:1',
     attention: 'Track local names and their referents.',
     signal: new AbortController().signal,
     ...overrides
-  }
-}
-
-function candidate(expression = 'database') {
-  return {
-    expression,
-    question: `What does ${expression} denote in Project P?`,
-    locations: [{ line: 1, offset: 0 }]
   }
 }
 
@@ -185,21 +176,20 @@ function waitingRuntime(model: Model<Api>): ModelRuntime {
 }
 
 describe('PiKnowledgeMaintenanceAgent', () => {
-  it('binds preprocessing Candidates as ordinary Todos without eagerly loading them into context', async () => {
+  it('binds Host initial Todos without eagerly loading them into context', async () => {
     const traces: KnowledgeAgentTraceEvent[] = []
     const runtime = fauxRuntime([
       (context) => {
         expect(context.tools?.map((tool) => tool.name)).toEqual(TOOL_NAMES)
         expect(contextText(context)).not.toContain('T000001')
-        expect(contextText(context)).not.toContain('What does database denote')
+        expect(contextText(context)).not.toContain('Investigate database')
         expect(contextText(context)).not.toContain('The user says the database is SQLite')
         return fauxAssistantMessage(fauxToolCall('list_todos', {}), { stopReason: 'toolUse' })
       },
       (context) => {
         const todoList = textContent(lastToolResult(context))
         expect(todoList).toContain('T000001 [pending]')
-        expect(todoList).toContain('Investigate the observed name or expression: database')
-        expect(todoList).toContain('Evidence starting locations: L000001:C0')
+        expect(todoList).toContain('Investigate database at L000001:C0')
         return fauxAssistantMessage(
           fauxToolCall('read_evidence', { line: 1, offset: 0, limit: 1_000 }),
           { stopReason: 'toolUse' }
@@ -217,7 +207,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
 
     const result = await new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
       runtime: runtime.runtime,
-      statementCandidates: [candidate()],
+      initialTodos: ['Investigate database at L000001:C0'],
       onTrace: (event) => traces.push(event)
     }))
 
@@ -322,7 +312,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
 
     const result = await new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
       runtime: runtime.runtime,
-      statementCandidates: [candidate()]
+      initialTodos: ['Inspect the evidence']
     }))
 
     expect(result.contribution.statements).toEqual([{ title: 'A', content: 'Current.' }])
@@ -394,7 +384,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
 
     await new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
       runtime: runtime.runtime,
-      observationLines: ['A😀B']
+      evidenceLines: ['A😀B']
     }))
   })
 
@@ -445,7 +435,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
 
     const result = await new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
       runtime,
-      statementCandidates: [candidate()]
+      initialTodos: ['Inspect the evidence']
     }))
 
     expect(normalCalls).toBe(5)
@@ -546,19 +536,6 @@ describe('PiKnowledgeMaintenanceAgent', () => {
 
     expect(supported.reasoningCalls).toEqual(['high'])
     expect(unsupported.reasoningCalls).toEqual([undefined])
-  })
-
-  it('rejects invalid Candidate locations before binding initial Todos', async () => {
-    const prepared = fauxRuntime([fauxAssistantMessage('Finished.')])
-    await expect(new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
-      runtime: prepared.runtime,
-      statementCandidates: [{
-        expression: 'database',
-        question: 'What does it mean?',
-        locations: [{ line: 99, offset: 0 }]
-      }]
-    }))).rejects.toThrow('证据位置无效')
-    expect(prepared.callCount()).toBe(0)
   })
 
   it('surfaces model runtime errors as connection failures', async () => {

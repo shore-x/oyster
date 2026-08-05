@@ -8,13 +8,10 @@ import type {
   KnowledgeMaintenanceResult,
   KnowledgeProcessingDebugTrace,
   KnowledgeProcessingSnapshot,
-  ObservationPreprocessingResult,
   ProcessingDebugTraceOrigin,
   ProcessingStageId,
   RunKnowledgeFullChainInput,
-  RunSessionPreprocessorInput,
   RunKnowledgeMaintenanceInput,
-  RunObservationPreprocessorInput,
   SaveProcessingStageInput
 } from '../../shared/knowledge-processing'
 
@@ -43,7 +40,6 @@ export function createKnowledgeProcessingController() {
   const [pendingStageIds, setPendingStageIds] = createSignal<ProcessingStageId[]>([])
   const [savingStageIds, setSavingStageIds] = createSignal<ProcessingStageId[]>([])
   const [error, setError] = createSignal<string>()
-  const [preprocessingResult, setPreprocessingResult] = createSignal<ObservationPreprocessingResult>()
   const [maintenanceResult, setMaintenanceResult] = createSignal<KnowledgeMaintenanceResult>()
   const [availableSessions, setAvailableSessions] = createSignal<AvailableSessionSummary[]>([])
   const [sessionsLoading, setSessionsLoading] = createSignal(true)
@@ -88,7 +84,6 @@ export function createKnowledgeProcessingController() {
   function invalidateInputResults(): void {
     const currentTrace = snapshot().debugTraces.find((trace) => trace.origin === 'stage_debug')
     setHiddenStageDebugTraceId(currentTrace?.id)
-    setPreprocessingResult(undefined)
     setMaintenanceResult(undefined)
   }
 
@@ -201,39 +196,6 @@ export function createKnowledgeProcessingController() {
     }
   }
 
-  async function runPreprocessor(
-    run: () => Promise<ObservationPreprocessingResult | undefined>
-  ): Promise<void> {
-    const stageId = 'observation_preprocessor' as const
-    try {
-      markPending(stageId, true)
-      setError(undefined)
-      const result = await run()
-      if (result) {
-        setPreprocessingResult(result)
-        setMaintenanceResult(undefined)
-      }
-    } catch (cause) {
-      setError(errorMessage(cause))
-    } finally {
-      markPending(stageId, false)
-    }
-  }
-
-  async function runObservationPreprocessor(input: RunObservationPreprocessorInput): Promise<void> {
-    await runPreprocessor(
-      () => window.oyster.knowledgeProcessing.runObservationPreprocessor(input)
-    )
-  }
-
-  async function runSessionPreprocessor(
-    input: RunSessionPreprocessorInput
-  ): Promise<void> {
-    await runPreprocessor(
-      () => window.oyster.knowledgeProcessing.runSessionPreprocessor(input)
-    )
-  }
-
   async function runKnowledgeMaintenance(input: RunKnowledgeMaintenanceInput): Promise<void> {
     const stageId = 'knowledge_maintenance_agent' as const
     try {
@@ -315,7 +277,6 @@ export function createKnowledgeProcessingController() {
     snapshot,
     isSaving: (stageId: ProcessingStageId) => savingStageIds().includes(stageId),
     error,
-    preprocessingResult,
     maintenanceResult,
     availableSessions,
     sessionsLoading,
@@ -333,8 +294,6 @@ export function createKnowledgeProcessingController() {
     resetFullChainResult,
     isRunning,
     saveStage,
-    runObservationPreprocessor,
-    runSessionPreprocessor,
     runKnowledgeMaintenance,
     cancelRun,
     loadAvailableSessions,

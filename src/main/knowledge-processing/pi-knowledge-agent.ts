@@ -29,8 +29,7 @@ import {
   formatEvidenceReadPage,
   MAX_EVIDENCE_READ_LIMIT,
   observationLineAddress,
-  readEvidencePage,
-  splitsSurrogatePair
+  readEvidencePage
 } from '../observation/evidence-location'
 import {
   type KnowledgeStatement,
@@ -44,10 +43,6 @@ import type {
   KnowledgeReader,
   KnowledgeStatementRecord
 } from './model'
-import {
-  MAX_STATEMENT_CANDIDATE_EXPRESSION_LENGTH,
-  MAX_STATEMENT_CANDIDATE_QUESTION_LENGTH
-} from './statement-candidate-batch'
 import { KnowledgeContributionWorkspace } from './knowledge-contribution-workspace'
 import {
   contributionStatementParameters,
@@ -284,81 +279,18 @@ function validateRunInput(input: KnowledgeAgentRunInput): void {
   if (input.reasoningEffort && !REASONING_EFFORTS.includes(input.reasoningEffort)) {
     throw new Error('思考强度无效')
   }
-  if (!Array.isArray(input.observationLines)) throw new Error('Observation 行数据无效')
+  if (!Array.isArray(input.evidenceLines)) throw new Error('Raw Evidence 行数据无效')
   if (
-    typeof input.observationFormatVersion !== 'string'
-    || !input.observationFormatVersion.trim()
-    || input.observationFormatVersion.length > 128
+    typeof input.evidenceFormatVersion !== 'string'
+    || !input.evidenceFormatVersion.trim()
+    || input.evidenceFormatVersion.length > 128
   ) {
-    throw new Error('Observation View 版本无效')
+    throw new Error('Raw Evidence 格式版本无效')
   }
-  if (input.observationLines.some((line) => typeof line !== 'string' || /[\r\n]/.test(line))) {
-    throw new Error('Observation 必须按单行数组提供')
-  }
-  if (!Array.isArray(input.statementCandidates)) throw new Error('Statement 候选清单无效')
-  for (const [candidateIndex, candidate] of input.statementCandidates.entries()) {
-    if (
-      !candidate
-      || typeof candidate.expression !== 'string'
-      || !candidate.expression.trim()
-      || candidate.expression.trim().length > MAX_STATEMENT_CANDIDATE_EXPRESSION_LENGTH
-      || typeof candidate.question !== 'string'
-      || !candidate.question.trim()
-      || candidate.question.trim().length > MAX_STATEMENT_CANDIDATE_QUESTION_LENGTH
-      || !Array.isArray(candidate.locations)
-      || !candidate.locations.length
-    ) {
-      throw new Error(`Statement 候选 ${candidateIndex + 1} 无效`)
-    }
-    for (const location of candidate.locations) {
-      const line = Number(location?.line)
-      const offset = Number(location?.offset)
-      const sourceLine = Number.isSafeInteger(line) ? input.observationLines[line - 1] : undefined
-      if (
-        !Number.isSafeInteger(line)
-        || !Number.isSafeInteger(offset)
-        || line < 1
-        || offset < 0
-        || sourceLine === undefined
-        || offset > sourceLine.length
-        || splitsSurrogatePair(sourceLine, offset)
-      ) {
-        throw new Error(`Statement 候选 ${candidateIndex + 1} 的证据位置无效`)
-      }
-    }
+  if (input.evidenceLines.some((line) => typeof line !== 'string' || /[\r\n]/.test(line))) {
+    throw new Error('Raw Evidence 必须按单行数组提供')
   }
   input.signal.throwIfAborted()
-}
-
-function workspaceEvidenceLocation(
-  input: KnowledgeAgentRunInput,
-  location: { line: number; offset: number }
-): string {
-  const sourceLine = input.observationLines[location.line - 1]
-  if (
-    !Number.isSafeInteger(location.line)
-    || !Number.isSafeInteger(location.offset)
-    || location.line < 1
-    || location.offset < 0
-    || sourceLine === undefined
-    || location.offset > sourceLine.length
-    || splitsSurrogatePair(sourceLine, location.offset)
-  ) {
-    throw new Error('候选证据位置不属于当前 Observation Workspace')
-  }
-  return formatEvidenceLocation(location)
-}
-
-function candidateTodos(input: KnowledgeAgentRunInput): string[] {
-  return input.statementCandidates.map((candidate) => ({
-    expression: candidate.expression.trim(),
-    question: candidate.question.trim(),
-    evidenceLocations: candidate.locations.map((location) => workspaceEvidenceLocation(input, location))
-  })).map((candidate) => [
-    `Investigate the observed name or expression: ${candidate.expression}`,
-    `Question: ${candidate.question}`,
-    `Evidence starting locations: ${candidate.evidenceLocations.join(', ')}`
-  ].join('\n'))
 }
 
 function contributionDraftPageText(page: ReturnType<KnowledgeContributionWorkspace['list']>): string {
@@ -374,14 +306,14 @@ function contributionDraftPageText(page: ReturnType<KnowledgeContributionWorkspa
 }
 
 function taskPrompt(input: KnowledgeAgentRunInput): string {
-  const lastLine = input.observationLines.length
+  const lastLine = input.evidenceLines.length
   const readableRange = lastLine > 0
     ? `${observationLineAddress(1)}-${observationLineAddress(lastLine)}`
     : 'No readable lines'
   return [
     'Maintain knowledge in this authorized workspace. The Host owns a general-purpose Todo list and a run-local Contribution Draft. Begin with list_todos, use the provided tools to complete the work, and follow the System Prompt language policy.',
-    `Observation sourceRef: ${input.sourceRef}`,
-    `Observation view format: ${input.observationFormatVersion}`,
+    `Raw Evidence sourceRef: ${input.sourceRef}`,
+    `Raw Evidence format: ${input.evidenceFormatVersion}`,
     `Range available to read_evidence: ${readableRange}. Evidence locations use one-based line and zero-based UTF-16 offset; limit is also measured in UTF-16 code units and must be at least 2 (maximum applied limit ${MAX_EVIDENCE_READ_LIMIT}). Always set a bounded limit and copy the returned Next location when more detail is needed.`,
     'Tool calls may be repeated when useful. Keep each read bounded and use returned continuation locations to inspect more material progressively.',
     input.attention?.trim() ? `Attention:\n${input.attention.trim()}` : undefined
@@ -402,7 +334,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
     let activeCompactionCall: number | undefined
 
     const agentRuntime = createPiAgentRuntime({
-      initialTodos: [...candidateTodos(input), ...(input.initialTodos ?? [])]
+      initialTodos: input.initialTodos ?? []
     })
 
     const reportTrace = (event: Parameters<NonNullable<KnowledgeAgentRunInput['onTrace']>>[0]): void => {
@@ -558,7 +490,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         execute: async (_toolCallId, parameters, signal) => {
           signal?.throwIfAborted()
           const page = readEvidencePage(
-            input.observationLines,
+            input.evidenceLines,
             { line: parameters.line, offset: parameters.offset },
             parameters.limit
           )

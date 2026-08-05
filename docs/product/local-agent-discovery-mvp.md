@@ -112,7 +112,7 @@ Raw Evidence 表示具有明确来源身份和版本身份、可由 Source Adapt
 - Canonical Activity 与消息/工具级解析；
 - turn/session 级实时 Connector；
 - 项目身份合并和跨项目关系；
-- 自动调度可用外部证据进入 Observation Preprocessor、Knowledge Maintenance Agent 或面向 Artifact 的 Projection 活动；
+- 自动调度可用外部证据进入 Knowledge Maintenance Agent 或面向 Artifact 的 Projection 活动；
 - Embedding、知识搜索、MCP 和 Context Packet；
 - 十万文件级分页、Worker 隔离和 byte-offset 增量读取；
 - 第三方 Connector 加载协议。

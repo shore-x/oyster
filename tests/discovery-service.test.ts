@@ -86,11 +86,11 @@ describe('DiscoveryService', () => {
       contentHash: createHash('sha256').update(sourceContent).digest('hex'),
       sizeBytes: selected.sizeBytes
     })
-    expect(evidence.observationView.rawLines).toContainEqual(expect.stringContaining('"sessionId":"one"'))
-    expect(evidence.observationView).toMatchObject({
-      formatVersion: 'claude-jsonl-v3',
-      rawLines: expect.any(Array),
-      units: expect.any(Array)
+    expect(evidence.rawEvidence.lines).toContainEqual(expect.stringContaining('"sessionId":"one"'))
+    expect(evidence.rawEvidence).toMatchObject({
+      formatVersion: 'claude-jsonl-raw-v1',
+      lines: expect.any(Array),
+      skillHints: expect.any(Array)
     })
     await expect(service.readAvailableSession({
       sourceRecordId: selected.sourceRecordId,
