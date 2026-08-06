@@ -19,13 +19,11 @@ import type { PiChatAgentRunInput, ChatKnowledgeStore } from './model'
 import { chatMessageView, serializableChatValue } from './chat-message-view'
 import {
   chatAgentToolDefinition,
+  readKnowledgeParameters,
+  searchKnowledgeParameters,
   spawnAgentParameters,
   upsertKnowledgeParameters
 } from './chat-tool-catalog'
-import {
-  readKnowledgeParameters,
-  searchKnowledgeParameters
-} from '../knowledge-processing/knowledge-maintenance-tool-catalog'
 import { createArtifactGitEnvironment } from '../artifacts/git-runtime'
 import { chatAgentSystemPrompt } from './prompt'
 import { appendChatAgentRun } from './pi-chat-session-repository'

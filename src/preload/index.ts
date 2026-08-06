@@ -91,15 +91,7 @@ const knowledgeProcessing: KnowledgeProcessingApi = {
     knowledgeProcessingChannels.readFullChainRun,
     runId
   ),
-  importFullChainRun: (runId) => ipcRenderer.invoke(
-    knowledgeProcessingChannels.importFullChainRun,
-    runId
-  ),
   cancelFullChain: () => ipcRenderer.invoke(knowledgeProcessingChannels.cancelFullChain),
-  discardSandbox: (sandboxId) => ipcRenderer.invoke(
-    knowledgeProcessingChannels.discardSandbox,
-    sandboxId
-  ),
   cancelRun: (stageId) => ipcRenderer.invoke(knowledgeProcessingChannels.cancelRun, stageId),
   subscribe: (listener) => {
     const handler = (

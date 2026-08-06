@@ -8,19 +8,16 @@ import type {
   ReasoningEffort
 } from './ai-backends'
 import type { AvailableSessionSummary } from './discovery'
-import type {
-  KnowledgeCommitResult,
-  KnowledgeContributionDraft,
-  KnowledgeStatement
-} from './knowledge'
+import type { KnowledgeStatement } from './knowledge'
 import type {
   AgentRunRecord,
-  AgentTodo,
-  AgentTodoCounts,
   SerializableJsonValue
 } from './agent-runtime'
 
-export const PROCESSING_STAGE_IDS = ['knowledge_maintenance_agent'] as const
+export const PROCESSING_STAGE_IDS = [
+  'knowledge_maintenance_agent',
+  'knowledge_reviewer_agent'
+] as const
 export type ProcessingStageId = (typeof PROCESSING_STAGE_IDS)[number]
 export type ProcessingRuntime = 'pi_agent_core'
 
@@ -73,16 +70,9 @@ export interface KnowledgeProcessingSnapshot {
 
 export type ProcessingDebugTraceOrigin = 'stage_debug' | 'full_chain'
 
-export interface KnowledgeMaintenanceWorkspaceStatus {
-  todos: AgentTodoCounts
-  draftStatementCount: number
-}
-
-/** Processing-specific placement of a generic Agent run and its separate workspace state. */
 export interface KnowledgeProcessingDebugTrace {
   origin: ProcessingDebugTraceOrigin
   run: AgentRunRecord
-  workspace?: KnowledgeMaintenanceWorkspaceStatus
 }
 
 export interface SaveProcessingStageInput {
@@ -116,35 +106,53 @@ export interface ProcessingExecutionSummary {
   reasoningEffort?: ReasoningEffort
 }
 
+export interface CollaborationWorkspaceView {
+  id: string
+  worktreePath: string
+  branchName: string
+  targetBranch: string
+  baseRevision: string
+  workOrderRevision: string
+}
+
 export interface KnowledgeMaintenanceResult {
   stageId: 'knowledge_maintenance_agent'
   sourceRef: string
-  evidenceSegmentCount: number
-  contribution: KnowledgeContributionDraft
-  todos: AgentTodo[]
-  /** References the generic Runtime observation without embedding it in the business result. */
+  activitySegmentCount: number
+  workspace: CollaborationWorkspaceView
+  previousRevision: string
+  revision: string
+  changedPaths: string[]
   agentRunId: string
   durationMs: number
   completedAt: string
   execution: ProcessingExecutionSummary
 }
 
-export interface KnowledgeSandboxView {
-  id: string
-  baselineCreatedAt: string
+export interface KnowledgeReviewResult {
+  stageId: 'knowledge_reviewer_agent'
+  outcome: 'changes_requested' | 'approved'
+  reviewedRevision: string
+  revision: string
+  changedPaths: string[]
+  markerPaths: string[]
+  agentRunId: string
+  durationMs: number
+  completedAt: string
+  execution: ProcessingExecutionSummary
 }
 
 export interface KnowledgeFullChainResult {
   runId: string
   session: AvailableSessionSummary
-  sandbox: KnowledgeSandboxView
   sourceRef: string
-  maintenance: KnowledgeMaintenanceResult
-  commit: KnowledgeCommitResult
-  knowledge: {
-    writtenStatementTitles: string[]
-    statements: KnowledgeStatement[]
-  }
+  workspace: CollaborationWorkspaceView
+  maintenanceRuns: KnowledgeMaintenanceResult[]
+  reviewRuns: KnowledgeReviewResult[]
+  approvedRevision: string
+  changedPaths: string[]
+  knowledge: KnowledgeStatement[]
+  artifactPaths: string[]
   durationMs: number
   completedAt: string
 }
@@ -157,7 +165,7 @@ export interface KnowledgeFullChainStageSnapshot {
 }
 
 export interface KnowledgeFullChainRunRecord {
-  formatVersion: 5
+  formatVersion: 6
   runId: string
   status: Exclude<AgentRunRecord['status'], 'running'>
   startedAt: string
@@ -168,6 +176,7 @@ export interface KnowledgeFullChainRunRecord {
   session?: AvailableSessionSummary
   configuration: {
     maintainer: KnowledgeFullChainStageSnapshot
+    reviewer: KnowledgeFullChainStageSnapshot
   }
   agentRuns: AgentRunRecord[]
   result?: KnowledgeFullChainResult
@@ -201,9 +210,7 @@ export interface KnowledgeProcessingApi {
   runFullChain(input: RunKnowledgeFullChainInput): Promise<KnowledgeFullChainResult | undefined>
   listFullChainRuns(): Promise<KnowledgeFullChainRunSummary[]>
   readFullChainRun(runId: string): Promise<KnowledgeFullChainRunRecord | undefined>
-  importFullChainRun(runId: string): Promise<KnowledgeCommitResult>
   cancelFullChain(): Promise<void>
-  discardSandbox(sandboxId: string): Promise<void>
   cancelRun(stageId: ProcessingStageId): Promise<void>
   subscribe(listener: (snapshot: KnowledgeProcessingSnapshot) => void): () => void
 }

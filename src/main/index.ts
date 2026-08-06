@@ -27,8 +27,7 @@ import {
   FIXTURE_SESSION_CONTENT
 } from './fixture-state'
 import {
-  createFixtureKnowledgeProcessingService,
-  FixtureKnowledgeAgentRuntime
+  createFixtureKnowledgeProcessingService
 } from './knowledge-processing/fixture'
 import {
   KnowledgeFullChainService
@@ -36,9 +35,13 @@ import {
 import { SqliteKnowledgeFullChainRunRepository } from './knowledge-processing/full-chain-run-repository'
 import { registerKnowledgeProcessingIpc } from './knowledge-processing/ipc'
 import { KnowledgeProcessingService } from './knowledge-processing/knowledge-processing-service'
-import { PiKnowledgeMaintenanceAgent } from './knowledge-processing/pi-knowledge-agent'
+import {
+  PiKnowledgeMaintainerAgent,
+  PiKnowledgeReviewerAgent
+} from './knowledge-processing/pi-collaboration-agents'
+import { CollaborationRepository } from './knowledge-processing/collaboration-repository'
 import { JsonKnowledgeProcessingRepository } from './knowledge-processing/repository'
-import { SqliteKnowledgeStoreManager } from './knowledge-store/knowledge-store-manager'
+import { SqliteKnowledgeStore } from './knowledge-store/sqlite-knowledge-store'
 import { registerKnowledgeIpc } from './knowledge-store/ipc'
 import { ChatAgentService } from './chat/chat-agent-service'
 import { JsonChatConfigurationRepository } from './chat/chat-configuration-repository'
@@ -56,7 +59,7 @@ let aiBackendService: AiBackendService | undefined
 let knowledgeProcessingService: KnowledgeProcessingService | undefined
 let knowledgeFullChainService: KnowledgeFullChainService | undefined
 let knowledgeFullChainRunRepository: SqliteKnowledgeFullChainRunRepository | undefined
-let knowledgeStoreManager: SqliteKnowledgeStoreManager | undefined
+let knowledgeStore: SqliteKnowledgeStore | undefined
 let chatAgentService: ChatAgentService | undefined
 let chatSessionRepository: PiChatSessionRepository | undefined
 
@@ -177,13 +180,15 @@ function createManagedSkillService(repository: ArtifactRepository): ManagedSkill
 
 function createKnowledgeProcessingService(
   aiBackend: AiBackendService,
-  stores: SqliteKnowledgeStoreManager
+  collaborations: CollaborationRepository
 ): KnowledgeProcessingService {
-  if (fixtureMode()) return createFixtureKnowledgeProcessingService(aiBackend)
+  if (fixtureMode()) return createFixtureKnowledgeProcessingService(aiBackend, collaborations)
   return new KnowledgeProcessingService(
     new JsonKnowledgeProcessingRepository(join(app.getPath('userData'), 'knowledge-processing.json')),
     aiBackend,
-    new PiKnowledgeMaintenanceAgent(stores.production)
+    collaborations,
+    new PiKnowledgeMaintainerAgent(),
+    new PiKnowledgeReviewerAgent()
   )
 }
 
@@ -823,14 +828,10 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
         await new Promise((resolve) => requestAnimationFrame(resolve))
         const traceExplorerExists = Boolean(page.querySelector('[data-testid="agent-run-view"]'))
         const traceEventCount = page.querySelectorAll('.agent-trace-message, .agent-trace-tool, .agent-trace-model-activity').length
-        page.querySelector('.agent-trace-message--assistant button')?.click()
-        await new Promise((resolve) => requestAnimationFrame(resolve))
-        const modelOutput = page.querySelector('[data-testid="agent-model-call-output"]')?.textContent
-        const modelContext = page.querySelector('[data-testid="agent-model-call-context"]')?.textContent
-        const systemPrompt = page.querySelector('[data-testid="agent-model-call-system-prompt"]')?.textContent
         const tool = page.querySelector('.agent-trace-tool')
         if (tool) tool.open = true
         await new Promise((resolve) => requestAnimationFrame(resolve))
+        const toolText = tool?.textContent
         const toolInput = tool?.querySelectorAll('pre')[0]?.textContent
         const toolOutput = tool?.querySelectorAll('pre')[1]?.textContent
         page.querySelector('[data-testid="full-chain-detail-back"]')?.click()
@@ -838,36 +839,34 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
         page.querySelector('[data-testid="open-full-chain-result"]')?.click()
         await new Promise((resolve) => requestAnimationFrame(resolve))
         const resultDetailExists = Boolean(page.querySelector('[data-testid="full-chain-result-detail"]'))
-        const todoCount = page.querySelectorAll('[data-testid="agent-todo-list"] .statement-candidate').length
-        const completedTodoCount = page.querySelectorAll('[data-testid="agent-todo-list"] .statement-candidate--resolved').length
-        const statementCount = page.querySelectorAll('.knowledge-browser--sandbox .knowledge-browser__item').length
-        const sandboxLink = page.querySelector('.knowledge-browser--sandbox .knowledge-statement-link > a')
-        sandboxLink?.dispatchEvent(new MouseEvent('mouseenter'))
+        const statementCount = page.querySelectorAll('.knowledge-browser--collaboration .knowledge-browser__item').length
+        const gitResultText = page.querySelector('[data-testid="full-chain-git-result"]')?.textContent
+        const changedPathCount = page.querySelectorAll('.chain-test__candidates code').length
+        const collaborationInitialTitle = page.querySelector('.knowledge-browser--collaboration [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
+        const collaborationLink = page.querySelector('.knowledge-browser--collaboration .knowledge-statement-link > a')
+        collaborationLink?.dispatchEvent(new MouseEvent('mouseenter'))
         let linkDeadline = Date.now() + 2_000
         while (
           document.querySelector('.knowledge-statement-preview > span')?.textContent?.includes('正在读取')
           && Date.now() < linkDeadline
         ) await new Promise((resolve) => setTimeout(resolve, 25))
-        const sandboxLinkLabel = sandboxLink?.textContent?.trim()
-        const sandboxLinkPreview = document.querySelector('.knowledge-statement-preview')?.textContent?.trim()
-        sandboxLink?.click()
+        const collaborationLinkLabel = collaborationLink?.textContent?.trim()
+        const collaborationLinkPreview = document.querySelector('.knowledge-statement-preview')?.textContent?.trim()
+        collaborationLink?.click()
         linkDeadline = Date.now() + 2_000
-        while (
-          page.querySelector('.knowledge-browser--sandbox [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim() !== 'Knowledge Maintenance Agent'
-          && Date.now() < linkDeadline
-        ) await new Promise((resolve) => setTimeout(resolve, 25))
-        const sandboxLinkedTitle = page.querySelector('.knowledge-browser--sandbox [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
-        const sandboxBack = page.querySelector('.knowledge-browser--sandbox [data-testid="statement-nav-back"]')
-        const sandboxBackAvailable = sandboxBack?.disabled === false
-        sandboxBack?.click()
         await new Promise((resolve) => requestAnimationFrame(resolve))
-        const sandboxTitleAfterBack = page.querySelector('.knowledge-browser--sandbox [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
-        const sandboxOverflowAfterBack = document.documentElement.scrollWidth > document.documentElement.clientWidth
-        const sandboxForward = page.querySelector('.knowledge-browser--sandbox [data-testid="statement-nav-forward"]')
-        const sandboxForwardAvailable = sandboxForward?.disabled === false
-        sandboxForward?.click()
+        const collaborationLinkedTitle = page.querySelector('.knowledge-browser--collaboration [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
+        const collaborationBack = page.querySelector('.knowledge-browser--collaboration [data-testid="statement-nav-back"]')
+        const collaborationBackAvailable = collaborationBack?.disabled === false
+        collaborationBack?.click()
         await new Promise((resolve) => requestAnimationFrame(resolve))
-        const sandboxTitleAfterForward = page.querySelector('.knowledge-browser--sandbox [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
+        const collaborationTitleAfterBack = page.querySelector('.knowledge-browser--collaboration [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
+        const collaborationOverflowAfterBack = document.documentElement.scrollWidth > document.documentElement.clientWidth
+        const collaborationForward = page.querySelector('.knowledge-browser--collaboration [data-testid="statement-nav-forward"]')
+        const collaborationForwardAvailable = collaborationForward?.disabled === false
+        collaborationForward?.click()
+        await new Promise((resolve) => requestAnimationFrame(resolve))
+        const collaborationTitleAfterForward = page.querySelector('.knowledge-browser--collaboration [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
         const bodyText = page.innerText
         page.querySelector('[data-testid="full-chain-result-back"]')?.click()
         await new Promise((resolve) => requestAnimationFrame(resolve))
@@ -878,23 +877,22 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
           summaryStatementCount,
           traceExplorerExists,
           traceEventCount,
-          modelOutput,
-          modelContext,
-          systemPrompt,
+          toolText,
           toolInput,
           toolOutput,
           resultDetailExists,
-          todoCount,
-          completedTodoCount,
           statementCount,
-          sandboxLinkLabel,
-          sandboxLinkPreview,
-          sandboxLinkedTitle,
-          sandboxBackAvailable,
-          sandboxTitleAfterBack,
-          sandboxOverflowAfterBack,
-          sandboxForwardAvailable,
-          sandboxTitleAfterForward,
+          gitResultText,
+          changedPathCount,
+          collaborationInitialTitle,
+          collaborationLinkLabel,
+          collaborationLinkPreview,
+          collaborationLinkedTitle,
+          collaborationBackAvailable,
+          collaborationTitleAfterBack,
+          collaborationOverflowAfterBack,
+          collaborationForwardAvailable,
+          collaborationTitleAfterForward,
           returnedToOverview: Boolean(page.querySelector('[data-testid="full-chain-session-select"]')),
           bodyText
         }
@@ -920,25 +918,14 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const resultDetailExists = Boolean(page.querySelector('[data-testid="history-run-result-detail"]'))
     const sharedBrowserExists = Boolean(page.querySelector('[data-testid="history-run-result-detail"] [data-testid="knowledge-statement-browser"]'))
     const importButton = page.querySelector('[data-testid="import-history-run"]')
-    importButton?.click()
-    deadline = Date.now() + 2_000
-    while (!page.querySelector('[data-testid="full-chain-import-result"]') && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 25))
-    }
-    const importNotice = page.querySelector('[data-testid="full-chain-import-result"]')?.textContent?.trim()
     const historyLink = page.querySelector('[data-testid="history-run-result-detail"] .knowledge-statement-link > a')
+    const historyInitialTitle = page.querySelector('[data-testid="history-run-result-detail"] [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
     historyLink?.click()
-    deadline = Date.now() + 2_000
-    while (
-      page.querySelector('[data-testid="history-run-result-detail"] [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim() !== 'Knowledge Maintenance Agent'
-      && Date.now() < deadline
-    ) await new Promise((resolve) => setTimeout(resolve, 25))
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const historyLinkedTitle = page.querySelector('[data-testid="history-run-result-detail"] [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
     page.querySelector('[data-testid="history-run-result-detail"] [data-testid="statement-nav-back"]')?.click()
-    deadline = Date.now() + 2_000
-    while (
-      page.querySelector('[data-testid="history-run-result-detail"] [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim() !== '知识加工链路'
-      && Date.now() < deadline
-    ) await new Promise((resolve) => setTimeout(resolve, 25))
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const historyTitleAfterBack = page.querySelector('[data-testid="history-run-result-detail"] [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
     const overflowAfterStatementBack = document.documentElement.scrollWidth > document.documentElement.clientWidth
     page.querySelector('[data-testid="history-run-result-back"]')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
@@ -950,15 +937,8 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const activityDetailExists = Boolean(page.querySelector('[data-testid="history-run-activity-detail"]'))
     const traceEventCount = page.querySelectorAll('[data-testid="history-run-activity-detail"] .agent-trace-message, [data-testid="history-run-activity-detail"] .agent-trace-tool, [data-testid="history-run-activity-detail"] .agent-trace-model-activity').length
     const activityDetail = page.querySelector('[data-testid="history-run-activity-detail"]')
-    const activityHeightBeforeInspector = activityDetail?.getBoundingClientRect().height
-    page.querySelector('[data-testid="history-run-activity-detail"] .agent-trace-message--assistant button')?.click()
-    await new Promise((resolve) => requestAnimationFrame(resolve))
-    const activityInspector = page.querySelector('[data-testid="history-run-activity-detail"] [data-testid="agent-run-inspector"]')
-    const activityInspectorBounds = activityInspector?.getBoundingClientRect()
-    const activityInspectorPosition = activityInspector ? getComputedStyle(activityInspector).position : undefined
-    const activityHeightStable = Math.abs((activityDetail?.getBoundingClientRect().height ?? 0) - (activityHeightBeforeInspector ?? 0)) <= 1
     const traceText = page.querySelector('[data-testid="history-run-activity-detail"]')?.textContent
-    const contextText = page.querySelector('[data-testid="history-run-activity-detail"] [data-testid="agent-model-call-context"]')?.textContent
+    const runSelectorText = page.querySelector('.agent-run-collection__selector')?.textContent
     page.querySelector('[data-testid="history-run-activity-back"]')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
     return {
@@ -967,23 +947,19 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       resultDetailExists,
       sharedBrowserExists,
       importButtonExists: Boolean(importButton),
-      importNotice,
+      historyInitialTitle,
+      historyLinkedTitle,
+      historyTitleAfterBack,
       overflowAfterStatementBack,
       activityDetailExists,
       traceEventCount,
       traceText,
-      contextText,
-      inspectorPosition: activityInspectorPosition,
-      inspectorWithinViewport: Boolean(activityInspectorBounds
-        && activityInspectorBounds.top >= 52
-        && activityInspectorBounds.right <= window.innerWidth
-        && activityInspectorBounds.bottom <= window.innerHeight),
-      activityHeightStable,
+      runSelectorText,
       returnedToHistory: Boolean(page.querySelector('.processing-history__list'))
     }
   })()`)
-  const productionTitlesAfterHistoryImport = knowledgeStoreManager?.production
-    .listStatements()
+  const productionTitlesAfterProcessing = knowledgeStore
+    ?.listStatements()
     .map((statement) => statement.title)
     .sort()
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="processing-view-stage-debug"]').click()`)
@@ -1013,8 +989,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       buttonCount: buttons.length,
       sharedButtonCount: page.querySelectorAll('.ui-button').length,
       tabButtonCount: page.querySelectorAll('button[role="tab"]').length,
-      statementButtonCount: page.querySelectorAll('.sandbox-statement').length,
-      chainStatementButtonCount: page.querySelectorAll('.knowledge-browser--sandbox .knowledge-browser__item').length,
+      chainStatementButtonCount: page.querySelectorAll('.knowledge-browser--collaboration .knowledge-browser__item').length,
       buttonIconCount: buttons.filter((button) => button.querySelector('.ui-button__icon .ui-icon')?.childElementCount > 0).length,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
       bodyText: page.innerText
@@ -1053,13 +1028,13 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   const traceSemantics = await window.webContents.executeJavaScript(`(() => {
     const page = document.querySelector('[data-testid="page-knowledge-processing"]')
     const stageTraces = Array.from(page.querySelectorAll('.processing-stage [data-testid="processing-debug-trace"]'))
-    const workspace = page.querySelector('.processing-stage [data-testid="maintenance-workspace-status"]')
-    workspace?.scrollIntoView({ block: 'center' })
+    const result = page.querySelector('[data-testid="processing-result-knowledge_maintenance_agent"]')
+    result?.scrollIntoView({ block: 'center' })
     return {
       panelCount: stageTraces.length,
       maintenanceEventCount: page.querySelectorAll('.processing-stage .agent-trace-message, .processing-stage .agent-trace-tool, .processing-stage .agent-trace-model-activity').length,
       modelCallAction: Boolean(page.querySelector('.processing-stage .agent-trace-message--assistant button')),
-      workspaceValues: Array.from(workspace?.querySelectorAll('strong') ?? []).map((node) => node.textContent?.trim()),
+      resultText: result?.textContent,
       bodyText: page.innerText,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
     }
@@ -1134,7 +1109,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   const agentConfigurationSemantics = await window.webContents.executeJavaScript(`(async () => {
     const page = document.querySelector('[data-testid="page-agent-configuration"]')
     let deadline = Date.now() + 2_000
-    while (page.querySelectorAll('.agent-config-role').length < 2 && Date.now() < deadline) {
+    while (page.querySelectorAll('.agent-config-role').length < 3 && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
     const title = page.querySelector('h1')?.textContent?.trim()
@@ -1148,13 +1123,13 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       .map((node) => node.textContent?.trim())
     const toolsReadOnlyCopy = page.querySelector('[data-testid="agent-config-tools-panel"]')?.textContent?.trim()
     const schemaPanelCount = page.querySelectorAll('.agent-config-tool__schema').length
-    const searchSchemaDetails = page.querySelector('[data-testid="agent-tool-schema-search_knowledge"]')
-    const addTodosSchemaDetails = page.querySelector('[data-testid="agent-tool-schema-add_todos"]')
-    searchSchemaDetails.open = true
-    addTodosSchemaDetails.open = true
+    const activitySchemaDetails = page.querySelector('[data-testid="agent-tool-schema-read_activity"]')
+    const evidenceSchemaDetails = page.querySelector('[data-testid="agent-tool-schema-read_evidence"]')
+    if (activitySchemaDetails) activitySchemaDetails.open = true
+    if (evidenceSchemaDetails) evidenceSchemaDetails.open = true
     await new Promise((resolve) => requestAnimationFrame(resolve))
-    const searchToolSchema = JSON.parse(searchSchemaDetails.querySelector('pre')?.textContent || '{}')
-    const addTodosToolSchema = JSON.parse(addTodosSchemaDetails.querySelector('pre')?.textContent || '{}')
+    const activityToolSchema = JSON.parse(activitySchemaDetails?.querySelector('pre')?.textContent || '{}')
+    const evidenceToolSchema = JSON.parse(evidenceSchemaDetails?.querySelector('pre')?.textContent || '{}')
     const expandedSchemaCount = page.querySelectorAll('.agent-config-tool__schema[open]').length
 
     page.querySelector('[data-testid="agent-config-tab-prompt"]')?.click()
@@ -1197,6 +1172,14 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     ) await new Promise((resolve) => setTimeout(resolve, 25))
     const restoredBadge = page.querySelector('.agent-config-detail__header .processing-mode-badge')?.textContent?.trim()
     const restoredPrompt = page.querySelector('[data-testid="agent-default-prompt-editor"]')?.value
+
+    page.querySelector('[data-testid="agent-config-role-knowledge_reviewer_agent"]')?.click()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    page.querySelector('[data-testid="agent-config-tab-tools"]')?.click()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const reviewerToolNames = Array.from(page.querySelectorAll('.agent-config-tool code'))
+      .map((node) => node.textContent?.trim())
+    const reviewerSchemaPanelCount = page.querySelectorAll('.agent-config-tool__schema').length
 
     page.querySelector('[data-testid="agent-config-role-chat_agent"]')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
@@ -1242,14 +1225,16 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       toolsReadOnlyCopy,
       schemaPanelCount,
       expandedSchemaCount,
-      searchToolSchema,
-      addTodosToolSchema,
+      activityToolSchema,
+      evidenceToolSchema,
       builtInPrompt,
       configuredBadge,
       saveNotice,
       processingPromptUsesConfiguredDefault,
       restoredBadge,
       restoredMatchesBuiltIn: restoredPrompt === builtInPrompt,
+      reviewerToolNames,
+      reviewerSchemaPanelCount,
       chatRoleText,
       chatToolNames,
       chatSchemaPanelCount,
@@ -1263,7 +1248,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const page = document.querySelector('[data-testid="page-agent-configuration"]')
     page.querySelector('[data-testid="agent-config-tab-tools"]')?.click()
     requestAnimationFrame(() => {
-      const schema = page.querySelector('[data-testid="agent-tool-schema-add_todos"]')
+      const schema = page.querySelector('[data-testid="agent-tool-schema-read_activity"]')
       if (schema) schema.open = true
       window.scrollTo(0, 0)
       requestAnimationFrame(resolve)
@@ -1428,7 +1413,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
         fullChainRun: fullChainRunSemantics,
         history: {
           ...processingHistorySemantics,
-          productionTitles: productionTitlesAfterHistoryImport
+          productionTitles: productionTitlesAfterProcessing
         },
         ...processingSemantics,
         promptRestore: promptRestoreSemantics,
@@ -1496,16 +1481,19 @@ app.whenReady().then(async () => {
   )
   const managedSkillService = createManagedSkillService(artifactRepository)
   aiBackendService = createBackendService()
-  knowledgeStoreManager = await SqliteKnowledgeStoreManager.open(
-    join(app.getPath('userData'), 'knowledge-store')
-  )
+  const knowledgeStoreRoot = join(app.getPath('userData'), 'knowledge-store')
+  await mkdir(knowledgeStoreRoot, { recursive: true })
+  knowledgeStore = new SqliteKnowledgeStore(join(knowledgeStoreRoot, 'knowledge.sqlite'))
   knowledgeFullChainRunRepository = await SqliteKnowledgeFullChainRunRepository.open(
     join(app.getPath('userData'), 'knowledge-processing-history.sqlite')
   )
-  for (const sandbox of await knowledgeStoreManager.listSandboxes()) {
-    await knowledgeStoreManager.discardSandbox(sandbox.id)
-  }
-  knowledgeProcessingService = createKnowledgeProcessingService(aiBackendService, knowledgeStoreManager)
+  const collaborationRepository = new CollaborationRepository(
+    join(app.getPath('userData'), 'collaboration-repository')
+  )
+  knowledgeProcessingService = createKnowledgeProcessingService(
+    aiBackendService,
+    collaborationRepository
+  )
   chatSessionRepository = new PiChatSessionRepository(join(app.getPath('userData'), 'chat-sessions'))
   chatAgentService = new ChatAgentService({
     sessions: chatSessionRepository,
@@ -1513,16 +1501,13 @@ app.whenReady().then(async () => {
       join(app.getPath('userData'), 'chat-agent.json')
     ),
     aiBackend: aiBackendService,
-    knowledgeStore: knowledgeStoreManager.production,
+    knowledgeStore,
     artifactRepositoryPath: artifactRepository.repositoryPath
   })
   knowledgeFullChainService = new KnowledgeFullChainService(
     service,
     knowledgeProcessingService,
-    knowledgeStoreManager,
-    (reader) => fixtureMode()
-      ? new FixtureKnowledgeAgentRuntime()
-      : new PiKnowledgeMaintenanceAgent(reader),
+    collaborationRepository,
     knowledgeFullChainRunRepository
   )
   const artifactInitialization = artifactRepository.initialize().catch((error: unknown) => {
@@ -1535,21 +1520,21 @@ app.whenReady().then(async () => {
     knowledgeProcessingService.initialize(),
     chatAgentService.initialize()
   ])
-  if (fixtureMode() && knowledgeStoreManager.production.listStatements().length === 0) {
-    knowledgeStoreManager.production.commit({
+  if (fixtureMode() && knowledgeStore.listStatements().length === 0) {
+    knowledgeStore.commit({
       runRef: 'fixture:knowledge-browser',
       statements: [
         {
           title: 'Oyster 知识加工链路',
-          content: '将外部 Agent Session 交给 [[Knowledge Maintenance Agent|知识维护 Agent]] 调查；Host 把完整 [[Raw Evidence|原始证据]] 分段绑定为 Todo，并在隔离空间中验证写入结果。'
+          content: 'Harness 从目标 revision 创建真实 Git 协作分支与 worktree，让 [[Knowledge Maintenance Agent|知识维护 Agent]] 和 Reviewer 通过文件与 commit 交替工作；[[Raw Evidence|原始证据]] 保留在 Repository 之外，测试结果保持未合并。'
         },
         {
           title: 'Knowledge Maintenance Agent',
-          content: '负责通过通用 Todo 组织调查、按需回溯[[Raw Evidence|原始证据]]，并让知识层中的 Statement 可以互相解释。'
+          content: '读取分支内文件工作清单与 Canonical Activity，按需回溯[[Raw Evidence|原始证据]]，直接维护 Knowledge/Artifact 文件并创建普通 Git commit。'
         },
         {
           title: 'Raw Evidence',
-          content: '外部 Agent Session 的不可变原始材料；Host 将其确定性分段并绑定为 [[Knowledge Maintenance Agent]] 的初始 Todo。不同 Harness 的 Skill 激活探测只提供待核查的位置提示。'
+          content: '外部 Agent Session 的不可变原始材料；它不进入协作 Repository。Host 生成确定性 Canonical Activity 与文件工作清单，供 [[Knowledge Maintenance Agent]] 有界读取和精确回查。'
         },
         {
           title: 'Skill 激活探测',
@@ -1569,8 +1554,7 @@ app.whenReady().then(async () => {
     () => mainWindow
   )
   registerKnowledgeIpc(
-    knowledgeStoreManager.production,
-    knowledgeFullChainService,
+    knowledgeStore,
     () => mainWindow
   )
   registerChatIpc(chatAgentService, () => mainWindow)
@@ -1586,7 +1570,7 @@ app.on('before-quit', () => {
   knowledgeFullChainService?.dispose()
   knowledgeProcessingService?.dispose()
   knowledgeFullChainRunRepository?.close()
-  knowledgeStoreManager?.close()
+  knowledgeStore?.close()
   aiBackendService?.dispose()
   void chatSessionRepository?.dispose()
 })

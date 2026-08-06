@@ -24,14 +24,42 @@ function record(runId: string, completedAt: string, title: string): KnowledgeFul
     sizeBytes: 512,
     revision: 'a'.repeat(64)
   }
-  const agentRun = completedAgentRun(
+  const maintainerRun = completedAgentRun(
     `${runId}:agent:1`,
-    ['read_evidence'],
+    ['read_activity'],
     1,
     'knowledge_maintenance_agent'
   )
+  const reviewerRun = completedAgentRun(
+    `${runId}:agent:2`,
+    ['read', 'bash'],
+    1,
+    'knowledge_reviewer_agent'
+  )
+  const baseRevision = 'b'.repeat(40)
+  const workOrderRevision = 'c'.repeat(40)
+  const maintainedRevision = 'd'.repeat(40)
+  const approvedRevision = 'e'.repeat(40)
+  const workspace = {
+    id: `workspace:${runId}`,
+    worktreePath: `/tmp/${runId}`,
+    branchName: `collaboration/${runId}`,
+    targetBranch: 'main',
+    baseRevision,
+    workOrderRevision
+  }
+  const execution = {
+    connectionId: 'model:maintainer',
+    connectionName: 'Maintainer',
+    backendKind: 'coding_plan' as const,
+    providerId: 'openai_codex' as const,
+    model: 'maintainer',
+    runtime: 'pi_agent_core' as const,
+    modelCallCount: 1,
+    toolCalls: ['read_activity']
+  }
   return {
-    formatVersion: 5,
+    formatVersion: 6,
     runId,
     status: 'completed',
     startedAt: '2026-07-20T10:30:58.500Z',
@@ -48,41 +76,48 @@ function record(runId: string, completedAt: string, title: string): KnowledgeFul
         connectionId: 'model:maintainer',
         modelId: 'maintainer',
         instructions: 'Maintain Statements.'
+      },
+      reviewer: {
+        connectionId: 'model:maintainer',
+        modelId: 'maintainer',
+        instructions: 'Review Statements.'
       }
     },
-    agentRuns: [agentRun],
+    agentRuns: [maintainerRun, reviewerRun],
     result: {
       runId,
       session,
-      sandbox: { id: `sandbox:${runId}`, baselineCreatedAt: completedAt },
       sourceRef: `raw:${runId}`,
-      maintenance: {
+      workspace,
+      maintenanceRuns: [{
         stageId: 'knowledge_maintenance_agent',
         sourceRef: `raw:${runId}`,
-        evidenceSegmentCount: 1,
-        contribution: { runRef: `full-chain:${runId}`, statements: [statement] },
-        todos: [{ id: 'T000001', content: 'Inspect Raw Evidence segment 1 of 1.', status: 'completed' }],
-        agentRunId: agentRun.id,
+        activitySegmentCount: 1,
+        workspace,
+        previousRevision: workOrderRevision,
+        revision: maintainedRevision,
+        changedPaths: ['.oyster/WORK.md', 'knowledge/database.md'],
+        agentRunId: maintainerRun.id,
         durationMs: 500,
         completedAt,
-        execution: {
-          connectionId: 'model:maintainer',
-          connectionName: 'Maintainer',
-          backendKind: 'coding_plan',
-          providerId: 'openai_codex',
-          model: 'maintainer',
-          runtime: 'pi_agent_core',
-          modelCallCount: 1,
-          toolCalls: ['read_evidence']
-        }
-      },
-      commit: {
-        contribution: { runRef: `full-chain:${runId}`, createdAt: completedAt },
-        statements: [statement],
-        createdTitles: [statement.title],
-        updatedTitles: []
-      },
-      knowledge: { writtenStatementTitles: [statement.title], statements: [statement] },
+        execution
+      }],
+      reviewRuns: [{
+        stageId: 'knowledge_reviewer_agent',
+        outcome: 'approved',
+        reviewedRevision: maintainedRevision,
+        revision: approvedRevision,
+        changedPaths: ['.oyster/WORK.md'],
+        markerPaths: [],
+        agentRunId: reviewerRun.id,
+        durationMs: 200,
+        completedAt,
+        execution: { ...execution, toolCalls: ['read', 'bash'] }
+      }],
+      approvedRevision,
+      changedPaths: ['knowledge/database.md'],
+      knowledge: [statement],
+      artifactPaths: [],
       durationMs: 1_500,
       completedAt
     }
@@ -94,6 +129,7 @@ function failedRecord(runId: string, completedAt: string): KnowledgeFullChainRun
   failed.status = 'failed'
   failed.error = 'Maintainer model unavailable'
   delete failed.result
+  failed.agentRuns.splice(1)
   const agentRun = failed.agentRuns[0]
   agentRun.status = 'failed'
   agentRun.error = 'Maintainer model unavailable'

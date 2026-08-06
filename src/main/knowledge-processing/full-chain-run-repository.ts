@@ -7,8 +7,8 @@ import type {
 } from '../../shared/knowledge-processing'
 import { parseTerminalAgentRunRecord } from '../agent-runtime/agent-run-record'
 
-const SCHEMA_VERSION = 4
-/** Pre-V5 development schemas may be rebuilt once; stable V5+ schemas require migrations. */
+const SCHEMA_VERSION = 5
+/** Pre-V5 development schemas may be rebuilt once; stable schemas require migrations. */
 const LAST_REBUILDABLE_SCHEMA_VERSION = 3
 const MAX_RUN_ID_LENGTH = 256
 
@@ -42,7 +42,7 @@ function normalizedRunId(value: unknown): string {
 
 function parseRecord(payload: string, expectedRunId: string): KnowledgeFullChainRunRecord {
   const record = JSON.parse(payload) as KnowledgeFullChainRunRecord
-  if (!record || record.formatVersion !== 5 || record.runId !== expectedRunId) {
+  if (!record || record.formatVersion !== 6 || record.runId !== expectedRunId) {
     throw new Error(`加工测试历史记录格式无效：${expectedRunId}`)
   }
   if (!['completed', 'failed', 'cancelled'].includes(record.status)
@@ -52,6 +52,7 @@ function parseRecord(payload: string, expectedRunId: string): KnowledgeFullChain
     || record.durationMs < 0
     || !record.input
     || !record.configuration?.maintainer
+    || !record.configuration?.reviewer
     || !Array.isArray(record.agentRuns)) {
     throw new Error(`加工测试历史记录 Envelope 无效：${expectedRunId}`)
   }
@@ -63,11 +64,25 @@ function parseRecord(payload: string, expectedRunId: string): KnowledgeFullChain
     if (!record.result || record.result.runId !== expectedRunId || record.error !== undefined) {
       throw new Error(`成功加工测试历史记录格式无效：${expectedRunId}`)
     }
-    const maintenanceRun = agentRuns.find((run) => run.id === record.result?.maintenance.agentRunId)
-    if (!maintenanceRun
-      || maintenanceRun.agentId !== 'knowledge_maintenance_agent'
-      || maintenanceRun.status !== 'completed') {
-      throw new Error(`成功加工测试历史未引用已完成的知识维护 Agent Run：${expectedRunId}`)
+    const referencedRunIds = [
+      ...record.result.maintenanceRuns.map((run) => run.agentRunId),
+      ...record.result.reviewRuns.map((run) => run.agentRunId)
+    ]
+    if (
+      referencedRunIds.length !== agentRuns.length
+      || new Set(referencedRunIds).size !== referencedRunIds.length
+      || referencedRunIds.some((id) => {
+      const run = agentRuns.find((candidate) => candidate.id === id)
+      return !run || run.status !== 'completed'
+      })
+    ) {
+      throw new Error(`成功加工测试历史未引用全部已完成 Agent Run：${expectedRunId}`)
+    }
+    const finalReview = record.result.reviewRuns.at(-1)
+    if (!finalReview
+      || finalReview.outcome !== 'approved'
+      || finalReview.revision !== record.result.approvedRevision) {
+      throw new Error(`成功加工测试历史缺少最终 Reviewer 批准：${expectedRunId}`)
     }
   } else if (record.result !== undefined || typeof record.error !== 'string' || !record.error) {
     throw new Error(`未成功加工测试历史记录格式无效：${expectedRunId}`)
@@ -102,6 +117,10 @@ export class SqliteKnowledgeFullChainRunRepository implements KnowledgeFullChain
       throw new Error(`加工测试历史 Schema ${version} 高于当前支持版本 ${SCHEMA_VERSION}`)
     }
     if (version === SCHEMA_VERSION) return
+    if (version === 4) {
+      this.database.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
+      return
+    }
     if (version > LAST_REBUILDABLE_SCHEMA_VERSION) {
       throw new Error(`加工测试历史 Schema ${version} 缺少到 ${SCHEMA_VERSION} 的显式迁移`)
     }
@@ -139,7 +158,7 @@ export class SqliteKnowledgeFullChainRunRepository implements KnowledgeFullChain
     const runId = normalizedRunId(record?.runId)
     const normalized = parseRecord(JSON.stringify(record), runId)
     const session = normalized.session ?? normalized.result?.session
-    const statementCount = normalized.result?.knowledge.statements.length ?? 0
+    const statementCount = normalized.result?.knowledge.length ?? 0
     const modelCallCount = normalized.agentRuns.reduce((count, run) => count + run.modelCalls.length, 0)
     this.database.prepare(`
       INSERT INTO knowledge_full_chain_runs (

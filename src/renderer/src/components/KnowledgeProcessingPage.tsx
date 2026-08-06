@@ -14,7 +14,6 @@ import {
   selectedLlmModel
 } from '../processing-configuration'
 import { Button, Icon } from '../ui'
-import { AgentTodoList } from './AgentTodoList'
 import { FullChainWorkspace } from './FullChainWorkspace'
 import { fullChainResultView } from './FullChainRunDetails'
 import { ProcessingDebugTracePanel } from './ProcessingDebugTracePanel'
@@ -32,72 +31,24 @@ function formatTime(value: string): string {
 }
 
 function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
-  const [selectedTitle, setSelectedTitle] = createSignal<string>()
-  const selectedStatement = createMemo(() => props.result.contribution.statements.find(
-    (statement) => statement.title === selectedTitle()
-  ) ?? props.result.contribution.statements[0])
-  const completedTodos = createMemo(() => props.result.todos.filter(
-    (todo) => todo.status === 'completed'
-  ).length)
-
-  createEffect(() => setSelectedTitle(props.result.contribution.statements[0]?.title))
-
   return (
     <section class="processing-result" data-testid="processing-result-knowledge_maintenance_agent">
       <div class="processing-result__heading">
         <div><Icon name="check" /><h3>知识维护结果</h3></div>
-        <span>{completedTodos()} / {props.result.todos.length} 个 Todo 已完成 · 尚未写入知识层</span>
+        <span>已提交到协作分支 · 未合并到 {props.result.workspace.targetBranch}</span>
       </div>
-      <Show
-        when={props.result.contribution.statements.length}
-        fallback={<div class="sandbox-knowledge__empty processing-contribution__empty">Agent 判断本次没有需要写入的 Knowledge Statement。</div>}
-      >
-        <div class="sandbox-knowledge processing-contribution-knowledge">
-          <aside class="sandbox-knowledge__list" aria-label="候选 Knowledge Statements">
-            <div class="sandbox-knowledge__list-header">
-              <span>候选 Statements</span>
-              <strong>{props.result.contribution.statements.length}</strong>
-            </div>
-            <For each={props.result.contribution.statements}>{(statement) => (
-              <button
-                type="button"
-                class="sandbox-statement"
-                aria-selected={selectedStatement()?.title === statement.title}
-                onClick={() => setSelectedTitle(statement.title)}
-              >
-                <strong>{statement.title}</strong>
-                <span>知识名称</span>
-              </button>
-            )}</For>
-          </aside>
-          <Show when={selectedStatement()}>
-            {(statement) => (
-              <article class="sandbox-knowledge__detail">
-                <h3>{statement().title}</h3>
-                <div class="sandbox-knowledge__detail-meta"><span>按标题创建或更新</span></div>
-                <div class="sandbox-knowledge__content">{statement().content}</div>
-              </article>
-            )}
-          </Show>
-        </div>
-      </Show>
-      <section class="processing-agent-todos" aria-label="Agent Todo List">
-        <div class="processing-agent-todos__heading">
-          <div>
-            <h4>Agent Todos</h4>
-            <p>包括 Host 绑定的证据段和 Agent 在调查中补充的工作项。</p>
-          </div>
-          <strong>{completedTodos()} / {props.result.todos.length}</strong>
-        </div>
-        <AgentTodoList todos={props.result.todos} emptyText="本次 Maintainer 运行没有 Todo。" />
-      </section>
       <dl class="processing-run-details">
+        <div><dt>Worktree</dt><dd>{props.result.workspace.worktreePath}</dd></div>
+        <div><dt>协作分支</dt><dd>{props.result.workspace.branchName}</dd></div>
+        <div><dt>前一 revision</dt><dd>{props.result.previousRevision}</dd></div>
+        <div><dt>当前 revision</dt><dd>{props.result.revision}</dd></div>
+        <div><dt>变更文件</dt><dd>{props.result.changedPaths.join(', ')}</dd></div>
         <div><dt>Connection</dt><dd>{props.result.execution.connectionName}</dd></div>
         <div><dt>Backend</dt><dd>{backendLabel(props.result.execution.backendKind)}</dd></div>
         <div><dt>Provider</dt><dd>{providerLabel(props.result.execution.providerId)}</dd></div>
         <div><dt>Model</dt><dd>{props.result.execution.model}</dd></div>
         <div><dt>Runtime</dt><dd>{runtimeLabel(props.result.execution.runtime)}</dd></div>
-        <div><dt>证据段</dt><dd>{props.result.evidenceSegmentCount} 个</dd></div>
+        <div><dt>活动段</dt><dd>{props.result.activitySegmentCount} 个</dd></div>
         <div><dt>模型调用</dt><dd>{props.result.execution.modelCallCount} 次</dd></div>
         <div><dt>耗时</dt><dd>{formatDuration(props.result.durationMs)}</dd></div>
         <div><dt>完成时间</dt><dd>{formatTime(props.result.completedAt)}</dd></div>
@@ -121,6 +72,9 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
   const maintainer = createMemo(() => controller.snapshot().stages.find(
     (stage) => stage.id === 'knowledge_maintenance_agent'
   ))
+  const reviewer = createMemo(() => controller.snapshot().stages.find(
+    (stage) => stage.id === 'knowledge_reviewer_agent'
+  ))
   const defaultLlm = createMemo(() => controller.snapshot().defaultLlm)
   const selectedConnection = createMemo(() => controller.snapshot().connections.find(
     (connection) => connection.id === defaultLlm()?.connectionId
@@ -139,7 +93,9 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
     return result
   })
   const anyRunning = createMemo(() => (
-    controller.isFullChainRunning() || controller.isRunning('knowledge_maintenance_agent')
+    controller.isFullChainRunning()
+    || controller.isRunning('knowledge_maintenance_agent')
+    || controller.isRunning('knowledge_reviewer_agent')
   ))
   const instructionsDirty = createMemo(() => {
     const stage = maintainer()
@@ -198,7 +154,7 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
           <div class="page-summary">
             <span>所有运行均为显式测试</span>
             <span class="page-summary__separator">·</span>
-            <span>结果默认隔离，可手动导入知识库</span>
+            <span>结果保留在未合并的 Git 协作分支</span>
           </div>
         </div>
         <div class="processing-mode-nav" role="tablist" aria-label="加工测试工作面">
@@ -218,13 +174,13 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
           selectedSessionId={selectedSessionId()}
           attention={fullChainAttention()}
           maintainer={maintainer()}
+          reviewer={reviewer()}
           defaultLlm={defaultLlm()}
           maintainerConnection={selectedConnection()}
+          reviewerConnection={selectedConnection()}
           running={controller.isFullChainRunning()}
           debugTrace={fullChainTrace()}
           locked={anyRunning()}
-          importingResult={Boolean(controller.fullChainResult() && controller.isImportingFullChainRun(controller.fullChainResult()!.runId))}
-          importResult={controller.fullChainResult() && controller.fullChainImportResult()?.runId === controller.fullChainResult()!.runId ? controller.fullChainImportResult()!.commit : undefined}
           result={controller.fullChainResult() ? fullChainResultView(controller.fullChainResult()!) : undefined}
           onSelectSession={updateSelectedSession}
           onAttentionInput={setFullChainAttention}
@@ -238,10 +194,6 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
             })
           }}
           onCancel={() => void controller.cancelFullChain()}
-          onImportResult={() => {
-            const result = controller.fullChainResult()
-            if (result) void controller.importFullChainRun(result.runId)
-          }}
         />
       </div>
 
@@ -251,17 +203,14 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
           loading={controller.fullChainRunsLoading()}
           selected={controller.selectedFullChainRun()}
           loadingRunId={controller.fullChainRuns().find((run) => controller.isLoadingFullChainRun(run.runId))?.runId}
-          importingRunId={controller.fullChainRuns().find((run) => controller.isImportingFullChainRun(run.runId))?.runId}
-          importResult={controller.fullChainImportResult()}
           onOpen={controller.readFullChainRun}
-          onImport={controller.importFullChainRun}
         />
       </div>
 
       <div class="processing-page-panel processing-tab-panel" role="tabpanel" hidden={view() !== 'stage_debug'}>
         <div class="stage-debug-intro">
           <strong>高级调试</strong>
-          <span>单独运行 Maintainer，检查证据读取、Todo、工具活动和候选贡献。</span>
+          <span>单独运行 Maintainer，检查 Activity/Evidence 读取、Git 文件修改与提交。</span>
         </div>
         <section class="processing-list" aria-label="知识加工阶段">
           <Show when={maintainer()}>
@@ -338,7 +287,7 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
                     </Show>
                   </div>
                   <div class="processing-workspace-panel stage-debug__output" aria-label="输出结果">
-                    <Show when={!controller.isRunning(stage().id) ? currentMaintenanceResult() : undefined} fallback={<div class="processing-workspace-empty">完成知识维护后，这里会展示候选 Knowledge Contribution。</div>}>
+                    <Show when={!controller.isRunning(stage().id) ? currentMaintenanceResult() : undefined} fallback={<div class="processing-workspace-empty">完成知识维护后，这里会展示协作 worktree 与提交结果。</div>}>
                       {(result) => <MaintenanceResult result={result()} />}
                     </Show>
                   </div>

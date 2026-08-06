@@ -8,7 +8,7 @@ import type {
 } from '../../shared/chat'
 import type { KnowledgeCommitResult, KnowledgeContributionDraft, KnowledgeStatement } from '../../shared/knowledge'
 import type { ModelRuntime } from '../ai-backends/model'
-import type { KnowledgeStatementRecord } from '../knowledge-processing/model'
+import type { KnowledgeStatementRecord } from '../knowledge-store/model'
 import type { AgentRunRecord } from '../../shared/agent-runtime'
 
 export interface ChatConfigurationStateData {

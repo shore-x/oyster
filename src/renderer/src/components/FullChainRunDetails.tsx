@@ -1,9 +1,7 @@
 import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
 import { Button } from '../ui'
-import type { KnowledgeCommitResult } from '../../../shared/knowledge'
 import { KnowledgeStatementBrowser, statementPreview } from './KnowledgeStatementBrowser'
 import { AgentRunCollectionExplorer } from './AgentRunView'
-import { AgentTodoList } from './AgentTodoList'
 import type { FullChainResultView, FullChainStepView } from './FullChainWorkspace'
 import type {
   KnowledgeFullChainRunRecord,
@@ -28,7 +26,12 @@ export function fullChainResultView(result: KnowledgeFullChainResult): FullChain
     runId: result.runId,
     completedAt: result.completedAt,
     durationMs: result.durationMs,
-    todos: result.maintenance.todos,
+    workspace: result.workspace,
+    approvedRevision: result.approvedRevision,
+    changedPaths: result.changedPaths,
+    artifactPaths: result.artifactPaths,
+    maintenanceRunCount: result.maintenanceRuns.length,
+    reviewRunCount: result.reviewRuns.length,
     steps: [
       {
         id: 'session',
@@ -37,13 +40,25 @@ export function fullChainResultView(result: KnowledgeFullChainResult): FullChain
         state: 'completed'
       },
       {
-        id: 'maintenance',
-        label: '知识维护与写入',
-        detail: `${result.maintenance.evidenceSegmentCount} 个证据段 · ${result.maintenance.execution.modelCallCount} 次模型调用 · ${result.commit.statements.length} 条 Statement`,
+        id: 'work_order',
+        label: '创建协作分支',
+        detail: `${result.workspace.branchName} · ${result.workspace.workOrderRevision.slice(0, 12)}`,
+        state: 'completed'
+      },
+      {
+        id: 'collaboration',
+        label: '维护与审查',
+        detail: `${result.maintenanceRuns.length} 次 Maintainer · ${result.reviewRuns.length} 次 Reviewer`,
+        state: 'completed'
+      },
+      {
+        id: 'approved',
+        label: 'Reviewer 批准',
+        detail: `${result.approvedRevision.slice(0, 12)} · 未合并到 ${result.workspace.targetBranch}`,
         state: 'completed'
       }
     ],
-    statements: result.knowledge.statements.map((statement) => ({
+    statements: result.knowledge.map((statement) => ({
       title: statement.title,
       content: statement.content
     }))
@@ -114,11 +129,7 @@ export function FullChainResultDetail(props: {
   backLabel: string
   detailTestId: string
   backTestId: string
-  importTestId?: string
-  importing?: boolean
-  importResult?: KnowledgeCommitResult
   onBack(): void
-  onImport?(): void
 }) {
   const [selectedTitle, setSelectedTitle] = createSignal<string>()
   const selectedStatement = createMemo(() => props.result.statements.find(
@@ -135,34 +146,17 @@ export function FullChainResultDetail(props: {
   })
 
   return (
-    <section class="chain-test__detail-page chain-test__result" data-testid={props.detailTestId} aria-label="Sandbox 测试结果详情">
+    <section class="chain-test__detail-page chain-test__result" data-testid={props.detailTestId} aria-label="Git 协作测试结果详情">
       <div class="chain-test__detail-header">
         <Button variant="ghost" icon="back" data-testid={props.backTestId} onClick={props.onBack}>{props.backLabel}</Button>
         <div>
-          <h2>{props.title || 'Sandbox 结果详情'}</h2>
-          <p>{props.description || '这是测试产生的隔离知识，不代表当前知识库。'}</p>
+          <h2>{props.title || '协作分支结果'}</h2>
+          <p>{props.description || 'Reviewer 已批准这个 revision；测试运行不会把它合并到目标分支。'}</p>
         </div>
         <div class="chain-test__detail-actions">
           <span>{props.result.completedAt ? `完成于 ${formatTime(props.result.completedAt)}` : ''}</span>
-          <Show when={props.onImport}>
-            <Button
-              variant="primary"
-              icon="download"
-              data-testid={props.importTestId}
-              disabled={props.importing || props.result.statements.length === 0}
-              onClick={props.onImport}
-            >{props.importing ? '正在导入…' : '导入正式知识库'}</Button>
-          </Show>
         </div>
       </div>
-
-      <Show when={props.importResult}>
-        {(commit) => (
-          <div class="knowledge-browser__notice" role="status" data-testid="full-chain-import-result">
-            已导入 {commit().statements.length} 条知识：新增 {commit().createdTitles.length} 条，覆盖 {commit().updatedTitles.length} 条。
-          </div>
-        )}
-      </Show>
 
       <div class="full-chain-progress">
         <For each={props.result.steps}>{(step, index) => (
@@ -174,13 +168,24 @@ export function FullChainResultDetail(props: {
         )}</For>
       </div>
 
-      <div class="knowledge-browser knowledge-browser--sandbox">
+      <dl class="processing-run-details" data-testid="full-chain-git-result">
+        <div><dt>Worktree</dt><dd>{props.result.workspace.worktreePath}</dd></div>
+        <div><dt>协作分支</dt><dd>{props.result.workspace.branchName}</dd></div>
+        <div><dt>目标分支</dt><dd>{props.result.workspace.targetBranch}（未合并）</dd></div>
+        <div><dt>Base revision</dt><dd>{props.result.workspace.baseRevision}</dd></div>
+        <div><dt>工作清单 revision</dt><dd>{props.result.workspace.workOrderRevision}</dd></div>
+        <div><dt>批准 revision</dt><dd>{props.result.approvedRevision}</dd></div>
+        <div><dt>Maintainer / Reviewer</dt><dd>{props.result.maintenanceRunCount} / {props.result.reviewRunCount}</dd></div>
+        <div><dt>变更文件</dt><dd>{props.result.changedPaths.length}</dd></div>
+      </dl>
+
+      <div class="knowledge-browser knowledge-browser--collaboration">
         <KnowledgeStatementBrowser
           items={statementSummaries()}
           total={props.result.statements.length}
           selectedTitle={selectedStatement()?.title}
           selectedStatement={selectedStatement()}
-          listLabel={props.listLabel || 'Sandbox Statements'}
+          listLabel={props.listLabel || '协作分支 Statements'}
           emptyListText="本次测试没有生成 Knowledge Statement。"
           navigationKey={props.result.runId}
           onSelect={setSelectedTitle}
@@ -189,9 +194,19 @@ export function FullChainResultDetail(props: {
       </div>
 
       <details class="chain-test__candidates ui-disclosure">
-        <summary>Maintainer Todos（{props.result.todos.length}）</summary>
-        <AgentTodoList todos={props.result.todos} emptyText="本次 Maintainer 运行没有 Todo。" />
+        <summary>变更文件（{props.result.changedPaths.length}）</summary>
+        <ul>
+          <For each={props.result.changedPaths}>{(path) => <li><code>{path}</code></li>}</For>
+        </ul>
       </details>
+      <Show when={props.result.artifactPaths.length}>
+        <details class="chain-test__candidates ui-disclosure">
+          <summary>Artifacts（{props.result.artifactPaths.length}）</summary>
+          <ul>
+            <For each={props.result.artifactPaths}>{(path) => <li><code>{path}</code></li>}</For>
+          </ul>
+        </details>
+      </Show>
     </section>
   )
 }

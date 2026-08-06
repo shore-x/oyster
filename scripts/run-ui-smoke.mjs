@@ -147,14 +147,14 @@ if (!knowledge.browse.selectedTitle || knowledge.browse.detailTitle !== knowledg
 }
 if (
   !knowledge.browse.detailContent?.includes('知识维护 Agent')
-  || !knowledge.browse.detailContent?.includes('原始证据')
+  || !knowledge.browse.detailContent?.includes('真实 Git 协作分支')
 ) {
   throw new Error('Knowledge browser did not render the current Statement body')
 }
 if (
   knowledge.browse.linkLabel !== '知识维护 Agent'
   || knowledge.browse.linkPreviewTitle !== 'Knowledge Maintenance Agent'
-  || !knowledge.browse.linkPreview?.includes('通用 Todo')
+  || !knowledge.browse.linkPreview?.includes('文件工作清单')
 ) {
   throw new Error('Knowledge browser did not render the wikilink alias and hover preview')
 }
@@ -309,46 +309,49 @@ if (!semantics.ai.model.configuredSummary?.includes('fixture-model')) throw new 
 if (!semantics.ai.model.bodyText.includes('OpenAI-compatible')) throw new Error('Custom compatible provider choice is missing')
 
 const agentConfiguration = semantics.agentConfiguration
-if (agentConfiguration?.title !== 'Agent 配置' || agentConfiguration.roleCount !== 2) {
+if (agentConfiguration?.title !== 'Agent 配置' || agentConfiguration.roleCount !== 3) {
   throw new Error('Agent configuration page does not list the registered Agents')
 }
 if (
-  agentConfiguration.maintenanceToolNames?.length !== 10
-  || !agentConfiguration.maintenanceToolNames.includes('search_knowledge')
-  || !agentConfiguration.maintenanceToolNames.includes('read_evidence')
-  || !agentConfiguration.maintenanceToolNames.includes('upsert_contribution_statement')
-  || !agentConfiguration.maintenanceToolNames.includes('list_todos')
+  agentConfiguration.maintenanceToolNames?.join(',')
+    !== 'read,bash,edit,write,read_activity,read_activity_attachment,read_evidence'
 ) {
   throw new Error('The Agent tool catalog does not match the Knowledge Maintenance runtime')
 }
 if (!agentConfiguration.toolsReadOnlyCopy?.includes('只读展示')) {
   throw new Error('The Agent configuration page does not explain that tools are code-owned')
 }
-if (agentConfiguration.schemaPanelCount !== 10 || agentConfiguration.expandedSchemaCount !== 2) {
+if (agentConfiguration.schemaPanelCount !== 7 || agentConfiguration.expandedSchemaCount !== 2) {
   throw new Error('The Agent tool parameter schemas are not available through expandable panels')
 }
-const searchToolSchema = agentConfiguration.searchToolSchema
+const activityToolSchema = agentConfiguration.activityToolSchema
 if (
-  searchToolSchema?.type !== 'object'
-  || searchToolSchema.additionalProperties !== false
-  || !searchToolSchema.required?.includes('query')
-  || searchToolSchema.properties?.query?.maxLength !== 1024
-  || searchToolSchema.properties?.limit?.maximum !== 20
+  activityToolSchema?.type !== 'object'
+  || activityToolSchema.additionalProperties !== false
+  || !activityToolSchema.required?.includes('activity')
+  || !activityToolSchema.required?.includes('offset')
+  || activityToolSchema.properties?.activity?.minimum !== 1
+  || activityToolSchema.properties?.offset?.minimum !== 0
+  || activityToolSchema.properties?.limit?.minimum !== 1
 ) {
-  throw new Error('The search_knowledge developer schema lost required fields or constraints')
-}
-const todoItemsSchema = agentConfiguration.addTodosToolSchema?.properties?.todos
-if (
-  !agentConfiguration.addTodosToolSchema?.required?.includes('todos')
-  || todoItemsSchema?.type !== 'array'
-  || todoItemsSchema?.minItems !== 1
-  || todoItemsSchema?.items?.type !== 'string'
-  || todoItemsSchema?.items?.maxLength !== 64 * 1_024
-) {
-  throw new Error('The shared Agent Todo developer schema is incomplete')
+  throw new Error('The read_activity developer schema lost required fields or constraints')
 }
 if (
-  !agentConfiguration.builtInPrompt?.includes('Knowledge Maintenance Agent')
+  !agentConfiguration.evidenceToolSchema?.required?.includes('line')
+  || agentConfiguration.evidenceToolSchema?.properties?.line?.minimum !== 1
+  || agentConfiguration.evidenceToolSchema?.properties?.limit?.minimum !== 2
+) {
+  throw new Error('The read_evidence developer schema lost required fields or constraints')
+}
+if (
+  agentConfiguration.reviewerToolNames?.join(',') !== 'read,bash,edit,write'
+  || agentConfiguration.reviewerSchemaPanelCount !== 4
+  || agentConfiguration.reviewerToolNames.some((name) => name.includes('todo') || name.includes('evidence'))
+) {
+  throw new Error('The Reviewer tool catalog is not restricted to coding tools')
+}
+if (
+  !agentConfiguration.builtInPrompt?.includes('Knowledge Maintainer')
   || agentConfiguration.configuredBadge !== 'Configured default'
   || !agentConfiguration.saveNotice?.includes('已保存')
   || !agentConfiguration.processingPromptUsesConfiguredDefault
@@ -423,7 +426,7 @@ if (
 const processing = semantics.processing
 if (processing.title !== '加工测试') throw new Error('Knowledge processing page was not rendered')
 if (processing.fullChain.fullChainSelected !== 'true' || !processing.fullChain.workspaceExists) {
-  throw new Error('Full-chain Sandbox workspace is not the default knowledge processing view')
+  throw new Error('Full-chain Git collaboration workspace is not the default knowledge processing view')
 }
 if (processing.fullChain.sessionOptionCount !== 2) {
   throw new Error(`Expected one available fixture Session, got ${processing.fullChain.sessionOptionCount - 1}`)
@@ -438,7 +441,7 @@ if (!processing.fullChain.selectedSession || processing.fullChain.fullChainButto
   throw new Error('A complete stage configuration must become runnable after selecting a Session')
 }
 const selectedSessionDetails = processing.fullChain.selectedSessionDetails
-if (selectedSessionDetails?.title !== '知识加工 Sandbox 设计讨论') {
+if (selectedSessionDetails?.title !== '知识加工 Git 协作设计讨论') {
   throw new Error('The selected Session title is not visible in the full-chain details')
 }
 if (!selectedSessionDetails?.timeRange?.includes('→')) {
@@ -453,19 +456,19 @@ if (selectedSessionDetails?.project !== '/Users/demo/projects/oyster') {
 if (!processing.fullChain.readyReason?.includes('准备完成')) {
   throw new Error('Full-chain view does not report that the selected configuration is runnable')
 }
-for (const requiredCopy of ['知识维护', 'API', 'OpenAI-compatible', 'Fixture Model', '模型默认']) {
+for (const requiredCopy of ['Maintainer', 'Reviewer', 'API', 'OpenAI-compatible', 'Fixture Model', '模型默认']) {
   if (!processing.fullChain.modelSummary?.includes(requiredCopy)) {
     throw new Error(`Full-chain stage configuration is missing: ${requiredCopy}`)
   }
 }
-if (!processing.fullChain.bodyText.includes('Sandbox 链路测试')) {
-  throw new Error('Knowledge Sandbox boundary is not visible in the full-chain view')
+if (!processing.fullChain.bodyText.includes('Git 协作测试')) {
+  throw new Error('Git collaboration boundary is not visible in the full-chain view')
 }
 if (
-  !processing.fullChain.bodyText.includes('不会自动写回')
-  || !processing.fullChain.bodyText.includes('手动导入')
+  !processing.fullChain.bodyText.includes('真实分支与 worktree')
+  || !processing.fullChain.bodyText.includes('不会合并到目标分支')
 ) {
-  throw new Error('Full-chain view does not explain its isolated write boundary')
+  throw new Error('Full-chain view does not explain its unmerged Git boundary')
 }
 if (!processing.fullChainRun?.runningStateVisible || !processing.fullChainRun?.completed) {
   throw new Error(`Full-chain run did not complete without a native confirmation dialog: ${processing.fullChainRun?.error || 'unknown error'}`)
@@ -473,88 +476,76 @@ if (!processing.fullChainRun?.runningStateVisible || !processing.fullChainRun?.c
 if (processing.fullChainRun.overviewHasTraceExplorer) {
   throw new Error('The full-chain overview still renders the unbounded detailed trace')
 }
-if (processing.fullChainRun.summaryStatementCount !== '2') {
+if (processing.fullChainRun.summaryStatementCount !== '3') {
   throw new Error('The full-chain overview does not expose compact result counts')
 }
-if (!processing.fullChainRun.traceExplorerExists || processing.fullChainRun.traceEventCount !== 4) {
+if (!processing.fullChainRun.traceExplorerExists || processing.fullChainRun.traceEventCount !== 2) {
   throw new Error('The secondary run-detail page does not expose the shared Agent timeline')
 }
-if (!processing.fullChainRun.modelOutput?.includes('read_evidence')) {
-  throw new Error('The run-detail page does not expose each model call output')
-}
-if (
-  !processing.fullChainRun.modelContext?.includes('Fixture knowledge maintenance task')
-  || !processing.fullChainRun.systemPrompt?.includes('Knowledge Maintenance Agent')
-) {
-  throw new Error('The Model Call inspector does not expose the complete Pi Context')
-}
-if (!processing.fullChainRun.toolInput?.includes('"line": 1') || !processing.fullChainRun.toolOutput?.includes('Fixture raw evidence')) {
-  throw new Error('The run-detail page does not expose tool arguments and results')
+if (!processing.fullChainRun.toolText?.includes('read') || !processing.fullChainRun.toolOutput?.includes('Fixture read completed')) {
+  throw new Error('The run-detail page does not expose Reviewer tool activity')
 }
 if (!processing.fullChainRun.resultDetailExists || !processing.fullChainRun.returnedToOverview) {
   throw new Error('The full-chain result detail is not a navigable secondary page')
 }
-if (
-  processing.fullChainRun.todoCount !== 1
-  || processing.fullChainRun.completedTodoCount !== 1
-) {
-  throw new Error('Full-chain result does not expose completed Maintainer Todos')
-}
-if (processing.fullChainRun.statementCount !== 2) {
+if (processing.fullChainRun.statementCount !== 3) {
   throw new Error('Full-chain result does not expose the committed Knowledge Statement')
 }
 if (
-  processing.fullChainRun.sandboxLinkLabel !== '知识维护 Agent'
-  || !processing.fullChainRun.sandboxLinkPreview?.includes('Knowledge Maintenance Agent')
-  || processing.fullChainRun.sandboxLinkedTitle !== 'Knowledge Maintenance Agent'
+  !processing.fullChainRun.collaborationLinkLabel
+  || !processing.fullChainRun.collaborationLinkPreview
+  || processing.fullChainRun.collaborationLinkedTitle === processing.fullChainRun.collaborationInitialTitle
 ) {
-  throw new Error('Sandbox result does not use the shared wikilink reader with hover previews')
+  throw new Error('Collaboration result does not use the shared wikilink reader with hover previews')
 }
 if (
-  !processing.fullChainRun.sandboxBackAvailable
-  || processing.fullChainRun.sandboxTitleAfterBack !== '知识加工链路'
-  || processing.fullChainRun.sandboxOverflowAfterBack
-  || !processing.fullChainRun.sandboxForwardAvailable
-  || processing.fullChainRun.sandboxTitleAfterForward !== 'Knowledge Maintenance Agent'
+  !processing.fullChainRun.collaborationBackAvailable
+  || processing.fullChainRun.collaborationTitleAfterBack !== processing.fullChainRun.collaborationInitialTitle
+  || processing.fullChainRun.collaborationOverflowAfterBack
+  || !processing.fullChainRun.collaborationForwardAvailable
+  || processing.fullChainRun.collaborationTitleAfterForward !== processing.fullChainRun.collaborationLinkedTitle
 ) {
-  throw new Error('Sandbox Statement reader cannot navigate backward and forward')
+  throw new Error('Collaboration Statement reader cannot navigate backward and forward')
 }
-if (/来源范围\s+L\d|Raw source|sourceRef|revision|Run ID|扫描版本/.test(processing.fullChainRun.bodyText || '')) {
-  throw new Error('The full-chain result exposes internal source coordinates or implementation identifiers')
+if (
+  !processing.fullChainRun.gitResultText?.includes('Worktree')
+  || !processing.fullChainRun.gitResultText?.includes('目标分支main（未合并）')
+  || !processing.fullChainRun.gitResultText?.includes('批准 revision')
+  || processing.fullChainRun.changedPathCount !== 3
+) {
+  throw new Error('The full-chain result does not expose its Git worktree, revisions, and changed files')
 }
-if (processing.history?.runCount !== 1 || !processing.history.listText?.includes('知识加工 Sandbox 设计讨论')) {
+if (/来源范围\s+L\d|Raw source|sourceRef|扫描版本/.test(processing.fullChainRun.bodyText || '')) {
+  throw new Error('The full-chain result exposes internal observation coordinates')
+}
+if (processing.history?.runCount !== 1 || !processing.history.listText?.includes('知识加工 Git 协作设计讨论')) {
   throw new Error('The completed full-chain run was not added to persistent history')
 }
-if (/Fixture raw evidence|Tool call ·|sourceRef|L\d{6}/.test(processing.history.listText || '')) {
+if (/Fixture (?:raw evidence|Canonical Activity)|Tool call ·|sourceRef|L\d{6}/.test(processing.history.listText || '')) {
   throw new Error('The compact history list eagerly exposes trace or evidence payloads')
 }
 if (!processing.history.resultDetailExists || !processing.history.sharedBrowserExists) {
   throw new Error('Historical results do not reuse the shared Statement browser')
 }
-if (
-  !processing.history.importButtonExists
-  || !processing.history.importNotice?.includes('已导入 2 条知识')
-  || processing.history.productionTitles?.join(',') !== 'Knowledge Maintenance Agent,知识加工链路'
-) {
-  throw new Error('A persisted test result cannot be imported into production by title')
+if (processing.history.importButtonExists || processing.history.productionTitles?.length !== 0) {
+  throw new Error('A persisted collaboration result must remain unmerged and cannot mutate production knowledge')
 }
+if (
+  !processing.history.historyInitialTitle
+  || processing.history.historyLinkedTitle === processing.history.historyInitialTitle
+  || processing.history.historyTitleAfterBack !== processing.history.historyInitialTitle
+) throw new Error('Historical Statement navigation does not preserve browser history')
 if (processing.history.overflowAfterStatementBack) {
   throw new Error('Historical Statement navigation introduces horizontal overflow after going back')
 }
 if (
   !processing.history.activityDetailExists
   || processing.history.traceEventCount !== 4
-  || !processing.history.traceText?.includes('Fixture raw evidence')
-  || !processing.history.contextText?.includes('Fixture knowledge maintenance task')
+  || !processing.history.traceText?.includes('Fixture read_activity completed')
+  || !processing.history.runSelectorText?.includes('knowledge_maintenance_agent')
+  || !processing.history.runSelectorText?.includes('knowledge_reviewer_agent')
 ) {
   throw new Error('Historical run details do not expose the persisted Agent Run')
-}
-if (
-  processing.history.inspectorPosition !== 'fixed'
-  || !processing.history.inspectorWithinViewport
-  || !processing.history.activityHeightStable
-) {
-  throw new Error('Historical Agent details are not displayed in a viewport-contained overlay')
 }
 if (!processing.history.returnedToHistory) {
   throw new Error('Historical secondary pages do not return to the history list')
@@ -569,7 +560,7 @@ if (processing.promptValues.some((prompt) => typeof prompt !== 'string' || !prom
   throw new Error('A processing default prompt is empty')
 }
 const [maintainerPrompt] = processing.promptValues
-for (const requiredCopy of ['Knowledge Maintenance Agent', 'Initial Todos cover every deterministic Raw Evidence segment', 'Skill activation', 'SKILL.md', 'Make the body, not an overloaded title, self-explaining', '[[canonical title]]', 'list_todos', 'complete_todos', 'there is no submit tool']) {
+for (const requiredCopy of ['Knowledge Maintainer', '.oyster/WORK.md', 'Canonical Activity', 'read_evidence', '[[canonical title]]', 'create one ordinary Git commit', 'Do not delete the work order']) {
   if (!maintainerPrompt.includes(requiredCopy)) {
     throw new Error(`Knowledge Maintenance Agent prompt is missing its responsibility: ${requiredCopy}`)
   }
@@ -603,7 +594,7 @@ if (!processing.maintainerReadyReason?.includes('可以运行知识维护')) {
 }
 if (processing.resultCount !== 0) throw new Error('Knowledge processing produced a candidate without an explicit run')
 if (processing.overflowX) throw new Error('Knowledge processing page has unexpected horizontal overflow')
-if (processing.buttonCount !== processing.sharedButtonCount + processing.tabButtonCount + processing.statementButtonCount + processing.chainStatementButtonCount) {
+if (processing.buttonCount !== processing.sharedButtonCount + processing.tabButtonCount + processing.chainStatementButtonCount) {
   throw new Error('A knowledge processing action button bypasses the shared UI component')
 }
 if (processing.buttonIconCount !== processing.sharedButtonCount) {
@@ -619,16 +610,21 @@ if (processing.trace.panelCount !== 1) throw new Error('The processing debug tra
 if (processing.trace.maintenanceEventCount !== 4) {
   throw new Error(`Expected 4 Agent timeline items, got ${processing.trace.maintenanceEventCount}`)
 }
-if (!processing.trace.modelCallAction) {
-  throw new Error('Knowledge maintenance debug trace cannot open the shared Model Call inspector')
+if (processing.trace.modelCallAction) {
+  throw new Error('The deterministic fixture unexpectedly fabricated a Model Call')
 }
-for (const requiredCopy of ['Fixture knowledge maintenance task', 'read_evidence', 'complete_todos']) {
+for (const requiredCopy of ['read_activity', 'write', 'bash']) {
   if (!processing.trace.bodyText.includes(requiredCopy)) {
     throw new Error(`Knowledge processing trace is missing: ${requiredCopy}`)
   }
 }
-if (processing.trace.workspaceValues.join(',') !== '0,1,1,2') {
-  throw new Error(`Knowledge maintenance workspace status is incorrect: ${processing.trace.workspaceValues.join(',')}`)
+if (
+  !processing.trace.resultText?.includes('Worktree')
+  || !processing.trace.resultText?.includes('协作分支')
+  || !processing.trace.resultText?.includes('当前 revision')
+  || !processing.trace.resultText?.includes('未合并到 main')
+) {
+  throw new Error('Knowledge maintenance result does not expose the Git handoff state')
 }
 if (processing.trace.overflowX) throw new Error('Debug trace view has unexpected horizontal overflow')
 if (processing.stateAfterNavigation.selectedSession !== processing.fullChain.selectedSession) {

@@ -24,7 +24,7 @@ import {
   type SourceEvidenceReader,
   type SourceEvidenceReadResult
 } from './source-evidence-reader'
-import type { RawEvidence } from '../observation/model'
+import type { CanonicalActivity, RawEvidence } from '../observation/model'
 
 type SnapshotListener = (snapshot: DiscoverySnapshot) => void
 
@@ -49,6 +49,7 @@ export interface AvailableSessionEvidence {
   contentHash: string
   sizeBytes: number
   rawEvidence: RawEvidence
+  canonicalActivity: CanonicalActivity
 }
 
 interface RefreshedConversationRecord {
@@ -269,12 +270,13 @@ export class DiscoveryService {
       evidence = await this.readRecordEvidence(source, adapter, currentRecord, maxBytes)
     }
     const content = new TextDecoder('utf-8', { fatal: true }).decode(evidence.content)
+    const observation = adapter.createObservation(content)
     return {
       sourceRecordId: currentRecord.id,
       revision: currentRecord.fingerprint,
       contentHash: evidence.contentHash,
       sizeBytes: evidence.sizeBytes,
-      rawEvidence: adapter.createRawEvidence(content)
+      ...observation
     }
   }
 

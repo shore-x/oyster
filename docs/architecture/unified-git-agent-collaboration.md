@@ -1,94 +1,92 @@
 # 统一 Git Repository 与 Agent 协作
 
-> 状态：已确认目标架构，独立原型已实现
+> 状态：知识加工 MVP 当前实现
 >
 > 日期：2026-08-06
->
-> 生产迁移状态：尚未接入当前 APP、SQLite Knowledge Store、UI 或正式 processing pipeline
 
-## 1. 核心定义
+## 1. 最小模型
 
-Knowledge 与 Artifact 是语义不同的两个权威层，但它们共享同一个 Git Repository 和修订历史。一次现实中的修改可能同时改变两个层，因此不能分别提交或分别决定版本。
+Knowledge 与 Artifact 是语义不同的两个文件层，但在知识加工协作中共享一个标准 Git Repository：
 
 ```text
 repository/
 ├── knowledge/
-└── artifacts/
+├── artifacts/
+└── .oyster/WORK.md   # 仅协作期间存在
 ```
 
-Repository tree 是两个层的共同文件事实；commit 是不可变 revision；branch 是一次尚未接纳的协作过程；merge commit 是 Reviewer 接受这次协作的记录。
+Repository tree 是 Agent 可见的工作事实，commit 是不可变 handoff revision，collaboration branch 是一次尚未接纳的工作过程。Raw Evidence、Canonical Activity、Agent transcript 和运行轨迹不进入 Repository。
 
-派生的全文搜索、引用图、反向引用、Artifact 清单和其他索引都必须从指定 commit tree 重建。它们不是第二份知识事实，也不写回 Repository。
+当前加工测试使用 Oyster 管理的 collaboration repository。现有 Knowledge 浏览、Chat Knowledge Store 和 Artifact 页面尚未整体迁移到这个 Repository；它们不是本次 MVP 的 promotion 目标。
 
-## 2. Knowledge 与 Artifact 文件
+## 2. Collaboration workspace
 
-`knowledge/**/*.md` 中每个文件保存一个 Knowledge Statement。第一个 H1 是 canonical title，剩余 Markdown 是自足正文；文件路径只负责定位，不是 Statement 身份。正文可以使用 `[[canonical title]]` 或 `[[canonical title|local display text]]` 引用其他 Statement。
-
-`artifacts/<artifact>/` 保存一个 Artifact 的任意文件；根 `AGENTS.md` 表达需要跨任务延续的 Attention。Artifact 可以包含文档、代码、配置、脚本或资源，不因与 Knowledge 共用 Repository 而变成 Knowledge Statement。
-
-两个层共享 revision，但不合并语义：Knowledge 解释可以怎样理解事物，Artifact 保存围绕 Attention 共同维护的产物。
-
-## 3. 协作分支
-
-一次结构化维护从目标分支当前 revision `B` 创建 `collaboration/<id>` 分支。Maintainer 与 Reviewer 在同一分支上交替追加 commit，而不是让 Harness 在每轮重建候选快照：
+Harness 从目标分支 `main` 的当前 revision `B` 创建 `collaboration/<id>` 分支和独立 worktree，然后创建 `.oyster/WORK.md` 并提交初始工作清单 `W0`：
 
 ```text
-target:         B ---------------------------- A
-                 \                            /
-collaboration:   M1 --- R1 --- M2 --- R2 --- M3
+main:             B
+                   \
+collaboration:     W0 --- M1 --- R1 --- M2 --- A
 ```
 
-- `M1/M2/M3`：Maintainer 从当前 HEAD 继续修改并提交；
-- `R1/R2`：Reviewer 把问题直接标记在相关文件中并提交；
-- `A`：Reviewer 验证当前 HEAD 后创建的 `--no-ff` merge commit。
+- `W0`：Harness 写入工作清单的初始 commit；
+- `M*`：Maintainer 修改 Knowledge/Artifact 和工作清单后的 commit；
+- `R*`：Reviewer 提出修改的 commit；
+- `A`：Reviewer 删除工作清单形成的批准 commit。
 
-这条历史同时保存问题被提出的位置、Reviewer 的原始说明、Maintainer 的解决方式以及最终批准。正式目标分支的当前 tree 始终是通过审阅的完整状态；中间 Review commit 可以暂时包含不可发布的文本标记。
+测试运行结束时 `main` 仍停留在 `B`。批准只表示 collaboration branch 的精确 revision 通过审查，不等于 promotion 或 merge。未来如需接纳结果，应由独立于 Agent 审阅的 Harness/产品机制决定。
 
-## 4. 文件内 Review 标记
+## 3. 文件工作清单
 
-Reviewer 使用一种项目无关的通用冲突式格式。完整块依次包含 `<<<<<<< REVIEW`、被审内容（内容缺失时可以为空）、`||||||| REVIEW COMMENT`、下一行开始的可执行修改说明，以及 `>>>>>>> REVIEW`。反引号只用于文档排版，不属于标记。
+`.oyster/WORK.md` 是当前 MVP 唯一的显式工作状态，同时服务两个场景：
 
-这只是提交到普通文件的文本，不是 Git unmerged index。Reviewer 应把标记放在问题实际发生或缺失内容应出现的位置；Maintainer 必须修改实际内容并删除完整标记块，不能只删除评论。
+1. 单个 Agent 在一次运行中记录和完成工作；
+2. Maintainer 与 Reviewer 通过 branch tree 交接未完成事项。
 
-当前最小模型只覆盖文本文件。没有必要为了尚未出现的二进制审阅需求预先增加 sidecar issue、Review 数据库或专用工具。
+初始清单包含 opaque `sourceRef`、可选 Attention、按顺序执行的 `read_activity`/附件读取项和完成契约。它不得复制 Raw Evidence 正文。Maintainer 可以补充工作项；Reviewer 请求修改时必须追加至少一个未完成项。
 
-## 5. Maintainer
+工作清单是中间文件，不属于最终 Knowledge/Artifact tree。Reviewer 批准时必须以一个只删除 `.oyster/WORK.md` 的 commit 收尾。该文件仍可能存在于 collaboration branch 的早期历史中；当前 MVP 不为此增加 squash、history rewrite 或额外清理协议。
 
-Maintainer 负责读取完整 Raw Evidence、已有 Repository tree 和当前分支中的 Review 标记，维护可复用 Knowledge，并在一个逻辑修改需要时同时更新 Artifact。
+通用 Todo Store 与工具实现暂时保留供其他 Agent 使用，但 Maintainer 和 Reviewer 都不安装 Todo 工具。是否把 Markdown 清单确立为所有 Agent 的长期正式工作状态，留待后续验证。
 
-最小工具集合是 Pi 的 `read`、`bash`、`edit`、`write`，外加不能由 Repository 代替的 `read_evidence` 与通用 Todo 工具。知识搜索、读取、增删改和 Draft 管理不再使用专用工具；Agent 通过普通文件和 Shell 能力完成。
+## 4. Maintainer handoff
 
-Maintainer 每次运行从 Harness 传入的 revision 开始，只在当前协作分支创建增量 commit。自然结束前必须完成绑定 Todo、解决全部 Review 标记、提交完整修改并保持 working tree clean。Maintainer 不负责 merge 目标分支。
+Maintainer 的初始 `cwd` 是 collaboration worktree 根。它使用 `read`、`bash`、`edit`、`write`，以及不能由文件替代的 `read_activity`、`read_activity_attachment`、`read_evidence`。
 
-Raw Evidence、Todo、transcript 和派生索引不进入 Repository。它们是来源或运行期状态，不因知识与 Artifact 使用 Git 而变成持久内容。
+一次有效 handoff 必须满足：
 
-## 6. Reviewer
+- HEAD 是上一个 handoff revision 的单亲增量 commit；
+- commit 至少修改一个 `knowledge/` 或 `artifacts/` 文件；
+- `.oyster/WORK.md` 仍存在且没有未完成项；
+- tree 中没有 `REVIEW` 标记；
+- Knowledge Markdown 可解析且 canonical title 不重复；
+- worktree clean；
+- `main` 仍等于 collaboration base。
 
-Reviewer 在独立 Agent 上下文中审阅当前协作分支的精确 HEAD 和相对 base 的完整变化。它不能访问 Raw Evidence、Maintainer transcript、Maintainer Todo 或工具轨迹，因此只从消费者视角判断自足性、概念边界、必要背景、内部一致性、引用语义以及 Knowledge/Artifact 协调性。
+Maintainer 不删除工作清单，也不 merge 目标分支。
 
-Reviewer 也只使用 Pi 的基础 `read`、`bash`、`edit`、`write`：
+## 5. Reviewer handoff
 
-- 有问题时，在相关文件中增加 Review 标记，创建一个普通 commit，然后结束；
-- 没有问题时，确认当前 HEAD 未变化、没有遗留 Review 标记，并把该精确 HEAD 通过 `--no-ff` merge 到目标分支。
+Reviewer 在独立上下文中工作，只有 `read`、`bash`、`edit`、`write`。它不读取 Raw Evidence、Canonical Activity、Maintainer transcript 或 Todo。
 
-Reviewer 创建的 merge commit 就是接受记录，因此不需要 `submit_review`、结构化 verdict、review report 文件或另一套跨 Agent issue API。
+需要修改时，Reviewer 在问题所在文件加入完整标记，并在工作清单追加未完成项后提交：
 
-## 7. Harness
+标记由五行组成：起始行 `<<<<<<< REVIEW`、被审内容（缺失时可以为空）、分隔行 `||||||| REVIEW COMMENT`、可执行的修改说明，以及结束行 `>>>>>>> REVIEW`。
 
-Harness 只承担不能由静态文件或 Git 自己完成的调度：
+通过时，Reviewer 验证没有标记，然后只删除 `.oyster/WORK.md` 并提交。Harness 根据这个 commit 识别 `approved`，但不修改 `main`。
 
-1. 从目标 revision 创建协作分支和 worktree；
-2. 把当前 revision 交给 Maintainer 或 Reviewer；
-3. 在 Agent 自然结束后读取新的 Git 状态；
-4. Reviewer 提交标记 commit 时再次调度 Maintainer；
-5. 目标分支出现预期 Reviewer merge commit 时结束协作。
+## 6. Harness 职责
 
-Harness 不复制 Reviewer 问题、不把问题转成 Prompt 字段，也不维护独立的 Contribution Draft。Agent 的工作内容在文件中，交接边界在 commit 中，Harness 只传递 revision 并选择下一个运行。
+Harness 只处理 Agent 不能仅凭普通文件完成的编排边界：
 
-当前原型串行执行一条协作分支，并要求目标分支在 Reviewer merge 前仍位于初始 base。并发、远端同步和复杂 merge conflict 等真实需求出现后再扩展。
+1. 创建 branch、worktree 和初始工作清单 commit；
+2. 将精确 revision 与 worktree 交给当前 Agent；
+3. 在 Agent 自然结束后校验 Git 状态和 handoff；
+4. 根据 Reviewer 的 changes-requested 或 approved 结果选择下一次运行；
+5. 保存终态运行快照。
 
-## 8. 当前实现与迁移
+Harness 不维护 Contribution Draft，不复制 Reviewer issue，不代理 Agent 修改或 commit，也不在测试运行中 merge。
 
-独立实现位于 `prototypes/unified-git-repository/`。当前生产代码仍使用 SQLite Knowledge Store、Contribution Draft 和专用 Knowledge 工具；这些是尚待迁移的旧实现，不再代表目标架构。
+## 7. 当前边界
 
-生产迁移应作为后续独立变更完成，包括统一 Repository、通用管理 Agent 工具精简、Maintainer worktree、Reviewer 运行、索引重建、UI 和历史数据边界。迁移前不得把原型文档描述成已上线产品行为。
+MVP 只实现单机、串行、单 collaboration branch。它不处理并发目标分支推进、远端同步、自动 rebase、复杂 merge conflict、权限治理或二进制 Review 协议。文件与 Shell 工具沿用当前高信任本机执行模型，worktree 根只是初始坐标，不是权限边界。

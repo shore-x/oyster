@@ -1,42 +1,45 @@
 # ADR-0002：使用统一 Git Repository 作为 Agent 协作事实
 
-- 状态：Accepted
+- 状态：Accepted；知识加工 MVP 已实现
 - 日期：2026-08-06
+- 修订：2026-08-06，采用文件工作清单；Reviewer 批准不再等于 merge
 - 取代：ADR-0001 中 Knowledge/Artifact 分离物理存储、Contribution Draft 提交协议和“Git 不承担 Agent 修订工作流”的相关决定
 - 关联文档：[统一 Git Repository 与 Agent 协作](../architecture/unified-git-agent-collaboration.md)
 
 ## Context
 
-现有生产实现让 Knowledge 位于 SQLite Store、Artifact 位于独立 Git Repository，并让 Maintainer 通过专用工具维护内存 Contribution Draft。这造成两个问题：一次同时影响 Knowledge 与 Artifact 的修改无法由同一个 revision 原子表达；Agent 的普通文件工作与知识工作需要两套搜索、读写和提交协议。
+旧知识加工让 Knowledge 位于 SQLite Store、Artifact 位于独立 Git Repository，并让 Maintainer 通过专用工具维护内存 Contribution Draft。一次同时影响 Knowledge 与 Artifact 的修改无法由同一个 revision 表达，Agent 文件工作和知识工作也需要两套协议。
 
-Reviewer 若再通过结构化 `submit_review` 返回 verdict 与 issue，会形成第三套与 Git 平行的跨 Agent 协作状态。Harness 必须复制问题内容并重新注入 Maintainer，文件 tree 和 commit 不再是完整交接事实。
+若 Reviewer 再通过结构化 verdict/issue 反馈，Harness 就必须复制问题并重新注入 Maintainer，形成第三套跨 Agent 状态。相反，仅传递 Git revision 又没有为“本轮还要做什么”提供简单、可见、可由单 Agent继续使用的载体。
 
 ## Decision
 
-Knowledge 与 Artifact 共享一个标准 Git Repository，分别位于 `knowledge/` 和 `artifacts/`。它们保留不同语义，但使用同一个 tree、commit 和 branch 历史。索引从指定 commit 派生，不进入 Repository。
+Knowledge 与 Artifact 在结构化知识加工中共享一个标准 Git Repository，分别位于 `knowledge/` 和 `artifacts/`。它们语义不同，但使用同一个 tree、commit 和 collaboration branch 历史。
 
-Maintainer 与 Reviewer 使用 Pi 基础文件和 Shell 工具直接维护 Repository。不可由文件代替的 Raw Evidence 读取和运行期 Todo 继续作为外部能力；专用 Knowledge CRUD、Contribution Draft 和 `submit_review` 不进入目标模型。
+一次协作由 Harness 从 target base 创建 branch/worktree，并通过初始 commit 加入 `.oyster/WORK.md`。该 Markdown 文件同时是单 Agent 工作清单和多 Agent 交接状态。Raw Evidence、Canonical Activity 和 transcript 不写入文件或 Repository。
 
-一次维护使用线性 collaboration branch。Maintainer 从当前 HEAD 增量修改并提交；Reviewer 发现问题时直接在相关文本中加入通用 `REVIEW` 冲突式标记并提交；Maintainer 在该 commit 上继续修改并解决标记。Reviewer 验证通过后，把自己审阅的精确 HEAD 以 `--no-ff` merge 到目标分支。merge commit 是接受记录，并通过 ancestry 保存所有原始 Maintainer 与 Reviewer commit。
+Maintainer 和 Reviewer 使用普通 Coding Tools 直接修改文件并 commit。Maintainer 额外拥有 Activity/Evidence 只读工具；两者都不安装通用 Todo。Todo 实现暂时保留，等待是否把文件清单推广为所有 Agent 正式状态的后续决定。专用 Knowledge CRUD、Contribution Draft、SQLite Sandbox 和 `submit_review` 不进入知识加工协作模型。
 
-Harness 只创建协作工作区、传递 revision、调度下一个 Agent，并观察预期 merge 是否出现。它不复制 Reviewer issue，不拥有另一份 Draft，也不代替 Agent 表达工作内容。
+Reviewer 请求修改时，在实际文件加入通用 `REVIEW` 标记，并在工作清单追加未完成项后 commit。Maintainer 在该 commit 上继续解决。Reviewer 通过时删除工作清单并创建一个只含该删除的 approval commit。
+
+Approval 与 promotion 分离。知识加工测试只返回已批准的精确 revision，绝不 merge target branch；未来由独立 Harness 或产品动作决定是否接纳。这样 Reviewer 仍负责质量判断，但不隐式获得修改正式分支的职责。
 
 ## Consequences
 
 ### Positive
 
-- Knowledge 与 Artifact 的耦合修改由同一个历史表达；
-- Agent 使用普通文件和 Git 能力，不需要领域 CRUD 或审阅提交工具；
-- Maintainer 直接在 Reviewer commit 上继续工作，交接自然且可检查；
-- Reviewer 问题与 Maintainer 解决过程保留在 Git ancestry 中；
-- merge commit 同时形成协作边界和 Reviewer 接受记录；
-- 派生索引可以按 revision 重建，不形成第二份事实。
+- Knowledge/Artifact 的耦合修改由同一个 revision 表达；
+- Agent 使用普通文件与 Git，不需要平行领域写入协议；
+- 工作清单对单 Agent 和跨 Agent 都可见，不需要 Runtime 消息总线；
+- Reviewer 问题与 Maintainer 解决过程保留在 branch history；
+- 测试、审阅和正式接纳具有清楚、独立的边界；
+- Harness 只传递 revision、验证 handoff 和调度下一次运行。
 
 ### Negative
 
-- collaboration branch 的中间 commit 可以包含 Review 标记或暂时不可运行的内容；
-- merge 后的历史仍可访问这些中间状态；
-- 当前最小标记协议只适合文本文件；
-- 当前串行模型要求目标分支在审阅完成前不发生并行推进。
+- collaboration branch 的中间 commit 可以包含 Review 标记或工作文件；
+- 工作清单从批准 tree 删除后仍可能存在于早期历史；
+- 当前文本 Review 协议不覆盖二进制内容；
+- 现有 Knowledge 浏览、Chat 和 Artifact 页面尚未整体迁移到统一 Repository。
 
-这些代价在早期阶段是可接受的；不提前增加 squash/archive、二进制 review、并发 merge 或权限治理机制。
+这些代价对当前 MVP 可接受。本阶段不增加 squash/history rewrite、并发 branch、远端同步、复杂 merge 或权限治理机制。

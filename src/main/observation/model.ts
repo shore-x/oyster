@@ -20,3 +20,51 @@ export interface RawEvidence {
   lines: string[]
   skillHints: RawEvidenceSkillHint[]
 }
+
+export interface EvidenceRange {
+  start: EvidenceLocation
+  end: EvidenceLocation
+}
+
+export type CanonicalActivityKind =
+  | 'session'
+  | 'instruction'
+  | 'user_message'
+  | 'assistant_message'
+  | 'reasoning'
+  | 'tool_call'
+  | 'tool_result'
+  | 'attachment'
+  | 'state'
+  | 'unknown'
+
+/** One deterministic, model-readable activity with links back to its source records. */
+export interface CanonicalActivityItem {
+  kind: CanonicalActivityKind
+  content: string
+  rawRanges: EvidenceRange[]
+  attachmentId?: string
+}
+
+/** Binary source content is kept out of text pages and exposed through a typed tool. */
+export interface CanonicalActivityAttachment {
+  id: string
+  mimeType: string
+  data: string
+  byteLength: number
+  sha256: string
+  rawRange: EvidenceRange
+}
+
+/** Rebuildable, Harness-specific activity projection of one Raw Evidence revision. */
+export interface CanonicalActivity {
+  formatVersion: string
+  items: CanonicalActivityItem[]
+  attachments: CanonicalActivityAttachment[]
+}
+
+/** The two observation-layer views derived from one immutable source revision. */
+export interface AgentObservation {
+  rawEvidence: RawEvidence
+  canonicalActivity: CanonicalActivity
+}

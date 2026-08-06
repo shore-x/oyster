@@ -1,9 +1,9 @@
 import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
 import type { AvailableSessionSummary } from '../../../shared/discovery'
 import type { LlmBinding } from '../../../shared/ai-backends'
-import type { KnowledgeCommitResult, KnowledgeStatement } from '../../../shared/knowledge'
-import type { AgentTodo } from '../../../shared/agent-runtime'
+import type { KnowledgeStatement } from '../../../shared/knowledge'
 import type {
+  CollaborationWorkspaceView,
   KnowledgeProcessingDebugTrace,
   ProcessingConnectionView,
   ProcessingStageView
@@ -32,7 +32,12 @@ export interface FullChainResultView {
   runId: string
   completedAt?: string
   durationMs?: number
-  todos: AgentTodo[]
+  workspace: CollaborationWorkspaceView
+  approvedRevision: string
+  changedPaths: string[]
+  artifactPaths: string[]
+  maintenanceRunCount: number
+  reviewRunCount: number
   steps: FullChainStepView[]
   statements: KnowledgeStatement[]
 }
@@ -43,19 +48,18 @@ export interface FullChainWorkspaceProps {
   selectedSessionId?: string
   attention: string
   maintainer?: ProcessingStageView
+  reviewer?: ProcessingStageView
   defaultLlm?: LlmBinding
   maintainerConnection?: ProcessingConnectionView
+  reviewerConnection?: ProcessingConnectionView
   running: boolean
   debugTrace?: KnowledgeProcessingDebugTrace
   locked: boolean
-  importingResult: boolean
-  importResult?: KnowledgeCommitResult
   result?: FullChainResultView
   onSelectSession(id: string): void
   onAttentionInput(value: string): void
   onRun(): void
   onCancel(): void
-  onImportResult(): void
 }
 
 function formatTime(value?: string): string {
@@ -104,16 +108,19 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
     props.defaultLlm,
     props.maintainerConnection
   ))
+  const reviewer = createMemo(() => stageSummary(
+    props.reviewer,
+    props.defaultLlm,
+    props.reviewerConnection
+  ))
   const disabledReason = createMemo(() => {
     if (props.locked) return '已有知识加工任务正在运行。'
     if (!selectedSession()) return '请选择一个 Session。'
     if (!maintainer().runnable) return `${maintainer().name} 尚未完成可用的模型配置。`
+    if (!reviewer().runnable) return `${reviewer().name} 尚未完成可用的模型配置。`
     return undefined
   })
   const visibleDebugTrace = createMemo(() => props.debugTrace)
-  const completedTodoCount = createMemo(() => props.result?.todos.filter(
-    (todo) => todo.status === 'completed'
-  ).length ?? 0)
 
   createEffect(() => {
     if (page() === 'result' && !props.result) setPage('overview')
@@ -121,9 +128,9 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
 
   return (
     <div class="chain-test" data-testid="full-chain-workspace">
-      <div class="chain-test__boundary" data-testid="sandbox-boundary">
-        <span class="sandbox-badge">Sandbox 链路测试</span>
-        <p>使用当前知识库的隔离副本运行；测试产生的 Statement 不会自动写回，可在结果详情中手动导入。</p>
+      <div class="chain-test__boundary" data-testid="git-collaboration-boundary">
+        <span class="git-collaboration-badge">Git 协作测试</span>
+        <p>Harness 创建真实分支与 worktree；Maintainer 和 Reviewer 交替提交，最终结果不会合并到目标分支。</p>
       </div>
 
       <Show when={page() === 'overview'}>
@@ -175,14 +182,15 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
             </label>
 
             <div class="chain-test__models" aria-label="链路模型配置">
-              <div><span>知识维护</span><strong>{maintainer().detail}</strong></div>
+              <div><span>Maintainer</span><strong>{maintainer().detail}</strong></div>
+              <div><span>Reviewer</span><strong>{reviewer().detail}</strong></div>
               <p>模型在“AI 后端”中统一配置；提示词可在“高级调试”中修改。</p>
             </div>
 
             <div class="chain-test__actions">
               <p data-testid="full-chain-disabled-reason">
                 {props.running
-                  ? 'Knowledge Maintenance Agent 正在读取证据并维护知识…'
+                  ? 'Maintainer 与 Reviewer 正在协作分支中工作…'
                   : disabledReason() || '输入和模型已经准备完成。'}
               </p>
               <Show
@@ -215,14 +223,14 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
             </div>
             <Show
               when={visibleDebugTrace()}
-              fallback={<div class="chain-test__empty">运行开始后，这里会显示知识维护的实时进度。</div>}
+              fallback={<div class="chain-test__empty">运行开始后，这里会显示当前 Agent 的实时进度。</div>}
             >
               {(trace) => (
                 <>
                   <div class="chain-test__activity-summary" data-testid="full-chain-activity-summary">
                     <div>
                       <span class="processing-debug__marker" aria-hidden="true" />
-                      <div><strong>知识维护</strong><p>{`${trace().run.modelCalls.length} 次模型 · ${trace().run.toolCalls.length} 次工具 · ${trace().workspace?.todos.pending ?? 0} 个 Todo 待处理`}</p></div>
+                      <div><strong>Git 协作</strong><p>{`${trace().run.modelCalls.length} 次模型 · ${trace().run.toolCalls.length} 次工具`}</p></div>
                     </div>
                   </div>
                   <Show when={trace().run.error}>{(error) => <p class="processing-debug__error">{error()}</p>}</Show>
@@ -242,17 +250,18 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
 
         <Show when={!props.running && props.result ? props.result : undefined}>
           {(result) => (
-            <section class="chain-test__result-summary" data-testid="full-chain-run-result" aria-label="Sandbox 测试结果概览">
+            <section class="chain-test__result-summary" data-testid="full-chain-run-result" aria-label="Git 协作测试结果概览">
               <div class="chain-test__result-heading">
                 <div>
-                  <h2>Sandbox 结果</h2>
-                  <p>隔离知识已经生成；正文与 Maintainer Todo 放在结果详情中。</p>
+                  <h2>Reviewer 已批准</h2>
+                  <p>结果保留在协作分支中，工作清单已删除，目标分支未被修改。</p>
                 </div>
                 <span>{result().completedAt ? `完成于 ${formatTime(result().completedAt)}` : ''}</span>
               </div>
               <div class="chain-test__result-metrics">
                 <div><strong data-testid="full-chain-result-statement-count">{result().statements.length}</strong><span>Statements</span></div>
-                <div><strong>{completedTodoCount()}</strong><span>Todo 已完成</span></div>
+                <div><strong>{result().maintenanceRunCount} / {result().reviewRunCount}</strong><span>Maintainer / Reviewer</span></div>
+                <div><strong>{result().changedPaths.length}</strong><span>变更文件</span></div>
                 <div><strong>{result().durationMs === undefined ? '—' : formatDuration(result().durationMs!)}</strong><span>耗时</span></div>
               </div>
               <Show when={result().statements.length}>
@@ -290,11 +299,7 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
           backLabel="返回概览"
           detailTestId="full-chain-result-detail"
           backTestId="full-chain-result-back"
-          importTestId="import-full-chain-result"
-          importing={props.importingResult}
-          importResult={props.importResult}
           onBack={() => setPage('overview')}
-          onImport={props.onImportResult}
         />}
       </Show>
     </div>

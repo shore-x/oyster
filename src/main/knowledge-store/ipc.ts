@@ -1,13 +1,11 @@
 import { ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import { knowledgeChannels } from '../../shared/channels'
 import type { BrowseKnowledgeInput } from '../../shared/knowledge'
-import type { KnowledgeFullChainService } from '../knowledge-processing/full-chain-service'
 import { KnowledgeExplorerProjectionService } from '../knowledge-projection/knowledge-explorer-projection'
 import type { SqliteKnowledgeStore } from './sqlite-knowledge-store'
 
 export function registerKnowledgeIpc(
   store: SqliteKnowledgeStore,
-  fullChain: KnowledgeFullChainService,
   getMainWindow: () => BrowserWindow | undefined
 ): void {
   const explorer = new KnowledgeExplorerProjectionService(store)
@@ -38,6 +36,6 @@ export function registerKnowledgeIpc(
   })
   ipcMain.handle(knowledgeChannels.clear, (event) => {
     assertTrustedSender(event)
-    return fullChain.clearKnowledge()
+    return store.clear()
   })
 }

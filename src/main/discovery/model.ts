@@ -6,7 +6,7 @@ import type {
   InstructionScope,
   ScanRun
 } from '../../shared/discovery'
-import type { RawEvidence } from '../observation/model'
+import type { AgentObservation } from '../observation/model'
 
 export interface DiscoveryStateData {
   sources: AgentSource[]
@@ -61,8 +61,8 @@ export interface AgentHistoryAdapter {
     context?: DetectionContext
   ): Promise<SourceRecordCandidate | undefined>
   resolveRecordPath(rootPath: string, record: SourceRecord): string
-  /** Reads complete Raw Evidence and derives non-authoritative format-specific hints. */
-  createRawEvidence(rawContent: string): RawEvidence
+  /** Derives Raw Evidence and its rebuildable Canonical Activity view from one source revision. */
+  createObservation(rawContent: string): AgentObservation
 }
 
 export interface DiscoveryRepository {

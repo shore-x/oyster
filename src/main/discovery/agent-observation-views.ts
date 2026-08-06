@@ -1,4 +1,14 @@
-import type { RawEvidence, RawEvidenceSkillHint } from '../observation/model'
+import { createHash } from 'node:crypto'
+import type {
+  AgentObservation,
+  CanonicalActivity,
+  CanonicalActivityAttachment,
+  CanonicalActivityItem,
+  CanonicalActivityKind,
+  EvidenceRange,
+  RawEvidence,
+  RawEvidenceSkillHint
+} from '../observation/model'
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null
@@ -166,14 +176,638 @@ function rawEvidence(
   return { formatVersion, lines, skillHints }
 }
 
-export function createClaudeRawEvidence(rawContent: string): RawEvidence {
+interface ProjectionBuilder {
+  items: CanonicalActivityItem[]
+  attachments: CanonicalActivityAttachment[]
+  nextAttachment: number
+  mirrorable: Array<{
+    item: CanonicalActivityItem
+    kind: CanonicalActivityKind
+    content: string
+    line: number
+    source: 'primary' | 'event'
+  }>
+}
+
+interface AttachmentCapture {
+  id: string
+  field: string
+  mimeType: string
+  byteLength: number
+  sha256: string
+}
+
+function physicalLineRange(lines: readonly string[], index: number): EvidenceRange {
+  return {
+    start: { line: index + 1, offset: 0 },
+    end: { line: index + 1, offset: lines[index].length }
+  }
+}
+
+function readableText(value: unknown): string | undefined {
+  if (typeof value === 'string') return value
+  const record = asRecord(value)
+  return typeof record?.text === 'string'
+    ? record.text
+    : typeof record?.thinking === 'string'
+      ? record.thinking
+      : undefined
+}
+
+function compactRecord(value: Record<string, unknown>, omitted: readonly string[]): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !omitted.includes(key)))
+}
+
+function parseStructuredString(value: string): unknown {
+  try {
+    return JSON.parse(value)
+  } catch {
+    return value
+  }
+}
+
+function attachmentDescriptor(capture: AttachmentCapture): string {
+  return [
+    `[Attachment ${capture.id}]`,
+    `Media type: ${capture.mimeType}`,
+    `Bytes: ${capture.byteLength}`,
+    `SHA-256: ${capture.sha256}`,
+    `Source field: ${capture.field}`,
+    capture.mimeType.startsWith('image/')
+      ? `Inspect with read_activity_attachment({"id":"${capture.id}"}).`
+      : 'This attachment type is opaque to the current Maintainer runtime; use the Raw source locator for provenance.'
+  ].join('\n')
+}
+
+function captureAttachment(
+  builder: ProjectionBuilder,
+  range: EvidenceRange,
+  mimeType: string,
+  encodedData: string,
+  field: string
+): AttachmentCapture {
+  const data = encodedData.replace(/\s/g, '')
+  const bytes = Buffer.from(data, 'base64')
+  const capture: AttachmentCapture = {
+    id: `ATT${String(builder.nextAttachment++).padStart(6, '0')}`,
+    field,
+    mimeType,
+    byteLength: bytes.length,
+    sha256: createHash('sha256').update(bytes).digest('hex')
+  }
+  builder.attachments.push({
+    id: capture.id,
+    mimeType,
+    data,
+    byteLength: capture.byteLength,
+    sha256: capture.sha256,
+    rawRange: range
+  })
+  return capture
+}
+
+function sanitizedValue(
+  builder: ProjectionBuilder,
+  range: EvidenceRange,
+  value: unknown,
+  field: string,
+  captures: AttachmentCapture[]
+): unknown {
+  if (typeof value === 'string') {
+    const dataUri = value.match(/^data:([^;,]+);base64,([\s\S]*)$/)
+    if (dataUri) {
+      const capture = captureAttachment(builder, range, dataUri[1], dataUri[2], field)
+      captures.push(capture)
+      return `[Attachment ${capture.id}]`
+    }
+    return value
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry, index) => sanitizedValue(
+      builder,
+      range,
+      entry,
+      `${field}[${index}]`,
+      captures
+    ))
+  }
+  const record = asRecord(value)
+  if (!record) return value
+  return Object.fromEntries(Object.entries(record).map(([key, entry]) => {
+    const path = field ? `${field}.${key}` : key
+    if (key === 'encrypted_content' && typeof entry === 'string') {
+      return [key, `[Opaque encrypted payload: ${entry.length} characters; sha256=${createHash('sha256').update(entry).digest('hex')}]`]
+    }
+    return [key, sanitizedValue(builder, range, entry, path, captures)]
+  }))
+}
+
+function formattedValue(
+  builder: ProjectionBuilder,
+  range: EvidenceRange,
+  value: unknown,
+  field = ''
+): { text: string; captures: AttachmentCapture[] } {
+  const captures: AttachmentCapture[] = []
+  const normalized = sanitizedValue(builder, range, value, field, captures)
+  return {
+    text: typeof normalized === 'string'
+      ? normalized
+      : JSON.stringify(normalized, null, 2),
+    captures
+  }
+}
+
+function addItem(
+  builder: ProjectionBuilder,
+  kind: CanonicalActivityKind,
+  content: string,
+  range: EvidenceRange,
+  attachmentId?: string
+): CanonicalActivityItem | undefined {
+  if (!content.trim()) return undefined
+  const item: CanonicalActivityItem = {
+    kind,
+    content,
+    rawRanges: [range],
+    ...(attachmentId ? { attachmentId } : {})
+  }
+  builder.items.push(item)
+  return item
+}
+
+function addCapturedAttachments(
+  builder: ProjectionBuilder,
+  captures: readonly AttachmentCapture[],
+  range: EvidenceRange
+): void {
+  for (const capture of captures) {
+    addItem(
+      builder,
+      'attachment',
+      attachmentDescriptor(capture),
+      range,
+      capture.mimeType.startsWith('image/') ? capture.id : undefined
+    )
+  }
+}
+
+function addValueItem(
+  builder: ProjectionBuilder,
+  kind: CanonicalActivityKind,
+  heading: string,
+  value: unknown,
+  range: EvidenceRange,
+  field = ''
+): void {
+  const formatted = formattedValue(builder, range, value, field)
+  addItem(builder, kind, [heading, formatted.text].filter(Boolean).join('\n'), range)
+  addCapturedAttachments(builder, formatted.captures, range)
+}
+
+function addUnparseableRecord(
+  projection: ProjectionBuilder,
+  dialect: 'Claude' | 'Pi' | 'Codex',
+  line: string,
+  range: EvidenceRange
+): void {
+  addItem(projection, 'unknown', [
+    `Unparseable ${dialect} JSONL record (opaque).`,
+    `Characters: ${line.length}`,
+    `UTF-8 bytes: ${Buffer.byteLength(line, 'utf8')}`,
+    `SHA-256: ${createHash('sha256').update(line).digest('hex')}`,
+    'Use this activity\'s Raw source locator with read_evidence to inspect the exact content.'
+  ].join('\n'), range)
+}
+
+function addMirrorableItem(
+  builder: ProjectionBuilder,
+  kind: Extract<CanonicalActivityKind, 'user_message' | 'assistant_message' | 'reasoning'>,
+  content: string,
+  range: EvidenceRange,
+  source: 'primary' | 'event'
+): void {
+  if (!content.trim()) return
+  const line = range.start.line
+  const mirror = [...builder.mirrorable].reverse().find((candidate) => (
+    candidate.kind === kind
+    && candidate.content === content
+    && candidate.source !== source
+    && Math.abs(candidate.line - line) <= 3
+  ))
+  if (mirror) {
+    mirror.item.rawRanges.push(range)
+    return
+  }
+  const item = addItem(builder, kind, content, range)
+  if (item) builder.mirrorable.push({ item, kind, content, line, source })
+}
+
+function builder(): ProjectionBuilder {
+  return { items: [], attachments: [], nextAttachment: 1, mirrorable: [] }
+}
+
+function canonicalActivity(
+  formatVersion: string,
+  projection: ProjectionBuilder
+): CanonicalActivity {
+  return {
+    formatVersion,
+    items: projection.items,
+    attachments: projection.attachments
+  }
+}
+
+function blockAttachment(
+  projection: ProjectionBuilder,
+  range: EvidenceRange,
+  block: Record<string, unknown>,
+  field: string
+): AttachmentCapture | undefined {
+  if (typeof block.image_url === 'string') {
+    const match = block.image_url.match(/^data:([^;,]+);base64,([\s\S]*)$/)
+    if (match) return captureAttachment(projection, range, match[1], match[2], field)
+  }
+  const source = asRecord(block.source)
+  const mimeType = typeof source?.media_type === 'string'
+    ? source.media_type
+    : typeof block.mimeType === 'string'
+      ? block.mimeType
+      : typeof block.mime_type === 'string'
+        ? block.mime_type
+        : undefined
+  const data = typeof source?.data === 'string'
+    ? source.data
+    : typeof block.data === 'string'
+      ? block.data
+      : undefined
+  return mimeType && data ? captureAttachment(projection, range, mimeType, data, field) : undefined
+}
+
+function appendMessageBlocks(
+  projection: ProjectionBuilder,
+  role: unknown,
+  content: unknown,
+  range: EvidenceRange,
+  dialect: 'claude' | 'pi' | 'codex'
+): void {
+  if (typeof content === 'string') {
+    const kind = role === 'assistant'
+      ? 'assistant_message'
+      : role === 'developer' || role === 'system'
+        ? 'instruction'
+        : 'user_message'
+    if (kind === 'assistant_message' || kind === 'user_message') {
+      addMirrorableItem(projection, kind, content, range, 'primary')
+    } else {
+      addItem(projection, kind, content, range)
+    }
+    return
+  }
+  if (!Array.isArray(content)) return
+
+  for (const [index, value] of content.entries()) {
+    const block = asRecord(value)
+    if (!block) continue
+    const type = typeof block.type === 'string' ? block.type : ''
+    if (type === 'text' || type === 'input_text' || type === 'output_text') {
+      const text = readableText(block)
+      if (!text) continue
+      const kind = role === 'assistant'
+        ? 'assistant_message'
+        : role === 'developer' || role === 'system'
+          ? 'instruction'
+          : 'user_message'
+      if (kind === 'assistant_message' || kind === 'user_message') {
+        addMirrorableItem(projection, kind, text, range, 'primary')
+      } else {
+        addItem(projection, kind, text, range)
+      }
+      continue
+    }
+    if (type === 'thinking' || type === 'reasoning' || type === 'summary_text') {
+      const text = readableText(block)
+      if (text) addMirrorableItem(projection, 'reasoning', text, range, 'primary')
+      continue
+    }
+    if (type === 'tool_use' || type === 'toolCall') {
+      const name = typeof block.name === 'string' ? block.name : 'unknown tool'
+      const id = typeof block.id === 'string' ? block.id : undefined
+      const args = block.input ?? block.arguments ?? {}
+      const formatted = formattedValue(projection, range, args, `content[${index}].arguments`)
+      addItem(projection, 'tool_call', [
+        `Tool: ${name}`,
+        id ? `Call ID: ${id}` : undefined,
+        'Arguments:',
+        formatted.text
+      ].filter((part): part is string => Boolean(part)).join('\n'), range)
+      addCapturedAttachments(projection, formatted.captures, range)
+      continue
+    }
+    if (type === 'tool_result' || type === 'toolResult') {
+      const id = typeof block.tool_use_id === 'string'
+        ? block.tool_use_id
+        : typeof block.toolCallId === 'string'
+          ? block.toolCallId
+          : undefined
+      const formatted = formattedValue(
+        projection,
+        range,
+        block.content ?? compactRecord(block, ['type', 'tool_use_id', 'toolCallId']),
+        `content[${index}].result`
+      )
+      addItem(projection, 'tool_result', [
+        id ? `Call ID: ${id}` : undefined,
+        block.is_error === true || block.isError === true ? 'Status: error' : undefined,
+        formatted.text
+      ].filter((part): part is string => Boolean(part)).join('\n'), range)
+      addCapturedAttachments(projection, formatted.captures, range)
+      continue
+    }
+    if (type.includes('image')) {
+      const capture = blockAttachment(projection, range, block, `content[${index}]`)
+      if (capture) addCapturedAttachments(projection, [capture], range)
+      else addValueItem(
+        projection,
+        'attachment',
+        'Image reference without embedded binary data:',
+        block,
+        range,
+        `content[${index}]`
+      )
+      continue
+    }
+    addValueItem(projection, 'unknown', `Unrecognized ${dialect} message block (${type || 'no type'}):`, block, range, `content[${index}]`)
+  }
+}
+
+function projectClaude(lines: readonly string[]): CanonicalActivity {
+  const projection = builder()
+  lines.forEach((line, index) => {
+    const record = parsedRecord(line)
+    const range = physicalLineRange(lines, index)
+    if (!record) {
+      if (line.trim()) addUnparseableRecord(projection, 'Claude', line, range)
+      return
+    }
+    const message = asRecord(record.message)
+    if ((record.type === 'user' || record.type === 'assistant') && message) {
+      appendMessageBlocks(projection, message.role ?? record.type, message.content, range, 'claude')
+      return
+    }
+    if (record.type === 'attachment') {
+      addValueItem(projection, 'attachment', 'Claude attachment record:', record.attachment ?? record, range, 'attachment')
+      return
+    }
+    if (record.type === 'system') {
+      addValueItem(projection, 'instruction', 'Claude system activity:', compactRecord(record, ['type']), range)
+      return
+    }
+    if (record.type === 'permission-mode') {
+      addValueItem(projection, 'state', 'Permission mode:', compactRecord(record, ['type', 'sessionId']), range)
+      return
+    }
+    if (record.type === 'file-history-snapshot' || record.type === 'last-prompt') {
+      addValueItem(projection, 'state', `Claude ${String(record.type)}:`, compactRecord(record, ['type']), range)
+      return
+    }
+    addValueItem(projection, 'unknown', `Unrecognized Claude record (${String(record.type ?? 'no type')}):`, record, range)
+  })
+  return canonicalActivity('claude-canonical-activity-v1', projection)
+}
+
+function projectPi(lines: readonly string[]): CanonicalActivity {
+  const projection = builder()
+  lines.forEach((line, index) => {
+    const record = parsedRecord(line)
+    const range = physicalLineRange(lines, index)
+    if (!record) {
+      if (line.trim()) addUnparseableRecord(projection, 'Pi', line, range)
+      return
+    }
+    if (record.type === 'message') {
+      const message = asRecord(record.message) ?? record
+      appendMessageBlocks(projection, message.role ?? record.role, message.content ?? record.content, range, 'pi')
+      return
+    }
+    if (record.type === 'session') {
+      addValueItem(projection, 'session', 'Pi Session:', compactRecord(record, ['type', 'id', 'timestamp']), range)
+      return
+    }
+    if (record.type === 'model_change' || record.type === 'thinking_level_change') {
+      addValueItem(projection, 'state', `Pi ${String(record.type)}:`, compactRecord(record, ['type', 'id', 'parentId', 'timestamp']), range)
+      return
+    }
+    addValueItem(projection, 'unknown', `Unrecognized Pi record (${String(record.type ?? 'no type')}):`, record, range)
+  })
+  return canonicalActivity('pi-canonical-activity-v1', projection)
+}
+
+function codexSessionContent(payload: Record<string, unknown>): string {
+  const dynamicTools = Array.isArray(payload.dynamic_tools)
+    ? payload.dynamic_tools.flatMap((tool) => {
+        const record = asRecord(tool)
+        return typeof record?.name === 'string' ? [record.name] : []
+      })
+    : []
+  const selected = {
+    cwd: payload.cwd,
+    originator: payload.originator,
+    cliVersion: payload.cli_version,
+    modelProvider: payload.model_provider,
+    contextWindow: payload.context_window,
+    historyMode: payload.history_mode,
+    memoryMode: payload.memory_mode,
+    git: payload.git,
+    dynamicTools
+  }
+  return ['Codex Session:', JSON.stringify(selected, null, 2)].join('\n')
+}
+
+function appendCodexToolCall(
+  projection: ProjectionBuilder,
+  payload: Record<string, unknown>,
+  range: EvidenceRange
+): void {
+  const name = typeof payload.name === 'string' ? payload.name : 'unknown tool'
+  const callId = typeof payload.call_id === 'string'
+    ? payload.call_id
+    : typeof payload.id === 'string'
+      ? payload.id
+      : undefined
+  const rawArguments = payload.arguments ?? payload.input ?? {}
+  const args = typeof rawArguments === 'string' ? parseStructuredString(rawArguments) : rawArguments
+  const formatted = formattedValue(projection, range, args, 'arguments')
+  addItem(projection, 'tool_call', [
+    `Tool: ${name}`,
+    callId ? `Call ID: ${callId}` : undefined,
+    'Arguments:',
+    formatted.text
+  ].filter((part): part is string => Boolean(part)).join('\n'), range)
+  addCapturedAttachments(projection, formatted.captures, range)
+}
+
+function appendCodexToolResult(
+  projection: ProjectionBuilder,
+  payload: Record<string, unknown>,
+  range: EvidenceRange
+): void {
+  const callId = typeof payload.call_id === 'string'
+    ? payload.call_id
+    : typeof payload.id === 'string'
+      ? payload.id
+      : undefined
+  const formatted = formattedValue(projection, range, payload.output ?? payload.content ?? '', 'output')
+  addItem(projection, 'tool_result', [
+    callId ? `Call ID: ${callId}` : undefined,
+    formatted.text
+  ].filter((part): part is string => Boolean(part)).join('\n'), range)
+  addCapturedAttachments(projection, formatted.captures, range)
+}
+
+function projectCodex(lines: readonly string[]): CanonicalActivity {
+  const projection = builder()
+  const sessionContents = new Map<string, CanonicalActivityItem>()
+  const baseInstructions = new Map<string, CanonicalActivityItem>()
+  lines.forEach((line, index) => {
+    const record = parsedRecord(line)
+    const range = physicalLineRange(lines, index)
+    if (!record) {
+      if (line.trim()) addUnparseableRecord(projection, 'Codex', line, range)
+      return
+    }
+    const payload = asRecord(record.payload) ?? record
+    const type = typeof payload.type === 'string' ? payload.type : ''
+
+    if (record.type === 'session_meta') {
+      const content = codexSessionContent(payload)
+      const previous = sessionContents.get(content)
+      if (previous) previous.rawRanges.push(range)
+      else {
+        const item = addItem(projection, 'session', content, range)
+        if (item) sessionContents.set(content, item)
+      }
+      if (typeof payload.base_instructions === 'string' && payload.base_instructions.trim()) {
+        const previousInstructions = baseInstructions.get(payload.base_instructions)
+        if (previousInstructions) previousInstructions.rawRanges.push(range)
+        else {
+          const item = addItem(
+            projection,
+            'instruction',
+            `Codex base instructions:\n${payload.base_instructions}`,
+            range
+          )
+          if (item) baseInstructions.set(payload.base_instructions, item)
+        }
+      }
+      return
+    }
+    if (record.type === 'response_item') {
+      if (type === 'message' || type === 'agent_message') {
+        appendMessageBlocks(
+          projection,
+          payload.role ?? (type === 'agent_message' ? 'assistant' : undefined),
+          payload.content,
+          range,
+          'codex'
+        )
+        return
+      }
+      if (type === 'reasoning') {
+        const summaries = Array.isArray(payload.summary)
+          ? payload.summary.flatMap((entry) => {
+              const text = readableText(entry)
+              return text ? [text] : []
+            })
+          : []
+        for (const summary of summaries) {
+          addMirrorableItem(projection, 'reasoning', summary, range, 'primary')
+        }
+        if (typeof payload.encrypted_content === 'string') {
+          addItem(projection, 'state', [
+            'Opaque encrypted reasoning payload (not model-readable).',
+            `Characters: ${payload.encrypted_content.length}`,
+            `SHA-256: ${createHash('sha256').update(payload.encrypted_content).digest('hex')}`
+          ].join('\n'), range)
+        }
+        return
+      }
+      if (type === 'function_call' || type === 'custom_tool_call' || type === 'tool_call') {
+        appendCodexToolCall(projection, payload, range)
+        return
+      }
+      if (type === 'function_call_output' || type === 'custom_tool_call_output' || type === 'tool_call_output') {
+        appendCodexToolResult(projection, payload, range)
+        return
+      }
+      addValueItem(projection, 'unknown', `Unrecognized Codex response item (${type || 'no type'}):`, payload, range)
+      return
+    }
+    if (record.type === 'event_msg') {
+      if (type === 'agent_reasoning' && typeof payload.text === 'string') {
+        addMirrorableItem(projection, 'reasoning', payload.text, range, 'event')
+        return
+      }
+      if (type === 'agent_message' && typeof payload.message === 'string') {
+        addMirrorableItem(projection, 'assistant_message', payload.message, range, 'event')
+        return
+      }
+      if (type === 'user_message' && typeof payload.message === 'string') {
+        addMirrorableItem(projection, 'user_message', payload.message, range, 'event')
+        return
+      }
+      if (
+        type === 'token_count'
+        || type === 'task_started'
+      ) return
+      if (type === 'task_complete') {
+        const message = typeof payload.last_agent_message === 'string'
+          ? payload.last_agent_message
+          : typeof payload.message === 'string'
+            ? payload.message
+            : undefined
+        if (message) addMirrorableItem(projection, 'assistant_message', message, range, 'event')
+        return
+      }
+      addValueItem(projection, 'state', `Codex event (${type || 'no type'}):`, compactRecord(payload, ['type']), range)
+      return
+    }
+    if (record.type === 'turn_context') {
+      addValueItem(projection, 'state', 'Codex turn context:', compactRecord(payload, ['type']), range)
+      return
+    }
+    if (record.type === 'world_state') {
+      addValueItem(projection, 'state', 'Codex world state:', payload, range)
+      return
+    }
+    addValueItem(projection, 'unknown', `Unrecognized Codex record (${String(record.type ?? type ?? 'no type')}):`, record, range)
+  })
+  return canonicalActivity('codex-canonical-activity-v1', projection)
+}
+
+function createClaudeRawEvidence(rawContent: string): RawEvidence {
   return rawEvidence(rawContent, 'claude-jsonl-raw-v1', claudeSkillHint)
 }
 
-export function createPiRawEvidence(rawContent: string): RawEvidence {
+export function createClaudeObservation(rawContent: string): AgentObservation {
+  const evidence = createClaudeRawEvidence(rawContent)
+  return { rawEvidence: evidence, canonicalActivity: projectClaude(evidence.lines) }
+}
+
+function createPiRawEvidence(rawContent: string): RawEvidence {
   return rawEvidence(rawContent, 'pi-jsonl-raw-v1', piSkillHint)
 }
 
-export function createCodexRawEvidence(rawContent: string): RawEvidence {
+export function createPiObservation(rawContent: string): AgentObservation {
+  const evidence = createPiRawEvidence(rawContent)
+  return { rawEvidence: evidence, canonicalActivity: projectPi(evidence.lines) }
+}
+
+function createCodexRawEvidence(rawContent: string): RawEvidence {
   return rawEvidence(rawContent, 'codex-jsonl-raw-v1', codexSkillHint)
+}
+
+export function createCodexObservation(rawContent: string): AgentObservation {
+  const evidence = createCodexRawEvidence(rawContent)
+  return { rawEvidence: evidence, canonicalActivity: projectCodex(evidence.lines) }
 }

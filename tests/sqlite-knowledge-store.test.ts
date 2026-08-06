@@ -1,10 +1,9 @@
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, rm, stat } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { SqliteKnowledgeStore } from '../src/main/knowledge-store/sqlite-knowledge-store'
-import { SqliteKnowledgeStoreManager } from '../src/main/knowledge-store/knowledge-store-manager'
 import { MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH } from '../src/shared/knowledge'
 
 const temporaryDirectories: string[] = []
@@ -312,47 +311,5 @@ describe('SqliteKnowledgeStore', () => {
     expect(database.prepare(`
       SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'discarded_auxiliary'
     `).get()).toBeDefined()
-  })
-})
-
-describe('SqliteKnowledgeStoreManager', () => {
-  it('isolates title-based updates inside disposable Sandbox snapshots', async () => {
-    const directory = await temporaryPath('oyster-knowledge-manager-')
-    const manager = await SqliteKnowledgeStoreManager.open(directory)
-    closeables.push(manager)
-    manager.production.commit({
-      runRef: 'run:production-baseline',
-      statements: [{ title: 'Shared title', content: 'Production meaning.' }]
-    })
-
-    const first = await manager.createSandbox()
-    first.store.commit({
-      runRef: 'run:sandbox-update',
-      statements: [
-        { title: 'Shared title', content: 'Sandbox meaning.' },
-        { title: 'Sandbox-only title', content: 'Only visible in this Sandbox.' }
-      ]
-    })
-
-    expect(first.store.getStatement('Shared title')?.content).toBe('Sandbox meaning.')
-    expect(manager.production.getStatement('Shared title')?.content).toBe('Production meaning.')
-    expect(manager.production.getStatement('Sandbox-only title')).toBeUndefined()
-    expect((await manager.listSandboxes()).map((sandbox) => sandbox.id)).toContain(first.id)
-
-    const second = await manager.createSandbox()
-    expect(second.store.getStatement('Shared title')?.content).toBe('Production meaning.')
-    expect(second.store.getStatement('Sandbox-only title')).toBeUndefined()
-
-    await manager.discardSandbox(first.id)
-    await expect(stat(first.databasePath)).rejects.toMatchObject({ code: 'ENOENT' })
-  })
-
-  it('rejects paths that are not Core-issued Sandbox IDs', async () => {
-    const directory = await temporaryPath('oyster-knowledge-manager-')
-    const manager = await SqliteKnowledgeStoreManager.open(directory)
-    closeables.push(manager)
-
-    await expect(manager.openSandbox('../knowledge.sqlite')).rejects.toThrow('Sandbox ID 无效')
-    await expect(manager.discardSandbox('../knowledge.sqlite')).rejects.toThrow('Sandbox ID 无效')
   })
 })

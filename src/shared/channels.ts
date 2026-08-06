@@ -42,9 +42,7 @@ export const knowledgeProcessingChannels = {
   runFullChain: 'knowledge-processing:run-full-chain',
   listFullChainRuns: 'knowledge-processing:list-full-chain-runs',
   readFullChainRun: 'knowledge-processing:read-full-chain-run',
-  importFullChainRun: 'knowledge-processing:import-full-chain-run',
   cancelFullChain: 'knowledge-processing:cancel-full-chain',
-  discardSandbox: 'knowledge-processing:discard-sandbox',
   cancelRun: 'knowledge-processing:cancel-run'
 } as const
 

@@ -47,12 +47,18 @@ function maintenanceResult(): KnowledgeMaintenanceResult {
   return {
     stageId: 'knowledge_maintenance_agent',
     sourceRef: 'raw:source-record-1@sha256:test',
-    evidenceSegmentCount: 1,
-    contribution: {
-      runRef: 'maintenance-run-1',
-      statements: [{ title: 'Raw Evidence', content: 'Raw Evidence content' }]
+    activitySegmentCount: 1,
+    workspace: {
+      id: 'workspace-1',
+      worktreePath: '/tmp/oyster-worktree',
+      branchName: 'collaboration/workspace-1',
+      targetBranch: 'main',
+      baseRevision: 'a'.repeat(40),
+      workOrderRevision: 'b'.repeat(40)
     },
-    todos: [{ id: 'T000001', content: 'Inspect Raw Evidence segment 1 of 1.', status: 'completed' }],
+    previousRevision: 'b'.repeat(40),
+    revision: 'c'.repeat(40),
+    changedPaths: ['.oyster/WORK.md', 'knowledge/raw-evidence.md'],
     agentRunId: 'maintenance-run-1',
     durationMs: 20,
     completedAt,
@@ -64,7 +70,7 @@ function maintenanceResult(): KnowledgeMaintenanceResult {
       model: 'fixture-model',
       runtime: 'pi_agent_core',
       modelCallCount: 1,
-      toolCalls: ['read_evidence']
+      toolCalls: ['read_activity']
     }
   }
 }
@@ -79,14 +85,7 @@ function installApis(overrides: Partial<KnowledgeProcessingApi> = {}) {
     runFullChain: async () => undefined,
     listFullChainRuns: async () => [],
     readFullChainRun: async () => undefined,
-    importFullChainRun: async () => ({
-      contribution: { runRef: 'import', createdAt: '2026-07-26T00:00:02.000Z' },
-      statements: [],
-      createdTitles: [],
-      updatedTitles: []
-    }),
     cancelFullChain: async () => undefined,
-    discardSandbox: async () => undefined,
     cancelRun: async () => undefined,
     subscribe: () => () => undefined,
     ...overrides
@@ -124,7 +123,8 @@ describe('knowledge processing controller', () => {
           expectedRevision: SESSION.revision,
           attention: 'Inspect Skill activations.'
         })
-        expect(controller.maintenanceResult()?.evidenceSegmentCount).toBe(1)
+        expect(controller.maintenanceResult()?.activitySegmentCount).toBe(1)
+        expect(controller.maintenanceResult()?.revision).toBe('c'.repeat(40))
         controller.invalidateInputResults()
         expect(controller.maintenanceResult()).toBeUndefined()
       } finally {

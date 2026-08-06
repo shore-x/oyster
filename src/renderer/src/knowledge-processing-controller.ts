@@ -1,6 +1,5 @@
 import { createSignal, onCleanup } from 'solid-js'
 import type { AvailableSessionSummary, DiscoverySnapshot } from '../../shared/discovery'
-import type { KnowledgeCommitResult } from '../../shared/knowledge'
 import type {
   KnowledgeFullChainResult,
   KnowledgeFullChainRunRecord,
@@ -49,12 +48,6 @@ export function createKnowledgeProcessingController() {
   const [fullChainRunsLoading, setFullChainRunsLoading] = createSignal(true)
   const [selectedFullChainRun, setSelectedFullChainRun] = createSignal<KnowledgeFullChainRunRecord>()
   const [loadingFullChainRunId, setLoadingFullChainRunId] = createSignal<string>()
-  const [importingFullChainRunId, setImportingFullChainRunId] = createSignal<string>()
-  const [fullChainImportResult, setFullChainImportResult] = createSignal<{
-    runId: string
-    commit: KnowledgeCommitResult
-  }>()
-  const [discardingSandboxId, setDiscardingSandboxId] = createSignal<string>()
   const [hiddenStageDebugTraceId, setHiddenStageDebugTraceId] = createSignal<string>()
   let sessionLoadRevision = 0
   let fullChainRunReadGeneration = 0
@@ -244,35 +237,6 @@ export function createKnowledgeProcessingController() {
     }
   }
 
-  async function discardSandbox(sandboxId: string): Promise<void> {
-    try {
-      setDiscardingSandboxId(sandboxId)
-      setError(undefined)
-      await window.oyster.knowledgeProcessing.discardSandbox(sandboxId)
-      setFullChainResult((current) => current?.sandbox.id === sandboxId ? undefined : current)
-    } catch (cause) {
-      setError(errorMessage(cause))
-    } finally {
-      setDiscardingSandboxId(undefined)
-    }
-  }
-
-  async function importFullChainRun(runId: string): Promise<KnowledgeCommitResult | undefined> {
-    try {
-      setImportingFullChainRunId(runId)
-      setFullChainImportResult(undefined)
-      setError(undefined)
-      const commit = await window.oyster.knowledgeProcessing.importFullChainRun(runId)
-      setFullChainImportResult({ runId, commit })
-      return commit
-    } catch (cause) {
-      setError(errorMessage(cause))
-      return undefined
-    } finally {
-      setImportingFullChainRunId(undefined)
-    }
-  }
-
   return {
     snapshot,
     isSaving: (stageId: ProcessingStageId) => savingStageIds().includes(stageId),
@@ -284,12 +248,9 @@ export function createKnowledgeProcessingController() {
     fullChainRuns,
     fullChainRunsLoading,
     selectedFullChainRun,
-    fullChainImportResult,
     debugTrace,
     isFullChainRunning: fullChainPending,
-    isDiscardingSandbox: (sandboxId: string) => discardingSandboxId() === sandboxId,
     isLoadingFullChainRun: (runId: string) => loadingFullChainRunId() === runId,
-    isImportingFullChainRun: (runId: string) => importingFullChainRunId() === runId,
     invalidateInputResults,
     resetFullChainResult,
     isRunning,
@@ -300,8 +261,6 @@ export function createKnowledgeProcessingController() {
     loadFullChainRuns,
     readFullChainRun,
     runFullChain,
-    cancelFullChain,
-    discardSandbox,
-    importFullChainRun
+    cancelFullChain
   }
 }

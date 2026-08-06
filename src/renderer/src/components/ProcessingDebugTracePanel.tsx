@@ -15,16 +15,6 @@ export function ProcessingDebugTracePanel(props: {
         </div>
         <span class="processing-debug__status">{agentRunStatusLabel(props.trace.run.status)}</span>
       </div>
-      <Show when={props.trace.workspace}>
-        {(workspace) => (
-          <div class="processing-debug-workspace" data-testid="maintenance-workspace-status">
-            <div><span>待处理 Todo</span><strong>{workspace().todos.pending}</strong></div>
-            <div><span>已完成 Todo</span><strong>{workspace().todos.completed}</strong></div>
-            <div><span>Todo 总数</span><strong>{workspace().todos.total}</strong></div>
-            <div><span>待写入知识</span><strong>{workspace().draftStatementCount}</strong></div>
-          </div>
-        )}
-      </Show>
       <Show when={props.trace.run.error}>{(error) => <p class="processing-debug__error">{error()}</p>}</Show>
       <AgentRunExplorer run={props.trace.run} compact />
     </section>

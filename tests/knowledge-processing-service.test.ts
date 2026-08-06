@@ -1,16 +1,47 @@
-import { describe, expect, it } from 'vitest'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { AiBackendSnapshot, AiConnection } from '../src/shared/ai-backends'
 import type { ModelGenerationRequest, ModelRuntime } from '../src/main/ai-backends/model'
 import type {
   AiBackendPort,
-  KnowledgeAgentRunInput,
-  KnowledgeAgentRunResult,
-  KnowledgeAgentRuntime
+  KnowledgeMaintainerRunInput,
+  KnowledgeMaintainerRuntime,
+  RepositoryAgentRunResult
 } from '../src/main/knowledge-processing/model'
 import { KnowledgeProcessingService } from '../src/main/knowledge-processing/knowledge-processing-service'
 import { InMemoryKnowledgeProcessingRepository } from '../src/main/knowledge-processing/repository'
-import { KNOWLEDGE_MAINTENANCE_AGENT_PROMPT } from '../src/main/knowledge-processing/prompts'
-import { completedAgentRun } from './agent-run-fixture'
+import {
+  KNOWLEDGE_MAINTENANCE_AGENT_PROMPT,
+  KNOWLEDGE_REVIEWER_AGENT_PROMPT
+} from '../src/main/knowledge-processing/prompts'
+import type { AgentObservation } from '../src/main/observation/model'
+import { CollaborationRepository } from '../src/main/knowledge-processing/collaboration-repository'
+import {
+  FixtureKnowledgeMaintainerRuntime,
+  FixtureKnowledgeReviewerRuntime
+} from '../src/main/knowledge-processing/fixture'
+
+const temporaryDirectories: string[] = []
+
+function observation(lines: string[]): AgentObservation {
+  return {
+    rawEvidence: { formatVersion: 'test-raw-v1', lines, skillHints: [] },
+    canonicalActivity: {
+      formatVersion: 'test-activity-v1',
+      items: [{
+        kind: 'user_message',
+        content: lines.join('\n'),
+        rawRanges: lines.map((line, index) => ({
+          start: { line: index + 1, offset: 0 },
+          end: { line: index + 1, offset: line.length }
+        }))
+      }],
+      attachments: []
+    }
+  }
+}
 
 function connection(): AiConnection {
   return {
@@ -74,125 +105,136 @@ class FakeBackend implements AiBackendPort {
   }
 }
 
-class CapturingAgent implements KnowledgeAgentRuntime {
-  calls: KnowledgeAgentRunInput[] = []
+class CapturingMaintainer implements KnowledgeMaintainerRuntime {
+  readonly calls: KnowledgeMaintainerRunInput[] = []
+  private readonly delegate = new FixtureKnowledgeMaintainerRuntime()
 
-  async run(input: KnowledgeAgentRunInput): Promise<KnowledgeAgentRunResult> {
+  async run(input: KnowledgeMaintainerRunInput): Promise<RepositoryAgentRunResult> {
     this.calls.push(input)
-    const run = completedAgentRun(input.runId, [
-      'list_todos',
-      'read_evidence',
-      'complete_todos'
-    ], 1, 'knowledge_maintenance_agent')
-    input.onRunUpdate?.(run)
-    return {
-      contribution: {
-        runRef: input.contributionRunRef,
-        statements: [{ title: 'Raw Evidence', content: 'Raw Evidence is inspected by the Maintainer.' }]
-      },
-      todos: (input.initialTodos ?? []).map((content, index) => ({
-        id: `T${String(index + 1).padStart(6, '0')}`,
-        content,
-        status: 'completed'
-      })),
-      run,
-      modelCallCount: 1,
-      toolCalls: ['list_todos', 'read_evidence', 'complete_todos']
-    }
+    return this.delegate.run(input)
   }
 }
 
 async function harness() {
-  const agent = new CapturingAgent()
+  const directory = await mkdtemp(join(tmpdir(), 'oyster-processing-service-'))
+  temporaryDirectories.push(directory)
+  const collaborations = new CollaborationRepository(join(directory, 'repository'))
+  const maintainer = new CapturingMaintainer()
   const backend = new FakeBackend()
   const service = new KnowledgeProcessingService(
     new InMemoryKnowledgeProcessingRepository({
-      stages: [{
-        stageId: 'knowledge_maintenance_agent'
-      }]
+      stages: [
+        { stageId: 'knowledge_maintenance_agent' },
+        { stageId: 'knowledge_reviewer_agent' }
+      ]
     }),
     backend,
-    agent
+    collaborations,
+    maintainer,
+    new FixtureKnowledgeReviewerRuntime()
   )
   await service.initialize()
-  return { service, agent, backend }
+  return { service, maintainer, backend, collaborations }
 }
 
+afterEach(async () => {
+  await Promise.all(temporaryDirectories.splice(0).map(
+    (directory) => rm(directory, { recursive: true, force: true })
+  ))
+})
+
 describe('KnowledgeProcessingService', () => {
-  it('exposes one Pi Agent stage with generic Todo and knowledge tools', async () => {
+  it('exposes Maintainer and Reviewer without installing Todo or contribution tools', async () => {
     const { service } = await harness()
     const snapshot = service.snapshot()
 
-    expect(snapshot.stages).toHaveLength(1)
+    expect(snapshot.stages).toHaveLength(2)
     expect(snapshot.stages[0]).toMatchObject({
       id: 'knowledge_maintenance_agent',
       runtime: 'pi_agent_core',
-      builtInInstructions: KNOWLEDGE_MAINTENANCE_AGENT_PROMPT,
-      effectiveInstructions: KNOWLEDGE_MAINTENANCE_AGENT_PROMPT
+      builtInInstructions: KNOWLEDGE_MAINTENANCE_AGENT_PROMPT
     })
-    expect(snapshot.stages[0].tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
-      'read_evidence',
-      'list_todos',
-      'add_todos',
-      'complete_todos',
-      'upsert_contribution_statement'
+    expect(snapshot.stages[1]).toMatchObject({
+      id: 'knowledge_reviewer_agent',
+      builtInInstructions: KNOWLEDGE_REVIEWER_AGENT_PROMPT
+    })
+    expect(snapshot.stages[0].tools.map((tool) => tool.name)).toEqual([
+      'read', 'bash', 'edit', 'write',
+      'read_activity', 'read_activity_attachment', 'read_evidence'
+    ])
+    expect(snapshot.stages[1].tools.map((tool) => tool.name)).toEqual([
+      'read', 'bash', 'edit', 'write'
+    ])
+    expect(snapshot.stages.flatMap((stage) => stage.tools).map((tool) => tool.name))
+      .not.toEqual(expect.arrayContaining(['list_todos', 'add_todos', 'complete_todos']))
+  })
+
+  it('creates a real worktree, supplies observation tools, and validates the Maintainer commit', async () => {
+    const { service, maintainer, collaborations } = await harness()
+    const baseRevision = await collaborations.currentRevision()
+    const result = await service.runKnowledgeMaintenance(
+      observation(['first line', 'second line']),
+      'session:codex:one@revision',
+      'Inspect the repository model.'
+    )
+
+    expect(maintainer.calls).toHaveLength(1)
+    expect(maintainer.calls[0].sourceRef).toBe('session:codex:one@revision')
+    expect(maintainer.calls[0].systemPrompt).toBe(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT)
+    expect(await readFile(
+      join(result.workspace.worktreePath, '.oyster', 'WORK.md'),
+      'utf8'
+    )).toContain('Inspect the repository model.')
+    expect(result.activitySegmentCount).toBe(1)
+    expect(result.previousRevision).toBe(result.workspace.workOrderRevision)
+    expect(result.revision).not.toBe(result.previousRevision)
+    expect(result.changedPaths).toEqual(expect.arrayContaining([
+      '.oyster/WORK.md',
+      'knowledge/knowledge-processing.md'
     ]))
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/Skill activation/i)
-    expect(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT).toMatch(/SKILL\.md/i)
+    expect(result.workspace.worktreePath).toBe(maintainer.calls[0].workspace.worktreePath)
+    expect(await collaborations.currentRevision()).toBe(baseRevision)
+    expect(service.snapshot().debugTraces[0]?.run.id).toBe(result.agentRunId)
   })
 
-  it('binds coarse evidence segments and Skill hints as ordinary initial Todos', async () => {
-    const { service, agent } = await harness()
-    const result = await service.runKnowledgeMaintenance({
-      formatVersion: 'codex-jsonl-raw-v1',
-      lines: ['first line', 'Skill call evidence'],
-      skillHints: [{
-        name: 'deep-research',
-        tool: 'Skill',
-        source: 'tool_call',
-        location: { line: 2, offset: 0 }
-      }]
-    }, 'session:codex:one@revision', 'Inspect Skill use', {
-      initialTodos: ['Check a user-requested concern.']
-    })
+  it('rejects malformed Canonical Activity before starting the Agent', async () => {
+    const { service, maintainer } = await harness()
+    const input = observation(['line'])
+    input.canonicalActivity.items[0].rawRanges[0].end.offset = 99
 
-    expect(agent.calls).toHaveLength(1)
-    expect(agent.calls[0]).toMatchObject({
-      evidenceLines: ['first line', 'Skill call evidence'],
-      evidenceFormatVersion: 'codex-jsonl-raw-v1',
-      sourceRef: 'session:codex:one@revision',
-      attention: 'Inspect Skill use'
-    })
-    expect(agent.calls[0].initialTodos).toHaveLength(2)
-    expect(agent.calls[0].initialTodos?.[0]).toContain('Inspect Raw Evidence segment 1 of 1')
-    expect(agent.calls[0].initialTodos?.[0]).toContain('possible Skill activation “deep-research”')
-    expect(agent.calls[0].initialTodos?.[1]).toBe('Check a user-requested concern.')
-    expect(result.evidenceSegmentCount).toBe(1)
-    expect(result.sourceRef).toBe('session:codex:one@revision')
-    expect(result.todos.every((todo) => todo.status === 'completed')).toBe(true)
-    expect(result.agentRunId).toBe(agent.calls[0].runId)
-    expect(service.snapshot().debugTraces[0]?.run.modelCalls).toHaveLength(1)
+    await expect(service.runKnowledgeMaintenance(input, 'session:test'))
+      .rejects.toThrow('Canonical Activity Raw locator 无效')
+    expect(maintainer.calls).toHaveLength(0)
   })
 
-  it('rejects malformed Raw Evidence before starting the Agent', async () => {
-    const { service, agent } = await harness()
-    await expect(service.runKnowledgeMaintenance({
-      formatVersion: 'test-v1',
-      lines: ['line'],
-      skillHints: [{ source: 'tool_call', location: { line: 2, offset: 0 } }]
-    }, 'session:test')).rejects.toThrow('Raw Evidence Skill hint 无效')
-    expect(agent.calls).toHaveLength(0)
-  })
-
-  it('blocks a new Maintainer run when the application default LLM is not configured', async () => {
-    const { service, agent, backend } = await harness()
+  it('requires a configured default LLM before creating a collaboration', async () => {
+    const { service, maintainer, backend } = await harness()
     backend.defaultLlm = undefined
 
-    await expect(service.runKnowledgeMaintenance({
-      formatVersion: 'test-v1',
-      lines: ['line'],
-      skillHints: []
-    }, 'session:test')).rejects.toThrow('AI 后端页面配置默认 LLM')
-    expect(agent.calls).toHaveLength(0)
+    await expect(service.runKnowledgeMaintenance(observation(['line']), 'session:test'))
+      .rejects.toThrow('AI 后端页面配置默认 LLM')
+    expect(maintainer.calls).toHaveLength(0)
+  })
+
+  it('rejects visual evidence when the selected Maintainer Model cannot receive images', async () => {
+    const { service, maintainer } = await harness()
+    const input = observation(['image data'])
+    input.canonicalActivity.items[0].kind = 'attachment'
+    input.canonicalActivity.items[0].attachmentId = 'ATT000001'
+    input.canonicalActivity.attachments.push({
+      id: 'ATT000001',
+      mimeType: 'image/png',
+      data: 'aW1hZ2U=',
+      byteLength: 5,
+      sha256: '0'.repeat(64),
+      rawRange: {
+        start: { line: 1, offset: 0 },
+        end: { line: 1, offset: 10 }
+      }
+    })
+
+    await expect(service.runKnowledgeMaintenance(input, 'session:test'))
+      .rejects.toThrow('不支持图片输入')
+    expect(maintainer.calls).toHaveLength(0)
   })
 })

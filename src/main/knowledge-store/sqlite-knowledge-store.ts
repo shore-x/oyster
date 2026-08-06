@@ -1,4 +1,4 @@
-import { backup, DatabaseSync, type SQLInputValue } from 'node:sqlite'
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 import type {
   KnowledgeCommitResult,
   KnowledgeContributionDraft,
@@ -6,6 +6,8 @@ import type {
   KnowledgeBrowseResult,
   ClearKnowledgeResult,
   KnowledgeStatement,
+  KnowledgeReader,
+  KnowledgeStatementRecord,
   KnowledgeStatementDraft,
   ListKnowledgeStatementsOptions,
   BrowseKnowledgeInput
@@ -14,11 +16,6 @@ import {
   MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH,
   MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH
 } from './model'
-import type {
-  KnowledgeReader,
-  KnowledgeStatementRecord
-} from '../knowledge-processing/model'
-
 const SCHEMA_VERSION = 3
 const MAX_RUN_REF_LENGTH = 1_024
 const MAX_LIST_LIMIT = 1_000
@@ -232,11 +229,6 @@ export class SqliteKnowledgeStore implements KnowledgeReader {
 
   private assertOpen(): void {
     if (this.closed) throw new Error('Knowledge Store 已关闭')
-  }
-
-  async snapshotTo(destinationPath: string): Promise<void> {
-    this.assertOpen()
-    await backup(this.database, destinationPath)
   }
 
   commit(draft: KnowledgeContributionDraft): KnowledgeCommitResult {

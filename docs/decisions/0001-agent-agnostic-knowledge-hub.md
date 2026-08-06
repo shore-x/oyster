@@ -17,9 +17,10 @@
 - 修订：2026-07-31，将现有对话 Agent 扩展为单一通用管理 Agent：所有 Session 常驻 Knowledge 与 Coding 工具，不绑定 Artifact、Project 或 `cwd`，由 Agent 自主发现相关 Artifact
 - 修订：2026-07-31，确定通用 Agent 的高信任 MVP：Coding 工具从固定 Artifact Repository 根开始，但不设置路径边界、Shell Sandbox、逐次审批、selector/router/lock；System Prompt 只提供必要环境事实
 - 修订：2026-07-31，为通用管理 Agent 增加 `spawn_agent`：它创建独立上下文的临时通用 Agent 运行，不建立新的用户 Session、固定子 Agent 角色或专用工作流
-- 修订：2026-08-05，所有内置工具使用 Agent 复用通用 Todo 与结束检查能力；初始 Todo 作为 Host 运行状态绑定，不做每轮 Context 注入，pending Todo 只是阻止自然结束的一种通用原因
-- 修订：2026-08-05，知识加工直接由 Host 将完整 Raw Evidence 组织为粗粒度 Evidence Segment initial Todo；Harness 保留 Skill 激活探测，Maintainer 负责回到证据核查
+- 修订：2026-08-05，引入可选的通用 Todo 与结束检查能力；ADR-0002 后 Maintainer/Reviewer 改用文件工作清单且不安装 Todo，Chat Agent 继续使用
+- 修订：2026-08-06，Source Adapter 从完整 Raw Evidence 确定性生成 Canonical Activity；Maintainer 完整扫描活动与附件，并按 locator 回查原文
 - 修订：2026-08-06，ADR-0002 取代分离 Knowledge Store、Contribution Draft 提交协议和“Git 不承担 Agent 修订工作流”的相关决定
+- 修订：2026-08-06，ADR-0002 进一步确定文件工作清单与“批准但不 merge”的知识加工 MVP
 - 关联文档：[ADR-0002](0002-unified-git-agent-collaboration.md)、[Product Brief](../product/product-brief.md)、[本地 Agent 发现与外部证据访问](../product/local-agent-discovery-mvp.md)、[AI Backend MVP](../product/ai-backends-mvp.md)、[知识加工验证 MVP](../product/knowledge-processing-mvp.md)、[Artifact Repository MVP](../product/artifact-repository-mvp.md)、[知识加工、Projection 与 Artifact](../architecture/knowledge-model-and-projection.md)
 
 ## Context
@@ -42,7 +43,7 @@ Oyster 的主要产品身份是：本地优先、跨 Agent、跨项目的知识�
 
 Projection 是从知识、Attention 和必要的当前状态形成可消费输出的活动，而不是第三个持久状态域本身。它可以形成按需消费输出，也可以初始化 Artifact，或基于当前 Artifact 形成下一次修订。Context Packet 是当前临时消费输出的候选形式，其与持久 Artifact 之间的转换关系不由本 ADR 决定。
 
-三个域保持不同的数据所有权，但知识加工、Projection 和 Artifact 维护通过共享 Attention 耦合。Source Adapter 保留完整 Raw Evidence，并可按 Harness 的原始格式确定性标记疑似 Skill 激活位置；这些标记只是导航线索。Host 在启动 Knowledge Maintenance Agent 时把完整证据确定性组织为粗粒度 Evidence Segment initial Todo，段内有界分页只承担单次工具 I/O 边界。Agent 逐段读取证据，自行识别需要调查的名称、指代和背景问题，必要时增加 Todo，并独立维护 Contribution Draft；当所有 Todo 完成且 Agent 自然结束时，Host 冻结整份 Draft。Todo 与 Contribution Draft 都是可丢弃的运行期工作材料（Run-local Working Material），不是第四个状态域。Oyster Core 统一执行该知识加工 Pipeline 的来源、冻结与提交边界。无论知识由 Agent、Pipeline 还是用户产生，都进入同一个知识层，不按处理器或 Artifact 建立不同的真相存储。
+三个域保持不同的数据所有权，但知识加工、Projection 和 Artifact 维护通过共享 Attention 耦合。Source Adapter 保留完整 Raw Evidence，从同一 revision 确定性生成 Canonical Activity，并按 Harness 原始格式标记疑似 Skill 激活位置；Activity 与 hint 都只是可重建导航。Canonical Activity 合并确定性重复表示，将 Base64 二进制变成可独立读取的 Attachment，并为每项活动保留 Raw locator，不做重要性、因果或真假判断。Host 在启动 Knowledge Maintenance Agent 时沿 Activity 边界生成粗粒度 Segment initial Todo，段内有界分页只承担单次工具 I/O 边界。Agent 逐段扫描活动与附件，按需回查 Raw Evidence，自行识别需要调查的名称、指代和背景问题，必要时增加 Todo，并独立维护 Contribution Draft；当所有 Todo 完成且 Agent 自然结束时，Host 冻结整份 Draft。Todo 与 Contribution Draft 都是可丢弃的运行期工作材料（Run-local Working Material），不是第四个状态域。Oyster Core 统一执行该知识加工 Pipeline 的来源、冻结与提交边界。无论知识由 Agent、Pipeline 还是用户产生，都进入同一个知识层，不按处理器或 Artifact 建立不同的真相存储。
 
 Attention 可以让 Artifact 自然形成分组，但是否正式引入 Project，以及这种分组的身份和生命周期，仍是未决定事项。任何 Artifact 分组都不得把共享知识划分为彼此隔离的真相。
 

@@ -3,7 +3,6 @@ import type {
   KnowledgeFullChainRunRecord,
   KnowledgeFullChainRunSummary
 } from '../../../shared/knowledge-processing'
-import type { KnowledgeCommitResult } from '../../../shared/knowledge'
 import { Button } from '../ui'
 import {
   FullChainActivityDetail,
@@ -32,10 +31,7 @@ export function ProcessingRunHistoryWorkspace(props: {
   loading: boolean
   selected?: KnowledgeFullChainRunRecord
   loadingRunId?: string
-  importingRunId?: string
-  importResult?: { runId: string; commit: KnowledgeCommitResult }
   onOpen(runId: string): Promise<KnowledgeFullChainRunRecord | undefined>
-  onImport(runId: string): Promise<KnowledgeCommitResult | undefined>
 }) {
   const [page, setPage] = createSignal<'list' | 'activity' | 'result'>('list')
 
@@ -130,18 +126,12 @@ export function ProcessingRunHistoryWorkspace(props: {
         {(record) => <FullChainResultDetail
           result={fullChainResultView(record().result!)}
           title="历史结果快照"
-          description="这是该次测试完成时保存的隔离结果，不会随当前知识库变化。"
+          description="这是该次测试结束时保存的已批准 Git revision；它没有合并到目标分支。"
           listLabel="历史 Statements"
           backLabel="返回历史"
           detailTestId="history-run-result-detail"
           backTestId="history-run-result-back"
-          importTestId="import-history-run"
-          importing={props.importingRunId === record().runId}
-          importResult={props.importResult?.runId === record().runId
-            ? props.importResult.commit
-            : undefined}
           onBack={() => setPage('list')}
-          onImport={() => void props.onImport(record().runId)}
         />}
       </Show>
     </div>

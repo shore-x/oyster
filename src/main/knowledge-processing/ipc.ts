@@ -31,9 +31,9 @@ export function registerKnowledgeProcessingIpc(
     }
   }
 
-  const resolveMaintainerBinding = (): ProcessingStageRunBinding => {
+  const resolveBinding = (stageId: ProcessingStageId): ProcessingStageRunBinding => {
     if (fullChain.isRunning()) throw new Error('完整链路正在运行，不能启动独立调试')
-    return service.runBinding('knowledge_maintenance_agent')
+    return service.runBinding(stageId)
   }
 
   ipcMain.handle(knowledgeProcessingChannels.getSnapshot, (event) => {
@@ -60,10 +60,13 @@ export function registerKnowledgeProcessingIpc(
       assertTrustedSender(event)
       const material = await loadSessionMaterial(discovery, input)
       return service.runKnowledgeMaintenance(
-        material.evidence.rawEvidence,
+        {
+          rawEvidence: material.evidence.rawEvidence,
+          canonicalActivity: material.evidence.canonicalActivity
+        },
         material.sourceRef,
         input.attention,
-        { binding: resolveMaintainerBinding() }
+        { binding: resolveBinding('knowledge_maintenance_agent') }
       )
     }
   )
@@ -71,7 +74,10 @@ export function registerKnowledgeProcessingIpc(
     knowledgeProcessingChannels.runFullChain,
     async (event, input: RunKnowledgeFullChainInput) => {
       assertTrustedSender(event)
-      return fullChain.run(input, { maintainer: resolveMaintainerBinding() })
+      return fullChain.run(input, {
+        maintainer: resolveBinding('knowledge_maintenance_agent'),
+        reviewer: resolveBinding('knowledge_reviewer_agent')
+      })
     }
   )
   ipcMain.handle(knowledgeProcessingChannels.listFullChainRuns, (event) => {
@@ -85,24 +91,10 @@ export function registerKnowledgeProcessingIpc(
       return fullChain.readRun(runId)
     }
   )
-  ipcMain.handle(
-    knowledgeProcessingChannels.importFullChainRun,
-    (event, runId: string) => {
-      assertTrustedSender(event)
-      return fullChain.importRun(runId)
-    }
-  )
   ipcMain.handle(knowledgeProcessingChannels.cancelFullChain, (event) => {
     assertTrustedSender(event)
     fullChain.cancel()
   })
-  ipcMain.handle(
-    knowledgeProcessingChannels.discardSandbox,
-    (event, sandboxId: string) => {
-      assertTrustedSender(event)
-      return fullChain.discardSandbox(sandboxId)
-    }
-  )
   ipcMain.handle(
     knowledgeProcessingChannels.cancelRun,
     (event, stageId: ProcessingStageId) => {

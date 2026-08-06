@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -15,18 +15,28 @@ import type { KnowledgeFullChainRunHistory } from '../src/main/knowledge-process
 import { KnowledgeProcessingService } from '../src/main/knowledge-processing/knowledge-processing-service'
 import type {
   AiBackendPort,
-  KnowledgeAgentRunInput,
-  KnowledgeAgentRuntime,
-  KnowledgeReader
+  KnowledgeMaintainerRuntime,
+  KnowledgeReviewerRunInput,
+  KnowledgeReviewerRuntime,
+  RepositoryAgentRunResult
 } from '../src/main/knowledge-processing/model'
 import { InMemoryKnowledgeProcessingRepository } from '../src/main/knowledge-processing/repository'
-import { SqliteKnowledgeStoreManager } from '../src/main/knowledge-store/knowledge-store-manager'
 import type { KnowledgeFullChainRunRecord } from '../src/shared/knowledge-processing'
-import type { AgentRunRecord } from '../src/shared/agent-runtime'
 import { completedAgentRun } from './agent-run-fixture'
+import {
+  CollaborationRepository,
+  COLLABORATION_WORK_FILE,
+  REVIEW_MARKER_COMMENT,
+  REVIEW_MARKER_END,
+  REVIEW_MARKER_START
+} from '../src/main/knowledge-processing/collaboration-repository'
+import {
+  FixtureKnowledgeMaintainerRuntime,
+  FixtureKnowledgeReviewerRuntime
+} from '../src/main/knowledge-processing/fixture'
+import { runArtifactGit } from '../src/main/artifacts/git-runtime'
 
 const temporaryDirectories: string[] = []
-const disposals: Array<() => void> = []
 
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex')
@@ -34,20 +44,20 @@ function sha256(value: string): string {
 
 function connection(): AiConnection {
   return {
-    id: 'model:maintainer',
+    id: 'model:collaboration',
     adapterId: 'openai-compatible',
     backendKind: 'api',
     providerId: 'openai_compatible',
-    displayName: 'Maintainer Model',
+    displayName: 'Collaboration Model',
     credentialMode: 'oyster_keychain',
     status: 'ready',
-    models: [{ id: 'maintainer', displayName: 'Maintainer', reasoningEfforts: [] }],
-    defaultModelId: 'maintainer',
+    models: [{ id: 'collaboration', displayName: 'Collaboration', reasoningEfforts: [] }],
+    defaultModelId: 'collaboration',
     modelConfig: {
       providerId: 'openai_compatible',
       protocol: 'openai_responses',
       baseUrl: 'https://example.test/v1',
-      model: 'maintainer',
+      model: 'collaboration',
       hasApiKey: true,
       reasoningEfforts: []
     }
@@ -59,7 +69,7 @@ class FakeBackend implements AiBackendPort {
     return {
       options: [],
       connections: [connection()],
-      defaultLlm: { connectionId: 'model:maintainer', modelId: 'maintainer' }
+      defaultLlm: { connectionId: 'model:collaboration', modelId: 'collaboration' }
     }
   }
 
@@ -81,17 +91,14 @@ class FakeBackend implements AiBackendPort {
     operation: (runtime: ModelRuntime) => Promise<T>
   ): Promise<T> {
     return operation({
-      model: { id: 'maintainer', contextWindow: 128_000 } as ModelRuntime['model'],
+      model: { id: 'collaboration', contextWindow: 128_000 } as ModelRuntime['model'],
       streamFn: (() => { throw new Error('not used') }) as ModelRuntime['streamFn']
     })
   }
 }
 
 function fakeDiscovery() {
-  const content = [
-    '{"role":"user","content":"Keep summaries concise."}',
-    '{"type":"function_call","name":"Skill","arguments":{"skill":"deep-research"}}'
-  ].join('\n')
+  const content = '{"role":"user","content":"Keep summaries concise."}'
   const revision = sha256(`revision\0${content}`)
   const session: AvailableSessionSummary = {
     sourceRecordId: 'source-record-session-1',
@@ -116,13 +123,20 @@ function fakeDiscovery() {
         sizeBytes: Buffer.byteLength(content),
         rawEvidence: {
           formatVersion: 'codex-jsonl-raw-v1',
-          lines: content.split('\n'),
-          skillHints: [{
-            name: 'deep-research',
-            tool: 'Skill',
-            source: 'tool_call' as const,
-            location: { line: 2, offset: 0 }
-          }]
+          lines: [content],
+          skillHints: []
+        },
+        canonicalActivity: {
+          formatVersion: 'codex-canonical-activity-v1',
+          items: [{
+            kind: 'user_message' as const,
+            content: 'Keep summaries concise.',
+            rawRanges: [{
+              start: { line: 1, offset: 0 },
+              end: { line: 1, offset: content.length }
+            }]
+          }],
+          attachments: []
         }
       }
     }
@@ -145,261 +159,157 @@ function inMemoryHistory(): {
   }
 }
 
-function terminalAgentRun(
-  id: string,
-  status: 'failed' | 'cancelled',
-  error: string
-): AgentRunRecord {
-  const run = completedAgentRun(id, [], 1, 'knowledge_maintenance_agent')
-  run.status = status
-  run.error = error
-  const modelCall = run.modelCalls[0]
-  if (modelCall) {
-    modelCall.status = status
-    modelCall.error = error
+const BINDINGS: KnowledgeFullChainBindings = {
+  maintainer: {
+    connectionId: 'model:collaboration',
+    modelId: 'collaboration',
+    instructions: 'Maintain the repository.'
+  },
+  reviewer: {
+    connectionId: 'model:collaboration',
+    modelId: 'collaboration',
+    instructions: 'Review the repository.'
   }
-  return run
 }
 
-function runningAgentRun(id: string): AgentRunRecord {
-  const run = completedAgentRun(id, [], 1, 'knowledge_maintenance_agent')
-  run.status = 'running'
-  delete run.completedAt
-  delete run.durationMs
-  for (const modelCall of run.modelCalls) {
-    modelCall.status = 'running'
-    delete modelCall.completedAt
-    delete modelCall.durationMs
+async function harness(
+  maintainer: KnowledgeMaintainerRuntime = new FixtureKnowledgeMaintainerRuntime(),
+  reviewer: KnowledgeReviewerRuntime = new FixtureKnowledgeReviewerRuntime()
+) {
+  const directory = await mkdtemp(join(tmpdir(), 'oyster-full-chain-'))
+  temporaryDirectories.push(directory)
+  const collaborations = new CollaborationRepository(join(directory, 'repository'))
+  const processing = new KnowledgeProcessingService(
+    new InMemoryKnowledgeProcessingRepository({
+      stages: [
+        { stageId: 'knowledge_maintenance_agent' },
+        { stageId: 'knowledge_reviewer_agent' }
+      ]
+    }),
+    new FakeBackend(),
+    collaborations,
+    maintainer,
+    reviewer
+  )
+  await processing.initialize()
+  const discovery = fakeDiscovery()
+  const { history, records } = inMemoryHistory()
+  return {
+    processing,
+    collaborations,
+    discovery,
+    records,
+    service: new KnowledgeFullChainService(
+      discovery.service,
+      processing,
+      collaborations,
+      history
+    )
   }
-  return run
+}
+
+class RequestChangesOnceReviewer implements KnowledgeReviewerRuntime {
+  calls = 0
+  private readonly approval = new FixtureKnowledgeReviewerRuntime()
+
+  async run(input: KnowledgeReviewerRunInput): Promise<RepositoryAgentRunResult> {
+    this.calls += 1
+    if (this.calls > 1) return this.approval.run(input)
+
+    const statementPath = join(
+      input.workspace.worktreePath,
+      'knowledge',
+      'knowledge-processing.md'
+    )
+    const current = await readFile(statementPath, 'utf8')
+    const marker = [
+      REVIEW_MARKER_START,
+      current.trimEnd(),
+      REVIEW_MARKER_COMMENT,
+      'Explain that the approved revision remains unmerged.',
+      REVIEW_MARKER_END,
+      ''
+    ].join('\n')
+    await writeFile(statementPath, marker, 'utf8')
+    const workPath = join(input.workspace.worktreePath, COLLABORATION_WORK_FILE)
+    await writeFile(
+      workPath,
+      `${await readFile(workPath, 'utf8')}\n- [ ] Resolve the Reviewer request.\n`,
+      'utf8'
+    )
+    await runArtifactGit(['add', '-A'], input.workspace.worktreePath)
+    await runArtifactGit([
+      'commit', '--quiet', '--no-gpg-sign', '-m', 'review: request unmerged explanation'
+    ], input.workspace.worktreePath)
+    const run = completedAgentRun(input.runId, ['read', 'edit', 'bash'], 1, 'knowledge_reviewer_agent')
+    input.onRunUpdate?.(run)
+    return { run, modelCallCount: 1, toolCalls: run.toolCalls.map((call) => call.name) }
+  }
 }
 
 afterEach(async () => {
-  for (const dispose of disposals.splice(0)) dispose()
   await Promise.all(temporaryDirectories.splice(0).map(
     (directory) => rm(directory, { recursive: true, force: true })
   ))
 })
 
 describe('KnowledgeFullChainService', () => {
-  it('runs one evidence-driven Maintainer in a Sandbox and stores a V5 terminal snapshot', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'oyster-full-chain-'))
-    temporaryDirectories.push(directory)
-    const stores = await SqliteKnowledgeStoreManager.open(join(directory, 'knowledge'))
-    disposals.push(() => stores.close())
-    const processing = new KnowledgeProcessingService(
-      new InMemoryKnowledgeProcessingRepository({
-        stages: [{ stageId: 'knowledge_maintenance_agent' }]
-      }),
-      new FakeBackend(),
-      { run: async () => { throw new Error('full chain must use the Sandbox-bound Agent') } }
-    )
-    await processing.initialize()
-    disposals.push(() => processing.dispose())
-    const discovery = fakeDiscovery()
-    const agentInputs: KnowledgeAgentRunInput[] = []
-    const { history, records: historyRecords } = inMemoryHistory()
-    const factory = (_reader: KnowledgeReader): KnowledgeAgentRuntime => ({
-      run: async (input) => {
-        agentInputs.push(input)
-        const run = completedAgentRun(
-          input.runId,
-          ['read_evidence', 'complete_todos'],
-          1,
-          'knowledge_maintenance_agent'
-        )
-        input.onRunUpdate?.(run)
-        return {
-          contribution: {
-            runRef: input.contributionRunRef,
-            statements: [{ title: 'Summary preference', content: 'The user prefers concise summaries.' }]
-          },
-          todos: (input.initialTodos ?? []).map((content, index) => ({
-            id: `T${String(index + 1).padStart(6, '0')}`,
-            content,
-            status: 'completed'
-          })),
-          run,
-          modelCallCount: 1,
-          toolCalls: ['read_evidence', 'complete_todos']
-        }
-      }
-    })
-    const service = new KnowledgeFullChainService(discovery.service, processing, stores, factory, history)
-    const bindings: KnowledgeFullChainBindings = {
-      maintainer: processing.runBinding('knowledge_maintenance_agent')
-    }
+  it('runs Maintainer then Reviewer on a real branch and stores a V6 unmerged result', async () => {
+    const { service, collaborations, discovery, records } = await harness()
+    const baseRevision = await collaborations.currentRevision()
+    const result = await service.run({
+      sourceRecordId: discovery.session.sourceRecordId,
+      expectedRevision: discovery.session.revision
+    }, BINDINGS)
 
+    expect(result.maintenanceRuns).toHaveLength(1)
+    expect(result.reviewRuns).toEqual([
+      expect.objectContaining({ outcome: 'approved', reviewedRevision: result.maintenanceRuns[0].revision })
+    ])
+    expect(result.approvedRevision).toBe(result.reviewRuns[0].revision)
+    expect(result.knowledge.map((statement) => statement.title)).toEqual([
+      'Knowledge Maintenance Agent',
+      'Knowledge Reviewer',
+      '知识加工链路'
+    ])
+    expect(result.changedPaths).toEqual(expect.arrayContaining([
+      'knowledge/knowledge-processing.md',
+      'knowledge/knowledge-maintainer.md',
+      'knowledge/knowledge-reviewer.md'
+    ]))
+    expect(await collaborations.currentRevision()).toBe(baseRevision)
+    await expect(access(join(result.workspace.worktreePath, COLLABORATION_WORK_FILE))).rejects.toThrow()
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({
+      formatVersion: 6,
+      status: 'completed',
+      result: { approvedRevision: result.approvedRevision }
+    })
+    expect(records[0].agentRuns).toHaveLength(2)
+  })
+
+  it('alternates Reviewer feedback and Maintainer repair before approval', async () => {
+    const reviewer = new RequestChangesOnceReviewer()
+    const { service, collaborations, discovery } = await harness(
+      new FixtureKnowledgeMaintainerRuntime(),
+      reviewer
+    )
+    const baseRevision = await collaborations.currentRevision()
     const result = await service.run({
       sourceRecordId: discovery.session.sourceRecordId,
       expectedRevision: discovery.session.revision,
-      attention: 'Preserve preferences.'
-    }, bindings)
+      attention: 'Keep the Git state explicit.'
+    }, BINDINGS)
 
-    expect(agentInputs).toHaveLength(1)
-    expect(agentInputs[0].initialTodos?.[0]).toContain('Inspect Raw Evidence segment 1 of 1')
-    expect(agentInputs[0].initialTodos?.[0]).toContain('possible Skill activation “deep-research”')
-    expect(result.maintenance.evidenceSegmentCount).toBe(1)
-    expect(result.knowledge.statements).toEqual([{ title: 'Summary preference', content: 'The user prefers concise summaries.' }])
-    expect(stores.production.listStatements()).toEqual([])
-    expect(historyRecords).toHaveLength(1)
-    expect(historyRecords[0]).toMatchObject({
-      formatVersion: 5,
-      status: 'completed',
-      configuration: { maintainer: { modelId: 'maintainer' } }
-    })
-    expect(historyRecords[0].runId).toBe(result.runId)
-    expect(historyRecords[0].agentRuns).toHaveLength(1)
-    expect(historyRecords[0].agentRuns[0]).toMatchObject({
-      id: result.maintenance.agentRunId,
-      agentId: 'knowledge_maintenance_agent',
-      status: 'completed'
-    })
-    expect(historyRecords[0].agentRuns[0].id).not.toBe(result.runId)
-  })
-
-  it('rejects a stale Session selection before creating a Sandbox', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'oyster-full-chain-'))
-    temporaryDirectories.push(directory)
-    const stores = await SqliteKnowledgeStoreManager.open(join(directory, 'knowledge'))
-    disposals.push(() => stores.close())
-    const processing = new KnowledgeProcessingService(
-      new InMemoryKnowledgeProcessingRepository(),
-      new FakeBackend(),
-      { run: async () => { throw new Error('not used') } }
-    )
-    await processing.initialize()
-    disposals.push(() => processing.dispose())
-    const discovery = fakeDiscovery()
-    const { history, records } = inMemoryHistory()
-    const service = new KnowledgeFullChainService(discovery.service, processing, stores, () => ({
-      run: async () => { throw new Error('not used') }
-    }), history)
-
-    await expect(service.run({
-      sourceRecordId: discovery.session.sourceRecordId,
-      expectedRevision: '0'.repeat(64)
-    }, {
-      maintainer: {
-        connectionId: 'model:maintainer',
-        modelId: 'maintainer',
-        instructions: 'Maintain knowledge.'
-      }
-    })).rejects.toThrow('Session 已失效')
-    expect(await stores.listSandboxes()).toEqual([])
-    expect(records).toHaveLength(1)
-    expect(records[0]).toMatchObject({
-      formatVersion: 5,
-      status: 'failed',
-      error: expect.stringContaining('Session 已失效'),
-      agentRuns: []
-    })
-    expect(records[0].session).toBeUndefined()
-  })
-
-  it('stores the failed Agent Run when knowledge maintenance fails', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'oyster-full-chain-'))
-    temporaryDirectories.push(directory)
-    const stores = await SqliteKnowledgeStoreManager.open(join(directory, 'knowledge'))
-    disposals.push(() => stores.close())
-    const processing = new KnowledgeProcessingService(
-      new InMemoryKnowledgeProcessingRepository(),
-      new FakeBackend(),
-      { run: async () => { throw new Error('not used') } }
-    )
-    await processing.initialize()
-    disposals.push(() => processing.dispose())
-    const discovery = fakeDiscovery()
-    const { history, records } = inMemoryHistory()
-    const service = new KnowledgeFullChainService(discovery.service, processing, stores, () => ({
-      run: async (input) => {
-        const error = 'maintainer model unavailable'
-        input.onRunUpdate?.(terminalAgentRun(input.runId, 'failed', error))
-        throw new Error(error)
-      }
-    }), history)
-
-    await expect(service.run({
-      sourceRecordId: discovery.session.sourceRecordId,
-      expectedRevision: discovery.session.revision
-    }, {
-      maintainer: {
-        connectionId: 'model:maintainer',
-        modelId: 'maintainer',
-        instructions: 'Maintain knowledge.'
-      }
-    })).rejects.toThrow('maintainer model unavailable')
-
-    expect(records).toHaveLength(1)
-    expect(records[0]).toMatchObject({
-      status: 'failed',
-      error: 'maintainer model unavailable',
-      agentRuns: [{
-        agentId: 'knowledge_maintenance_agent',
-        status: 'failed',
-        error: 'maintainer model unavailable',
-        modelCalls: [{ status: 'failed' }]
-      }]
-    })
-    expect(records[0].agentRuns[0].id).not.toBe(records[0].runId)
-    expect(await stores.listSandboxes()).toEqual([])
-  })
-
-  it('stores a cancelled terminal snapshot with the active Agent Run', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'oyster-full-chain-'))
-    temporaryDirectories.push(directory)
-    const stores = await SqliteKnowledgeStoreManager.open(join(directory, 'knowledge'))
-    disposals.push(() => stores.close())
-    const processing = new KnowledgeProcessingService(
-      new InMemoryKnowledgeProcessingRepository(),
-      new FakeBackend(),
-      { run: async () => { throw new Error('not used') } }
-    )
-    await processing.initialize()
-    disposals.push(() => processing.dispose())
-    const discovery = fakeDiscovery()
-    const { history, records } = inMemoryHistory()
-    let markStarted!: () => void
-    const started = new Promise<void>((resolve) => { markStarted = resolve })
-    const service = new KnowledgeFullChainService(discovery.service, processing, stores, () => ({
-      run: async (input) => {
-        input.onRunUpdate?.(runningAgentRun(input.runId))
-        markStarted()
-        return new Promise<never>((_resolve, reject) => {
-          const cancel = (): void => {
-            input.onRunUpdate?.(terminalAgentRun(input.runId, 'cancelled', '用户取消了运行'))
-            reject(input.signal.reason)
-          }
-          if (input.signal.aborted) cancel()
-          else input.signal.addEventListener('abort', cancel, { once: true })
-        })
-      }
-    }), history)
-
-    const run = service.run({
-      sourceRecordId: discovery.session.sourceRecordId,
-      expectedRevision: discovery.session.revision
-    }, {
-      maintainer: {
-        connectionId: 'model:maintainer',
-        modelId: 'maintainer',
-        instructions: 'Maintain knowledge.'
-      }
-    })
-    await started
-    service.cancel()
-    await expect(run).rejects.toThrow('取消')
-
-    expect(records).toHaveLength(1)
-    expect(records[0]).toMatchObject({
-      status: 'cancelled',
-      error: '加工测试运行已取消',
-      agentRuns: [{
-        agentId: 'knowledge_maintenance_agent',
-        status: 'cancelled',
-        modelCalls: [{ status: 'cancelled' }]
-      }]
-    })
-    expect(await stores.listSandboxes()).toEqual([])
+    expect(result.maintenanceRuns).toHaveLength(2)
+    expect(result.reviewRuns.map((review) => review.outcome)).toEqual([
+      'changes_requested',
+      'approved'
+    ])
+    expect(result.reviewRuns[0].markerPaths).toEqual(['knowledge/knowledge-processing.md'])
+    expect(result.maintenanceRuns[1].previousRevision).toBe(result.reviewRuns[0].revision)
+    expect(result.reviewRuns[1].reviewedRevision).toBe(result.maintenanceRuns[1].revision)
+    expect(await collaborations.currentRevision()).toBe(baseRevision)
+    await expect(access(join(result.workspace.worktreePath, COLLABORATION_WORK_FILE))).rejects.toThrow()
   })
 })

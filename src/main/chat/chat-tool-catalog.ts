@@ -6,11 +6,18 @@ import {
 } from '../../shared/knowledge'
 import type { ProcessingToolView } from '../../shared/knowledge-processing'
 import { AGENT_TODO_TOOL_CATALOG } from '../agent-runtime/agent-todos'
-import {
-  knowledgeMaintenanceToolDefinition,
-  readKnowledgeParameters,
-  searchKnowledgeParameters
-} from '../knowledge-processing/knowledge-maintenance-tool-catalog'
+
+const MAX_KNOWLEDGE_SEARCH_RESULTS = 20
+
+export const searchKnowledgeParameters = Type.Object({
+  query: Type.String({ minLength: 1, maxLength: 1_024 }),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_KNOWLEDGE_SEARCH_RESULTS })),
+  offset: Type.Optional(Type.Integer({ minimum: 0 }))
+}, { additionalProperties: false })
+
+export const readKnowledgeParameters = Type.Object({
+  title: Type.String({ minLength: 1, maxLength: MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH })
+}, { additionalProperties: false })
 
 export const upsertKnowledgeParameters = Type.Object({
   statements: Type.Array(Type.Object({
@@ -34,16 +41,17 @@ export const spawnAgentParameters = Type.Object({
   })
 }, { additionalProperties: false })
 
-const searchKnowledgeDefinition = knowledgeMaintenanceToolDefinition('search_knowledge')
-const readKnowledgeDefinition = knowledgeMaintenanceToolDefinition('read_knowledge')
-
 const CHAT_AGENT_TOOL_CATALOG = [
   {
-    ...searchKnowledgeDefinition,
+    name: 'search_knowledge',
+    label: '搜索已有知识',
+    description: '按标题和正文文本搜索当前 Knowledge Statement，返回有界的候选列表。',
     parameters: searchKnowledgeParameters
   },
   {
-    ...readKnowledgeDefinition,
+    name: 'read_knowledge',
+    label: '读取 Knowledge Statement',
+    description: '按完整 canonical title 精确读取当前 Knowledge Statement。',
     parameters: readKnowledgeParameters
   },
   {
