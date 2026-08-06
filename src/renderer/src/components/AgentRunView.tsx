@@ -89,6 +89,26 @@ function modelCallTitle(call: AgentModelCallRecord, index: number): string {
   return call.purpose === 'context_compaction' ? `上下文压缩 ${index + 1}` : `模型调用 ${index + 1}`
 }
 
+function updateWithoutMovingScroll(element: HTMLElement, update: () => void): void {
+  const positions: Array<{ element: HTMLElement; top: number; left: number }> = []
+  let ancestor = element.parentElement
+  while (ancestor) {
+    positions.push({ element: ancestor, top: ancestor.scrollTop, left: ancestor.scrollLeft })
+    ancestor = ancestor.parentElement
+  }
+  const viewport = { top: window.scrollY, left: window.scrollX }
+  const restore = (): void => {
+    for (const position of positions) {
+      position.element.scrollTop = position.top
+      position.element.scrollLeft = position.left
+    }
+    window.scrollTo(viewport.left, viewport.top)
+  }
+  update()
+  restore()
+  requestAnimationFrame(restore)
+}
+
 type TimelineItem =
   | { kind: 'message'; sequence: number; message: AgentMessageRecord }
   | { kind: 'tool'; sequence: number; call: AgentToolCallRecord }
@@ -109,9 +129,20 @@ function timelineItems(run: AgentRunRecord): TimelineItem[] {
 
 function ToolCall(props: { call: AgentToolCallRecord; label?: string }) {
   const status = () => props.call.status
+  const [expanded, setExpanded] = createSignal(false)
+  const payloadId = `agent-tool-payload-${createUniqueId()}`
   return (
-    <details class={`agent-trace-tool agent-trace-status--${status()}`} data-tool-call-id={props.call.id}>
-      <summary>
+    <section
+      class={`agent-trace-tool agent-trace-status--${status()}${expanded() ? ' agent-trace-tool--expanded' : ''}`}
+      data-tool-call-id={props.call.id}
+    >
+      <button
+        type="button"
+        class="agent-trace-tool__toggle"
+        aria-expanded={expanded()}
+        aria-controls={payloadId}
+        onClick={(event) => updateWithoutMovingScroll(event.currentTarget, () => setExpanded((value) => !value))}
+      >
         <span class="agent-trace-marker" aria-hidden="true" />
         <span class="agent-trace-tool__identity">
           <strong>{props.label || props.call.name}</strong>
@@ -119,15 +150,15 @@ function ToolCall(props: { call: AgentToolCallRecord; label?: string }) {
             <code>{props.call.name}</code>
           </Show>
         </span>
-        <span>{agentRunStatusLabel(status())} · {formatDuration(props.call.durationMs)}</span>
-      </summary>
-      <div class="agent-trace-tool__payloads">
+        <span class="agent-trace-tool__state">{agentRunStatusLabel(status())} · {formatDuration(props.call.durationMs)}</span>
+      </button>
+      <div id={payloadId} class="agent-trace-tool__payloads" hidden={!expanded()}>
         <section><h5>Input</h5><pre>{pretty(props.call.input)}</pre></section>
         <Show when={props.call.result !== undefined}>
           <section><h5>Result</h5><pre>{pretty(toolResultBody(props.call))}</pre></section>
         </Show>
       </div>
-    </details>
+    </section>
   )
 }
 

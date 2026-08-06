@@ -145,4 +145,34 @@ describe('CollaborationRepository', () => {
     await expect(repository.recordMaintainerHandoff(workspace, workspace.workOrderRevision))
       .rejects.toThrow('工作清单仍有未完成项')
   })
+
+  it('preserves non-ASCII paths when validating a Maintainer handoff', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'oyster-collaboration-'))
+    temporaryDirectories.push(directory)
+    const repository = new CollaborationRepository(join(directory, 'repository'))
+    await repository.initialize()
+    const workspace = await repository.createCollaboration({
+      sourceRef: 'raw:test@sha256:unicode',
+      items: ['Inspect the activity.']
+    })
+    const knowledgePath = 'knowledge/商品商户小程序精选集页面.md'
+    await writeFile(
+      join(workspace.worktreePath, knowledgePath),
+      '# 商品商户小程序精选集页面\n\n该页面展示精选商品。\n',
+      'utf8'
+    )
+    const workPath = join(workspace.worktreePath, COLLABORATION_WORK_FILE)
+    await writeFile(
+      workPath,
+      (await readFile(workPath, 'utf8')).replaceAll('- [ ]', '- [x]'),
+      'utf8'
+    )
+    const revision = await commit(workspace.worktreePath, 'maintain: add localized knowledge')
+
+    await expect(repository.recordMaintainerHandoff(workspace, workspace.workOrderRevision))
+      .resolves.toMatchObject({ revision, changedPaths: [COLLABORATION_WORK_FILE, knowledgePath] })
+    await expect(repository.revisionView(revision)).resolves.toMatchObject({
+      knowledge: [{ path: knowledgePath }]
+    })
+  })
 })

@@ -173,6 +173,10 @@ function allowedCollaborationPath(path: string): boolean {
     || path.startsWith(`${ARTIFACT_DIRECTORY}/`)
 }
 
+function nulDelimitedPaths(output: string): string[] {
+  return output ? output.split('\0').filter(Boolean).sort() : []
+}
+
 /** A real Git repository and one linear, branch-local Agent collaboration. */
 export class CollaborationRepository {
   readonly repositoryPath: string
@@ -278,11 +282,12 @@ export class CollaborationRepository {
     const output = await this.git([
       'ls-tree',
       '-r',
+      '-z',
       '--name-only',
       revision,
       ...(path ? ['--', path] : [])
     ])
-    return output ? output.split('\n').filter(Boolean).sort() : []
+    return nulDelimitedPaths(output)
   }
 
   private async readTreeFile(revision: string, path: string): Promise<string> {
@@ -299,8 +304,8 @@ export class CollaborationRepository {
   }
 
   private async changedPaths(previousRevision: string, revision: string): Promise<string[]> {
-    const output = await this.git(['diff', '--name-only', previousRevision, revision])
-    return output ? output.split('\n').filter(Boolean).sort() : []
+    const output = await this.git(['diff', '--name-only', '-z', previousRevision, revision])
+    return nulDelimitedPaths(output)
   }
 
   async revisionChangedPaths(previousRevision: string, revision: string): Promise<string[]> {

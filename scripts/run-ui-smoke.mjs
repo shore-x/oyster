@@ -422,6 +422,14 @@ if (
 ) {
   throw new Error('The conversational Model Call inspector is not a viewport-contained overlay')
 }
+if (
+  Number.parseFloat(chat.timelineGap) > 7
+  || chat.messageFontSize !== '13px'
+  || Number.parseFloat(chat.messageLineHeight) > 21
+  || Number.parseFloat(chat.messagePaddingTop) > 16
+) {
+  throw new Error('The conversational timeline does not use the compact information density')
+}
 
 const processing = semantics.processing
 if (processing.title !== '加工测试') throw new Error('Knowledge processing page was not rendered')
@@ -546,6 +554,13 @@ if (
   || !processing.history.runSelectorText?.includes('knowledge_reviewer_agent')
 ) {
   throw new Error('Historical run details do not expose the persisted Agent Run')
+}
+if (
+  !processing.history.toolExpansionKeepsScroll
+  || !processing.history.toolPayloadVisible
+  || !processing.history.toolIsUnboxed
+) {
+  throw new Error('Tool Call disclosure moves the history viewport or still uses a boxed card')
 }
 if (!processing.history.returnedToHistory) {
   throw new Error('Historical secondary pages do not return to the history list')

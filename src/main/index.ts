@@ -939,6 +939,23 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const activityDetail = page.querySelector('[data-testid="history-run-activity-detail"]')
     const traceText = page.querySelector('[data-testid="history-run-activity-detail"]')?.textContent
     const runSelectorText = page.querySelector('.agent-run-collection__selector')?.textContent
+    const tool = activityDetail?.querySelector('.agent-trace-tool')
+    const toolStyle = tool ? getComputedStyle(tool) : undefined
+    const toolIsUnboxed = Boolean(toolStyle
+      && (toolStyle.backgroundColor === 'rgba(0, 0, 0, 0)' || toolStyle.backgroundColor === 'transparent')
+      && Number.parseFloat(toolStyle.borderTopWidth) === 0)
+    const spacer = document.createElement('div')
+    spacer.style.height = '900px'
+    activityDetail?.prepend(spacer)
+    tool?.scrollIntoView({ block: 'center' })
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const toolScrollBefore = window.scrollY
+    tool?.querySelector('.agent-trace-tool__toggle')?.click()
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    const toolScrollAfter = window.scrollY
+    const toolPayloadVisible = tool?.querySelector('.agent-trace-tool__payloads')?.hidden === false
+    spacer.remove()
+    window.scrollTo(0, 0)
     page.querySelector('[data-testid="history-run-activity-back"]')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
     return {
@@ -955,6 +972,9 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       traceEventCount,
       traceText,
       runSelectorText,
+      toolExpansionKeepsScroll: toolScrollBefore > 0 && Math.abs(toolScrollAfter - toolScrollBefore) < 1,
+      toolPayloadVisible,
+      toolIsUnboxed,
       returnedToHistory: Boolean(page.querySelector('.processing-history__list'))
     }
   })()`)
@@ -1289,6 +1309,13 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     page.querySelector('.agent-run-view__close')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
     const workspace = page.querySelector('.chat-workspace')?.getBoundingClientRect()
+    const timelineStyle = page.querySelector('.agent-trace-timeline')
+      ? getComputedStyle(page.querySelector('.agent-trace-timeline'))
+      : undefined
+    const assistantStyle = page.querySelector('.agent-trace-message__text')
+      ? getComputedStyle(page.querySelector('.agent-trace-message__text'))
+      : undefined
+    const messagesStyle = messages ? getComputedStyle(messages) : undefined
     return {
       title: page.querySelector('h1')?.textContent?.trim(),
       sessionCount: page.querySelectorAll('.chat-session').length,
@@ -1308,6 +1335,10 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
         && inspectorBounds.right <= window.innerWidth
         && inspectorBounds.bottom <= window.innerHeight),
       messageHeightStable,
+      timelineGap: timelineStyle?.rowGap,
+      messageFontSize: assistantStyle?.fontSize,
+      messageLineHeight: assistantStyle?.lineHeight,
+      messagePaddingTop: messagesStyle?.paddingTop,
       overflowWithInspector,
       composerVisible: Boolean(composer),
       pageError: page.querySelector('.page-error')?.textContent?.trim(),
