@@ -1,38 +1,7 @@
 import { Type } from '@earendil-works/pi-ai'
 import { createCodingTools } from '@earendil-works/pi-coding-agent'
-import {
-  MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH,
-  MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH
-} from '../../shared/knowledge'
 import type { ProcessingToolView } from '../../shared/knowledge-processing'
 import { AGENT_TODO_TOOL_CATALOG } from '../agent-runtime/agent-todos'
-
-const MAX_KNOWLEDGE_SEARCH_RESULTS = 20
-
-export const searchKnowledgeParameters = Type.Object({
-  query: Type.String({ minLength: 1, maxLength: 1_024 }),
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_KNOWLEDGE_SEARCH_RESULTS })),
-  offset: Type.Optional(Type.Integer({ minimum: 0 }))
-}, { additionalProperties: false })
-
-export const readKnowledgeParameters = Type.Object({
-  title: Type.String({ minLength: 1, maxLength: MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH })
-}, { additionalProperties: false })
-
-export const upsertKnowledgeParameters = Type.Object({
-  statements: Type.Array(Type.Object({
-    title: Type.String({
-      minLength: 1,
-      maxLength: MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH,
-      description: 'The exact canonical title of one independently searchable named subject.'
-    }),
-    content: Type.String({
-      minLength: 1,
-      maxLength: MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH,
-      description: 'The complete self-explaining free-text body. Relationships may use [[canonical title]] references.'
-    })
-  }, { additionalProperties: false }), { minItems: 1 })
-}, { additionalProperties: false })
 
 export const spawnAgentParameters = Type.Object({
   task: Type.String({
@@ -42,24 +11,6 @@ export const spawnAgentParameters = Type.Object({
 }, { additionalProperties: false })
 
 const CHAT_AGENT_TOOL_CATALOG = [
-  {
-    name: 'search_knowledge',
-    label: '搜索已有知识',
-    description: '按标题和正文文本搜索当前 Knowledge Statement，返回有界的候选列表。',
-    parameters: searchKnowledgeParameters
-  },
-  {
-    name: 'read_knowledge',
-    label: '读取 Knowledge Statement',
-    description: '按完整 canonical title 精确读取当前 Knowledge Statement。',
-    parameters: readKnowledgeParameters
-  },
-  {
-    name: 'upsert_knowledge',
-    label: '写入 Knowledge Statements',
-    description: 'Atomically create or replace one or more Statements in the authoritative Knowledge Store. A canonical title is the identity key; existing content is replaced in full.',
-    parameters: upsertKnowledgeParameters
-  },
   {
     name: 'spawn_agent',
     label: '创建子 Agent',
@@ -84,9 +35,9 @@ function serializableParameters(parameters: object): ProcessingToolView['paramet
   return JSON.parse(JSON.stringify(parameters)) as ProcessingToolView['parameters']
 }
 
-export function chatAgentToolViews(artifactRepositoryPath: string): readonly ProcessingToolView[] {
+export function chatAgentToolViews(repositoryPath: string): readonly ProcessingToolView[] {
   return [
-    ...createCodingTools(artifactRepositoryPath).map((tool) => ({
+    ...createCodingTools(repositoryPath).map((tool) => ({
       name: tool.name,
       label: tool.label,
       description: tool.description,

@@ -104,10 +104,11 @@ if (skills.openFolderDisabled !== false || skills.pageError || skills.overflowX)
 }
 
 const artifacts = semantics.artifacts
-const expectedArtifactRepositoryPath = join(userDataPath, 'artifacts')
+const expectedRepositoryPath = join(userDataPath, 'repository')
+const expectedArtifactPath = join(expectedRepositoryPath, 'artifacts')
 if (artifacts?.title !== '协作产物') throw new Error('Artifact page was not rendered')
-if (artifacts.repositoryPath !== expectedArtifactRepositoryPath) {
-  throw new Error(`Artifact Repository is not fixed under userData: ${artifacts.repositoryPath}`)
+if (artifacts.repositoryPath !== expectedRepositoryPath) {
+  throw new Error(`Oyster Repository is not fixed under userData: ${artifacts.repositoryPath}`)
 }
 if (
   artifacts.cardCountAfterCreate !== 1
@@ -127,11 +128,11 @@ if (!artifacts.createWasCollapsed || !artifacts.cardDetailsCollapsed) {
 }
 if (artifacts.pageError) throw new Error(`Artifact page reported an error: ${artifacts.pageError}`)
 if (artifacts.overflowX) throw new Error(`Artifact page has unexpected horizontal overflow at 900px: ${JSON.stringify(artifacts.overflowElements)}`)
-if (!(await stat(join(expectedArtifactRepositoryPath, '.git'))).isDirectory()) {
-  throw new Error('Artifact Repository was not initialized as Git')
+if (!(await stat(join(expectedRepositoryPath, '.git'))).isDirectory()) {
+  throw new Error('Oyster Repository was not initialized as Git')
 }
 if (
-  await readFile(join(expectedArtifactRepositoryPath, 'attention-tracking', 'AGENTS.md'), 'utf8')
+  await readFile(join(expectedArtifactPath, 'attention-tracking', 'AGENTS.md'), 'utf8')
   !== '# Attention\n\n持续维护 **Attention 测试**。\n'
 ) {
   throw new Error('Artifact AGENTS.md was not persisted with the expected content')
@@ -147,14 +148,14 @@ if (!knowledge.browse.selectedTitle || knowledge.browse.detailTitle !== knowledg
 }
 if (
   !knowledge.browse.detailContent?.includes('知识维护 Agent')
-  || !knowledge.browse.detailContent?.includes('真实 Git 协作分支')
+  || !knowledge.browse.detailContent?.includes('统一 Repository')
 ) {
   throw new Error('Knowledge browser did not render the current Statement body')
 }
 if (
   knowledge.browse.linkLabel !== '知识维护 Agent'
   || knowledge.browse.linkPreviewTitle !== 'Knowledge Maintenance Agent'
-  || !knowledge.browse.linkPreview?.includes('文件工作清单')
+  || !knowledge.browse.linkPreview?.includes('Run 工作清单')
 ) {
   throw new Error('Knowledge browser did not render the wikilink alias and hover preview')
 }
@@ -366,19 +367,16 @@ if (!agentConfiguration.chatRoleText?.includes('通用 Agent')) {
 }
 if (
   agentConfiguration.chatToolNames?.join(',')
-    !== 'read,bash,edit,write,search_knowledge,read_knowledge,upsert_knowledge,spawn_agent,add_todos,complete_todos,list_todos'
-  || agentConfiguration.chatSchemaPanelCount !== 11
+    !== 'read,bash,edit,write,spawn_agent,add_todos,complete_todos,list_todos'
+  || agentConfiguration.chatSchemaPanelCount !== 8
 ) {
   throw new Error('The conversational Agent tool catalog is incomplete')
 }
-const chatStatementItem = agentConfiguration.chatUpsertSchema?.properties?.statements?.items
 if (
-  agentConfiguration.chatUpsertSchema?.type !== 'object'
-  || !agentConfiguration.chatUpsertSchema?.required?.includes('statements')
-  || !chatStatementItem?.required?.includes('title')
-  || !chatStatementItem?.required?.includes('content')
+  agentConfiguration.chatSpawnSchema?.type !== 'object'
+  || !agentConfiguration.chatSpawnSchema?.required?.includes('task')
 ) {
-  throw new Error('The conversational Agent write-tool schema is not available to developers')
+  throw new Error('The conversational Agent delegation schema is not available to developers')
 }
 if (
   agentConfiguration.chatConfiguredBadge !== 'Configured default'
@@ -434,7 +432,7 @@ if (
 const processing = semantics.processing
 if (processing.title !== '加工测试') throw new Error('Knowledge processing page was not rendered')
 if (processing.fullChain.fullChainSelected !== 'true' || !processing.fullChain.workspaceExists) {
-  throw new Error('Full-chain Git collaboration workspace is not the default knowledge processing view')
+  throw new Error('Full-chain Run view is not the default knowledge processing view')
 }
 if (processing.fullChain.sessionOptionCount !== 2) {
   throw new Error(`Expected one available fixture Session, got ${processing.fullChain.sessionOptionCount - 1}`)
@@ -473,7 +471,7 @@ if (!processing.fullChain.bodyText.includes('Git 协作测试')) {
   throw new Error('Git collaboration boundary is not visible in the full-chain view')
 }
 if (
-  !processing.fullChain.bodyText.includes('真实分支与 worktree')
+  !processing.fullChain.bodyText.includes('统一 Repository 中创建 Run')
   || !processing.fullChain.bodyText.includes('不会合并到目标分支')
 ) {
   throw new Error('Full-chain view does not explain its unmerged Git boundary')
@@ -489,6 +487,15 @@ if (processing.fullChainRun.summaryStatementCount !== '3') {
 }
 if (!processing.fullChainRun.traceExplorerExists || processing.fullChainRun.traceEventCount !== 2) {
   throw new Error('The secondary run-detail page does not expose the shared Agent timeline')
+}
+if (
+  !processing.fullChainRun.runSelectorText?.includes('Maintainer')
+  || !processing.fullChainRun.runSelectorText?.includes('Reviewer')
+  || processing.fullChainRun.runSelectorText?.includes('knowledge_maintenance_agent')
+  || processing.fullChainRun.runSelectorText?.includes('knowledge_reviewer_agent')
+  || processing.fullChainRun.selectedAgentName !== 'Reviewer'
+) {
+  throw new Error('The live run-detail page does not distinguish Maintainer and Reviewer in one window')
 }
 if (!processing.fullChainRun.toolText?.includes('read') || !processing.fullChainRun.toolOutput?.includes('Fixture read completed')) {
   throw new Error('The run-detail page does not expose Reviewer tool activity')
@@ -516,12 +523,14 @@ if (
   throw new Error('Collaboration Statement reader cannot navigate backward and forward')
 }
 if (
-  !processing.fullChainRun.gitResultText?.includes('Worktree')
+  !processing.fullChainRun.gitResultText?.includes('Repository')
+  || !processing.fullChainRun.gitResultText?.includes('WORK.md')
+  || !processing.fullChainRun.gitResultText?.includes('处理分支')
   || !processing.fullChainRun.gitResultText?.includes('目标分支main（未合并）')
   || !processing.fullChainRun.gitResultText?.includes('批准 revision')
-  || processing.fullChainRun.changedPathCount !== 3
+  || processing.fullChainRun.changedPathCount !== 6
 ) {
-  throw new Error('The full-chain result does not expose its Git worktree, revisions, and changed files')
+  throw new Error('The full-chain result does not expose its Repository, Run, revisions, and changed files')
 }
 if (/来源范围\s+L\d|Raw source|sourceRef|扫描版本/.test(processing.fullChainRun.bodyText || '')) {
   throw new Error('The full-chain result exposes internal observation coordinates')
@@ -535,8 +544,14 @@ if (/Fixture (?:raw evidence|Canonical Activity)|Tool call ·|sourceRef|L\d{6}/.
 if (!processing.history.resultDetailExists || !processing.history.sharedBrowserExists) {
   throw new Error('Historical results do not reuse the shared Statement browser')
 }
-if (processing.history.importButtonExists || processing.history.productionTitles?.length !== 0) {
-  throw new Error('A persisted collaboration result must remain unmerged and cannot mutate production knowledge')
+if (
+  processing.history.importButtonExists
+  || processing.history.productionTitles?.length !== 3
+  || !processing.history.productionTitles.includes('Knowledge Maintenance Agent')
+  || !processing.history.productionTitles.includes('Knowledge Reviewer')
+  || !processing.history.productionTitles.includes('知识加工链路')
+) {
+  throw new Error('The shared Knowledge layer does not reflect the current processing revision')
 }
 if (
   !processing.history.historyInitialTitle
@@ -550,8 +565,10 @@ if (
   !processing.history.activityDetailExists
   || processing.history.traceEventCount !== 4
   || !processing.history.traceText?.includes('Fixture read_activity completed')
-  || !processing.history.runSelectorText?.includes('knowledge_maintenance_agent')
-  || !processing.history.runSelectorText?.includes('knowledge_reviewer_agent')
+  || !processing.history.runSelectorText?.includes('Maintainer')
+  || !processing.history.runSelectorText?.includes('Reviewer')
+  || processing.history.runSelectorText?.includes('knowledge_maintenance_agent')
+  || processing.history.runSelectorText?.includes('knowledge_reviewer_agent')
 ) {
   throw new Error('Historical run details do not expose the persisted Agent Run')
 }
@@ -575,7 +592,7 @@ if (processing.promptValues.some((prompt) => typeof prompt !== 'string' || !prom
   throw new Error('A processing default prompt is empty')
 }
 const [maintainerPrompt] = processing.promptValues
-for (const requiredCopy of ['Knowledge Maintainer', '.oyster/WORK.md', 'Canonical Activity', 'read_evidence', '[[canonical title]]', 'create one ordinary Git commit', 'Do not delete the work order']) {
+for (const requiredCopy of ['Knowledge Maintainer', 'runs/<run-id>/WORK.md', 'Canonical Activity', 'read_evidence', '[[canonical title]]', 'create one ordinary Git commit', 'Do not delete WORK.md']) {
   if (!maintainerPrompt.includes(requiredCopy)) {
     throw new Error(`Knowledge Maintenance Agent prompt is missing its responsibility: ${requiredCopy}`)
   }
@@ -622,6 +639,9 @@ if (!processing.promptRestore.matchesOriginal || processing.promptRestore.defaul
   throw new Error('Restore default did not reset an unsaved prompt draft after a successful save')
 }
 if (processing.trace.panelCount !== 1) throw new Error('The processing debug trace panel must be rendered')
+if (processing.trace.agentName !== 'Maintainer') {
+  throw new Error('The knowledge processing trace still uses the application name instead of Maintainer')
+}
 if (processing.trace.maintenanceEventCount !== 4) {
   throw new Error(`Expected 4 Agent timeline items, got ${processing.trace.maintenanceEventCount}`)
 }
@@ -634,8 +654,9 @@ for (const requiredCopy of ['read_activity', 'write', 'bash']) {
   }
 }
 if (
-  !processing.trace.resultText?.includes('Worktree')
-  || !processing.trace.resultText?.includes('协作分支')
+  !processing.trace.resultText?.includes('Repository')
+  || !processing.trace.resultText?.includes('Run')
+  || !processing.trace.resultText?.includes('处理分支')
   || !processing.trace.resultText?.includes('当前 revision')
   || !processing.trace.resultText?.includes('未合并到 main')
 ) {

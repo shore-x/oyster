@@ -22,7 +22,6 @@ import {
   chatAgentSystemPrompt
 } from '../src/main/chat/prompt'
 import { ARTIFACT_GIT_BINARY_PATH } from '../src/main/artifacts/git-runtime'
-import { SqliteKnowledgeStore } from '../src/main/knowledge-store/sqlite-knowledge-store'
 import type { ChatEvent } from '../src/shared/chat'
 
 const temporaryPaths: string[] = []
@@ -91,9 +90,8 @@ async function serviceFixture(
   const rootPath = await mkdtemp(join(tmpdir(), 'oyster-chat-service-'))
   temporaryPaths.push(rootPath)
   const artifactRepositoryPath = join(rootPath, 'artifacts')
-  await mkdir(artifactRepositoryPath)
+  await Promise.all([mkdir(artifactRepositoryPath), mkdir(join(rootPath, 'knowledge'))])
   const sessions = new PiChatSessionRepository(join(rootPath, 'sessions'))
-  const knowledgeStore = new SqliteKnowledgeStore(join(rootPath, 'knowledge.sqlite'))
   const prepared = fauxRuntime(typeof responses === 'function'
     ? responses({ rootPath, artifactRepositoryPath })
     : responses)
@@ -102,15 +100,13 @@ async function serviceFixture(
     sessions,
     configuration,
     aiBackend: backend,
-    knowledgeStore,
-    artifactRepositoryPath
+    repositoryPath: rootPath
   })
   await service.initialize()
   return {
     rootPath,
     artifactRepositoryPath,
     sessions,
-    knowledgeStore,
     configuration,
     backend,
     service,
@@ -140,50 +136,21 @@ describe('ChatAgentService', () => {
       reasoningEffort: 'low'
     })
     expect((await fixture.service.readSession(first.id)).binding).toEqual(first.binding)
-    fixture.knowledgeStore.close()
     await fixture.sessions.dispose()
   })
 
-  it('freezes the configured prompt and runs a persisted Pi conversation with direct Knowledge Store writes', async () => {
+  it('freezes the configured prompt and exposes one repository through ordinary coding tools', async () => {
     const customPrompt = 'Use local knowledge and reply briefly.'
-    const fixture = await serviceFixture(({ artifactRepositoryPath }) => [
+    const fixture = await serviceFixture(({ rootPath }) => [
       (context) => {
-        expect(context.systemPrompt).toBe(chatAgentSystemPrompt(
-          customPrompt,
-          artifactRepositoryPath
-        ))
+        expect(context.systemPrompt).toBe(chatAgentSystemPrompt(customPrompt, rootPath))
         expect(context.tools?.map((tool) => tool.name)).toEqual([
-          'read',
-          'bash',
-          'edit',
-          'write',
-          'search_knowledge',
-          'read_knowledge',
-          'upsert_knowledge',
-          'spawn_agent',
-          'add_todos',
-          'complete_todos',
-          'list_todos'
+          'read', 'bash', 'edit', 'write', 'spawn_agent',
+          'add_todos', 'complete_todos', 'list_todos'
         ])
-        return fauxAssistantMessage(fauxToolCall('search_knowledge', { query: 'Project P' }), {
-          stopReason: 'toolUse'
-        })
-      },
-      fauxAssistantMessage(fauxToolCall('read_knowledge', { title: 'Project P' }), {
-        stopReason: 'toolUse'
-      }),
-      fauxAssistantMessage(fauxToolCall('upsert_knowledge', {
-        statements: [
-          { title: 'Project P', content: '[[Project P]] now uses SQLite.' },
-          { title: 'SQLite', content: 'SQLite is the database used by [[Project P]].' }
-        ]
-      }), { stopReason: 'toolUse' }),
-      fauxAssistantMessage('Knowledge was updated.')
+        return fauxAssistantMessage('Repository inspected.')
+      }
     ])
-    fixture.knowledgeStore.commit({
-      runRef: 'seed',
-      statements: [{ title: 'Project P', content: 'Project P is local.' }]
-    })
     const events: ChatEvent[] = []
     fixture.service.subscribe((event) => events.push(event))
 
@@ -194,38 +161,14 @@ describe('ChatAgentService', () => {
 
     const detail = await fixture.service.sendMessage({
       sessionId: session.id,
-      text: 'Please update Project P and SQLite.'
+      text: 'Please inspect the repository.'
     })
-    expect(fixture.callCount()).toBe(4)
-    expect(detail.title).toBe('Please update Project P and SQLite.')
-    expect(detail.messages.map((entry) => entry.message.role)).toEqual([
-      'user',
-      'assistant',
-      'tool',
-      'assistant',
-      'tool',
-      'assistant',
-      'tool',
-      'assistant'
-    ])
-    expect(detail.messages.find((entry) => entry.message.role === 'tool' && (
-      entry.message.toolName === 'upsert_knowledge'
-    ))?.message).toMatchObject({
-      details: {
-        statementCount: 2,
-        createdTitles: ['SQLite'],
-        updatedTitles: ['Project P']
-      }
-    })
+    expect(fixture.callCount()).toBe(1)
+    expect(detail.title).toBe('Please inspect the repository.')
+    expect(detail.messages.map((entry) => entry.message.role)).toEqual(['user', 'assistant'])
     expect(detail.runs).toHaveLength(1)
-    expect(detail.runs[0].modelCalls).toHaveLength(4)
-    expect(detail.runs[0].toolCalls.map((call) => call.name)).toEqual([
-      'search_knowledge',
-      'read_knowledge',
-      'upsert_knowledge'
-    ])
-    expect(fixture.knowledgeStore.getStatement('Project P')?.content).toContain('SQLite')
-    expect(fixture.knowledgeStore.getStatement('SQLite')).toBeDefined()
+    expect(detail.runs[0].modelCalls).toHaveLength(1)
+    expect(detail.runs[0].toolCalls).toEqual([])
     expect(events).toContainEqual(expect.objectContaining({
       type: 'run_state_changed',
       sessionId: session.id,
@@ -243,23 +186,10 @@ describe('ChatAgentService', () => {
       isDefaultCustomized: false
     })
     expect(snapshot.agent.tools.map((tool) => tool.name)).toEqual([
-      'read',
-      'bash',
-      'edit',
-      'write',
-      'search_knowledge',
-      'read_knowledge',
-      'upsert_knowledge',
-      'spawn_agent',
-      'add_todos',
-      'complete_todos',
-      'list_todos'
+      'read', 'bash', 'edit', 'write', 'spawn_agent',
+      'add_todos', 'complete_todos', 'list_todos'
     ])
-    expect(snapshot.agent.tools[6].parameters).toMatchObject({
-      type: 'object',
-      properties: { statements: { type: 'array', minItems: 1 } }
-    })
-    expect(snapshot.agent.tools[7]).toMatchObject({
+    expect(snapshot.agent.tools[4]).toMatchObject({
       name: 'spawn_agent',
       parameters: {
         type: 'object',
@@ -268,7 +198,6 @@ describe('ChatAgentService', () => {
         properties: { task: { type: 'string', minLength: 1 } }
       }
     })
-    fixture.knowledgeStore.close()
     await fixture.sessions.dispose()
   })
 
@@ -280,15 +209,12 @@ describe('ChatAgentService', () => {
       'bash',
       'edit',
       'write',
-      'search_knowledge',
-      'read_knowledge',
-      'upsert_knowledge',
       'spawn_agent',
       'add_todos',
       'complete_todos',
       'list_todos'
     ]
-    const fixture = await serviceFixture(({ artifactRepositoryPath }) => [
+    const fixture = await serviceFixture(({ rootPath }) => [
       (context) => {
         expect(JSON.stringify(context.messages)).toContain(parentOnlyContext)
         return fauxAssistantMessage(fauxToolCall('spawn_agent', {
@@ -298,23 +224,11 @@ describe('ChatAgentService', () => {
       (context) => {
         expect(context.systemPrompt).toBe(chatAgentSystemPrompt(
           DEFAULT_CHAT_AGENT_SYSTEM_PROMPT,
-          artifactRepositoryPath
+          rootPath
         ))
         expect(context.tools?.map((tool) => tool.name)).toEqual(expectedTools)
         expect(context.messages).toHaveLength(1)
         expect(JSON.stringify(context.messages)).toContain(delegatedTask)
-        expect(JSON.stringify(context.messages)).not.toContain(parentOnlyContext)
-        return fauxAssistantMessage(fauxToolCall('read_knowledge', {
-          title: 'Project P'
-        }), { stopReason: 'toolUse' })
-      },
-      (context) => {
-        expect(context.messages.map((message) => message.role)).toEqual([
-          'user',
-          'assistant',
-          'toolResult'
-        ])
-        expect(JSON.stringify(context.messages)).toContain('Project P uses SQLite.')
         expect(JSON.stringify(context.messages)).not.toContain(parentOnlyContext)
         return fauxAssistantMessage('Child finding: Project P uses SQLite.')
       },
@@ -329,10 +243,6 @@ describe('ChatAgentService', () => {
         return fauxAssistantMessage('Parent accepted the child result.')
       }
     ])
-    fixture.knowledgeStore.commit({
-      runRef: 'seed',
-      statements: [{ title: 'Project P', content: 'Project P uses SQLite.' }]
-    })
     const session = await fixture.service.createSession({})
 
     const detail = await fixture.service.sendMessage({
@@ -340,7 +250,7 @@ describe('ChatAgentService', () => {
       text: `Delegate this without sharing ${parentOnlyContext}.`
     })
 
-    expect(fixture.callCount()).toBe(4)
+    expect(fixture.callCount()).toBe(3)
     expect(detail.messages.map((entry) => entry.message.role)).toEqual([
       'user',
       'assistant',
@@ -369,8 +279,6 @@ describe('ChatAgentService', () => {
     expect(details.runId).not.toBe(session.id)
     expect(details.transcript.map((message) => message.role)).toEqual([
       'user',
-      'assistant',
-      'toolResult',
       'assistant'
     ])
     expect(JSON.stringify(details.transcript)).not.toContain(parentOnlyContext)
@@ -389,7 +297,6 @@ describe('ChatAgentService', () => {
       status: 'completed'
     })
 
-    fixture.knowledgeStore.close()
     await fixture.sessions.dispose()
   })
 
@@ -441,7 +348,6 @@ describe('ChatAgentService', () => {
       error: expect.stringContaining('child model unavailable')
     })
 
-    fixture.knowledgeStore.close()
     await fixture.sessions.dispose()
   })
 
@@ -504,11 +410,10 @@ describe('ChatAgentService', () => {
     expect(JSON.stringify(spawnResult)).toContain('Grandchild result.')
     expect(JSON.stringify(spawnResult)).not.toContain(parentOnlyContext)
 
-    fixture.knowledgeStore.close()
     await fixture.sessions.dispose()
   })
 
-  it('starts unrestricted coding tools in the shared Artifact Repository', async () => {
+  it('starts unrestricted coding tools in the one Oyster Repository', async () => {
     let outsideRepositoryPath = ''
     const relativeRepositoryPath = 'relative-repository.txt'
     const fixture = await serviceFixture(({ rootPath }) => {
@@ -545,7 +450,7 @@ describe('ChatAgentService', () => {
     })
 
     expect(await readFile(
-      join(fixture.artifactRepositoryPath, relativeRepositoryPath),
+      join(fixture.rootPath, relativeRepositoryPath),
       'utf8'
     )).toBe('second version\n')
     expect(await readFile(outsideRepositoryPath, 'utf8')).toBe('outside repository\n')
@@ -561,7 +466,7 @@ describe('ChatAgentService', () => {
     ])
     expect(toolMessages[2]).toMatchObject({ text: expect.stringContaining('second version') })
     expect(toolMessages[4]).toMatchObject({
-      text: expect.stringContaining(fixture.artifactRepositoryPath)
+      text: expect.stringContaining(fixture.rootPath)
     })
     expect(toolMessages[4]).toMatchObject({
       text: expect.stringContaining(ARTIFACT_GIT_BINARY_PATH)
@@ -591,24 +496,22 @@ describe('ChatAgentService', () => {
     ])).toEqual(expectedToolCalls)
 
     fixture.service.dispose()
-    fixture.knowledgeStore.close()
     await fixture.sessions.dispose()
   })
 
   it('does not impose a model-call or tool-call quota', async () => {
-    const searches = Array.from({ length: 12 }, (_, index) => fauxAssistantMessage(
-      fauxToolCall('search_knowledge', { query: `query-${index}` }),
+    const toolCalls = Array.from({ length: 12 }, () => fauxAssistantMessage(
+      fauxToolCall('list_todos', {}),
       { stopReason: 'toolUse' }
     ))
-    const fixture = await serviceFixture([...searches, fauxAssistantMessage('Finished.')])
+    const fixture = await serviceFixture([...toolCalls, fauxAssistantMessage('Finished.')])
     const session = await fixture.service.createSession({})
     const detail = await fixture.service.sendMessage({ sessionId: session.id, text: 'Search widely.' })
 
     expect(fixture.callCount()).toBe(13)
     expect(detail.messages.filter((entry) => (
-      entry.message.role === 'tool' && entry.message.toolName === 'search_knowledge'
+      entry.message.role === 'tool' && entry.message.toolName === 'list_todos'
     ))).toHaveLength(12)
-    fixture.knowledgeStore.close()
     await fixture.sessions.dispose()
   })
 
@@ -620,7 +523,6 @@ describe('ChatAgentService', () => {
     await expect(fixture.service.createSession({})).rejects.toThrow('不存在')
     fixture.backend.defaultLlm = { connectionId: 'connection:test', modelId: 'missing' }
     await expect(fixture.service.createSession({})).rejects.toThrow('不可用')
-    fixture.knowledgeStore.close()
     await fixture.sessions.dispose()
   })
 
@@ -639,7 +541,6 @@ describe('ChatAgentService', () => {
       isDefaultCustomized: false
     })
 
-    fixture.knowledgeStore.close()
     await fixture.sessions.dispose()
   })
 
@@ -647,7 +548,6 @@ describe('ChatAgentService', () => {
     const rootPath = await mkdtemp(join(tmpdir(), 'oyster-chat-cancel-'))
     temporaryPaths.push(rootPath)
     const sessions = new PiChatSessionRepository(join(rootPath, 'sessions'))
-    const knowledgeStore = new SqliteKnowledgeStore(join(rootPath, 'knowledge.sqlite'))
     const model = fauxProvider().getModel()
     let modelCalls = 0
     let childSignal: AbortSignal | undefined
@@ -697,8 +597,7 @@ describe('ChatAgentService', () => {
       sessions,
       configuration: new InMemoryChatConfigurationRepository(),
       aiBackend: new FauxAiBackend(runtime),
-      knowledgeStore,
-      artifactRepositoryPath: join(rootPath, 'artifacts')
+      repositoryPath: rootPath
     })
     await service.initialize()
     const session = await service.createSession({})
@@ -722,7 +621,6 @@ describe('ChatAgentService', () => {
       type: 'run_state_changed',
       status: 'cancelled'
     }))
-    knowledgeStore.close()
     await sessions.dispose()
   })
 })

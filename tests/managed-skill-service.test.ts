@@ -11,7 +11,7 @@ import {
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ArtifactRepository } from '../src/main/artifacts/artifact-repository'
+import { ArtifactService } from '../src/main/artifacts/artifact-repository'
 import type { DetectionContext } from '../src/main/discovery/model'
 import { ManagedSkillService } from '../src/main/skills/managed-skill-service'
 
@@ -26,13 +26,13 @@ afterEach(async () => {
 async function fixture(environment: NodeJS.ProcessEnv = {}): Promise<{
   rootPath: string
   homeDirectory: string
-  repository: ArtifactRepository
+  repository: ArtifactService
   service: ManagedSkillService
 }> {
   const rootPath = await mkdtemp(join(tmpdir(), 'oyster-managed-skills-'))
   temporaryDirectories.push(rootPath)
   const homeDirectory = join(rootPath, 'home')
-  const repository = new ArtifactRepository(join(rootPath, 'app-data', 'artifacts'))
+  const repository = new ArtifactService(join(rootPath, 'app-data', 'artifacts'))
   await mkdir(homeDirectory, { recursive: true })
   await repository.initialize()
   const context: DetectionContext = { homeDirectory, environment, pathEntries: [] }
@@ -50,11 +50,11 @@ async function write(path: string, content: string): Promise<void> {
 }
 
 async function writeArtifact(
-  repository: ArtifactRepository,
+  repository: ArtifactService,
   directoryName: string,
   skillDocument?: string
 ): Promise<string> {
-  const artifactPath = join(repository.repositoryPath, directoryName)
+  const artifactPath = join(repository.artifactsPath, directoryName)
   await write(join(artifactPath, 'AGENTS.md'), '# Attention\n\nMaintain this Skill.\n')
   await mkdir(join(artifactPath, 'output'), { recursive: true })
   if (skillDocument !== undefined) {

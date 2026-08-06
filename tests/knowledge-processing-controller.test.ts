@@ -48,17 +48,18 @@ function maintenanceResult(): KnowledgeMaintenanceResult {
     stageId: 'knowledge_maintenance_agent',
     sourceRef: 'raw:source-record-1@sha256:test',
     activitySegmentCount: 1,
-    workspace: {
+    run: {
       id: 'workspace-1',
-      worktreePath: '/tmp/oyster-worktree',
-      branchName: 'collaboration/workspace-1',
+      repositoryPath: '/tmp/oyster-repository',
+      runPath: '/tmp/oyster-repository/runs/workspace-1',
+      workPath: '/tmp/oyster-repository/runs/workspace-1/WORK.md',
+      branchName: 'processing/workspace-1',
       targetBranch: 'main',
-      baseRevision: 'a'.repeat(40),
-      workOrderRevision: 'b'.repeat(40)
+      baseRevision: 'b'.repeat(40)
     },
     previousRevision: 'b'.repeat(40),
     revision: 'c'.repeat(40),
-    changedPaths: ['.oyster/WORK.md', 'knowledge/raw-evidence.md'],
+    changedPaths: ['knowledge/raw-evidence.md'],
     agentRunId: 'maintenance-run-1',
     durationMs: 20,
     completedAt,

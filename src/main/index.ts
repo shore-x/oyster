@@ -32,34 +32,36 @@ import {
 import {
   KnowledgeFullChainService
 } from './knowledge-processing/full-chain-service'
-import { SqliteKnowledgeFullChainRunRepository } from './knowledge-processing/full-chain-run-repository'
+import { FileKnowledgeFullChainRunRepository } from './knowledge-processing/full-chain-run-repository'
 import { registerKnowledgeProcessingIpc } from './knowledge-processing/ipc'
 import { KnowledgeProcessingService } from './knowledge-processing/knowledge-processing-service'
 import {
   PiKnowledgeMaintainerAgent,
   PiKnowledgeReviewerAgent
 } from './knowledge-processing/pi-collaboration-agents'
-import { CollaborationRepository } from './knowledge-processing/collaboration-repository'
+import { ProcessingRepository } from './knowledge-processing/processing-repository'
 import { JsonKnowledgeProcessingRepository } from './knowledge-processing/repository'
-import { SqliteKnowledgeStore } from './knowledge-store/sqlite-knowledge-store'
+import { FileKnowledgeStore } from './knowledge-store/file-knowledge-store'
 import { registerKnowledgeIpc } from './knowledge-store/ipc'
 import { ChatAgentService } from './chat/chat-agent-service'
 import { JsonChatConfigurationRepository } from './chat/chat-configuration-repository'
 import { registerChatIpc } from './chat/ipc'
 import { PiChatSessionRepository } from './chat/pi-chat-session-repository'
-import { ArtifactRepository } from './artifacts/artifact-repository'
+import { ArtifactService } from './artifacts/artifact-repository'
+import { runArtifactGit } from './artifacts/git-runtime'
 import { registerArtifactIpc } from './artifacts/ipc'
 import { registerSkillIpc } from './skills/ipc'
 import { ManagedSkillService } from './skills/managed-skill-service'
 import { SkillDiscoveryService } from './skills/skill-discovery-service'
+import { OysterRepository } from './repository/oyster-repository'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 let mainWindow: BrowserWindow | undefined
 let aiBackendService: AiBackendService | undefined
 let knowledgeProcessingService: KnowledgeProcessingService | undefined
 let knowledgeFullChainService: KnowledgeFullChainService | undefined
-let knowledgeFullChainRunRepository: SqliteKnowledgeFullChainRunRepository | undefined
-let knowledgeStore: SqliteKnowledgeStore | undefined
+let knowledgeFullChainRunRepository: FileKnowledgeFullChainRunRepository | undefined
+let knowledgeStore: FileKnowledgeStore | undefined
 let chatAgentService: ChatAgentService | undefined
 let chatSessionRepository: PiChatSessionRepository | undefined
 
@@ -155,6 +157,42 @@ async function initializeFixtureSkills(homeDirectory: string): Promise<void> {
   }))
 }
 
+async function initializeFixtureKnowledge(store: FileKnowledgeStore): Promise<void> {
+  if (store.listStatements().length) return
+  const statements = [
+    {
+      path: 'oyster-processing.md',
+      title: 'Oyster 知识加工链路',
+      content: 'Harness 在统一 Repository 中创建 processing branch，让 [[Knowledge Maintenance Agent|知识维护 Agent]] 和 Reviewer 通过 Run 工作状态与 commit 交替工作；[[Raw Evidence|原始证据]] 保留在 Repository 之外，测试结果保持未合并。'
+    },
+    {
+      path: 'knowledge-maintainer.md',
+      title: 'Knowledge Maintenance Agent',
+      content: '读取 Run 工作清单与 Canonical Activity，按需回溯[[Raw Evidence|原始证据]]，直接维护 Knowledge/Artifact 文件并创建普通 Git commit。'
+    },
+    {
+      path: 'raw-evidence.md',
+      title: 'Raw Evidence',
+      content: '外部 Agent Session 的不可变原始材料；它不进入 Oyster Repository。Host 生成确定性 Canonical Activity 与 Run 工作清单，供 [[Knowledge Maintenance Agent]] 有界读取和精确回查。'
+    },
+    {
+      path: 'skill-activation.md',
+      title: 'Skill 激活探测',
+      content: 'Source Adapter 按 Agent Harness 的记录格式识别 Skill 工具调用、`SKILL.md` 读取和运行时注入，并向 [[Knowledge Maintenance Agent|知识维护 Agent]] 提供回到原始证据核查的导航提示。'
+    }
+  ]
+  await Promise.all(statements.map((statement) => writeFile(
+    join(store.knowledgePath, statement.path),
+    `# ${statement.title}\n\n${statement.content}\n`,
+    'utf8'
+  )))
+  const repositoryPath = dirname(store.knowledgePath)
+  await runArtifactGit(['add', '--', 'knowledge'], repositoryPath)
+  await runArtifactGit([
+    'commit', '--quiet', '--no-gpg-sign', '-m', 'Initialize fixture knowledge'
+  ], repositoryPath)
+}
+
 function createSkillDiscoveryService(discovery: DiscoveryService): SkillDiscoveryService {
   const useFixtures = fixtureMode()
   const homeDirectory = skillDiscoveryHomeDirectory()
@@ -171,7 +209,7 @@ function createSkillDiscoveryService(discovery: DiscoveryService): SkillDiscover
   return new SkillDiscoveryService(context, projectPaths, adminRoot)
 }
 
-function createManagedSkillService(repository: ArtifactRepository): ManagedSkillService {
+function createManagedSkillService(repository: ArtifactService): ManagedSkillService {
   const useFixtures = fixtureMode()
   const homeDirectory = skillDiscoveryHomeDirectory()
   const context = createDetectionContext(homeDirectory, useFixtures ? {} : process.env)
@@ -180,13 +218,13 @@ function createManagedSkillService(repository: ArtifactRepository): ManagedSkill
 
 function createKnowledgeProcessingService(
   aiBackend: AiBackendService,
-  collaborations: CollaborationRepository
+  processingRepository: ProcessingRepository
 ): KnowledgeProcessingService {
-  if (fixtureMode()) return createFixtureKnowledgeProcessingService(aiBackend, collaborations)
+  if (fixtureMode()) return createFixtureKnowledgeProcessingService(aiBackend, processingRepository)
   return new KnowledgeProcessingService(
     new JsonKnowledgeProcessingRepository(join(app.getPath('userData'), 'knowledge-processing.json')),
     aiBackend,
-    collaborations,
+    processingRepository,
     new PiKnowledgeMaintainerAgent(),
     new PiKnowledgeReviewerAgent()
   )
@@ -827,6 +865,8 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
         page.querySelector('[data-testid="open-full-chain-activity"]')?.click()
         await new Promise((resolve) => requestAnimationFrame(resolve))
         const traceExplorerExists = Boolean(page.querySelector('[data-testid="agent-run-view"]'))
+        const runSelectorText = page.querySelector('.agent-run-collection__selector')?.textContent
+        const selectedAgentName = page.querySelector('.agent-run-view__summary > div:first-child strong')?.textContent?.trim()
         const traceEventCount = page.querySelectorAll('.agent-trace-message, .agent-trace-tool, .agent-trace-model-activity').length
         const tool = page.querySelector('.agent-trace-tool')
         if (tool) tool.open = true
@@ -876,6 +916,8 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
           overviewHasTraceExplorer,
           summaryStatementCount,
           traceExplorerExists,
+          runSelectorText,
+          selectedAgentName,
           traceEventCount,
           toolText,
           toolInput,
@@ -1054,6 +1096,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       panelCount: stageTraces.length,
       maintenanceEventCount: page.querySelectorAll('.processing-stage .agent-trace-message, .processing-stage .agent-trace-tool, .processing-stage .agent-trace-model-activity').length,
       modelCallAction: Boolean(page.querySelector('.processing-stage .agent-trace-message--assistant button')),
+      agentName: page.querySelector('.processing-stage .agent-run-view__compact-header strong')?.textContent?.trim(),
       resultText: result?.textContent,
       bodyText: page.innerText,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
@@ -1209,10 +1252,10 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const chatToolNames = Array.from(page.querySelectorAll('.agent-config-tool code'))
       .map((node) => node.textContent?.trim())
     const chatSchemaPanelCount = page.querySelectorAll('.agent-config-tool__schema').length
-    const upsertSchemaDetails = page.querySelector('[data-testid="agent-tool-schema-upsert_knowledge"]')
-    upsertSchemaDetails.open = true
+    const spawnSchemaDetails = page.querySelector('[data-testid="agent-tool-schema-spawn_agent"]')
+    if (spawnSchemaDetails) spawnSchemaDetails.open = true
     await new Promise((resolve) => requestAnimationFrame(resolve))
-    const chatUpsertSchema = JSON.parse(upsertSchemaDetails.querySelector('pre')?.textContent || '{}')
+    const chatSpawnSchema = JSON.parse(spawnSchemaDetails?.querySelector('pre')?.textContent || '{}')
 
     page.querySelector('[data-testid="agent-config-tab-prompt"]')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
@@ -1258,7 +1301,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       chatRoleText,
       chatToolNames,
       chatSchemaPanelCount,
-      chatUpsertSchema,
+      chatSpawnSchema,
       chatConfiguredBadge,
       chatRestoredMatchesBuiltIn: chatRestoredPrompt === chatBuiltInPrompt,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
@@ -1507,23 +1550,17 @@ app.whenReady().then(async () => {
   const service = createService()
   const skillDiscoveryService = createSkillDiscoveryService(service)
   if (fixtureMode()) await initializeFixtureSkills(skillDiscoveryHomeDirectory())
-  const artifactRepository = new ArtifactRepository(
-    join(app.getPath('userData'), 'artifacts')
-  )
-  const managedSkillService = createManagedSkillService(artifactRepository)
+  const repository = new OysterRepository(join(app.getPath('userData'), 'repository'))
+  await repository.initialize()
+  const artifactService = new ArtifactService(repository)
+  const managedSkillService = createManagedSkillService(artifactService)
   aiBackendService = createBackendService()
-  const knowledgeStoreRoot = join(app.getPath('userData'), 'knowledge-store')
-  await mkdir(knowledgeStoreRoot, { recursive: true })
-  knowledgeStore = new SqliteKnowledgeStore(join(knowledgeStoreRoot, 'knowledge.sqlite'))
-  knowledgeFullChainRunRepository = await SqliteKnowledgeFullChainRunRepository.open(
-    join(app.getPath('userData'), 'knowledge-processing-history.sqlite')
-  )
-  const collaborationRepository = new CollaborationRepository(
-    join(app.getPath('userData'), 'collaboration-repository')
-  )
+  knowledgeStore = new FileKnowledgeStore(repository.knowledgePath)
+  knowledgeFullChainRunRepository = new FileKnowledgeFullChainRunRepository(repository.runsPath)
+  const processingRepository = new ProcessingRepository(repository)
   knowledgeProcessingService = createKnowledgeProcessingService(
     aiBackendService,
-    collaborationRepository
+    processingRepository
   )
   chatSessionRepository = new PiChatSessionRepository(join(app.getPath('userData'), 'chat-sessions'))
   chatAgentService = new ChatAgentService({
@@ -1532,17 +1569,16 @@ app.whenReady().then(async () => {
       join(app.getPath('userData'), 'chat-agent.json')
     ),
     aiBackend: aiBackendService,
-    knowledgeStore,
-    artifactRepositoryPath: artifactRepository.repositoryPath
+    repositoryPath: repository.rootPath
   })
   knowledgeFullChainService = new KnowledgeFullChainService(
     service,
     knowledgeProcessingService,
-    collaborationRepository,
+    processingRepository,
     knowledgeFullChainRunRepository
   )
-  const artifactInitialization = artifactRepository.initialize().catch((error: unknown) => {
-    console.error('Artifact Repository 初始化失败；可在协作产物页面重试。', error)
+  const artifactInitialization = artifactService.initialize().catch((error: unknown) => {
+    console.error('Artifact 层初始化失败；可在协作产物页面重试。', error)
   })
   await Promise.all([
     service.initialize(),
@@ -1551,32 +1587,10 @@ app.whenReady().then(async () => {
     knowledgeProcessingService.initialize(),
     chatAgentService.initialize()
   ])
-  if (fixtureMode() && knowledgeStore.listStatements().length === 0) {
-    knowledgeStore.commit({
-      runRef: 'fixture:knowledge-browser',
-      statements: [
-        {
-          title: 'Oyster 知识加工链路',
-          content: 'Harness 从目标 revision 创建真实 Git 协作分支与 worktree，让 [[Knowledge Maintenance Agent|知识维护 Agent]] 和 Reviewer 通过文件与 commit 交替工作；[[Raw Evidence|原始证据]] 保留在 Repository 之外，测试结果保持未合并。'
-        },
-        {
-          title: 'Knowledge Maintenance Agent',
-          content: '读取分支内文件工作清单与 Canonical Activity，按需回溯[[Raw Evidence|原始证据]]，直接维护 Knowledge/Artifact 文件并创建普通 Git commit。'
-        },
-        {
-          title: 'Raw Evidence',
-          content: '外部 Agent Session 的不可变原始材料；它不进入协作 Repository。Host 生成确定性 Canonical Activity 与文件工作清单，供 [[Knowledge Maintenance Agent]] 有界读取和精确回查。'
-        },
-        {
-          title: 'Skill 激活探测',
-          content: 'Source Adapter 按 Agent Harness 的记录格式识别 Skill 工具调用、`SKILL.md` 读取和运行时注入，并向 [[Knowledge Maintenance Agent|知识维护 Agent]] 提供回到原始证据核查的导航提示。'
-        }
-      ]
-    })
-  }
+  if (fixtureMode()) await initializeFixtureKnowledge(knowledgeStore)
   registerIpc(service)
   registerSkillIpc(skillDiscoveryService, managedSkillService, () => mainWindow)
-  registerArtifactIpc(artifactRepository, () => mainWindow)
+  registerArtifactIpc(artifactService, () => mainWindow)
   registerAiBackendIpc(aiBackendService, () => mainWindow)
   registerKnowledgeProcessingIpc(
     service,
@@ -1600,8 +1614,6 @@ app.on('before-quit', () => {
   chatAgentService?.dispose()
   knowledgeFullChainService?.dispose()
   knowledgeProcessingService?.dispose()
-  knowledgeFullChainRunRepository?.close()
-  knowledgeStore?.close()
   aiBackendService?.dispose()
   void chatSessionRepository?.dispose()
 })

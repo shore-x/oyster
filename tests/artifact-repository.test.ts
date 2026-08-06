@@ -16,7 +16,7 @@ import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  ArtifactRepository,
+  ArtifactService,
   resolveArtifactDirectoryPath
 } from '../src/main/artifacts/artifact-repository'
 import {
@@ -31,7 +31,7 @@ const temporaryDirectories: string[] = []
 async function temporaryRepositoryPath(): Promise<string> {
   const temporaryDirectory = await mkdtemp(join(tmpdir(), 'oyster-artifacts-'))
   temporaryDirectories.push(temporaryDirectory)
-  return join(temporaryDirectory, 'application-data', 'artifacts')
+  return join(temporaryDirectory, 'application-data', 'repository')
 }
 
 afterEach(async () => {
@@ -40,10 +40,10 @@ afterEach(async () => {
   )))
 })
 
-describe('ArtifactRepository', () => {
-  it('initializes the fixed repository as an empty Git work tree without committing', async () => {
+describe('ArtifactService', () => {
+  it('initializes the one repository and its empty Artifact layer', async () => {
     const repositoryPath = await temporaryRepositoryPath()
-    const repository = new ArtifactRepository(repositoryPath)
+    const repository = new ArtifactService(repositoryPath)
 
     const snapshot = await repository.initialize()
 
@@ -54,12 +54,12 @@ describe('ArtifactRepository', () => {
     })
     expect((await lstat(join(repositoryPath, '.git'))).isDirectory()).toBe(true)
     expect(await readFile(join(repositoryPath, '.git', 'HEAD'), 'utf8')).toMatch(/^ref: refs\/heads\//)
-    await expect(runArtifactGit(['rev-parse', '--verify', 'HEAD'], repositoryPath)).rejects.toThrow()
+    await expect(runArtifactGit(['rev-parse', '--verify', 'HEAD'], repositoryPath)).resolves.toBeUndefined()
   })
 
   it('initializes with the bundled Git when PATH contains no Git executable', async () => {
     const repositoryPath = await temporaryRepositoryPath()
-    const repository = new ArtifactRepository(repositoryPath)
+    const repository = new ArtifactService(repositoryPath)
     const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH'
     const originalPath = process.env[pathKey]
 
@@ -89,7 +89,7 @@ describe('ArtifactRepository', () => {
 
     try {
       process.env[pathKey] = fakeBinaryDirectory
-      await expect(new ArtifactRepository(repositoryPath).initialize()).resolves.toBeDefined()
+      await expect(new ArtifactService(repositoryPath).initialize()).resolves.toBeDefined()
     } finally {
       if (originalPath === undefined) delete process.env[pathKey]
       else process.env[pathKey] = originalPath
@@ -139,10 +139,10 @@ describe('ArtifactRepository', () => {
     await mkdir(repositoryPath, { recursive: true })
     await mkdir(gitTargetPath)
     await symlink(gitTargetPath, join(repositoryPath, '.git'))
-    const repository = new ArtifactRepository(repositoryPath)
+    const repository = new ArtifactService(repositoryPath)
 
     await expect(repository.initialize()).rejects.toThrow(
-      'Artifact Repository 的 .git 必须是本地真实目录'
+      'Oyster Repository 的 .git 必须是本地真实目录'
     )
     await unlink(join(repositoryPath, '.git'))
     await expect(repository.refresh()).resolves.toMatchObject({
@@ -169,7 +169,7 @@ describe('ArtifactRepository', () => {
     }
 
     try {
-      await new ArtifactRepository(repositoryPath).initialize()
+      await new ArtifactService(repositoryPath).initialize()
     } finally {
       for (const [key, value] of originalValues) {
         if (value === undefined) delete process.env[key]
@@ -188,8 +188,8 @@ describe('ArtifactRepository', () => {
     await mkdir(targetPath)
     await symlink(targetPath, repositoryPath)
 
-    await expect(new ArtifactRepository(repositoryPath).initialize()).rejects.toThrow(
-      'Artifact Repository 根路径必须是 APP 管理的真实目录'
+    await expect(new ArtifactService(repositoryPath).initialize()).rejects.toThrow(
+      'Oyster Repository 根路径必须是 APP 管理的真实目录'
     )
     await expect(lstat(join(targetPath, '.git'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
@@ -201,23 +201,23 @@ describe('ArtifactRepository', () => {
     await mkdir(gitTargetPath)
     await symlink(gitTargetPath, join(repositoryPath, '.git'))
 
-    await expect(new ArtifactRepository(repositoryPath).initialize()).rejects.toThrow(
-      'Artifact Repository 的 .git 必须是本地真实目录'
+    await expect(new ArtifactService(repositoryPath).initialize()).rejects.toThrow(
+      'Oyster Repository 的 .git 必须是本地真实目录'
     )
   })
 
   it('loads only visible first-level real directories with a regular root AGENTS.md', async () => {
     const repositoryPath = await temporaryRepositoryPath()
-    const repository = new ArtifactRepository(repositoryPath)
+    const repository = new ArtifactService(repositoryPath)
     await repository.initialize()
 
-    const validPath = join(repositoryPath, 'a-valid-artifact')
-    const invalidPath = join(repositoryPath, 'b-missing-attention')
-    const nestedOnlyPath = join(repositoryPath, 'c-nested-only')
-    const agentsDirectoryPath = join(repositoryPath, 'd-agents-directory')
-    const externallyNamedPath = join(repositoryPath, ' externally-named ')
-    const hiddenPath = join(repositoryPath, '.hidden-artifact')
-    const symlinkTargetPath = join(repositoryPath, '.external-target')
+    const validPath = join(repository.artifactsPath, 'a-valid-artifact')
+    const invalidPath = join(repository.artifactsPath, 'b-missing-attention')
+    const nestedOnlyPath = join(repository.artifactsPath, 'c-nested-only')
+    const agentsDirectoryPath = join(repository.artifactsPath, 'd-agents-directory')
+    const externallyNamedPath = join(repository.artifactsPath, ' externally-named ')
+    const hiddenPath = join(repository.artifactsPath, '.hidden-artifact')
+    const symlinkTargetPath = join(repository.artifactsPath, '.external-target')
     await Promise.all([
       mkdir(validPath),
       mkdir(invalidPath),
@@ -234,9 +234,9 @@ describe('ArtifactRepository', () => {
       writeFile(join(nestedOnlyPath, 'nested', 'AGENTS.md'), '# Nested', 'utf8'),
       writeFile(join(hiddenPath, 'AGENTS.md'), '# Hidden', 'utf8'),
       writeFile(join(symlinkTargetPath, 'AGENTS.md'), '# Symlink target', 'utf8'),
-      writeFile(join(repositoryPath, 'ordinary-file.txt'), 'ignored', 'utf8')
+      writeFile(join(repository.artifactsPath, 'ordinary-file.txt'), 'ignored', 'utf8')
     ])
-    await symlink(symlinkTargetPath, join(repositoryPath, 'e-symlink-artifact'))
+    await symlink(symlinkTargetPath, join(repository.artifactsPath, 'e-symlink-artifact'))
 
     const snapshot = await repository.refresh()
     const agentsDetails = await stat(join(validPath, 'AGENTS.md'))
@@ -261,9 +261,9 @@ describe('ArtifactRepository', () => {
 
   it('derives a ready Skill view from a real output directory and valid SKILL.md', async () => {
     const repositoryPath = await temporaryRepositoryPath()
-    const repository = new ArtifactRepository(repositoryPath)
+    const repository = new ArtifactService(repositoryPath)
     await repository.initialize()
-    const artifactPath = join(repositoryPath, 'review-skill')
+    const artifactPath = join(repository.artifactsPath, 'review-skill')
     await mkdir(join(artifactPath, 'output'), { recursive: true })
     await Promise.all([
       writeFile(join(artifactPath, 'AGENTS.md'), '# Attention\n\nMaintain review guidance.\n'),
@@ -294,11 +294,11 @@ describe('ArtifactRepository', () => {
 
   it('keeps malformed output entries visible as invalid Skill views', async () => {
     const repositoryPath = await temporaryRepositoryPath()
-    const repository = new ArtifactRepository(repositoryPath)
+    const repository = new ArtifactService(repositoryPath)
     await repository.initialize()
-    const missingDocument = join(repositoryPath, 'missing-document')
-    const linkedOutput = join(repositoryPath, 'linked-output')
-    const outputTarget = join(repositoryPath, '.output-target')
+    const missingDocument = join(repository.artifactsPath, 'missing-document')
+    const linkedOutput = join(repository.artifactsPath, 'linked-output')
+    const outputTarget = join(repository.artifactsPath, '.output-target')
     await Promise.all([
       mkdir(join(missingDocument, 'output'), { recursive: true }),
       mkdir(linkedOutput),
@@ -333,9 +333,9 @@ describe('ArtifactRepository', () => {
   it('reports an unreadable AGENTS.md as invalid without failing the scan', async () => {
     if (process.platform === 'win32') return
     const repositoryPath = await temporaryRepositoryPath()
-    const repository = new ArtifactRepository(repositoryPath)
+    const repository = new ArtifactService(repositoryPath)
     await repository.initialize()
-    const artifactPath = join(repositoryPath, 'unreadable-attention')
+    const artifactPath = join(repository.artifactsPath, 'unreadable-attention')
     const attentionPath = join(artifactPath, 'AGENTS.md')
     await mkdir(artifactPath)
     await writeFile(attentionPath, '# Attention\n', 'utf8')
@@ -353,7 +353,7 @@ describe('ArtifactRepository', () => {
 
   it('creates an Artifact with the minimal attention file and reloads it', async () => {
     const repositoryPath = await temporaryRepositoryPath()
-    const repository = new ArtifactRepository(repositoryPath)
+    const repository = new ArtifactService(repositoryPath)
     await repository.initialize()
 
     const snapshot = await repository.createArtifact({
@@ -361,7 +361,7 @@ describe('ArtifactRepository', () => {
       attention: '  Track Agent Memory over time.\n\nPreserve manual edits.  '
     })
 
-    expect(await readFile(join(repositoryPath, 'agent-memory', 'AGENTS.md'), 'utf8')).toBe(
+    expect(await readFile(join(repository.artifactsPath, 'agent-memory', 'AGENTS.md'), 'utf8')).toBe(
       '# Attention\n\nTrack Agent Memory over time.\n\nPreserve manual edits.\n'
     )
     expect(snapshot.artifacts).toHaveLength(1)
@@ -384,7 +384,7 @@ describe('ArtifactRepository', () => {
     ' trailing-space '
   ])('rejects an unsafe Artifact directory name: %j', async (directoryName) => {
     const repositoryPath = await temporaryRepositoryPath()
-    const repository = new ArtifactRepository(repositoryPath)
+    const repository = new ArtifactService(repositoryPath)
     await repository.initialize()
 
     await expect(repository.createArtifact({
@@ -395,16 +395,16 @@ describe('ArtifactRepository', () => {
 
   it('rejects empty attention and preserves an existing directory on conflict', async () => {
     const repositoryPath = await temporaryRepositoryPath()
-    const repository = new ArtifactRepository(repositoryPath)
+    const repository = new ArtifactService(repositoryPath)
     await repository.initialize()
 
     await expect(repository.createArtifact({
       directoryName: 'empty-attention',
       attention: '   '
     })).rejects.toThrow('Artifact Attention 不能为空')
-    await expect(lstat(join(repositoryPath, 'empty-attention'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(lstat(join(repository.artifactsPath, 'empty-attention'))).rejects.toMatchObject({ code: 'ENOENT' })
 
-    const existingPath = join(repositoryPath, 'existing')
+    const existingPath = join(repository.artifactsPath, 'existing')
     await mkdir(existingPath)
     await writeFile(join(existingPath, 'keep.txt'), 'keep me', 'utf8')
     await expect(repository.createArtifact({

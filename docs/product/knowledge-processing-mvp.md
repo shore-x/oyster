@@ -3,87 +3,45 @@
 > 状态：当前实现
 >
 > 日期：2026-08-06
->
-> 范围：验证“确定 Session revision → Canonical Activity/Raw Evidence → 文件工作清单 → Maintainer/Reviewer Git commit 交接 → 已批准但未合并 revision”的最小闭环。
 
-## 1. 完整链路
+## 目标
+
+用真实 Maintainer → Reviewer 链路验证：外部 Agent Session 能被完整读取，Agent 能直接维护全局 Knowledge/Artifact，Reviewer 能独立反馈或批准，并且完整轨迹可在同一个 UI 窗口查看。
+
+## Repository 与 Run
+
+应用固定使用 `<Electron userData>/repository/`：
 
 ```text
-外部 Session revision
-  → Source Adapter 读取 Raw Evidence 并生成 Canonical Activity
-  → Harness 创建 collaboration branch/worktree
-  → 初始 commit 写入 .oyster/WORK.md
-  → Maintainer 读取活动并修改 Knowledge/Artifact，commit
-  → Reviewer 审阅精确 revision
-      ├─ 请求修改：REVIEW 标记 + 未完成清单项，commit → Maintainer
-      └─ 批准：删除工作清单，commit → 结束
-  → 保存 approved revision；main 保持不变
+repository/
+├── knowledge/
+├── artifacts/
+└── runs/<run-id>/
+    ├── WORK.md
+    └── run.json
 ```
 
-测试运行不会写入现有 SQLite Knowledge Store，也没有“导入 Sandbox”操作。
+Knowledge 与 Artifact 全局唯一，不从属于测试或 Run。Harness 从 `main` base 创建 `processing/<run-id>`，但不创建 worktree 或副本。`WORK.md` 保存本次输入引用、Attention、读取清单和角色 handoff；`run.json` 保存终态结果与全部 Agent Run records。
 
-## 2. Observation 输入与确定性降噪
+## 输入读取
 
-用户选择 discovery catalog 中一条 Session 及其当前 revision。Source Adapter 从原始位置读取并校验版本，产生：
+Source Adapter 从选定 Session revision 生成可定位的 Canonical Activity，并保留 Raw Evidence locator。Harness 沿 Activity 边界生成 `WORK.md` 清单。Maintainer 使用 `read_activity` 完整扫描活动，以 `read_activity_attachment` 检查图片，只在精确核查时调用 `read_evidence`。原始证据不复制进 Repository 或 Run。
 
-- Raw Evidence：保留原始行、格式版本和可选 Skill hint；
-- Canonical Activity：确定性、可回查、去除表示噪音的完整活动视图；
-- Attachment：Base64 不进入文本上下文，图片由独立工具读取。
+## Maintainer
 
-Canonical Activity 合并完全重复镜像、过滤正常遥测、摘要不可读加密 payload，并为每项活动保留 Raw locator。未知记录作为 opaque activity 保留。该预处理不使用模型判断内容价值，因此不能替代 Raw Evidence 的最终核查权。
+Maintainer 从 Repository 根运行普通 `read`、`bash`、`edit`、`write`，并拥有三个 Observation 只读工具。它读取指定 Run 的 `WORK.md`，直接维护 `knowledge/`、`artifacts/`，完成清单、解决 Review marker并创建一个普通 Knowledge/Artifact commit。Harness 验证后自动追加 Maintainer handoff。
 
-Harness 根据模型 context window 沿 Activity 边界组织较粗的读取项。只有单个 Activity 过大时才按 offset 续页；分页是 I/O 边界，不是独立工作状态。
+## Reviewer
 
-## 3. 工作清单
+Reviewer 从同一个 Repository 根工作，但没有 Raw Evidence 或 Observation 工具。它审阅精确 candidate revision：
 
-Harness 把读取计划写入 `.oyster/WORK.md` 并创建初始 commit。文件包含 opaque `sourceRef`、可选 Attention、按顺序执行的 Activity/Attachment 调用和完成契约，不包含 Raw Evidence 正文。
+- 需要修改：在实际文件加入完整 `REVIEW` block，在 `WORK.md` 增加未完成项，并创建反馈 commit；
+- 批准：验证无未完成项和 marker 后结束；Harness 在 `WORK.md` 追加绑定精确 OID 的 Reviewer approval。Reviewer 不创建 approval commit、不删除工作记录、不 merge。
 
-Maintainer 把它作为单 Agent 工作状态；Reviewer 把它作为跨 Agent 交接的一部分。Maintainer 结束前必须完成所有 checkbox。Reviewer 请求修改时必须追加未完成项；批准时必须删除该文件。
+## UI 与历史
 
-Todo Store 和工具代码暂时保留，但 Maintainer/Reviewer 的 runtime 都不安装 Todo 工具。是否将 Markdown 清单推广为其他 Agent 的长期正式状态不在本 MVP 中决定。
+运行视图在一个窗口中按 handoff 顺序展示所有 Agent Runs，并使用 `Maintainer`、`Reviewer` 名称区分。历史列表读取各 `runs/<run-id>/run.json`；成功记录包含输入、Session、两种角色配置、全部轨迹、candidate revision、变更路径及 revision 对应的 Knowledge/Artifact 视图。
 
-## 4. Agent 与工具
+## 当前边界
 
-Maintainer 的 `cwd` 是真实 worktree 根，工具为：
-
-- `read`、`bash`、`edit`、`write`；
-- `read_activity`、`read_activity_attachment`、`read_evidence`。
-
-它通过普通文件搜索和编辑维护 `knowledge/`、`artifacts/`，不使用 Knowledge CRUD、Contribution Draft 或提交工具。
-
-Reviewer 在新的 Agent 上下文中运行，只有四个 Coding Tools。它看不到 Raw Evidence、Canonical Activity、Maintainer transcript 或工具轨迹，只审阅 Repository tree、diff 和工作清单。
-
-## 5. Git handoff 校验
-
-每个 Agent 必须从输入 revision 创建一个单亲增量 commit并保持 worktree clean。Harness 还校验：
-
-- Maintainer 修改了 `knowledge/` 或 `artifacts/`；
-- Maintainer 没有删除工作清单，且所有清单项已完成；
-- Maintainer tree 没有 Review 标记，Knowledge Markdown 可解析；
-- changes-requested Reviewer commit 含完整 Review 标记和未完成清单项；
-- approved Reviewer commit 只删除工作清单；
-- `main` 始终等于运行开始时的 base revision。
-
-## 6. 页面与配置
-
-“加工测试”页面提供：
-
-- 链路测试：运行 Maintainer/Reviewer 完整协作并显示 worktree、branch、base/work-order/approved revision、运行次数、变更文件和最终 Knowledge；
-- 历史记录：读取终态快照和全部 Agent Runs；成功结果保持未合并，没有导入按钮；
-- 高级调试：单独运行 Maintainer，查看 Git handoff 和 Agent 调用轨迹。
-
-“Agent 配置”列出 Maintainer、Reviewer 和 Chat Agent。前两者分别展示 7 个和 4 个工具，均不含 Todo。Default LLM 仍由“AI 后端”统一配置；每次运行冻结自己的 stage Prompt 与模型绑定。
-
-## 7. 历史
-
-加工历史使用 V6 终态 Envelope，保存输入、Session 摘要、Maintainer/Reviewer 配置、零个或多个终态 Agent Runs，以及成功时的 collaboration workspace 和 approved revision。
-
-成功记录必须引用全部 Agent Runs，最后一个 Reviewer 结果必须为 `approved` 且 revision 等于 `approvedRevision`。列表只保存轻量摘要；完整 tree 结果与调用轨迹按需读取。Schema 4 到 5 只提升数据库版本，旧开发期 Schema 可重建。
-
-## 8. 当前非目标
-
-- 不 merge 或 promotion 到 `main`；
-- 不把 collaboration result 同步到现有 Knowledge/Artifact 页面；
-- 不建立 Contribution Draft、SQLite Sandbox、结构化 review report 或专用 Git 工具；
-- 不处理并发、远端、自动 rebase、复杂冲突、权限治理或二进制 Review；
-- 不把工作清单确立为所有 Agent 的最终通用状态协议。
+MVP 不定义 promotion、并发写入治理、锁、队列、远端同步、自动 rebase 或复杂冲突策略。这些问题不改变当前三个全局目录和 Run 不拥有领域文件的定义。

@@ -2,10 +2,10 @@ import { ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import { knowledgeChannels } from '../../shared/channels'
 import type { BrowseKnowledgeInput } from '../../shared/knowledge'
 import { KnowledgeExplorerProjectionService } from '../knowledge-projection/knowledge-explorer-projection'
-import type { SqliteKnowledgeStore } from './sqlite-knowledge-store'
+import type { FileKnowledgeStore } from './file-knowledge-store'
 
 export function registerKnowledgeIpc(
-  store: SqliteKnowledgeStore,
+  store: FileKnowledgeStore,
   getMainWindow: () => BrowserWindow | undefined
 ): void {
   const explorer = new KnowledgeExplorerProjectionService(store)

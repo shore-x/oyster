@@ -32,7 +32,7 @@
   -> 按选择读取入口 Markdown 或打开原始目录
 ```
 
-发现不修改外部 Agent，不复制 Skill，不写入 Artifact Repository，也不执行任何附带内容。
+发现不修改外部 Agent，不复制 Skill，不写入 Oyster Repository 的 Artifact 文件层，也不执行任何附带内容。
 
 ## 2. 最小对象与生命周期
 
@@ -158,4 +158,4 @@ UI 必须给项目 Skill 显示“项目”标记和注册根所属目录。未�
 - 空目录、损坏入口、删除后读取、未知 ID 和预览大小边界；
 - Renderer 的 scope、项目路径、原始路径、Markdown、空状态和错误状态；
 - Skill Markdown 图片不会生成资源请求；
-- 既有 history Discovery、知识加工和 Artifact Repository 测试保持通过。
+- 既有 history Discovery、知识加工和 Artifact 文件层测试保持通过。

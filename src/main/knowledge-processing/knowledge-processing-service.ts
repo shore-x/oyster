@@ -31,9 +31,9 @@ import {
   planActivityWork
 } from './activity-work-plan'
 import {
-  CollaborationRepository,
-  type CollaborationWorkspace
-} from './collaboration-repository'
+  ProcessingRepository,
+  type ProcessingRun
+} from './processing-repository'
 
 const MAX_SOURCE_REF_CHARACTERS = 512
 const MAX_DEBUG_TRACE_ERROR_CHARACTERS = 2 * 1_024
@@ -45,10 +45,6 @@ export interface ProcessingStageRunBinding {
   reasoningEffort?: ReasoningEffort
 }
 
-export interface ProcessingRunLease {
-  readonly id: string
-}
-
 export interface ProcessingDebugTraceContext {
   id: string
   origin: ProcessingDebugTraceOrigin
@@ -56,16 +52,15 @@ export interface ProcessingDebugTraceContext {
 
 export interface KnowledgeMaintenanceRunOptions {
   binding?: ProcessingStageRunBinding
-  lease?: ProcessingRunLease
   agent?: KnowledgeMaintainerRuntime
-  workspace?: CollaborationWorkspace
+  run?: ProcessingRun
+  processingRunId?: string
   previousRevision?: string
   debugTrace?: ProcessingDebugTraceContext
 }
 
 export interface KnowledgeReviewRunOptions {
   binding?: ProcessingStageRunBinding
-  lease?: ProcessingRunLease
   agent?: KnowledgeReviewerRuntime
   debugTrace?: ProcessingDebugTraceContext
 }
@@ -190,14 +185,15 @@ function executionSummary(
   }
 }
 
-function workspaceView(workspace: CollaborationWorkspace) {
+function runView(run: ProcessingRun) {
   return {
-    id: workspace.id,
-    worktreePath: workspace.worktreePath,
-    branchName: workspace.branchName,
-    targetBranch: workspace.targetBranch,
-    baseRevision: workspace.baseRevision,
-    workOrderRevision: workspace.workOrderRevision
+    id: run.id,
+    repositoryPath: run.repositoryPath,
+    runPath: run.runPath,
+    workPath: run.workPath,
+    branchName: run.branchName,
+    targetBranch: run.targetBranch,
+    baseRevision: run.baseRevision
   }
 }
 
@@ -207,14 +203,13 @@ export class KnowledgeProcessingService {
   private mutationQueue: Promise<void> = Promise.resolve()
   private readonly listeners = new Set<ProcessingSnapshotListener>()
   private readonly activeRuns = new Map<ProcessingStageId, AbortController>()
-  private readonly debugTraces = new Map<ProcessingDebugTraceOrigin, KnowledgeProcessingDebugTrace>()
-  private exclusiveLease?: ProcessingRunLease
+  private readonly debugTraces = new Map<string, KnowledgeProcessingDebugTrace>()
   private readonly unsubscribeAiBackend: () => void
 
   constructor(
     private readonly repository: KnowledgeProcessingRepository,
     private readonly aiBackend: AiBackendPort,
-    private readonly collaborations: CollaborationRepository,
+    private readonly processingRepository: ProcessingRepository,
     private readonly maintainer: KnowledgeMaintainerRuntime,
     private readonly reviewer: KnowledgeReviewerRuntime
   ) {
@@ -229,7 +224,7 @@ export class KnowledgeProcessingService {
       this.state = { stages: [] }
       this.configurationError = `知识加工配置无法读取：${errorText(error)}`
     }
-    await this.collaborations.initialize()
+    await this.processingRepository.initialize()
   }
 
   snapshot(): KnowledgeProcessingSnapshot {
@@ -370,25 +365,8 @@ export class KnowledgeProcessingService {
     return structuredClone(this.configuredStage(stageId))
   }
 
-  acquireExclusiveRun(): ProcessingRunLease {
-    if (this.exclusiveLease || this.activeRuns.size) throw new Error('已有知识加工运行正在占用工作区')
-    const lease = Object.freeze({ id: randomUUID() })
-    this.exclusiveLease = lease
-    return lease
-  }
-
-  releaseExclusiveRun(lease: ProcessingRunLease): void {
-    if (this.exclusiveLease !== lease) throw new Error('知识加工运行租约无效')
-    if (this.activeRuns.size) throw new Error('知识加工阶段尚未结束，不能释放运行租约')
-    this.exclusiveLease = undefined
-  }
-
-  private beginRun(stageId: ProcessingStageId, lease?: ProcessingRunLease): AbortController {
-    if (this.exclusiveLease && this.exclusiveLease !== lease) {
-      throw new Error('完整链路正在运行，不能启动独立阶段')
-    }
-    if (!this.exclusiveLease && lease) throw new Error('知识加工运行租约已失效')
-    if (this.activeRuns.size) throw new Error('已有知识加工阶段正在运行')
+  private beginRun(stageId: ProcessingStageId): AbortController {
+    if (this.activeRuns.has(stageId)) throw new Error('该知识加工阶段正在运行')
     const controller = new AbortController()
     this.activeRuns.set(stageId, controller)
     this.emit()
@@ -402,8 +380,18 @@ export class KnowledgeProcessingService {
 
   private recordAgentRun(context: ProcessingDebugTraceContext, run: AgentRunRecord): void {
     const parsed = parseAgentRunRecord(run, context.id)
-    this.debugTraces.set(context.origin, { origin: context.origin, run: parsed })
+    this.debugTraces.set(context.id, { origin: context.origin, run: parsed })
     this.emit()
+  }
+
+  clearDebugTraces(origin: ProcessingDebugTraceOrigin): void {
+    let changed = false
+    for (const [runId, trace] of this.debugTraces) {
+      if (trace.origin !== origin) continue
+      this.debugTraces.delete(runId)
+      changed = true
+    }
+    if (changed) this.emit()
   }
 
   private failDebugTrace(
@@ -411,8 +399,8 @@ export class KnowledgeProcessingService {
     status: 'failed' | 'cancelled',
     error: unknown
   ): void {
-    const trace = this.debugTraces.get(context.origin)
-    if (!trace || trace.run.id !== context.id || trace.run.status !== 'running') return
+    const trace = this.debugTraces.get(context.id)
+    if (!trace || trace.origin !== context.origin || trace.run.status !== 'running') return
     const completedAt = new Date().toISOString()
     trace.run.status = status
     trace.run.completedAt = completedAt
@@ -425,8 +413,8 @@ export class KnowledgeProcessingService {
   }
 
   agentRunSnapshot(context: ProcessingDebugTraceContext): AgentRunRecord | undefined {
-    const trace = this.debugTraces.get(context.origin)
-    return trace?.run.id === context.id ? structuredClone(trace.run) : undefined
+    const trace = this.debugTraces.get(context.id)
+    return trace?.origin === context.origin ? structuredClone(trace.run) : undefined
   }
 
   async runKnowledgeMaintenance(
@@ -445,8 +433,9 @@ export class KnowledgeProcessingService {
     const stage = options.binding ?? this.configuredStage('knowledge_maintenance_agent')
     const connection = this.aiBackend.snapshot().connections.find((item) => item.id === stage.connectionId)
     if (!connection) throw new Error('已配置的 Connection 不再可用')
-    const controller = this.beginRun('knowledge_maintenance_agent', options.lease)
     const debugTrace = options.debugTrace ?? { id: randomUUID(), origin: 'stage_debug' }
+    if (!options.debugTrace) this.clearDebugTraces(debugTrace.origin)
+    const controller = this.beginRun('knowledge_maintenance_agent')
     const startedAt = Date.now()
     try {
       return await this.aiBackend.withModelRuntime(
@@ -462,16 +451,17 @@ export class KnowledgeProcessingService {
             rawEvidence.skillHints,
             activitySegmentCharacterLimit(runtime.model.contextWindow)
           )
-          const workspace = options.workspace ?? await this.collaborations.createCollaboration({
+          const processingRun = options.run ?? await this.processingRepository.createRun({
+            id: options.processingRunId ?? debugTrace.id,
             sourceRef,
             attention: normalizedAttention,
             items: plan.items
           })
-          const previousRevision = options.previousRevision ?? workspace.workOrderRevision
+          const previousRevision = options.previousRevision ?? processingRun.baseRevision
           const result = await (options.agent ?? this.maintainer).run({
             runtime,
             systemPrompt: stage.instructions,
-            workspace,
+            run: processingRun,
             observation,
             sourceRef,
             previousRevision,
@@ -480,8 +470,8 @@ export class KnowledgeProcessingService {
             onRunUpdate: (run) => this.recordAgentRun(debugTrace, run),
             signal: controller.signal
           })
-          const handoff = await this.collaborations.recordMaintainerHandoff(
-            workspace,
+          const handoff = await this.processingRepository.recordMaintainerHandoff(
+            processingRun,
             previousRevision
           )
           this.recordAgentRun(debugTrace, result.run)
@@ -489,7 +479,7 @@ export class KnowledgeProcessingService {
             stageId: 'knowledge_maintenance_agent' as const,
             sourceRef,
             activitySegmentCount: plan.segmentCount,
-            workspace: workspaceView(workspace),
+            run: runView(processingRun),
             previousRevision,
             revision: handoff.revision,
             changedPaths: handoff.changedPaths,
@@ -516,42 +506,43 @@ export class KnowledgeProcessingService {
   }
 
   async runKnowledgeReview(
-    workspace: CollaborationWorkspace,
+    run: ProcessingRun,
     reviewedRevision: string,
     options: KnowledgeReviewRunOptions = {}
   ): Promise<KnowledgeReviewResult> {
     const stage = options.binding ?? this.configuredStage('knowledge_reviewer_agent')
     const connection = this.aiBackend.snapshot().connections.find((item) => item.id === stage.connectionId)
     if (!connection) throw new Error('已配置的 Connection 不再可用')
-    const controller = this.beginRun('knowledge_reviewer_agent', options.lease)
     const debugTrace = options.debugTrace ?? { id: randomUUID(), origin: 'stage_debug' }
+    if (!options.debugTrace) this.clearDebugTraces(debugTrace.origin)
+    const controller = this.beginRun('knowledge_reviewer_agent')
     const startedAt = Date.now()
     try {
       return await this.aiBackend.withModelRuntime(
         stage.connectionId,
         stage.modelId,
         async (runtime) => {
-          if (await this.collaborations.collaborationRevision(workspace) !== reviewedRevision) {
+          if (await this.processingRepository.runRevision(run) !== reviewedRevision) {
             throw new Error('Reviewer 输入 revision 已经过期')
           }
           const result = await (options.agent ?? this.reviewer).run({
             runtime,
             systemPrompt: stage.instructions,
-            workspace,
+            run,
             reviewedRevision,
             reasoningEffort: stage.reasoningEffort,
             runId: debugTrace.id,
             onRunUpdate: (run) => this.recordAgentRun(debugTrace, run),
             signal: controller.signal
           })
-          const outcome = await this.collaborations.recordReviewerOutcome(workspace, reviewedRevision)
+          const outcome = await this.processingRepository.recordReviewerOutcome(run, reviewedRevision)
           this.recordAgentRun(debugTrace, result.run)
           return {
             stageId: 'knowledge_reviewer_agent' as const,
             outcome: outcome.kind,
             reviewedRevision,
             revision: outcome.revision,
-            changedPaths: outcome.kind === 'changes_requested' ? outcome.changedPaths : ['.oyster/WORK.md'],
+            changedPaths: outcome.kind === 'changes_requested' ? outcome.changedPaths : [],
             markerPaths: outcome.kind === 'changes_requested' ? outcome.markerPaths : [],
             agentRunId: result.run.id,
             durationMs: Date.now() - startedAt,

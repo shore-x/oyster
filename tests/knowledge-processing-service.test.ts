@@ -17,7 +17,7 @@ import {
   KNOWLEDGE_REVIEWER_AGENT_PROMPT
 } from '../src/main/knowledge-processing/prompts'
 import type { AgentObservation } from '../src/main/observation/model'
-import { CollaborationRepository } from '../src/main/knowledge-processing/collaboration-repository'
+import { ProcessingRepository } from '../src/main/knowledge-processing/processing-repository'
 import {
   FixtureKnowledgeMaintainerRuntime,
   FixtureKnowledgeReviewerRuntime
@@ -118,7 +118,7 @@ class CapturingMaintainer implements KnowledgeMaintainerRuntime {
 async function harness() {
   const directory = await mkdtemp(join(tmpdir(), 'oyster-processing-service-'))
   temporaryDirectories.push(directory)
-  const collaborations = new CollaborationRepository(join(directory, 'repository'))
+  const collaborations = new ProcessingRepository(join(directory, 'repository'))
   const maintainer = new CapturingMaintainer()
   const backend = new FakeBackend()
   const service = new KnowledgeProcessingService(
@@ -169,7 +169,7 @@ describe('KnowledgeProcessingService', () => {
       .not.toEqual(expect.arrayContaining(['list_todos', 'add_todos', 'complete_todos']))
   })
 
-  it('creates a real worktree, supplies observation tools, and validates the Maintainer commit', async () => {
+  it('creates a Run in the real repository, supplies observation tools, and validates the Maintainer commit', async () => {
     const { service, maintainer, collaborations } = await harness()
     const baseRevision = await collaborations.currentRevision()
     const result = await service.runKnowledgeMaintenance(
@@ -181,18 +181,14 @@ describe('KnowledgeProcessingService', () => {
     expect(maintainer.calls).toHaveLength(1)
     expect(maintainer.calls[0].sourceRef).toBe('session:codex:one@revision')
     expect(maintainer.calls[0].systemPrompt).toBe(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT)
-    expect(await readFile(
-      join(result.workspace.worktreePath, '.oyster', 'WORK.md'),
-      'utf8'
-    )).toContain('Inspect the repository model.')
+    expect(await readFile(result.run.workPath, 'utf8')).toContain('Inspect the repository model.')
     expect(result.activitySegmentCount).toBe(1)
-    expect(result.previousRevision).toBe(result.workspace.workOrderRevision)
+    expect(result.previousRevision).toBe(result.run.baseRevision)
     expect(result.revision).not.toBe(result.previousRevision)
     expect(result.changedPaths).toEqual(expect.arrayContaining([
-      '.oyster/WORK.md',
       'knowledge/knowledge-processing.md'
     ]))
-    expect(result.workspace.worktreePath).toBe(maintainer.calls[0].workspace.worktreePath)
+    expect(result.run.repositoryPath).toBe(maintainer.calls[0].run.repositoryPath)
     expect(await collaborations.currentRevision()).toBe(baseRevision)
     expect(service.snapshot().debugTraces[0]?.run.id).toBe(result.agentRunId)
   })

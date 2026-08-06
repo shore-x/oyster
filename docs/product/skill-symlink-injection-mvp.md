@@ -49,7 +49,7 @@ Artifact 的当前身份继续是 Repository 相对路径。Skill 不是第二�
 一个可注入的 Skill Artifact 采用以下最小布局：
 
 ```text
-<Artifact Repository>/
+<Oyster Repository>/artifacts/
 └── my-skill/
     ├── AGENTS.md
     ├── notes.md                 # 可选，仅供 Artifact 维护
@@ -80,7 +80,7 @@ Artifact 的当前身份继续是 Repository 相对路径。Skill 不是第二�
 当前 symlink 在目标 Agent Skill 根中使用 `SKILL.md` 声明的 `name` 作为目录项名称，并指向 `output/` 的绝对路径。例如：
 
 ```text
-~/.claude/skills/my-skill -> <Artifact Repository>/my-skill/output
+~/.claude/skills/my-skill -> <Oyster Repository>/artifacts/my-skill/output
 ```
 
 逻辑注册目录名称与 Skill `name` 保持一致，而物理目标目录固定为 `output/`。
@@ -121,7 +121,7 @@ Artifact 的当前身份继续是 Repository 相对路径。Skill 不是第二�
 - 目标 Agent 或用户直接修改 `output/` 时，修改就是对当前 Artifact 内容的普通文件修改；MVP 不区分写入者，也不增加锁或冲突协议；
 - Oyster 未运行时，已有 symlink 和 Skill 内容继续留在本机，目标 Agent 可以按自身规则读取。
 
-这些行为与当前 Artifact Repository 的路径身份和高信任本机文件模型一致。symlink 不被描述为权限边界。
+这些行为与统一 Repository 中 Artifact 文件层的路径身份和高信任本机文件模型一致。symlink 不被描述为权限边界。
 
 ## 7. 最小 UI 与页面职责
 

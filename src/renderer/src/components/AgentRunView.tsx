@@ -13,6 +13,7 @@ type JsonObject = { [key: string]: SerializableJsonValue }
 
 export interface AgentRunViewProps {
   run: AgentRunRecord
+  agentDisplayName?: string
   toolLabel?(name: string): string | undefined
   onOpenKnowledge?(title: string): void
 }
@@ -164,6 +165,7 @@ function ToolCall(props: { call: AgentToolCallRecord; label?: string }) {
 
 function Message(props: {
   message: AgentMessageRecord
+  assistantName: string
   modelCall?: AgentModelCallRecord
   onSelectModelCall?(id: string): void
   onOpenKnowledge?(title: string): void
@@ -173,7 +175,7 @@ function Message(props: {
   return (
     <article class={`agent-trace-message agent-trace-message--${props.message.role}`}>
       <div class="agent-trace-message__heading">
-        <strong>{props.message.role === 'user' ? '你' : props.message.role === 'assistant' ? 'Oyster' : 'Runtime'}</strong>
+        <strong>{props.message.role === 'user' ? '你' : props.message.role === 'assistant' ? props.assistantName : 'Runtime'}</strong>
         <Show when={props.modelCall && props.onSelectModelCall}>
           <button type="button" onClick={() => props.onSelectModelCall?.(props.modelCall!.id)}>查看模型调用</button>
         </Show>
@@ -209,6 +211,7 @@ export function AgentRunTimeline(props: AgentRunViewProps & {
             <Show when={item.kind === 'message' ? item.message : undefined}>
               {(message) => <Message
                 message={message()}
+                assistantName={props.agentDisplayName ?? 'Oyster'}
                 modelCall={modelCallForMessage(message().id)}
                 onSelectModelCall={props.onSelectModelCall}
                 onOpenKnowledge={props.onOpenKnowledge}
@@ -303,13 +306,13 @@ export function AgentRunExplorer(props: AgentRunViewProps & { compact?: boolean 
     <section class={`agent-run-view agent-run-view--${props.run.status}${props.compact ? ' agent-run-view--compact' : ''}`} data-testid="agent-run-view">
       <Show when={props.compact}>
         <header class="agent-run-view__compact-header">
-          <strong>{props.run.agentId}</strong>
+          <strong>{props.agentDisplayName ?? props.run.agentId}</strong>
           <span title={props.run.parentRunId}>{props.run.parentRunId ? '子 Agent' : '根 Agent'} · {agentRunStatusLabel(props.run.status)}</span>
         </header>
       </Show>
       <Show when={!props.compact}>
         <header class="agent-run-view__summary">
-          <div><span>Agent</span><strong>{props.run.agentId}</strong></div>
+          <div><span>Agent</span><strong>{props.agentDisplayName ?? props.run.agentId}</strong></div>
           <div><span>Turns</span><strong>{props.run.turns.length}</strong></div>
           <div><span>Model Calls</span><strong>{props.run.modelCalls.length}</strong></div>
           <div><span>Tool Calls</span><strong>{props.run.toolCalls.length}</strong></div>
@@ -353,14 +356,29 @@ export function AgentRunExplorer(props: AgentRunViewProps & { compact?: boolean 
 /** Generic multi-Agent projection; business pages only decide which runs belong together. */
 export function AgentRunCollectionExplorer(props: {
   runs: AgentRunRecord[]
+  agentDisplayName?(run: AgentRunRecord): string
+  followLatestRun?: boolean
   toolLabel?: AgentRunViewProps['toolLabel']
   onOpenKnowledge?: AgentRunViewProps['onOpenKnowledge']
 }) {
   const [selectedRunId, setSelectedRunId] = createSignal<string>()
   const selectedRun = createMemo(() => props.runs.find((run) => run.id === selectedRunId()))
+  let knownRunIds = new Set<string>()
   createEffect(() => {
-    if (selectedRun()) return
-    setSelectedRunId(props.runs.find((run) => run.status === 'failed')?.id ?? props.runs[0]?.id)
+    const runs = props.runs
+    const newRuns = runs.filter((run) => !knownRunIds.has(run.id))
+    const newRunToFollow = [...newRuns].reverse().find((run) => run.status === 'running')
+      ?? (props.followLatestRun ? newRuns[newRuns.length - 1] : undefined)
+    if (newRunToFollow) {
+      setSelectedRunId(newRunToFollow.id)
+    } else if (!selectedRun()) {
+      setSelectedRunId(
+        runs.find((run) => run.status === 'failed')?.id
+        ?? runs.find((run) => run.status === 'running')?.id
+        ?? runs[0]?.id
+      )
+    }
+    knownRunIds = new Set(runs.map((run) => run.id))
   })
   return (
     <section class="agent-run-collection" data-testid="agent-run-collection">
@@ -373,7 +391,7 @@ export function AgentRunCollectionExplorer(props: {
               onClick={() => setSelectedRunId(run.id)}
             >
               <span>{index() + 1}</span>
-              <strong>{run.agentId}</strong>
+              <strong>{props.agentDisplayName?.(run) ?? run.agentId}</strong>
               <small>{agentRunStatusLabel(run.status)} · {run.modelCalls.length} 次模型</small>
             </button>
           )}</For>
@@ -382,6 +400,7 @@ export function AgentRunCollectionExplorer(props: {
       <Show when={selectedRun()} fallback={<div class="agent-trace-empty">没有实际启动的 Agent Run。</div>}>
         {(run) => <AgentRunExplorer
           run={run()}
+          agentDisplayName={props.agentDisplayName?.(run())}
           toolLabel={props.toolLabel}
           onOpenKnowledge={props.onOpenKnowledge}
         />}

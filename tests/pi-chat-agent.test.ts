@@ -12,7 +12,6 @@ import {
 import type { ModelRuntime } from '../src/main/ai-backends/model'
 import { PiChatAgent } from '../src/main/chat/pi-chat-agent'
 import { PiChatSessionRepository } from '../src/main/chat/pi-chat-session-repository'
-import { SqliteKnowledgeStore } from '../src/main/knowledge-store/sqlite-knowledge-store'
 
 const temporaryPaths: string[] = []
 
@@ -25,7 +24,6 @@ describe('PiChatAgent', () => {
     const rootPath = await mkdtemp(join(tmpdir(), 'oyster-pi-chat-'))
     temporaryPaths.push(rootPath)
     const sessions = new PiChatSessionRepository(join(rootPath, 'sessions'))
-    const knowledgeStore = new SqliteKnowledgeStore(join(rootPath, 'knowledge.sqlite'))
     const binding = {
       connectionId: 'connection:test',
       modelId: 'small-model',
@@ -59,7 +57,7 @@ describe('PiChatAgent', () => {
       }
     }
     const metadata = await opened.session.getMetadata()
-    await new PiChatAgent(knowledgeStore, join(rootPath, 'artifacts')).run({
+    await new PiChatAgent(rootPath).run({
       sessionId: metadata.id,
       session: opened.session,
       binding,
@@ -82,7 +80,6 @@ describe('PiChatAgent', () => {
     expect(detail.runs[0].modelCalls.some((call) => call.purpose === 'agent')).toBe(true)
     expect(detail.runs[0].modelCalls.find((call) => call.purpose === 'agent')?.context.messages)
       .toContainEqual(expect.objectContaining({ role: 'user' }))
-    knowledgeStore.close()
     await sessions.dispose()
   })
 
@@ -90,7 +87,6 @@ describe('PiChatAgent', () => {
     const rootPath = await mkdtemp(join(tmpdir(), 'oyster-pi-chat-todos-'))
     temporaryPaths.push(rootPath)
     const sessions = new PiChatSessionRepository(join(rootPath, 'sessions'))
-    const knowledgeStore = new SqliteKnowledgeStore(join(rootPath, 'knowledge.sqlite'))
     const binding = {
       connectionId: 'connection:test',
       modelId: 'todo-model',
@@ -127,7 +123,7 @@ describe('PiChatAgent', () => {
     }
     const metadata = await opened.session.getMetadata()
 
-    await new PiChatAgent(knowledgeStore, join(rootPath, 'artifacts')).run({
+    await new PiChatAgent(rootPath).run({
       sessionId: metadata.id,
       session: opened.session,
       binding,
@@ -150,7 +146,6 @@ describe('PiChatAgent', () => {
     const rawContext = await opened.session.buildContext()
     expect(rawContext.messages).toContainEqual(expect.objectContaining({ role: 'runtimeFeedback' }))
 
-    knowledgeStore.close()
     await sessions.dispose()
   })
 })

@@ -19,7 +19,7 @@ import type {
   SkillBindingTargetSummary
 } from '../../shared/skills'
 import {
-  type ArtifactRepository,
+  type ArtifactService,
   resolveArtifactDirectoryPath
 } from '../artifacts/artifact-repository'
 import { readArtifactSkillDocument } from '../artifacts/skill-artifact'
@@ -227,7 +227,7 @@ async function inspectBindingTarget(
 
 export class ManagedSkillService {
   constructor(
-    private readonly repository: ArtifactRepository,
+    private readonly repository: ArtifactService,
     private readonly context: DetectionContext
   ) {}
 
@@ -246,7 +246,7 @@ export class ManagedSkillService {
     artifactDirectoryName: string
   ): Promise<ManagedArtifact> {
     const artifactPath = resolveArtifactDirectoryPath(
-      this.repository.repositoryPath,
+      this.repository.artifactsPath,
       artifactDirectoryName
     )
     const snapshot = await this.repository.refresh()
@@ -268,7 +268,7 @@ export class ManagedSkillService {
     const skills = await Promise.all(artifactSnapshot.artifacts.flatMap((artifact) => {
       if (!artifact.skill) return []
       const artifactPath = resolveArtifactDirectoryPath(
-        this.repository.repositoryPath,
+        this.repository.artifactsPath,
         artifact.directoryName
       )
       return [Promise.all(this.targets().map(async (target) => {

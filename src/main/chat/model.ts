@@ -6,9 +6,7 @@ import type {
   ChatSessionDetail,
   ChatSessionSummary
 } from '../../shared/chat'
-import type { KnowledgeCommitResult, KnowledgeContributionDraft, KnowledgeStatement } from '../../shared/knowledge'
 import type { ModelRuntime } from '../ai-backends/model'
-import type { KnowledgeStatementRecord } from '../knowledge-store/model'
 import type { AgentRunRecord } from '../../shared/agent-runtime'
 
 export interface ChatConfigurationStateData {
@@ -31,17 +29,6 @@ export interface ChatSessionRepository {
   list(): Promise<ChatSessionSummary[]>
   detail(sessionId: string, running?: boolean): Promise<ChatSessionDetail>
   delete(sessionId: string): Promise<void>
-}
-
-export interface ChatKnowledgeStore {
-  search(
-    query: string,
-    limit: number,
-    offset?: number,
-    signal?: AbortSignal
-  ): Promise<KnowledgeStatementRecord[]>
-  read(title: string, signal?: AbortSignal): Promise<KnowledgeStatement | undefined>
-  commit(draft: KnowledgeContributionDraft): KnowledgeCommitResult
 }
 
 export interface ChatAiBackendPort {

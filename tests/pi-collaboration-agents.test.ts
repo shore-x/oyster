@@ -12,17 +12,17 @@ import {
   PiKnowledgeMaintainerAgent,
   PiKnowledgeReviewerAgent
 } from '../src/main/knowledge-processing/pi-collaboration-agents'
-import type { CollaborationWorkspace } from '../src/main/knowledge-processing/collaboration-repository'
+import type { ProcessingRun } from '../src/main/knowledge-processing/processing-repository'
 import type { AgentObservation } from '../src/main/observation/model'
 
-const workspace: CollaborationWorkspace = {
+const run: ProcessingRun = {
   id: 'workspace-test',
-  repositoryPath: '/tmp/oyster-collaboration-repository',
-  worktreePath: '/tmp/oyster-collaboration-worktree',
+  repositoryPath: '/tmp/oyster-repository',
+  runPath: '/tmp/oyster-repository/runs/workspace-test',
+  workPath: '/tmp/oyster-repository/runs/workspace-test/WORK.md',
   targetBranch: 'main',
-  branchName: 'collaboration/test',
-  baseRevision: 'a'.repeat(40),
-  workOrderRevision: 'b'.repeat(40)
+  branchName: 'processing/test',
+  baseRevision: 'a'.repeat(40)
 }
 
 const observation: AgentObservation = {
@@ -68,8 +68,8 @@ describe('Pi collaboration Agents', () => {
           'read', 'bash', 'edit', 'write',
           'read_activity', 'read_activity_attachment', 'read_evidence'
         ])
-        expect(contextText(context)).toContain(workspace.worktreePath)
-        expect(contextText(context)).toContain('.oyster/WORK.md')
+        expect(contextText(context)).toContain(run.repositoryPath)
+        expect(contextText(context)).toContain(run.workPath)
         expect(contextText(context)).not.toContain('list_todos')
         return fauxAssistantMessage(
           fauxToolCall('read_activity', { activity: 1, offset: 0, limit: 100 }),
@@ -85,10 +85,10 @@ describe('Pi collaboration Agents', () => {
     const result = await new PiKnowledgeMaintainerAgent().run({
       runtime,
       systemPrompt: 'Maintain the collaboration tree.',
-      workspace,
+      run,
       observation,
       sourceRef: 'raw:test@revision',
-      previousRevision: workspace.workOrderRevision,
+      previousRevision: run.baseRevision,
       runId: 'maintainer-run',
       signal: new AbortController().signal
     })
@@ -102,18 +102,18 @@ describe('Pi collaboration Agents', () => {
         expect(context.tools?.map((tool) => tool.name)).toEqual([
           'read', 'bash', 'edit', 'write'
         ])
-        expect(contextText(context)).toContain(workspace.worktreePath)
+        expect(contextText(context)).toContain(run.repositoryPath)
         expect(contextText(context)).toContain('Exact revision to review')
         expect(contextText(context)).not.toContain('read_evidence')
         expect(contextText(context)).not.toContain('list_todos')
-        return fauxAssistantMessage('Reviewer approval committed.')
+        return fauxAssistantMessage('Reviewer approved the exact revision.')
       }
     ])
 
     const result = await new PiKnowledgeReviewerAgent().run({
       runtime,
       systemPrompt: 'Review the collaboration tree.',
-      workspace,
+      run,
       reviewedRevision: 'c'.repeat(40),
       runId: 'reviewer-run',
       signal: new AbortController().signal

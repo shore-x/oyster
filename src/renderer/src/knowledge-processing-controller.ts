@@ -75,7 +75,8 @@ export function createKnowledgeProcessingController() {
   }
 
   function invalidateInputResults(): void {
-    const currentTrace = snapshot().debugTraces.find((trace) => trace.origin === 'stage_debug')
+    const stageTraces = snapshot().debugTraces.filter((trace) => trace.origin === 'stage_debug')
+    const currentTrace = stageTraces[stageTraces.length - 1]
     setHiddenStageDebugTraceId(currentTrace?.run.id)
     setMaintenanceResult(undefined)
   }
@@ -84,17 +85,20 @@ export function createKnowledgeProcessingController() {
     setFullChainResult(undefined)
   }
 
+  function debugTraces(origin: ProcessingDebugTraceOrigin): KnowledgeProcessingDebugTrace[] {
+    return snapshot().debugTraces.filter((trace) => (
+      trace.origin === origin
+      && !(
+        origin === 'stage_debug'
+        && trace.run.id === hiddenStageDebugTraceId()
+        && trace.run.status !== 'running'
+      )
+    ))
+  }
+
   function debugTrace(origin: ProcessingDebugTraceOrigin): KnowledgeProcessingDebugTrace | undefined {
-    const trace = snapshot().debugTraces.find((candidate) => candidate.origin === origin)
-    if (
-      origin === 'stage_debug'
-      && trace
-      && trace.run.id === hiddenStageDebugTraceId()
-      && trace.run.status !== 'running'
-    ) {
-      return undefined
-    }
-    return trace
+    const traces = debugTraces(origin)
+    return traces[traces.length - 1]
   }
 
   let receivedSubscriptionSnapshot = false
@@ -248,6 +252,7 @@ export function createKnowledgeProcessingController() {
     fullChainRuns,
     fullChainRunsLoading,
     selectedFullChainRun,
+    debugTraces,
     debugTrace,
     isFullChainRunning: fullChainPending,
     isLoadingFullChainRun: (runId: string) => loadingFullChainRunId() === runId,

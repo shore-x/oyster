@@ -1,12 +1,5 @@
-/** Per-Statement persistence boundary shared by producers and the Store. */
 export const MAX_KNOWLEDGE_STATEMENT_CONTENT_LENGTH = 1_024 * 1_024
 export const MAX_KNOWLEDGE_STATEMENT_TITLE_LENGTH = 2_048
-
-/** Runtime envelope metadata. It is not part of Statement semantics. */
-export interface KnowledgeContributionRecord {
-  runRef: string
-  createdAt: string
-}
 
 /** The complete MVP knowledge object: one canonical title and its free-text body. */
 export interface KnowledgeStatement {
@@ -14,23 +7,6 @@ export interface KnowledgeStatement {
   content: string
 }
 
-export interface KnowledgeStatementDraft {
-  title: string
-  content: string
-}
-
-export interface KnowledgeContributionDraft {
-  /** Identifies the processing run that submitted this atomic write envelope. */
-  runRef: string
-  statements: KnowledgeStatementDraft[]
-}
-
-export interface KnowledgeCommitResult {
-  contribution: KnowledgeContributionRecord
-  statements: KnowledgeStatement[]
-  createdTitles: string[]
-  updatedTitles: string[]
-}
 
 export interface ListKnowledgeStatementsOptions {
   limit?: number
@@ -85,7 +61,6 @@ export interface KnowledgeNeighborhoodProjection {
 
 export interface ClearKnowledgeResult {
   deletedStatementCount: number
-  deletedContributionCount: number
 }
 
 export interface KnowledgeApi {

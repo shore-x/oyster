@@ -120,7 +120,7 @@ async function sessionSummary(
  * Thin Oyster adapter over Pi's native JSONL session repository.
  *
  * The raw Pi messages remain intact, including assistant tool calls and tool-result messages.
- * Chat history is intentionally stored separately from the Knowledge Store database.
+ * Chat history is intentionally stored separately from the repository's Knowledge files.
  */
 export class PiChatSessionRepository implements ChatSessionRepository {
   private readonly environment: NodeExecutionEnv

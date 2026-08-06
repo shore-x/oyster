@@ -17,13 +17,12 @@ import {
 import {
   KnowledgeProcessingService,
   type ProcessingDebugTraceContext,
-  type ProcessingRunLease,
   type ProcessingStageRunBinding
 } from './knowledge-processing-service'
 import {
-  CollaborationRepository,
-  type CollaborationWorkspace
-} from './collaboration-repository'
+  ProcessingRepository,
+  type ProcessingRun
+} from './processing-repository'
 import type { KnowledgeFullChainRunHistory } from './full-chain-run-repository'
 
 export interface KnowledgeFullChainBindings {
@@ -34,7 +33,6 @@ export interface KnowledgeFullChainBindings {
 interface ActiveFullChainRun {
   runId: string
   controller: AbortController
-  lease: ProcessingRunLease
 }
 
 function terminalStatus(signal: AbortSignal): 'failed' | 'cancelled' {
@@ -53,24 +51,18 @@ function validateInput(input: RunKnowledgeFullChainInput): void {
   }
 }
 
-function internalWorkspace(
-  repositoryPath: string,
-  result: KnowledgeMaintenanceResult
-): CollaborationWorkspace {
-  return {
-    ...result.workspace,
-    repositoryPath
-  }
+function internalRun(result: KnowledgeMaintenanceResult): ProcessingRun {
+  return { ...result.run }
 }
 
-/** Runs a real, unmerged Git collaboration through Maintainer/Reviewer handoffs. */
+/** Runs a real, unmerged processing revision through Maintainer/Reviewer handoffs. */
 export class KnowledgeFullChainService {
   private active?: ActiveFullChainRun
 
   constructor(
     private readonly discovery: DiscoveryService,
     private readonly processing: KnowledgeProcessingService,
-    private readonly collaborations: CollaborationRepository,
+    private readonly processingRepository: ProcessingRepository,
     private readonly history?: KnowledgeFullChainRunHistory
   ) {}
 
@@ -85,11 +77,11 @@ export class KnowledgeFullChainService {
     validateInput(input)
     if (this.active) throw new Error('完整链路正在运行')
 
-    const lease = this.processing.acquireExclusiveRun()
     const runId = randomUUID()
     const controller = new AbortController()
-    const active: ActiveFullChainRun = { runId, controller, lease }
+    const active: ActiveFullChainRun = { runId, controller }
     this.active = active
+    this.processing.clearDebugTraces('full_chain')
     const startedAt = Date.now()
     const startedAtIso = new Date(startedAt).toISOString()
     let session: AvailableSessionSummary | undefined
@@ -112,7 +104,7 @@ export class KnowledgeFullChainService {
       if (!this.history) return
       historySaveAttempted = true
       this.history.save({
-        formatVersion: 6,
+        formatVersion: 7,
         runId,
         status,
         startedAt: startedAtIso,
@@ -150,13 +142,13 @@ export class KnowledgeFullChainService {
         input.attention,
         {
           binding: structuredClone(bindings.maintainer),
-          lease,
+          processingRunId: runId,
           debugTrace: firstContext
         }
       )
       maintenanceRuns.push(firstMaintenance)
       recordAgentRun(firstContext)
-      const workspace = internalWorkspace(this.collaborations.repositoryPath, firstMaintenance)
+      const processingRun = internalRun(firstMaintenance)
       let revision = firstMaintenance.revision
 
       while (true) {
@@ -165,9 +157,8 @@ export class KnowledgeFullChainService {
           id: randomUUID(),
           origin: 'full_chain'
         }
-        const review = await this.processing.runKnowledgeReview(workspace, revision, {
+        const review = await this.processing.runKnowledgeReview(processingRun, revision, {
           binding: structuredClone(bindings.reviewer),
-          lease,
           debugTrace: reviewContext
         })
         reviewRuns.push(review)
@@ -188,8 +179,7 @@ export class KnowledgeFullChainService {
           input.attention,
           {
             binding: structuredClone(bindings.maintainer),
-            lease,
-            workspace,
+            run: processingRun,
             previousRevision: revision,
             debugTrace: maintenanceContext
           }
@@ -200,17 +190,17 @@ export class KnowledgeFullChainService {
       }
 
       controller.signal.throwIfAborted()
-      const finalView = await this.collaborations.revisionView(revision)
+      const finalView = await this.processingRepository.revisionView(revision)
       const result: KnowledgeFullChainResult = {
         runId,
         session: structuredClone(session),
         sourceRef: material.sourceRef,
-        workspace: firstMaintenance.workspace,
+        run: firstMaintenance.run,
         maintenanceRuns,
         reviewRuns,
         approvedRevision: revision,
-        changedPaths: await this.collaborations.revisionChangedPaths(
-          workspace.baseRevision,
+        changedPaths: await this.processingRepository.revisionChangedPaths(
+          processingRun.baseRevision,
           revision
         ),
         knowledge: finalView.knowledge.map(({ title, content }) => ({ title, content })),
@@ -222,15 +212,10 @@ export class KnowledgeFullChainService {
       return result
     } catch (error) {
       const status = terminalStatus(controller.signal)
-      const currentDebugTrace = this.processing.snapshot().debugTraces
-        .find((trace) => trace.origin === 'full_chain')
-      const currentTrace: ProcessingDebugTraceContext | undefined = currentDebugTrace
-        ? {
-            id: currentDebugTrace.run.id,
-            origin: 'full_chain'
-          }
-        : undefined
-      if (currentTrace) recordAgentRun(currentTrace)
+      for (const trace of this.processing.snapshot().debugTraces) {
+        if (trace.origin !== 'full_chain') continue
+        recordAgentRun({ id: trace.run.id, origin: trace.origin })
+      }
       if (!historySaveAttempted) {
         const completedAt = new Date().toISOString()
         saveHistory(
@@ -244,7 +229,6 @@ export class KnowledgeFullChainService {
       throw error
     } finally {
       if (this.active === active) this.active = undefined
-      this.processing.releaseExclusiveRun(lease)
     }
   }
 

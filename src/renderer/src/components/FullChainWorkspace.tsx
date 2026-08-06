@@ -3,7 +3,7 @@ import type { AvailableSessionSummary } from '../../../shared/discovery'
 import type { LlmBinding } from '../../../shared/ai-backends'
 import type { KnowledgeStatement } from '../../../shared/knowledge'
 import type {
-  CollaborationWorkspaceView,
+  ProcessingRunView,
   KnowledgeProcessingDebugTrace,
   ProcessingConnectionView,
   ProcessingStageView
@@ -15,6 +15,7 @@ import {
   reasoningLabel,
   selectedLlmModel
 } from '../processing-configuration'
+import { processingAgentDisplayName } from '../processing-agent-presentation'
 import { Button } from '../ui'
 import { FullChainActivityDetail, FullChainResultDetail } from './FullChainRunDetails'
 import { SessionMetadata, sessionOptionLabel } from './SessionMetadata'
@@ -32,7 +33,7 @@ export interface FullChainResultView {
   runId: string
   completedAt?: string
   durationMs?: number
-  workspace: CollaborationWorkspaceView
+  run: ProcessingRunView
   approvedRevision: string
   changedPaths: string[]
   artifactPaths: string[]
@@ -53,7 +54,7 @@ export interface FullChainWorkspaceProps {
   maintainerConnection?: ProcessingConnectionView
   reviewerConnection?: ProcessingConnectionView
   running: boolean
-  debugTrace?: KnowledgeProcessingDebugTrace
+  debugTraces: KnowledgeProcessingDebugTrace[]
   locked: boolean
   result?: FullChainResultView
   onSelectSession(id: string): void
@@ -120,7 +121,22 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
     if (!reviewer().runnable) return `${reviewer().name} 尚未完成可用的模型配置。`
     return undefined
   })
-  const visibleDebugTrace = createMemo(() => props.debugTrace)
+  const visibleDebugTraces = createMemo(() => props.debugTraces)
+  const visibleRuns = createMemo(() => visibleDebugTraces().map((trace) => trace.run))
+  const currentDebugTrace = createMemo(() => {
+    const traces = visibleDebugTraces()
+    return [...traces].reverse().find((trace) => trace.run.status === 'running')
+      ?? traces[traces.length - 1]
+  })
+  const traceStatus = createMemo(() => props.running ? 'running' : currentDebugTrace()?.run.status)
+  const modelCallCount = createMemo(() => visibleRuns().reduce(
+    (total, run) => total + run.modelCalls.length,
+    0
+  ))
+  const toolCallCount = createMemo(() => visibleRuns().reduce(
+    (total, run) => total + run.toolCalls.length,
+    0
+  ))
 
   createEffect(() => {
     if (page() === 'result' && !props.result) setPage('overview')
@@ -130,7 +146,7 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
     <div class="chain-test" data-testid="full-chain-workspace">
       <div class="chain-test__boundary" data-testid="git-collaboration-boundary">
         <span class="git-collaboration-badge">Git 协作测试</span>
-        <p>Harness 创建真实分支与 worktree；Maintainer 和 Reviewer 交替提交，最终结果不会合并到目标分支。</p>
+        <p>Harness 在统一 Repository 中创建 Run 与真实处理分支；Maintainer 和 Reviewer 共用 WORK.md，最终结果不会合并到目标分支。</p>
       </div>
 
       <Show when={page() === 'overview'}>
@@ -190,7 +206,7 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
             <div class="chain-test__actions">
               <p data-testid="full-chain-disabled-reason">
                 {props.running
-                  ? 'Maintainer 与 Reviewer 正在协作分支中工作…'
+                  ? 'Maintainer 与 Reviewer 正在当前 Run 中工作…'
                   : disabledReason() || '输入和模型已经准备完成。'}
               </p>
               <Show
@@ -217,12 +233,12 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
                 <h2>运行概览</h2>
                 <p>主页面只保留阶段状态；逐次调用在运行详情中查看。</p>
               </div>
-              <Show when={visibleDebugTrace()}>
-                {(trace) => <span class={`chain-test__status chain-test__status--${trace().run.status}`}>{trace().run.status === 'running' ? '运行中' : trace().run.status === 'completed' ? '已完成' : trace().run.status === 'cancelled' ? '已取消' : '失败'}</span>}
+              <Show when={traceStatus()}>
+                {(status) => <span class={`chain-test__status chain-test__status--${status()}`}>{status() === 'running' ? '运行中' : status() === 'completed' ? '已完成' : status() === 'cancelled' ? '已取消' : '失败'}</span>}
               </Show>
             </div>
             <Show
-              when={visibleDebugTrace()}
+              when={currentDebugTrace()}
               fallback={<div class="chain-test__empty">运行开始后，这里会显示当前 Agent 的实时进度。</div>}
             >
               {(trace) => (
@@ -230,7 +246,10 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
                   <div class="chain-test__activity-summary" data-testid="full-chain-activity-summary">
                     <div>
                       <span class="processing-debug__marker" aria-hidden="true" />
-                      <div><strong>Git 协作</strong><p>{`${trace().run.modelCalls.length} 次模型 · ${trace().run.toolCalls.length} 次工具`}</p></div>
+                      <div>
+                        <strong>{processingAgentDisplayName(trace().run.agentId)}</strong>
+                        <p>{`${visibleRuns().length} Agent Runs · ${modelCallCount()} 次模型 · ${toolCallCount()} 次工具`}</p>
+                      </div>
                     </div>
                   </div>
                   <Show when={trace().run.error}>{(error) => <p class="processing-debug__error">{error()}</p>}</Show>
@@ -285,7 +304,8 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
 
       <Show when={page() === 'activity'}>
         <FullChainActivityDetail
-          trace={visibleDebugTrace()}
+          runs={visibleRuns()}
+          followLatestRun
           backLabel="返回概览"
           detailTestId="full-chain-activity-detail"
           backTestId="full-chain-detail-back"

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -24,12 +24,11 @@ import { InMemoryKnowledgeProcessingRepository } from '../src/main/knowledge-pro
 import type { KnowledgeFullChainRunRecord } from '../src/shared/knowledge-processing'
 import { completedAgentRun } from './agent-run-fixture'
 import {
-  CollaborationRepository,
-  COLLABORATION_WORK_FILE,
+  ProcessingRepository,
   REVIEW_MARKER_COMMENT,
   REVIEW_MARKER_END,
   REVIEW_MARKER_START
-} from '../src/main/knowledge-processing/collaboration-repository'
+} from '../src/main/knowledge-processing/processing-repository'
 import {
   FixtureKnowledgeMaintainerRuntime,
   FixtureKnowledgeReviewerRuntime
@@ -178,7 +177,7 @@ async function harness(
 ) {
   const directory = await mkdtemp(join(tmpdir(), 'oyster-full-chain-'))
   temporaryDirectories.push(directory)
-  const collaborations = new CollaborationRepository(join(directory, 'repository'))
+  const collaborations = new ProcessingRepository(join(directory, 'repository'))
   const processing = new KnowledgeProcessingService(
     new InMemoryKnowledgeProcessingRepository({
       stages: [
@@ -217,7 +216,7 @@ class RequestChangesOnceReviewer implements KnowledgeReviewerRuntime {
     if (this.calls > 1) return this.approval.run(input)
 
     const statementPath = join(
-      input.workspace.worktreePath,
+      input.run.repositoryPath,
       'knowledge',
       'knowledge-processing.md'
     )
@@ -231,16 +230,16 @@ class RequestChangesOnceReviewer implements KnowledgeReviewerRuntime {
       ''
     ].join('\n')
     await writeFile(statementPath, marker, 'utf8')
-    const workPath = join(input.workspace.worktreePath, COLLABORATION_WORK_FILE)
+    const workPath = input.run.workPath
     await writeFile(
       workPath,
       `${await readFile(workPath, 'utf8')}\n- [ ] Resolve the Reviewer request.\n`,
       'utf8'
     )
-    await runArtifactGit(['add', '-A'], input.workspace.worktreePath)
+    await runArtifactGit(['add', '--', 'knowledge', 'artifacts'], input.run.repositoryPath)
     await runArtifactGit([
       'commit', '--quiet', '--no-gpg-sign', '-m', 'review: request unmerged explanation'
-    ], input.workspace.worktreePath)
+    ], input.run.repositoryPath)
     const run = completedAgentRun(input.runId, ['read', 'edit', 'bash'], 1, 'knowledge_reviewer_agent')
     input.onRunUpdate?.(run)
     return { run, modelCallCount: 1, toolCalls: run.toolCalls.map((call) => call.name) }
@@ -254,8 +253,8 @@ afterEach(async () => {
 })
 
 describe('KnowledgeFullChainService', () => {
-  it('runs Maintainer then Reviewer on a real branch and stores a V6 unmerged result', async () => {
-    const { service, collaborations, discovery, records } = await harness()
+  it('runs Maintainer then Reviewer on a real branch and stores a V7 unmerged result', async () => {
+    const { service, processing, collaborations, discovery, records } = await harness()
     const baseRevision = await collaborations.currentRevision()
     const result = await service.run({
       sourceRecordId: discovery.session.sourceRecordId,
@@ -278,19 +277,23 @@ describe('KnowledgeFullChainService', () => {
       'knowledge/knowledge-reviewer.md'
     ]))
     expect(await collaborations.currentRevision()).toBe(baseRevision)
-    await expect(access(join(result.workspace.worktreePath, COLLABORATION_WORK_FILE))).rejects.toThrow()
+    await expect(readFile(result.run.workPath, 'utf8')).resolves.toContain('Reviewer approved revision')
     expect(records).toHaveLength(1)
     expect(records[0]).toMatchObject({
-      formatVersion: 6,
+      formatVersion: 7,
       status: 'completed',
       result: { approvedRevision: result.approvedRevision }
     })
     expect(records[0].agentRuns).toHaveLength(2)
+    expect(processing.snapshot().debugTraces.map((trace) => trace.run.agentId)).toEqual([
+      'knowledge_maintenance_agent',
+      'knowledge_reviewer_agent'
+    ])
   })
 
   it('alternates Reviewer feedback and Maintainer repair before approval', async () => {
     const reviewer = new RequestChangesOnceReviewer()
-    const { service, collaborations, discovery } = await harness(
+    const { service, processing, collaborations, discovery } = await harness(
       new FixtureKnowledgeMaintainerRuntime(),
       reviewer
     )
@@ -309,7 +312,13 @@ describe('KnowledgeFullChainService', () => {
     expect(result.reviewRuns[0].markerPaths).toEqual(['knowledge/knowledge-processing.md'])
     expect(result.maintenanceRuns[1].previousRevision).toBe(result.reviewRuns[0].revision)
     expect(result.reviewRuns[1].reviewedRevision).toBe(result.maintenanceRuns[1].revision)
+    expect(processing.snapshot().debugTraces.map((trace) => trace.run.agentId)).toEqual([
+      'knowledge_maintenance_agent',
+      'knowledge_reviewer_agent',
+      'knowledge_maintenance_agent',
+      'knowledge_reviewer_agent'
+    ])
     expect(await collaborations.currentRevision()).toBe(baseRevision)
-    await expect(access(join(result.workspace.worktreePath, COLLABORATION_WORK_FILE))).rejects.toThrow()
+    await expect(readFile(result.run.workPath, 'utf8')).resolves.toContain('Reviewer approved revision')
   })
 })

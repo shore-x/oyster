@@ -5,7 +5,7 @@ export interface KnowledgeExplorerSessionSnapshot {
   hoveredTitle?: string
 }
 
-/** Transient browsing state. It deliberately has no Knowledge Store dependency. */
+/** Transient browsing state. It deliberately has no Knowledge persistence role. */
 export class KnowledgeExplorerSession {
   private history: string[] = []
   private historyIndex = -1

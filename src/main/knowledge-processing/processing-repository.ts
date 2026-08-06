@@ -1,19 +1,21 @@
 import { execFile } from 'node:child_process'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { basename, dirname, relative, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { join, relative, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 import {
   ARTIFACT_GIT_BINARY_PATH,
   createArtifactGitEnvironment
 } from '../artifacts/git-runtime'
+import {
+  ARTIFACTS_DIRECTORY,
+  KNOWLEDGE_DIRECTORY,
+  OYSTER_TARGET_BRANCH,
+  OysterRepository
+} from '../repository/oyster-repository'
 
 const execFileAsync = promisify(execFile)
-const TARGET_BRANCH = 'main'
-const KNOWLEDGE_DIRECTORY = 'knowledge'
-const ARTIFACT_DIRECTORY = 'artifacts'
-const COLLABORATION_DIRECTORY = '.oyster'
-export const COLLABORATION_WORK_FILE = `${COLLABORATION_DIRECTORY}/WORK.md`
+export const RUN_WORK_FILE_NAME = 'WORK.md'
 
 export const REVIEW_MARKER_START = '<<<<<<< REVIEW'
 export const REVIEW_MARKER_COMMENT = '||||||| REVIEW COMMENT'
@@ -25,17 +27,18 @@ const REVIEW_MARKERS = [
   REVIEW_MARKER_END
 ] as const
 
-export interface CollaborationWorkspace {
+export interface ProcessingRun {
   id: string
   repositoryPath: string
-  worktreePath: string
+  runPath: string
+  workPath: string
   targetBranch: string
   branchName: string
   baseRevision: string
-  workOrderRevision: string
 }
 
-export interface CollaborationWorkOrder {
+export interface ProcessingWorkOrder {
+  id?: string
   sourceRef: string
   attention?: string
   items: readonly string[]
@@ -81,6 +84,12 @@ function requiredText(value: unknown, label: string): string {
   return value.trim()
 }
 
+function requiredRunId(value: unknown): string {
+  const id = requiredText(value, 'Run ID')
+  if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error('Run ID 格式无效')
+  return id
+}
+
 function repositoryChild(rootPath: string, relativePath: string): string {
   const root = resolve(rootPath)
   const target = resolve(root, relativePath)
@@ -93,20 +102,17 @@ function repositoryChild(rootPath: string, relativePath: string): string {
 
 function markdownChecklistItem(value: string): string {
   const lines = requiredText(value, '工作项').split(/\r?\n/)
-  return [
-    `- [ ] ${lines[0]}`,
-    ...lines.slice(1).map((line) => `  ${line}`)
-  ].join('\n')
+  return [`- [ ] ${lines[0]}`, ...lines.slice(1).map((line) => `  ${line}`)].join('\n')
 }
 
-function serializeWorkOrder(input: CollaborationWorkOrder): string {
+function serializeWorkOrder(id: string, input: ProcessingWorkOrder): string {
   if (!Array.isArray(input.items) || !input.items.length) {
-    throw new Error('协作工作清单不能为空')
+    throw new Error('Run 工作清单不能为空')
   }
   return [
-    '# Collaboration Work Order',
+    `# Run ${id}`,
     '',
-    'This file is branch-local working state. It must be removed by the Reviewer before approval.',
+    'This file is the durable work state shared by the Maintainer and Reviewer.',
     '',
     `Source reference: ${requiredText(input.sourceRef, 'Source reference')}`,
     ...(input.attention?.trim() ? ['', '## Attention', '', input.attention.trim()] : []),
@@ -121,12 +127,28 @@ function serializeWorkOrder(input: CollaborationWorkOrder): string {
     '- [ ] Every justified Knowledge or Artifact change is committed.',
     '- [ ] No REVIEW marker remains.',
     '- [ ] The working tree is clean.',
+    '',
+    '## Handoffs',
+    '',
+    'Maintainer and Reviewer append concise, role-named handoffs here.',
     ''
   ].join('\n')
 }
 
 function hasPendingWork(document: string): boolean {
   return /^\s*- \[ \]/m.test(document)
+}
+
+function approvalLine(revision: string): string {
+  return `- [x] Reviewer approved revision ${revision}.`
+}
+
+function maintainerHandoffLine(revision: string): string {
+  return `- [x] Maintainer handed off revision ${revision}.`
+}
+
+function reviewerChangesLine(revision: string): string {
+  return `- [x] Reviewer requested changes in revision ${revision}.`
 }
 
 function markerCount(document: string, marker: string): number {
@@ -167,32 +189,29 @@ function parseKnowledgeStatement(path: string, document: string): RepositoryKnow
   return { path, title, content }
 }
 
-function allowedCollaborationPath(path: string): boolean {
-  return path === COLLABORATION_WORK_FILE
-    || path.startsWith(`${KNOWLEDGE_DIRECTORY}/`)
-    || path.startsWith(`${ARTIFACT_DIRECTORY}/`)
+function allowedDomainPath(path: string): boolean {
+  return path.startsWith(`${KNOWLEDGE_DIRECTORY}/`)
+    || path.startsWith(`${ARTIFACTS_DIRECTORY}/`)
 }
 
 function nulDelimitedPaths(output: string): string[] {
   return output ? output.split('\0').filter(Boolean).sort() : []
 }
 
-/** A real Git repository and one linear, branch-local Agent collaboration. */
-export class CollaborationRepository {
+/** Git handoffs over the single Oyster working tree; a Run owns only runs/<id>/. */
+export class ProcessingRepository {
   readonly repositoryPath: string
+  private readonly repository: OysterRepository
 
-  constructor(repositoryPath: string) {
-    this.repositoryPath = resolve(repositoryPath)
+  constructor(repository: OysterRepository | string) {
+    this.repository = typeof repository === 'string' ? new OysterRepository(repository) : repository
+    this.repositoryPath = this.repository.rootPath
   }
 
-  private async git(
-    args: string[],
-    cwd = this.repositoryPath,
-    trimOutput = true
-  ): Promise<string> {
+  private async git(args: string[], trimOutput = true): Promise<string> {
     try {
       const { stdout } = await execFileAsync(ARTIFACT_GIT_BINARY_PATH, args, {
-        cwd,
+        cwd: this.repositoryPath,
         env: createArtifactGitEnvironment(),
         maxBuffer: 16 * 1_024 * 1_024
       })
@@ -204,108 +223,55 @@ export class CollaborationRepository {
   }
 
   async initialize(): Promise<string> {
-    await mkdir(this.repositoryPath, { recursive: true })
-    try {
-      return await this.git(['rev-parse', '--verify', TARGET_BRANCH])
-    } catch {
-      await this.git(['init', '--quiet', `--initial-branch=${TARGET_BRANCH}`])
-      await this.git(['config', 'user.name', 'Oyster Collaboration'])
-      await this.git(['config', 'user.email', 'collaboration@oyster.local'])
-      await Promise.all([
-        mkdir(resolve(this.repositoryPath, KNOWLEDGE_DIRECTORY), { recursive: true }),
-        mkdir(resolve(this.repositoryPath, ARTIFACT_DIRECTORY), { recursive: true })
-      ])
-      await Promise.all([
-        writeFile(resolve(this.repositoryPath, KNOWLEDGE_DIRECTORY, '.gitkeep'), '', 'utf8'),
-        writeFile(resolve(this.repositoryPath, ARTIFACT_DIRECTORY, '.gitkeep'), '', 'utf8')
-      ])
-      await this.git(['add', '--', KNOWLEDGE_DIRECTORY, ARTIFACT_DIRECTORY])
-      await this.git(['commit', '--quiet', '--no-gpg-sign', '-m', 'Initialize collaboration repository'])
-      return this.git(['rev-parse', TARGET_BRANCH])
-    }
+    await this.repository.initialize()
+    return this.git(['rev-parse', '--verify', OYSTER_TARGET_BRANCH])
   }
 
   async currentRevision(): Promise<string> {
-    return this.git(['rev-parse', TARGET_BRANCH])
+    return this.git(['rev-parse', OYSTER_TARGET_BRANCH])
   }
 
-  async collaborationRevision(workspace: CollaborationWorkspace): Promise<string> {
-    return this.git(['rev-parse', 'HEAD'], workspace.worktreePath)
+  async runRevision(_run: ProcessingRun): Promise<string> {
+    return this.git(['rev-parse', 'HEAD'])
   }
 
-  async createCollaboration(input: CollaborationWorkOrder): Promise<CollaborationWorkspace> {
+  async createRun(input: ProcessingWorkOrder): Promise<ProcessingRun> {
+    await this.initialize()
     const baseRevision = await this.currentRevision()
-    const id = randomUUID()
-    const branchName = `collaboration/${id}`
-    const worktreesRoot = resolve(
-      dirname(this.repositoryPath),
-      `${basename(this.repositoryPath)}-worktrees`
-    )
-    const worktreePath = resolve(worktreesRoot, id)
-    await mkdir(worktreesRoot, { recursive: true })
-    await this.git([
-      'worktree',
-      'add',
-      '--quiet',
-      '-b',
-      branchName,
-      worktreePath,
-      baseRevision
-    ])
-    await mkdir(repositoryChild(worktreePath, COLLABORATION_DIRECTORY), { recursive: true })
-    await writeFile(
-      repositoryChild(worktreePath, COLLABORATION_WORK_FILE),
-      serializeWorkOrder(input),
-      'utf8'
-    )
-    await this.git(['add', '--', COLLABORATION_WORK_FILE], worktreePath)
-    await this.git([
-      'commit',
-      '--quiet',
-      '--no-gpg-sign',
-      '-m',
-      'Initialize collaboration work order'
-    ], worktreePath)
-    const workOrderRevision = await this.git(['rev-parse', 'HEAD'], worktreePath)
+    const id = requiredRunId(input.id ?? randomUUID())
+    const branchName = `processing/${id}`
+    await this.git(['checkout', '--quiet', OYSTER_TARGET_BRANCH])
+    await this.git(['checkout', '--quiet', '-b', branchName, baseRevision])
+    const runPath = repositoryChild(this.repository.runsPath, id)
+    const workPath = join(runPath, RUN_WORK_FILE_NAME)
+    await mkdir(runPath, { recursive: false })
+    await writeFile(workPath, serializeWorkOrder(id, input), 'utf8')
     return {
       id,
       repositoryPath: this.repositoryPath,
-      worktreePath,
-      targetBranch: TARGET_BRANCH,
+      runPath,
+      workPath,
+      targetBranch: OYSTER_TARGET_BRANCH,
       branchName,
-      baseRevision,
-      workOrderRevision
+      baseRevision
     }
   }
 
   private async treeFiles(revision: string, path?: string): Promise<string[]> {
     const output = await this.git([
-      'ls-tree',
-      '-r',
-      '-z',
-      '--name-only',
-      revision,
-      ...(path ? ['--', path] : [])
+      'ls-tree', '-r', '-z', '--name-only', revision, ...(path ? ['--', path] : [])
     ])
     return nulDelimitedPaths(output)
   }
 
   private async readTreeFile(revision: string, path: string): Promise<string> {
-    return this.git(['show', `${revision}:${path}`], this.repositoryPath, false)
-  }
-
-  private async fileExists(revision: string, path: string): Promise<boolean> {
-    try {
-      await this.git(['cat-file', '-e', `${revision}:${path}`])
-      return true
-    } catch {
-      return false
-    }
+    return this.git(['show', `${revision}:${path}`], false)
   }
 
   private async changedPaths(previousRevision: string, revision: string): Promise<string[]> {
-    const output = await this.git(['diff', '--name-only', '-z', previousRevision, revision])
-    return nulDelimitedPaths(output)
+    return nulDelimitedPaths(await this.git([
+      'diff', '--name-only', '-z', previousRevision, revision
+    ]))
   }
 
   async revisionChangedPaths(previousRevision: string, revision: string): Promise<string[]> {
@@ -313,30 +279,25 @@ export class CollaborationRepository {
   }
 
   private async commitParents(revision: string): Promise<string[]> {
-    const output = await this.git(['rev-list', '--parents', '-n', '1', revision])
-    return output.split(' ').slice(1)
+    return (await this.git(['rev-list', '--parents', '-n', '1', revision])).split(' ').slice(1)
   }
 
-  private async assertClean(cwd: string, label: string): Promise<void> {
-    const status = await this.git(['status', '--porcelain', '--untracked-files=all'], cwd)
-    if (status) throw new Error(`${label} 工作区尚未提交全部修改`)
-  }
-
-  private async assertWorkspace(workspace: CollaborationWorkspace): Promise<void> {
-    const branch = await this.git(['branch', '--show-current'], workspace.worktreePath)
-    if (branch !== workspace.branchName) throw new Error('协作 worktree 没有停留在绑定分支')
-    if (await this.currentRevision() !== workspace.baseRevision) {
-      throw new Error('目标分支已经离开协作 base')
+  private async assertClean(label: string): Promise<void> {
+    if (await this.git(['status', '--porcelain', '--untracked-files=all'])) {
+      throw new Error(`${label} 工作区尚未提交全部修改`)
     }
+  }
+
+  private async assertRun(run: ProcessingRun): Promise<void> {
+    const branch = await this.git(['branch', '--show-current'])
+    if (branch !== run.branchName) throw new Error('Repository 没有停留在当前 Run 分支')
   }
 
   private async reviewMarkerPaths(revision: string): Promise<string[]> {
     const paths: string[] = []
     for (const path of await this.treeFiles(revision)) {
-      if (!path.startsWith(`${KNOWLEDGE_DIRECTORY}/`)
-        && !path.startsWith(`${ARTIFACT_DIRECTORY}/`)) continue
-      const document = await this.readTreeFile(revision, path)
-      if (hasReviewMarker(document)) paths.push(path)
+      if (!allowedDomainPath(path)) continue
+      if (hasReviewMarker(await this.readTreeFile(revision, path))) paths.push(path)
     }
     return paths
   }
@@ -344,6 +305,12 @@ export class CollaborationRepository {
   private async assertNoReviewMarkers(revision: string): Promise<void> {
     const paths = await this.reviewMarkerPaths(revision)
     if (paths.length) throw new Error(`仍有未解决的 REVIEW 标记：${paths.join('、')}`)
+  }
+
+  private async appendHandoff(run: ProcessingRun, line: string): Promise<void> {
+    const document = await this.readWorkOrder(run)
+    if (document.includes(line)) return
+    await writeFile(run.workPath, `${document.trimEnd()}\n\n${line}\n`, 'utf8')
   }
 
   async revisionView(revisionInput: string): Promise<RepositoryRevisionView> {
@@ -362,79 +329,69 @@ export class CollaborationRepository {
       titles.set(statement.title, statement.path)
     }
     knowledge.sort((left, right) => left.title.localeCompare(right.title))
-    const artifactPaths = (await this.treeFiles(revision, ARTIFACT_DIRECTORY))
-      .filter((path) => !path.endsWith('/.gitkeep') && path !== `${ARTIFACT_DIRECTORY}/.gitkeep`)
+    const artifactPaths = (await this.treeFiles(revision, ARTIFACTS_DIRECTORY))
+      .filter((path) => path !== `${ARTIFACTS_DIRECTORY}/.gitkeep`)
     return { revision, knowledge, artifactPaths }
   }
 
   async recordMaintainerHandoff(
-    workspace: CollaborationWorkspace,
+    run: ProcessingRun,
     previousRevision: string
   ): Promise<MaintainerHandoff> {
-    await this.assertClean(workspace.worktreePath, 'Maintainer')
-    await this.assertWorkspace(workspace)
-    const revision = await this.collaborationRevision(workspace)
+    await this.assertClean('Maintainer')
+    await this.assertRun(run)
+    const revision = await this.runRevision(run)
     const parents = await this.commitParents(revision)
     if (parents.length !== 1 || parents[0] !== previousRevision) {
       throw new Error('Maintainer 必须在上一个 handoff revision 上增量提交一次')
     }
     const changedPaths = await this.changedPaths(previousRevision, revision)
     if (!changedPaths.length) throw new Error('Maintainer handoff commit 不能为空')
-    const outside = changedPaths.find((path) => !allowedCollaborationPath(path))
-    if (outside) throw new Error(`Maintainer 修改超出协作 Repository：${outside}`)
-    if (!changedPaths.some((path) => (
-      path.startsWith(`${KNOWLEDGE_DIRECTORY}/`)
-      || path.startsWith(`${ARTIFACT_DIRECTORY}/`)
-    ))) {
-      throw new Error('Maintainer 没有修改 Knowledge 或 Artifact')
-    }
-    if (!await this.fileExists(revision, COLLABORATION_WORK_FILE)) {
-      throw new Error('Maintainer 不得删除协作工作清单')
-    }
-    const workOrder = await this.readTreeFile(revision, COLLABORATION_WORK_FILE)
+    const outside = changedPaths.find((path) => !allowedDomainPath(path))
+    if (outside) throw new Error(`Maintainer 修改超出 Knowledge/Artifact：${outside}`)
+    const workOrder = await this.readWorkOrder(run)
     if (hasPendingWork(workOrder)) throw new Error('Maintainer 提交时工作清单仍有未完成项')
     await this.assertNoReviewMarkers(revision)
     await this.revisionView(revision)
+    await this.appendHandoff(run, maintainerHandoffLine(revision))
     return { previousRevision, revision, changedPaths }
   }
 
   async recordReviewerOutcome(
-    workspace: CollaborationWorkspace,
+    run: ProcessingRun,
     reviewedRevision: string
   ): Promise<ReviewerOutcome> {
-    await this.assertClean(workspace.worktreePath, 'Reviewer')
-    await this.assertWorkspace(workspace)
-    const revision = await this.collaborationRevision(workspace)
+    await this.assertClean('Reviewer')
+    await this.assertRun(run)
+    const revision = await this.runRevision(run)
+    const workOrder = await this.readWorkOrder(run)
+    if (revision === reviewedRevision) {
+      if (hasPendingWork(workOrder)) throw new Error('Reviewer 批准时工作清单仍有未完成项')
+      await this.assertNoReviewMarkers(revision)
+      await this.revisionView(revision)
+      await this.appendHandoff(run, approvalLine(reviewedRevision))
+      return { kind: 'approved', reviewedRevision, revision }
+    }
+
     const parents = await this.commitParents(revision)
     if (parents.length !== 1 || parents[0] !== reviewedRevision) {
       throw new Error('Reviewer 必须在被审阅 revision 上增量提交一次')
     }
     const changedPaths = await this.changedPaths(reviewedRevision, revision)
     if (!changedPaths.length) throw new Error('Reviewer handoff commit 不能为空')
-    const outside = changedPaths.find((path) => !allowedCollaborationPath(path))
-    if (outside) throw new Error(`Reviewer 修改超出协作 Repository：${outside}`)
-    const workOrderExists = await this.fileExists(revision, COLLABORATION_WORK_FILE)
-    if (!workOrderExists) {
-      if (changedPaths.length !== 1 || changedPaths[0] !== COLLABORATION_WORK_FILE) {
-        throw new Error('Reviewer 批准 commit 只能删除协作工作清单')
-      }
-      await this.assertNoReviewMarkers(revision)
-      await this.revisionView(revision)
-      return { kind: 'approved', reviewedRevision, revision }
-    }
-
+    const outside = changedPaths.find((path) => !allowedDomainPath(path))
+    if (outside) throw new Error(`Reviewer 修改超出 Knowledge/Artifact：${outside}`)
     const markerPaths = await this.reviewMarkerPaths(revision)
     if (!markerPaths.length) throw new Error('Reviewer commit 没有包含 REVIEW 标记')
     for (const path of markerPaths) {
-      const document = await this.readTreeFile(revision, path)
-      if (!hasCompleteReviewMarkers(document)) {
+      if (!hasCompleteReviewMarkers(await this.readTreeFile(revision, path))) {
         throw new Error(`REVIEW 标记格式不完整：${path}`)
       }
     }
-    const workOrder = await this.readTreeFile(revision, COLLABORATION_WORK_FILE)
     if (!hasPendingWork(workOrder)) {
-      throw new Error('Reviewer 提出修改时必须在工作清单中留下未完成项')
+      throw new Error('Reviewer 提出修改时必须在 WORK.md 中留下未完成项')
     }
+    await this.appendHandoff(run, reviewerChangesLine(revision))
     return {
       kind: 'changes_requested',
       reviewedRevision,
@@ -444,7 +401,11 @@ export class CollaborationRepository {
     }
   }
 
-  async readWorkOrder(workspace: CollaborationWorkspace): Promise<string> {
-    return readFile(repositoryChild(workspace.worktreePath, COLLABORATION_WORK_FILE), 'utf8')
+  async readWorkOrder(run: ProcessingRun): Promise<string> {
+    return readFile(run.workPath, 'utf8')
   }
+}
+
+export function reviewerApprovalLine(revision: string): string {
+  return approvalLine(revision)
 }

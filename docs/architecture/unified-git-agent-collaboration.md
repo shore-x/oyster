@@ -1,92 +1,74 @@
-# 统一 Git Repository 与 Agent 协作
+# 统一 Repository、全局事实层与 Run
 
-> 状态：知识加工 MVP 当前实现
+> 状态：当前架构
 >
 > 日期：2026-08-06
 
-## 1. 最小模型
+## 1. 最小整体模型
 
-Knowledge 与 Artifact 是语义不同的两个文件层，但在知识加工协作中共享一个标准 Git Repository：
+Oyster 只管理一个标准 Git Repository 和一个物理工作树：
 
 ```text
-repository/
+<Electron userData>/repository/
+├── .git/
 ├── knowledge/
 ├── artifacts/
-└── .oyster/WORK.md   # 仅协作期间存在
+└── runs/
+    └── <run-id>/
+        ├── WORK.md
+        └── run.json
 ```
 
-Repository tree 是 Agent 可见的工作事实，commit 是不可变 handoff revision，collaboration branch 是一次尚未接纳的工作过程。Raw Evidence、Canonical Activity、Agent transcript 和运行轨迹不进入 Repository。
+根级目录表达三个一级概念：
 
-当前加工测试使用 Oyster 管理的 collaboration repository。现有 Knowledge 浏览、Chat Knowledge Store 和 Artifact 页面尚未整体迁移到这个 Repository；它们不是本次 MVP 的 promotion 目标。
+- `knowledge/` 是全局唯一的知识事实层；
+- `artifacts/` 是全局唯一的 Artifact 事实层；
+- `runs/` 是 Agent 工作过程的持久记录层。
 
-## 2. Collaboration workspace
+Run 不拥有 Knowledge 或 Artifact，也不包含它们的副本。三层没有“正式版目录”“测试版目录”或每 Run workspace；不同内容状态由 Git revision 表达。
 
-Harness 从目标分支 `main` 的当前 revision `B` 创建 `collaboration/<id>` 分支和独立 worktree，然后创建 `.oyster/WORK.md` 并提交初始工作清单 `W0`：
+## 2. Repository 与 Run 的版本边界
 
-```text
-main:             B
-                   \
-collaboration:     W0 --- M1 --- R1 --- M2 --- A
-```
+Git commit 只表达 `knowledge/` 与 `artifacts/` 的一致内容 revision。`runs/` 由根 `.gitignore` 排除，因此切换内容 revision 不会删除工作历史，也不会把过程文件混入候选内容 diff。
 
-- `W0`：Harness 写入工作清单的初始 commit；
-- `M*`：Maintainer 修改 Knowledge/Artifact 和工作清单后的 commit；
-- `R*`：Reviewer 提出修改的 commit；
-- `A`：Reviewer 删除工作清单形成的批准 commit。
+一次 Run 位于 `runs/<run-id>/`：
 
-测试运行结束时 `main` 仍停留在 `B`。批准只表示 collaboration branch 的精确 revision 通过审查，不等于 promotion 或 merge。未来如需接纳结果，应由独立于 Agent 审阅的 Harness/产品机制决定。
+- `WORK.md` 保存输入引用、Attention、检查清单和带角色名称的 Maintainer/Reviewer handoff；
+- `run.json` 在终态保存输入、配置、结果和完整 Agent Run records；
+- Run 通过 repository-relative path 和 commit OID 引用外部材料与内容 revision。
 
-## 3. 文件工作清单
+Raw Evidence 与 Canonical Activity 仍由 Observation 边界提供，不复制到 Run 或 Repository。
 
-`.oyster/WORK.md` 是当前 MVP 唯一的显式工作状态，同时服务两个场景：
+## 3. Agent 工作坐标
 
-1. 单个 Agent 在一次运行中记录和完成工作；
-2. Maintainer 与 Reviewer 通过 branch tree 交接未完成事项。
+Maintainer、Reviewer 与 Chat Agent 的初始 `cwd` 都是同一个 Repository 根：
 
-初始清单包含 opaque `sourceRef`、可选 Attention、按顺序执行的 `read_activity`/附件读取项和完成契约。它不得复制 Raw Evidence 正文。Maintainer 可以补充工作项；Reviewer 请求修改时必须追加至少一个未完成项。
+- 固定从 `knowledge/` 读取和修改 Knowledge；
+- 固定从 `artifacts/` 读取和修改 Artifact；
+- 加工 Agent 从 Harness 明确提供的 `runs/<run-id>/WORK.md` 读取当前工作状态。
 
-工作清单是中间文件，不属于最终 Knowledge/Artifact tree。Reviewer 批准时必须以一个只删除 `.oyster/WORK.md` 的 commit 收尾。该文件仍可能存在于 collaboration branch 的早期历史中；当前 MVP 不为此增加 squash、history rewrite 或额外清理协议。
+不为 Run 创建 worktree、Knowledge/Artifact 副本或指向全局目录的 symlink。角色差异只来自 System Prompt、工具集合、输入材料和当前 revision。
 
-通用 Todo Store 与工具实现暂时保留供其他 Agent 使用，但 Maintainer 和 Reviewer 都不安装 Todo 工具。是否把 Markdown 清单确立为所有 Agent 的长期正式工作状态，留待后续验证。
+## 4. Maintainer 与 Reviewer
 
-## 4. Maintainer handoff
+Harness 从 `main` 的 base revision 创建 `processing/<run-id>` 分支，并创建该 Run 的 `WORK.md`。
 
-Maintainer 的初始 `cwd` 是 collaboration worktree 根。它使用 `read`、`bash`、`edit`、`write`，以及不能由文件替代的 `read_activity`、`read_activity_attachment`、`read_evidence`。
+Maintainer：
 
-一次有效 handoff 必须满足：
+1. 读取 `WORK.md`、Canonical Activity、必要附件和 Raw Evidence；
+2. 直接修改全局路径 `knowledge/` 与 `artifacts/`；
+3. 完成清单并解决所有 `REVIEW` 标记；
+4. 为 Knowledge/Artifact 变化创建一个普通单亲 commit；
+5. Harness 验证后在 `WORK.md` 追加带 Maintainer 名称和 OID 的 handoff。
 
-- HEAD 是上一个 handoff revision 的单亲增量 commit；
-- commit 至少修改一个 `knowledge/` 或 `artifacts/` 文件；
-- `.oyster/WORK.md` 仍存在且没有未完成项；
-- tree 中没有 `REVIEW` 标记；
-- Knowledge Markdown 可解析且 canonical title 不重复；
-- worktree clean；
-- `main` 仍等于 collaboration base。
+Reviewer 只审阅精确 candidate revision：
 
-Maintainer 不删除工作清单，也不 merge 目标分支。
+- 需要修改时，在实际文件写入完整 `REVIEW` block，在 `WORK.md` 增加未完成项，并为 Knowledge/Artifact 反馈创建普通 commit；
+- 批准时，不创建无内容价值的 approval commit；Harness 验证后在 `WORK.md` 追加绑定精确 OID 的 Reviewer approval handoff，且不删除 `WORK.md`；
+- Reviewer 永不 merge `main`。
 
-## 5. Reviewer handoff
+Harness 校验 revision、工作清单和 Review marker，记录已验证的角色 handoff，并在 Maintainer/Reviewer 之间传递同一个 Run。
 
-Reviewer 在独立上下文中工作，只有 `read`、`bash`、`edit`、`write`。它不读取 Raw Evidence、Canonical Activity、Maintainer transcript 或 Todo。
+## 5. 当前边界
 
-需要修改时，Reviewer 在问题所在文件加入完整标记，并在工作清单追加未完成项后提交：
-
-标记由五行组成：起始行 `<<<<<<< REVIEW`、被审内容（缺失时可以为空）、分隔行 `||||||| REVIEW COMMENT`、可执行的修改说明，以及结束行 `>>>>>>> REVIEW`。
-
-通过时，Reviewer 验证没有标记，然后只删除 `.oyster/WORK.md` 并提交。Harness 根据这个 commit 识别 `approved`，但不修改 `main`。
-
-## 6. Harness 职责
-
-Harness 只处理 Agent 不能仅凭普通文件完成的编排边界：
-
-1. 创建 branch、worktree 和初始工作清单 commit；
-2. 将精确 revision 与 worktree 交给当前 Agent；
-3. 在 Agent 自然结束后校验 Git 状态和 handoff；
-4. 根据 Reviewer 的 changes-requested 或 approved 结果选择下一次运行；
-5. 保存终态运行快照。
-
-Harness 不维护 Contribution Draft，不复制 Reviewer issue，不代理 Agent 修改或 commit，也不在测试运行中 merge。
-
-## 7. 当前边界
-
-MVP 只实现单机、串行、单 collaboration branch。它不处理并发目标分支推进、远端同步、自动 rebase、复杂 merge conflict、权限治理或二进制 Review 协议。文件与 Shell 工具沿用当前高信任本机执行模型，worktree 根只是初始坐标，不是权限边界。
+当前定义只规定事实位置、角色交接和 revision 语义。并发写入、队列、锁、租约、远端同步、自动 rebase、复杂冲突和 promotion 治理均留到出现明确需求后设计，不进入当前最小模型。

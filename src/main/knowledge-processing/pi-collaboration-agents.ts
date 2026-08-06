@@ -42,12 +42,11 @@ import {
 import { REASONING_EFFORTS } from '../../shared/ai-backends'
 import type { AgentRunRecord } from '../../shared/agent-runtime'
 import {
-  COLLABORATION_WORK_FILE,
   REVIEW_MARKER_COMMENT,
   REVIEW_MARKER_END,
   REVIEW_MARKER_START,
-  type CollaborationWorkspace
-} from './collaboration-repository'
+  type ProcessingRun
+} from './processing-repository'
 import {
   knowledgeMaintenanceToolDefinition,
   readActivityAttachmentParameters,
@@ -104,14 +103,14 @@ function validateBaseInput(input: KnowledgeMaintainerRunInput | KnowledgeReviewe
   if (input.reasoningEffort && !REASONING_EFFORTS.includes(input.reasoningEffort)) {
     throw new Error('思考强度无效')
   }
-  if (!input.workspace?.worktreePath || !input.workspace.branchName) {
-    throw new Error('Collaboration workspace 无效')
+  if (!input.run?.repositoryPath || !input.run.workPath || !input.run.branchName) {
+    throw new Error('Processing Run 无效')
   }
   input.signal.throwIfAborted()
 }
 
-function codingTools(workspace: CollaborationWorkspace): AgentTool[] {
-  return createCodingTools(workspace.worktreePath, {
+function codingTools(run: ProcessingRun): AgentTool[] {
+  return createCodingTools(run.repositoryPath, {
     bash: {
       spawnHook: (context) => ({
         ...context,
@@ -310,11 +309,12 @@ function maintainerTaskPrompt(input: KnowledgeMaintainerRunInput): string {
   const { rawEvidence, canonicalActivity } = input.observation
   const lastLine = rawEvidence.lines.length
   return [
-    `Collaboration workspace: ${input.workspace.worktreePath}`,
-    `Collaboration branch: ${input.workspace.branchName}`,
+    `Repository root: ${input.run.repositoryPath}`,
+    `Run directory: ${input.run.runPath}`,
+    `Processing branch: ${input.run.branchName}`,
     `Previous handoff revision: ${input.previousRevision}`,
-    `Base revision: ${input.workspace.baseRevision}`,
-    `Work order: ${COLLABORATION_WORK_FILE}`,
+    `Base revision: ${input.run.baseRevision}`,
+    `Work state: ${input.run.workPath}`,
     `Raw Evidence sourceRef: ${input.sourceRef}`,
     `Canonical Activity format: ${canonicalActivity.formatVersion}. Range: A000001-A${String(canonicalActivity.items.length).padStart(6, '0')}. Maximum read limit: ${MAX_ACTIVITY_READ_LIMIT}.`,
     `Raw Evidence format: ${rawEvidence.formatVersion}. Range: ${observationLineAddress(1)}-${observationLineAddress(lastLine)}. Maximum read limit: ${MAX_EVIDENCE_READ_LIMIT}.`,
@@ -324,12 +324,13 @@ function maintainerTaskPrompt(input: KnowledgeMaintainerRunInput): string {
 
 function reviewerTaskPrompt(input: KnowledgeReviewerRunInput): string {
   return [
-    `Collaboration workspace: ${input.workspace.worktreePath}`,
-    `Collaboration branch: ${input.workspace.branchName}`,
-    `Base revision: ${input.workspace.baseRevision}`,
+    `Repository root: ${input.run.repositoryPath}`,
+    `Run directory: ${input.run.runPath}`,
+    `Processing branch: ${input.run.branchName}`,
+    `Base revision: ${input.run.baseRevision}`,
     `Exact revision to review: ${input.reviewedRevision}`,
-    `Branch-local work order: ${COLLABORATION_WORK_FILE}`,
-    'Review only if HEAD still equals the exact revision above. If changes are required, add REVIEW blocks to the affected files, append at least one unchecked item to the work order, and commit. If the tree is acceptable, delete the work order and commit only that deletion. Never merge the target branch.'
+    `Run work state: ${input.run.workPath}`,
+    'Review only if HEAD still equals the exact revision above. If changes are required, add REVIEW blocks to the affected files, append at least one unchecked item to WORK.md, and commit the Knowledge/Artifact corrections. If the tree is acceptable, finish without creating another commit. The Harness records the validated Reviewer handoff in WORK.md. Never merge the target branch.'
   ].join('\n\n')
 }
 
@@ -346,7 +347,7 @@ export class PiKnowledgeMaintainerAgent implements KnowledgeMaintainerRuntime {
       runId: input.runId,
       onRunUpdate: input.onRunUpdate,
       signal: input.signal,
-      tools: [...codingTools(input.workspace), ...observationTools(input)]
+      tools: [...codingTools(input.run), ...observationTools(input)]
     })
   }
 }
@@ -366,7 +367,7 @@ export class PiKnowledgeReviewerAgent implements KnowledgeReviewerRuntime {
       runId: input.runId,
       onRunUpdate: input.onRunUpdate,
       signal: input.signal,
-      tools: codingTools(input.workspace)
+      tools: codingTools(input.run)
     })
   }
 }

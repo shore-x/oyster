@@ -36,7 +36,7 @@ function readCurrentKnowledgeView(reader: KnowledgeProjectionReader): KnowledgeS
 
 /**
  * Read-only, rebuildable projection over the current Knowledge Statement view.
- * The Store remains authoritative; edges and groups returned here are snapshots.
+ * The repository's knowledge/ files remain authoritative; edges and groups are snapshots.
  */
 export class KnowledgeExplorerProjectionService {
   constructor(private readonly reader: KnowledgeProjectionReader) {}

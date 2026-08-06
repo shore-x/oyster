@@ -1,5 +1,6 @@
 import { Show } from 'solid-js'
 import type { KnowledgeProcessingDebugTrace } from '../../../shared/knowledge-processing'
+import { processingAgentDisplayName } from '../processing-agent-presentation'
 import { AgentRunExplorer, agentRunStatusLabel } from './AgentRunView'
 
 export function ProcessingDebugTracePanel(props: {
@@ -16,11 +17,18 @@ export function ProcessingDebugTracePanel(props: {
         <span class="processing-debug__status">{agentRunStatusLabel(props.trace.run.status)}</span>
       </div>
       <Show when={props.trace.run.error}>{(error) => <p class="processing-debug__error">{error()}</p>}</Show>
-      <AgentRunExplorer run={props.trace.run} compact />
+      <AgentRunExplorer
+        run={props.trace.run}
+        agentDisplayName={processingAgentDisplayName(props.trace.run.agentId)}
+        compact
+      />
     </section>
   )
 }
 
 export function ProcessingTraceExplorer(props: { trace: KnowledgeProcessingDebugTrace }) {
-  return <AgentRunExplorer run={props.trace.run} />
+  return <AgentRunExplorer
+    run={props.trace.run}
+    agentDisplayName={processingAgentDisplayName(props.trace.run.agentId)}
+  />
 }

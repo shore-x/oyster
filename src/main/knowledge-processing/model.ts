@@ -7,7 +7,7 @@ import type {
 } from '../../shared/knowledge-processing'
 import type { AgentRunRecord } from '../../shared/agent-runtime'
 import type { AgentObservation } from '../observation/model'
-import type { CollaborationWorkspace } from './collaboration-repository'
+import type { ProcessingRun } from './processing-repository'
 
 export interface StoredProcessingStage {
   stageId: ProcessingStageId
@@ -49,7 +49,7 @@ export interface RepositoryAgentRunResult {
 interface RepositoryAgentRunInput {
   runtime: ModelRuntime
   systemPrompt: string
-  workspace: CollaborationWorkspace
+  run: ProcessingRun
   reasoningEffort?: ReasoningEffort
   runId: string
   onRunUpdate?: (run: AgentRunRecord) => void

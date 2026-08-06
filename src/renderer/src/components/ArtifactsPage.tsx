@@ -141,8 +141,8 @@ export function ArtifactsPage(props: { onManageSkill(artifactDirectoryName: stri
 
       <section class="artifact-repository" aria-labelledby="artifact-repository-title">
         <div>
-          <h2 id="artifact-repository-title">Artifact Repository</h2>
-          <p>APP 管理的固定目录。一级子文件夹中存在 AGENTS.md 时，即识别为一个 Artifact。</p>
+          <h2 id="artifact-repository-title">Oyster Repository</h2>
+          <p>Artifact 位于统一仓库的 artifacts/；其中一级子文件夹存在 AGENTS.md 时，即识别为一个 Artifact。</p>
           <code data-testid="artifact-repository-path">
             {controller.snapshot()?.repositoryPath || (controller.busy() === 'load' ? '正在读取…' : '—')}
           </code>
@@ -231,7 +231,7 @@ export function ArtifactsPage(props: { onManageSkill(artifactDirectoryName: stri
             <div class="artifact-list__empty">
               <Icon name="folder" />
               <strong>{controller.error() ? '无法读取 Artifact' : '正在读取 Artifact…'}</strong>
-              <p>{controller.error() ? '请检查错误信息并刷新重试。' : '正在加载固定 Artifact Repository。'}</p>
+              <p>{controller.error() ? '请检查错误信息并刷新重试。' : '正在加载统一 Repository 的 Artifact 文件层。'}</p>
             </div>
           )}
         >

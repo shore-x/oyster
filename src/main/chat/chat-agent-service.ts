@@ -17,7 +17,6 @@ import type {
   ChatAiBackendPort,
   ChatConfigurationRepository,
   ChatConfigurationStateData,
-  ChatKnowledgeStore,
   ChatSessionRepository
 } from './model'
 import { chatAgentToolViews } from './chat-tool-catalog'
@@ -30,8 +29,7 @@ export interface ChatAgentServiceOptions {
   sessions: ChatSessionRepository
   configuration: ChatConfigurationRepository
   aiBackend: ChatAiBackendPort
-  knowledgeStore: ChatKnowledgeStore
-  artifactRepositoryPath: string
+  repositoryPath: string
   agent?: ChatAgentRuntime
 }
 
@@ -65,10 +63,7 @@ export class ChatAgentService implements ChatApi {
   private mutationQueue: Promise<void> = Promise.resolve()
 
   constructor(private readonly options: ChatAgentServiceOptions) {
-    this.agent = options.agent ?? new PiChatAgent(
-      options.knowledgeStore,
-      options.artifactRepositoryPath
-    )
+    this.agent = options.agent ?? new PiChatAgent(options.repositoryPath)
   }
 
   async initialize(): Promise<void> {
@@ -148,7 +143,7 @@ export class ChatAgentService implements ChatApi {
         displayName: '通用 Agent',
         description: '理解和维护 Oyster 的 Knowledge 与 Artifact。',
         runtime: 'pi_agent_core' as const,
-        tools: chatAgentToolViews(this.options.artifactRepositoryPath).map((tool) => (
+        tools: chatAgentToolViews(this.options.repositoryPath).map((tool) => (
           structuredClone(tool)
         )),
         builtInInstructions: DEFAULT_CHAT_AGENT_SYSTEM_PROMPT,

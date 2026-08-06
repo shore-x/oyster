@@ -9,7 +9,7 @@ import {
 import { artifactChannels } from '../../shared/channels'
 import type { CreateArtifactInput } from '../../shared/artifacts'
 import {
-  ArtifactRepository,
+  ArtifactService,
   resolveArtifactDirectoryPath
 } from './artifact-repository'
 
@@ -19,7 +19,7 @@ async function openPath(path: string, label: string): Promise<void> {
 }
 
 export function registerArtifactIpc(
-  repository: ArtifactRepository,
+  repository: ArtifactService,
   getMainWindow: () => BrowserWindow | undefined
 ): void {
   const assertTrustedSender = (event: IpcMainInvokeEvent): void => {
@@ -51,11 +51,11 @@ export function registerArtifactIpc(
   )
   ipcMain.handle(artifactChannels.openRepository, async (event) => {
     assertTrustedSender(event)
-    await openPath(repository.repositoryPath, ' Artifact Repository')
+    await openPath(repository.repositoryPath, ' Oyster Repository')
   })
   ipcMain.handle(artifactChannels.openArtifact, async (event, directoryName: string) => {
     assertTrustedSender(event)
-    const artifactPath = resolveArtifactDirectoryPath(repository.repositoryPath, directoryName)
+    const artifactPath = resolveArtifactDirectoryPath(repository.artifactsPath, directoryName)
     const [directoryDetails, attentionDetails] = await Promise.all([
       lstat(artifactPath),
       lstat(join(artifactPath, 'AGENTS.md'))

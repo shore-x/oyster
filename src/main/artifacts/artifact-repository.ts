@@ -5,8 +5,8 @@ import type {
   ArtifactSummary,
   CreateArtifactInput
 } from '../../shared/artifacts'
-import { runArtifactGit } from './git-runtime'
 import { inspectArtifactSkill } from './skill-artifact'
+import { OysterRepository } from '../repository/oyster-repository'
 
 const ATTENTION_FILE_NAME = 'AGENTS.md'
 
@@ -88,65 +88,29 @@ async function readArtifact(
   }
 }
 
-export class ArtifactRepository {
+export class ArtifactService {
   readonly repositoryPath: string
+  readonly artifactsPath: string
+  private readonly repository: OysterRepository
 
-  constructor(repositoryPath: string) {
-    this.repositoryPath = resolve(repositoryPath)
+  constructor(repository: OysterRepository | string) {
+    this.repository = typeof repository === 'string' ? new OysterRepository(repository) : repository
+    this.repositoryPath = this.repository.rootPath
+    this.artifactsPath = this.repository.artifactsPath
   }
 
   async initialize(): Promise<ArtifactSnapshot> {
+    await this.repository.initialize()
     return this.refresh()
   }
 
   async refresh(): Promise<ArtifactSnapshot> {
-    await this.ensureRepository()
+    await mkdir(this.artifactsPath, { recursive: true })
     return this.scan()
   }
 
-  private async assertRealRepositoryRoot(): Promise<void> {
-    const details = await lstat(this.repositoryPath)
-    if (!details.isDirectory() || details.isSymbolicLink()) {
-      throw new Error('Artifact Repository 根路径必须是 APP 管理的真实目录')
-    }
-  }
-
-  private async ensureRepository(): Promise<void> {
-    try {
-      await mkdir(this.repositoryPath, { recursive: true })
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    }
-    await this.assertRealRepositoryRoot()
-
-    const gitPath = join(this.repositoryPath, '.git')
-    try {
-      const details = await lstat(gitPath)
-      if (!details.isDirectory() || details.isSymbolicLink()) {
-        throw new Error('Artifact Repository 的 .git 必须是本地真实目录')
-      }
-      return
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
-
-    await runArtifactGit(['init', '--quiet'], this.repositoryPath)
-    await this.assertRealRepositoryRoot()
-    try {
-      const details = await lstat(gitPath)
-      if (!details.isDirectory() || details.isSymbolicLink()) {
-        throw new Error('Artifact Repository 的 .git 必须是本地真实目录')
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        throw new Error('Git 初始化没有在 Artifact Repository 中建立 .git 目录')
-      }
-      throw error
-    }
-  }
-
   private async scan(): Promise<ArtifactSnapshot> {
-    const entries = await readdir(this.repositoryPath, { withFileTypes: true })
+    const entries = await readdir(this.artifactsPath, { withFileTypes: true })
     const directories = entries
       .filter((entry) => !entry.name.startsWith('.') && entry.isDirectory())
       .map((entry) => entry.name)
@@ -154,7 +118,7 @@ export class ArtifactRepository {
 
     const scanned = await Promise.all(directories.map(async (directoryName) => ({
       directoryName,
-      artifact: await readArtifact(this.repositoryPath, directoryName)
+      artifact: await readArtifact(this.artifactsPath, directoryName)
     })))
 
     return clone({
@@ -169,8 +133,8 @@ export class ArtifactRepository {
   }
 
   async createArtifact(input: CreateArtifactInput): Promise<ArtifactSnapshot> {
-    await this.ensureRepository()
-    const artifactPath = resolveNewArtifactDirectoryPath(this.repositoryPath, input?.directoryName)
+    await mkdir(this.artifactsPath, { recursive: true })
+    const artifactPath = resolveNewArtifactDirectoryPath(this.artifactsPath, input?.directoryName)
     const attention = assertAttention(input?.attention)
 
     try {

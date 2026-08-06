@@ -106,20 +106,21 @@ export interface ProcessingExecutionSummary {
   reasoningEffort?: ReasoningEffort
 }
 
-export interface CollaborationWorkspaceView {
+export interface ProcessingRunView {
   id: string
-  worktreePath: string
+  repositoryPath: string
+  runPath: string
+  workPath: string
   branchName: string
   targetBranch: string
   baseRevision: string
-  workOrderRevision: string
 }
 
 export interface KnowledgeMaintenanceResult {
   stageId: 'knowledge_maintenance_agent'
   sourceRef: string
   activitySegmentCount: number
-  workspace: CollaborationWorkspaceView
+  run: ProcessingRunView
   previousRevision: string
   revision: string
   changedPaths: string[]
@@ -146,7 +147,7 @@ export interface KnowledgeFullChainResult {
   runId: string
   session: AvailableSessionSummary
   sourceRef: string
-  workspace: CollaborationWorkspaceView
+  run: ProcessingRunView
   maintenanceRuns: KnowledgeMaintenanceResult[]
   reviewRuns: KnowledgeReviewResult[]
   approvedRevision: string
@@ -165,7 +166,7 @@ export interface KnowledgeFullChainStageSnapshot {
 }
 
 export interface KnowledgeFullChainRunRecord {
-  formatVersion: 6
+  formatVersion: 7
   runId: string
   status: Exclude<AgentRunRecord['status'], 'running'>
   startedAt: string

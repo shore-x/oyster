@@ -35,11 +35,12 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
     <section class="processing-result" data-testid="processing-result-knowledge_maintenance_agent">
       <div class="processing-result__heading">
         <div><Icon name="check" /><h3>知识维护结果</h3></div>
-        <span>已提交到协作分支 · 未合并到 {props.result.workspace.targetBranch}</span>
+        <span>已提交到处理分支 · 未合并到 {props.result.run.targetBranch}</span>
       </div>
       <dl class="processing-run-details">
-        <div><dt>Worktree</dt><dd>{props.result.workspace.worktreePath}</dd></div>
-        <div><dt>协作分支</dt><dd>{props.result.workspace.branchName}</dd></div>
+        <div><dt>Repository</dt><dd>{props.result.run.repositoryPath}</dd></div>
+        <div><dt>Run</dt><dd>{props.result.run.runPath}</dd></div>
+        <div><dt>处理分支</dt><dd>{props.result.run.branchName}</dd></div>
         <div><dt>前一 revision</dt><dd>{props.result.previousRevision}</dd></div>
         <div><dt>当前 revision</dt><dd>{props.result.revision}</dd></div>
         <div><dt>变更文件</dt><dd>{props.result.changedPaths.join(', ')}</dd></div>
@@ -83,8 +84,8 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
     (session) => session.sourceRecordId === selectedSessionId()
   ))
   const maintenanceTrace = createMemo(() => controller.debugTrace('stage_debug'))
-  const fullChainTrace = createMemo(() => {
-    return controller.debugTrace('full_chain')
+  const fullChainTraces = createMemo(() => {
+    return controller.debugTraces('full_chain')
   })
   const currentMaintenanceResult = createMemo(() => {
     const result = controller.maintenanceResult()
@@ -179,7 +180,7 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
           maintainerConnection={selectedConnection()}
           reviewerConnection={selectedConnection()}
           running={controller.isFullChainRunning()}
-          debugTrace={fullChainTrace()}
+          debugTraces={fullChainTraces()}
           locked={anyRunning()}
           result={controller.fullChainResult() ? fullChainResultView(controller.fullChainResult()!) : undefined}
           onSelectSession={updateSelectedSession}
@@ -287,7 +288,7 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
                     </Show>
                   </div>
                   <div class="processing-workspace-panel stage-debug__output" aria-label="输出结果">
-                    <Show when={!controller.isRunning(stage().id) ? currentMaintenanceResult() : undefined} fallback={<div class="processing-workspace-empty">完成知识维护后，这里会展示协作 worktree 与提交结果。</div>}>
+                    <Show when={!controller.isRunning(stage().id) ? currentMaintenanceResult() : undefined} fallback={<div class="processing-workspace-empty">完成知识维护后，这里会展示 Run 与提交结果。</div>}>
                       {(result) => <MaintenanceResult result={result()} />}
                     </Show>
                   </div>

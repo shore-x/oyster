@@ -20,7 +20,7 @@ export interface ArtifactSummary {
 }
 
 export interface ArtifactSnapshot {
-  /** Absolute path to the application-managed Artifact Repository. */
+  /** Absolute path to the one application-managed Oyster Repository. */
   repositoryPath: string
   artifacts: ArtifactSummary[]
   /** Visible first-level directories that do not contain a regular root AGENTS.md file. */

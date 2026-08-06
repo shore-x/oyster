@@ -9,6 +9,7 @@ import type {
   KnowledgeProcessingDebugTrace
 } from '../../../shared/knowledge-processing'
 import type { AgentRunRecord } from '../../../shared/agent-runtime'
+import { processingAgentDisplayName } from '../processing-agent-presentation'
 
 function formatTime(value?: string): string {
   if (!value) return '—'
@@ -26,7 +27,7 @@ export function fullChainResultView(result: KnowledgeFullChainResult): FullChain
     runId: result.runId,
     completedAt: result.completedAt,
     durationMs: result.durationMs,
-    workspace: result.workspace,
+    run: result.run,
     approvedRevision: result.approvedRevision,
     changedPaths: result.changedPaths,
     artifactPaths: result.artifactPaths,
@@ -41,8 +42,8 @@ export function fullChainResultView(result: KnowledgeFullChainResult): FullChain
       },
       {
         id: 'work_order',
-        label: '创建协作分支',
-        detail: `${result.workspace.branchName} · ${result.workspace.workOrderRevision.slice(0, 12)}`,
+        label: '创建 Run',
+        detail: `${result.run.branchName} · ${result.run.runPath}`,
         state: 'completed'
       },
       {
@@ -54,7 +55,7 @@ export function fullChainResultView(result: KnowledgeFullChainResult): FullChain
       {
         id: 'approved',
         label: 'Reviewer 批准',
-        detail: `${result.approvedRevision.slice(0, 12)} · 未合并到 ${result.workspace.targetBranch}`,
+        detail: `${result.approvedRevision.slice(0, 12)} · 未合并到 ${result.run.targetBranch}`,
         state: 'completed'
       }
     ],
@@ -85,6 +86,7 @@ function terminalStatusLabel(status: KnowledgeFullChainRunRecord['status']): str
 export function FullChainActivityDetail(props: {
   trace?: KnowledgeProcessingDebugTrace
   runs?: AgentRunRecord[]
+  followLatestRun?: boolean
   status?: KnowledgeFullChainRunRecord['status']
   error?: string
   title?: string
@@ -115,7 +117,11 @@ export function FullChainActivityDetail(props: {
         </div>
       )}</Show>
       <Show when={runs().length} fallback={<div class="chain-test__empty">这次测试没有实际启动 Agent。</div>}>
-        <AgentRunCollectionExplorer runs={runs()} />
+        <AgentRunCollectionExplorer
+          runs={runs()}
+          agentDisplayName={(run) => processingAgentDisplayName(run.agentId)}
+          followLatestRun={props.followLatestRun}
+        />
       </Show>
     </section>
   )
@@ -169,11 +175,12 @@ export function FullChainResultDetail(props: {
       </div>
 
       <dl class="processing-run-details" data-testid="full-chain-git-result">
-        <div><dt>Worktree</dt><dd>{props.result.workspace.worktreePath}</dd></div>
-        <div><dt>协作分支</dt><dd>{props.result.workspace.branchName}</dd></div>
-        <div><dt>目标分支</dt><dd>{props.result.workspace.targetBranch}（未合并）</dd></div>
-        <div><dt>Base revision</dt><dd>{props.result.workspace.baseRevision}</dd></div>
-        <div><dt>工作清单 revision</dt><dd>{props.result.workspace.workOrderRevision}</dd></div>
+        <div><dt>Repository</dt><dd>{props.result.run.repositoryPath}</dd></div>
+        <div><dt>Run</dt><dd>{props.result.run.runPath}</dd></div>
+        <div><dt>WORK.md</dt><dd>{props.result.run.workPath}</dd></div>
+        <div><dt>处理分支</dt><dd>{props.result.run.branchName}</dd></div>
+        <div><dt>目标分支</dt><dd>{props.result.run.targetBranch}（未合并）</dd></div>
+        <div><dt>Base revision</dt><dd>{props.result.run.baseRevision}</dd></div>
         <div><dt>批准 revision</dt><dd>{props.result.approvedRevision}</dd></div>
         <div><dt>Maintainer / Reviewer</dt><dd>{props.result.maintenanceRunCount} / {props.result.reviewRunCount}</dd></div>
         <div><dt>变更文件</dt><dd>{props.result.changedPaths.length}</dd></div>

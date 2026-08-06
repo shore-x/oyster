@@ -1,230 +1,120 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import { FileKnowledgeFullChainRunRepository } from '../src/main/knowledge-processing/full-chain-run-repository'
 import type { KnowledgeFullChainRunRecord } from '../src/shared/knowledge-processing'
-import { SqliteKnowledgeFullChainRunRepository } from '../src/main/knowledge-processing/full-chain-run-repository'
 import { completedAgentRun } from './agent-run-fixture'
 
-const temporaryDirectories: string[] = []
-
-function record(runId: string, completedAt: string, title: string): KnowledgeFullChainRunRecord {
-  const statement = { title: 'Database', content: `Body for ${runId}` }
-  const session = {
-    sourceRecordId: `source-record:${runId}`,
-    sourceId: 'source:codex',
-    agentType: 'codex' as const,
-    sourceDisplayName: 'Codex',
-    externalId: `session:${runId}`,
-    title,
-    projectPath: '/projects/oyster',
-    startedAt: '2026-07-20T10:00:00.000Z',
-    endedAt: '2026-07-20T10:30:00.000Z',
-    sizeBytes: 512,
-    revision: 'a'.repeat(64)
-  }
-  const maintainerRun = completedAgentRun(
-    `${runId}:agent:1`,
-    ['read_activity'],
-    1,
-    'knowledge_maintenance_agent'
-  )
-  const reviewerRun = completedAgentRun(
-    `${runId}:agent:2`,
-    ['read', 'bash'],
-    1,
-    'knowledge_reviewer_agent'
-  )
-  const baseRevision = 'b'.repeat(40)
-  const workOrderRevision = 'c'.repeat(40)
-  const maintainedRevision = 'd'.repeat(40)
-  const approvedRevision = 'e'.repeat(40)
-  const workspace = {
-    id: `workspace:${runId}`,
-    worktreePath: `/tmp/${runId}`,
-    branchName: `collaboration/${runId}`,
+function record(runId = 'run-history'): KnowledgeFullChainRunRecord {
+  const maintainer = completedAgentRun('maintainer-run', ['read'], 1, 'knowledge_maintenance_agent')
+  const reviewer = completedAgentRun('reviewer-run', ['read'], 1, 'knowledge_reviewer_agent')
+  const revision = 'b'.repeat(40)
+  const processingRun = {
+    id: runId,
+    repositoryPath: '/tmp/oyster/repository',
+    runPath: `/tmp/oyster/repository/runs/${runId}`,
+    workPath: `/tmp/oyster/repository/runs/${runId}/WORK.md`,
     targetBranch: 'main',
-    baseRevision,
-    workOrderRevision
-  }
-  const execution = {
-    connectionId: 'model:maintainer',
-    connectionName: 'Maintainer',
-    backendKind: 'coding_plan' as const,
-    providerId: 'openai_codex' as const,
-    model: 'maintainer',
-    runtime: 'pi_agent_core' as const,
-    modelCallCount: 1,
-    toolCalls: ['read_activity']
+    branchName: `processing/${runId}`,
+    baseRevision: 'a'.repeat(40)
   }
   return {
-    formatVersion: 6,
+    formatVersion: 7,
     runId,
     status: 'completed',
-    startedAt: '2026-07-20T10:30:58.500Z',
-    completedAt,
-    durationMs: 1_500,
-    input: {
-      sourceRecordId: session.sourceRecordId,
-      expectedRevision: session.revision,
-      attention: 'Focus on names.'
+    startedAt: '2026-08-06T00:00:00.000Z',
+    completedAt: '2026-08-06T00:00:01.000Z',
+    durationMs: 1_000,
+    input: { sourceRecordId: 'source-1', expectedRevision: 'revision-1' },
+    session: {
+      sourceRecordId: 'source-1',
+      sourceId: 'source:codex',
+      agentType: 'codex',
+      sourceDisplayName: 'Codex',
+      externalId: 'session-1',
+      title: 'History session',
+      sizeBytes: 100,
+      revision: 'revision-1'
     },
-    session,
     configuration: {
-      maintainer: {
-        connectionId: 'model:maintainer',
-        modelId: 'maintainer',
-        instructions: 'Maintain Statements.'
-      },
-      reviewer: {
-        connectionId: 'model:maintainer',
-        modelId: 'maintainer',
-        instructions: 'Review Statements.'
-      }
+      maintainer: { connectionId: 'connection', modelId: 'maintainer', instructions: 'Maintain.' },
+      reviewer: { connectionId: 'connection', modelId: 'reviewer', instructions: 'Review.' }
     },
-    agentRuns: [maintainerRun, reviewerRun],
+    agentRuns: [maintainer, reviewer],
     result: {
       runId,
-      session,
-      sourceRef: `raw:${runId}`,
-      workspace,
+      session: {
+        sourceRecordId: 'source-1',
+        sourceId: 'source:codex',
+        agentType: 'codex',
+        sourceDisplayName: 'Codex',
+        externalId: 'session-1',
+        title: 'History session',
+        sizeBytes: 100,
+        revision: 'revision-1'
+      },
+      sourceRef: 'source-1@revision-1',
+      run: processingRun,
       maintenanceRuns: [{
         stageId: 'knowledge_maintenance_agent',
-        sourceRef: `raw:${runId}`,
+        sourceRef: 'source-1@revision-1',
         activitySegmentCount: 1,
-        workspace,
-        previousRevision: workOrderRevision,
-        revision: maintainedRevision,
-        changedPaths: ['.oyster/WORK.md', 'knowledge/database.md'],
-        agentRunId: maintainerRun.id,
+        run: processingRun,
+        previousRevision: processingRun.baseRevision,
+        revision,
+        changedPaths: ['knowledge/subject.md'],
+        agentRunId: maintainer.id,
         durationMs: 500,
-        completedAt,
-        execution
+        completedAt: '2026-08-06T00:00:00.500Z',
+        execution: {
+          connectionId: 'connection', connectionName: 'Connection', backendKind: 'api',
+          providerId: 'openai_compatible', model: 'maintainer', runtime: 'pi_agent_core',
+          modelCallCount: 1, toolCalls: ['read']
+        }
       }],
       reviewRuns: [{
         stageId: 'knowledge_reviewer_agent',
         outcome: 'approved',
-        reviewedRevision: maintainedRevision,
-        revision: approvedRevision,
-        changedPaths: ['.oyster/WORK.md'],
+        reviewedRevision: revision,
+        revision,
+        changedPaths: [],
         markerPaths: [],
-        agentRunId: reviewerRun.id,
-        durationMs: 200,
-        completedAt,
-        execution: { ...execution, toolCalls: ['read', 'bash'] }
+        agentRunId: reviewer.id,
+        durationMs: 500,
+        completedAt: '2026-08-06T00:00:01.000Z',
+        execution: {
+          connectionId: 'connection', connectionName: 'Connection', backendKind: 'api',
+          providerId: 'openai_compatible', model: 'reviewer', runtime: 'pi_agent_core',
+          modelCallCount: 1, toolCalls: ['read']
+        }
       }],
-      approvedRevision,
-      changedPaths: ['knowledge/database.md'],
-      knowledge: [statement],
+      approvedRevision: revision,
+      changedPaths: ['knowledge/subject.md'],
+      knowledge: [{ title: 'Subject', content: 'Body.' }],
       artifactPaths: [],
-      durationMs: 1_500,
-      completedAt
+      durationMs: 1_000,
+      completedAt: '2026-08-06T00:00:01.000Z'
     }
   }
 }
 
-function failedRecord(runId: string, completedAt: string): KnowledgeFullChainRunRecord {
-  const failed = record(runId, completedAt, 'Failed Session')
-  failed.status = 'failed'
-  failed.error = 'Maintainer model unavailable'
-  delete failed.result
-  failed.agentRuns.splice(1)
-  const agentRun = failed.agentRuns[0]
-  agentRun.status = 'failed'
-  agentRun.error = 'Maintainer model unavailable'
-  const modelCall = agentRun.modelCalls[0]
-  if (modelCall) {
-    modelCall.status = 'failed'
-    modelCall.error = 'Maintainer model unavailable'
-  }
-  return failed
-}
-
-afterEach(async () => {
-  await Promise.all(temporaryDirectories.splice(0).map(
-    (directory) => rm(directory, { recursive: true, force: true })
-  ))
-})
-
-describe('SqliteKnowledgeFullChainRunRepository', () => {
-  it('persists immutable details while listing compact Maintainer summaries', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'oyster-processing-history-'))
-    temporaryDirectories.push(directory)
-    const databasePath = join(directory, 'history.sqlite')
-    const repository = await SqliteKnowledgeFullChainRunRepository.open(databasePath)
-    repository.save(record('run-1', '2026-07-20T10:31:00.000Z', 'First Session'))
-    repository.save(record('run-2', '2026-07-21T10:31:00.000Z', 'Second Session'))
-
+describe('FileKnowledgeFullChainRunRepository', () => {
+  it('stores terminal history in runs/<run-id>/run.json', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'oyster-run-history-'))
+    const repository = new FileKnowledgeFullChainRunRepository(join(root, 'runs'))
+    const value = record()
+    repository.save(value)
+    expect(repository.read(value.runId)).toEqual(value)
     expect(repository.list()).toEqual([
-      expect.objectContaining({ runId: 'run-2', sessionTitle: 'Second Session', statementCount: 1, maintainerModel: 'maintainer' }),
-      expect.objectContaining({ runId: 'run-1', sessionTitle: 'First Session' })
+      expect.objectContaining({ runId: value.runId, agentRunCount: 2, statementCount: 1 })
     ])
-    expect(JSON.stringify(repository.list())).not.toContain('Body for run-1')
-    expect(repository.read('run-1')).toEqual(record('run-1', '2026-07-20T10:31:00.000Z', 'First Session'))
-    expect(() => repository.save(record('run-1', '2026-07-20T10:31:00.000Z', 'First Session'))).toThrow()
-    repository.close()
   })
 
-  it('persists failed terminal details while keeping the list compact', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'oyster-processing-history-'))
-    temporaryDirectories.push(directory)
-    const repository = await SqliteKnowledgeFullChainRunRepository.open(join(directory, 'history.sqlite'))
-    const failed = failedRecord('run-failed', '2026-07-22T10:31:00.000Z')
-
-    repository.save(failed)
-
-    expect(repository.list()).toEqual([expect.objectContaining({
-      runId: 'run-failed',
-      status: 'failed',
-      statementCount: 0,
-      agentRunCount: 1,
-      modelCallCount: 1,
-      error: 'Maintainer model unavailable'
-    })])
-    expect(JSON.stringify(repository.list())).not.toContain('Body for run-failed')
-    expect(repository.read('run-failed')).toEqual(failed)
-    repository.close()
-  })
-
-  it('rejects non-terminal and unknown-version Agent Run records at the shared boundary', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'oyster-processing-history-'))
-    temporaryDirectories.push(directory)
-    const repository = await SqliteKnowledgeFullChainRunRepository.open(join(directory, 'history.sqlite'))
-    const running = record('run-running', '2026-07-22T10:31:00.000Z', 'Running Session')
-    running.agentRuns[0].status = 'running'
-    delete running.agentRuns[0].completedAt
-    delete running.agentRuns[0].durationMs
-    expect(() => repository.save(running)).toThrow('尚未终态化')
-
-    const incomplete = record('run-incomplete', '2026-07-22T10:31:30.000Z', 'Incomplete Session')
-    incomplete.agentRuns[0].modelCalls[0].status = 'running'
-    delete incomplete.agentRuns[0].modelCalls[0].completedAt
-    delete incomplete.agentRuns[0].modelCalls[0].durationMs
-    expect(() => repository.save(incomplete)).toThrow('仍包含运行中活动')
-
-    const unknownVersion = record('run-unknown', '2026-07-22T10:32:00.000Z', 'Unknown Session')
-    unknownVersion.agentRuns[0].formatVersion = 99 as 1
-    expect(() => repository.save(unknownVersion)).toThrow('格式版本无效')
-    expect(repository.list()).toEqual([])
-    repository.close()
-  })
-
-  it('rebuilds old schema data instead of maintaining legacy record compatibility', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'oyster-processing-history-'))
-    temporaryDirectories.push(directory)
-    const databasePath = join(directory, 'history.sqlite')
-    const database = new DatabaseSync(databasePath)
-    database.exec(`
-      CREATE TABLE knowledge_full_chain_runs (run_id TEXT PRIMARY KEY, payload_json TEXT);
-      INSERT INTO knowledge_full_chain_runs VALUES ('legacy', '{}');
-      PRAGMA user_version = 1;
-    `)
-    database.close()
-
-    const repository = await SqliteKnowledgeFullChainRunRepository.open(databasePath)
-    expect(repository.list()).toEqual([])
-    expect(repository.read('legacy')).toBeUndefined()
-    repository.close()
+  it('does not overwrite an existing terminal record', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'oyster-run-history-'))
+    const repository = new FileKnowledgeFullChainRunRepository(join(root, 'runs'))
+    repository.save(record())
+    expect(() => repository.save(record())).toThrow()
   })
 })

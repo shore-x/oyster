@@ -12,17 +12,13 @@ import {
   createPiAgentRuntime,
   isAgentRuntimeFeedbackMessage
 } from '../agent-runtime/pi-agent-runtime'
-import type { KnowledgeStatement } from '../../shared/knowledge'
 import { CHAT_AGENT_ID } from '../../shared/chat'
 import type { AgentRunRecord } from '../../shared/agent-runtime'
-import type { PiChatAgentRunInput, ChatKnowledgeStore } from './model'
+import type { PiChatAgentRunInput } from './model'
 import { chatMessageView, serializableChatValue } from './chat-message-view'
 import {
   chatAgentToolDefinition,
-  readKnowledgeParameters,
-  searchKnowledgeParameters,
-  spawnAgentParameters,
-  upsertKnowledgeParameters
+  spawnAgentParameters
 } from './chat-tool-catalog'
 import { createArtifactGitEnvironment } from '../artifacts/git-runtime'
 import { chatAgentSystemPrompt } from './prompt'
@@ -33,15 +29,6 @@ function asError(value: unknown, fallback: string): Error {
   if (value instanceof Error) return value
   if (typeof value === 'string' && value) return new Error(value)
   return new Error(fallback)
-}
-
-function compactInline(value: string, maximum: number): string {
-  const compact = value.replace(/\s+/g, ' ').trim()
-  return compact.length <= maximum ? compact : `${compact.slice(0, maximum - 1)}…`
-}
-
-function statementText(statement: KnowledgeStatement): string {
-  return `Title: ${statement.title}\nContent:\n${statement.content}`
 }
 
 function finalAssistantText(messages: readonly AgentMessage[]): string {
@@ -107,92 +94,8 @@ function safeEmit(
   }
 }
 
-function knowledgeTools(
-  store: ChatKnowledgeStore,
-  agentRunId: string
-): AgentTool[] {
-  return [
-    {
-      ...chatAgentToolDefinition('search_knowledge'),
-      executionMode: 'sequential',
-      execute: async (_toolCallId, parameters, signal) => {
-        signal?.throwIfAborted()
-        const query = parameters.query.trim()
-        if (!query) throw new Error('搜索 query 去除空白后不能为空')
-        const limit = parameters.limit ?? 8
-        const offset = parameters.offset ?? 0
-        const records = (await store.search(query, limit, offset, signal)).slice(0, limit)
-        const hasNextPage = records.length === limit
-        return {
-          content: [{
-            type: 'text',
-            text: records.length
-              ? [
-                  ...records.map((record) => (
-                    `- Title: ${compactInline(record.title, 512)}\n  Preview: ${compactInline(record.content, 1_024)}`
-                  )),
-                  '',
-                  `Next offset: ${hasNextPage ? offset + records.length : 'none'}`
-                ].join('\n')
-              : 'No matching Knowledge Statements.\nNext offset: none'
-          }],
-          details: {
-            count: records.length,
-            offset,
-            nextOffset: hasNextPage ? offset + records.length : null
-          }
-        }
-      }
-    } as AgentTool<typeof searchKnowledgeParameters>,
-    {
-      ...chatAgentToolDefinition('read_knowledge'),
-      executionMode: 'sequential',
-      execute: async (_toolCallId, parameters, signal) => {
-        signal?.throwIfAborted()
-        const title = parameters.title.trim()
-        if (!title) throw new Error('Statement title 去除空白后不能为空')
-        const statement = await store.read(title, signal)
-        return {
-          content: [{
-            type: 'text',
-            text: statement ? statementText(statement) : 'Knowledge Statement not found.'
-          }],
-          details: { found: Boolean(statement), title }
-        }
-      }
-    } as AgentTool<typeof readKnowledgeParameters>,
-    {
-      ...chatAgentToolDefinition('upsert_knowledge'),
-      executionMode: 'sequential',
-      execute: async (_toolCallId, parameters, signal) => {
-        signal?.throwIfAborted()
-        const result = store.commit({
-          runRef: `chat:${agentRunId}:${randomUUID()}`,
-          statements: parameters.statements
-        })
-        return {
-          content: [{
-            type: 'text',
-            text: [
-              `Committed ${result.statements.length} Knowledge Statements.`,
-              result.createdTitles.length ? `Created: ${result.createdTitles.join(', ')}` : undefined,
-              result.updatedTitles.length ? `Updated: ${result.updatedTitles.join(', ')}` : undefined
-            ].filter((part): part is string => Boolean(part)).join('\n')
-          }],
-          details: {
-            runRef: result.contribution.runRef,
-            statementCount: result.statements.length,
-            createdTitles: result.createdTitles,
-            updatedTitles: result.updatedTitles
-          }
-        }
-      }
-    } as AgentTool<typeof upsertKnowledgeParameters>
-  ]
-}
-
-function codingTools(artifactRepositoryPath: string): AgentTool[] {
-  return createCodingTools(artifactRepositoryPath, {
+function codingTools(repositoryPath: string): AgentTool[] {
+  return createCodingTools(repositoryPath, {
     bash: {
       spawnHook: (context) => ({
         ...context,
@@ -204,10 +107,7 @@ function codingTools(artifactRepositoryPath: string): AgentTool[] {
 
 /** A regular, unrestricted Pi Agent loop with filesystem, shell, and Knowledge tools. */
 export class PiChatAgent {
-  constructor(
-    private readonly knowledgeStore: ChatKnowledgeStore,
-    private readonly artifactRepositoryPath: string
-  ) {}
+  constructor(private readonly repositoryPath: string) {}
 
   async run(input: PiChatAgentRunInput): Promise<void> {
     if (!input.text.trim()) throw new Error('消息不能为空')
@@ -217,7 +117,7 @@ export class PiChatAgent {
     input.signal.throwIfAborted()
     const systemPrompt = chatAgentSystemPrompt(
       input.binding.systemPrompt,
-      this.artifactRepositoryPath
+      this.repositoryPath
     )
     const thinkingLevel = input.runtime.model.reasoning
       ? (input.binding.reasoningEffort ?? 'off')
@@ -249,8 +149,7 @@ export class PiChatAgent {
         }
       })
       const tools: AgentTool[] = [
-        ...codingTools(this.artifactRepositoryPath),
-        ...knowledgeTools(this.knowledgeStore, agentRunId),
+        ...codingTools(this.repositoryPath),
         {
           ...chatAgentToolDefinition('spawn_agent'),
           execute: async (_toolCallId, parameters, signal) => {
