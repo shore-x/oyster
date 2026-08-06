@@ -137,7 +137,7 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
   const currentMaintenanceResult = createMemo(() => {
     const result = controller.maintenanceResult()
     const trace = maintenanceTrace()
-    if (!result || (trace && trace.id !== result.debugTrace.id)) return undefined
+    if (!result || (trace && trace.run.id !== result.debugTrace.run.id)) return undefined
     return result
   })
   const anyRunning = createMemo(() => (

@@ -20,7 +20,7 @@ import {
 import type { ModelRuntime } from '../src/main/ai-backends/model'
 import type {
   KnowledgeAgentRunInput,
-  KnowledgeAgentTraceEvent,
+  KnowledgeAgentWorkspaceStatus,
   KnowledgeReader,
   KnowledgeStatementRecord
 } from '../src/main/knowledge-processing/model'
@@ -78,6 +78,7 @@ function runInput(overrides: Partial<KnowledgeAgentRunInput> = {}): KnowledgeAge
     evidenceFormatVersion: 'test-v1',
     sourceRef: 'observation:test:1',
     contributionRunRef: 'test-run:1',
+    runId: 'agent-run:1',
     attention: 'Track local names and their referents.',
     signal: new AbortController().signal,
     ...overrides
@@ -177,7 +178,7 @@ function waitingRuntime(model: Model<Api>): ModelRuntime {
 
 describe('PiKnowledgeMaintenanceAgent', () => {
   it('binds Host initial Todos without eagerly loading them into context', async () => {
-    const traces: KnowledgeAgentTraceEvent[] = []
+    const workspaceUpdates: KnowledgeAgentWorkspaceStatus[] = []
     const runtime = fauxRuntime([
       (context) => {
         expect(context.tools?.map((tool) => tool.name)).toEqual(TOOL_NAMES)
@@ -208,7 +209,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
     const result = await new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
       runtime: runtime.runtime,
       initialTodos: ['Investigate database at L000001:C0'],
-      onTrace: (event) => traces.push(event)
+      onWorkspaceStatus: (status) => workspaceUpdates.push(status)
     }))
 
     expect(result.contribution.statements).toEqual([{
@@ -227,8 +228,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       'upsert_contribution_statement',
       'complete_todos'
     ])
-    expect(traces).toContainEqual(expect.objectContaining({
-      type: 'workspace_status',
+    expect(workspaceUpdates).toContainEqual(expect.objectContaining({
       todos: { total: 1, pending: 0, completed: 1 },
       draftStatementCount: 1
     }))
@@ -473,7 +473,6 @@ describe('PiKnowledgeMaintenanceAgent', () => {
       search: async () => { throw new Error('temporary search failure') },
       read: async () => undefined
     }
-    const traces: KnowledgeAgentTraceEvent[] = []
     const runtime = fauxRuntime([
       fauxAssistantMessage(
         fauxToolCall('read_evidence', { line: 999, offset: 0, limit: 10 }),
@@ -487,21 +486,19 @@ describe('PiKnowledgeMaintenanceAgent', () => {
     ])
 
     const result = await new PiKnowledgeMaintenanceAgent(reader).run(runInput({
-      runtime: runtime.runtime,
-      onTrace: (event) => traces.push(event)
+      runtime: runtime.runtime
     }))
 
     expect(result.modelCallCount).toBe(3)
-    expect(traces).toContainEqual(expect.objectContaining({
-      type: 'tool_completed', toolName: 'read_evidence', status: 'failed'
+    expect(result.run.toolCalls).toContainEqual(expect.objectContaining({
+      name: 'read_evidence', status: 'failed'
     }))
-    expect(traces).toContainEqual(expect.objectContaining({
-      type: 'tool_completed', toolName: 'search_knowledge', status: 'failed'
+    expect(result.run.toolCalls).toContainEqual(expect.objectContaining({
+      name: 'search_knowledge', status: 'failed'
     }))
   })
 
-  it('redacts an unknown model-generated tool name from traces and continues', async () => {
-    const traces: KnowledgeAgentTraceEvent[] = []
+  it('keeps unknown model-generated tool calls visible in the generic run record', async () => {
     const runtime = fauxRuntime([
       fauxAssistantMessage(
         fauxToolCall('secret_internal_tool_name', { secret: 'do-not-log' }),
@@ -511,13 +508,15 @@ describe('PiKnowledgeMaintenanceAgent', () => {
     ])
 
     const result = await new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
-      runtime: runtime.runtime,
-      onTrace: (event) => traces.push(event)
+      runtime: runtime.runtime
     }))
 
-    expect(result.toolCalls).toEqual(['未知工具'])
-    expect(JSON.stringify(traces)).not.toContain('secret_internal_tool_name')
-    expect(JSON.stringify(traces)).not.toContain('do-not-log')
+    expect(result.toolCalls).toEqual(['secret_internal_tool_name'])
+    expect(result.run.toolCalls[0]).toMatchObject({
+      name: 'secret_internal_tool_name',
+      input: { secret: 'do-not-log' },
+      status: 'failed'
+    })
   })
 
   it('isolates diagnostic callbacks and forwards reasoning only to reasoning models', async () => {
@@ -527,7 +526,7 @@ describe('PiKnowledgeMaintenanceAgent', () => {
     await expect(new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
       runtime: supported.runtime,
       reasoningEffort: 'high',
-      onTrace: () => { throw new Error('trace sink failed') }
+      onRunUpdate: () => { throw new Error('trace sink failed') }
     }))).resolves.toBeDefined()
     await new PiKnowledgeMaintenanceAgent(new MemoryKnowledgeReader()).run(runInput({
       runtime: unsupported.runtime,

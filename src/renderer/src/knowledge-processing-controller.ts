@@ -83,7 +83,7 @@ export function createKnowledgeProcessingController() {
 
   function invalidateInputResults(): void {
     const currentTrace = snapshot().debugTraces.find((trace) => trace.origin === 'stage_debug')
-    setHiddenStageDebugTraceId(currentTrace?.id)
+    setHiddenStageDebugTraceId(currentTrace?.run.id)
     setMaintenanceResult(undefined)
   }
 
@@ -96,8 +96,8 @@ export function createKnowledgeProcessingController() {
     if (
       origin === 'stage_debug'
       && trace
-      && trace.id === hiddenStageDebugTraceId()
-      && trace.status !== 'running'
+      && trace.run.id === hiddenStageDebugTraceId()
+      && trace.run.status !== 'running'
     ) {
       return undefined
     }

@@ -46,7 +46,6 @@ import type {
 import { KnowledgeContributionWorkspace } from './knowledge-contribution-workspace'
 import {
   contributionStatementParameters,
-  KNOWLEDGE_MAINTENANCE_TOOL_CATALOG,
   knowledgeMaintenanceToolDefinition,
   listContributionStatementsParameters,
   MAX_KNOWLEDGE_SEARCH_RESULTS as MAX_SEARCH_RESULTS,
@@ -59,11 +58,6 @@ import {
 } from './knowledge-maintenance-tool-catalog'
 
 const MAX_EVIDENCE_OUTPUT_CHARS = 64 * 1_024
-const UNKNOWN_TRACE_TOOL_NAME = '未知工具'
-
-const TRACEABLE_TOOL_NAMES = new Set<string>(
-  KNOWLEDGE_MAINTENANCE_TOOL_CATALOG.map((tool) => tool.name)
-)
 
 function emptyUsage(): Usage {
   return {
@@ -104,144 +98,6 @@ function compactInline(value: string, maximum: number): string {
   const compact = value.replace(/\s+/g, ' ').trim()
   if (compact.length <= maximum) return compact
   return `${compact.slice(0, maximum - 1)}…`
-}
-
-function safeTraceInteger(value: unknown): number | undefined {
-  return Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : undefined
-}
-
-function safeTraceToolName(value: string): string {
-  return TRACEABLE_TOOL_NAMES.has(value) ? value : UNKNOWN_TRACE_TOOL_NAME
-}
-
-function safeToolErrorCategory(toolName: string, result: unknown): string {
-  if (!TRACEABLE_TOOL_NAMES.has(toolName)) return '工具调用失败'
-  const errorText = result instanceof Error
-    ? result.message
-    : typeof result === 'string'
-      ? result
-      : (() => {
-          try {
-            return JSON.stringify(result)
-          } catch {
-            return ''
-          }
-        })()
-  if (toolName === 'read_evidence') {
-    if (/不存在|失效|revision|unavailable/i.test(errorText)) return '原始证据不可用'
-    if (/line|offset|location|位置|参数|property|integer|unicode/i.test(errorText)) {
-      return '证据读取位置或参数无效'
-    }
-    if (/预算|上限|output/i.test(errorText)) return '证据读取预算不足'
-  }
-  return '工具调用失败'
-}
-
-function safeTraceDetails(toolName: string, result: unknown, isError: boolean): string | undefined {
-  if (isError) return safeToolErrorCategory(toolName, result)
-  if (!result || typeof result !== 'object') return undefined
-  const details = (result as { details?: unknown }).details
-  if (!details || typeof details !== 'object') return undefined
-  const record = details as Record<string, unknown>
-  if (toolName === 'search_knowledge') {
-    const count = safeTraceInteger(record.count)
-    return count === undefined ? undefined : `返回 ${count} 条候选知识`
-  }
-  if (toolName === 'read_knowledge') {
-    return typeof record.found === 'boolean' ? (record.found ? '已找到 Statement' : '未找到 Statement') : undefined
-  }
-  if (toolName === 'list_todos' || toolName === 'add_todos' || toolName === 'complete_todos') {
-    const pending = safeTraceInteger(record.pendingCount)
-    return pending === undefined ? undefined : `Todo · ${pending} 个待处理`
-  }
-  if (
-    toolName === 'upsert_contribution_statement'
-    || toolName === 'read_contribution_statement'
-    || toolName === 'list_contribution_statements'
-    || toolName === 'remove_contribution_statement'
-  ) {
-    const draftStatementCount = safeTraceInteger(record.draftStatementCount)
-    return draftStatementCount === undefined ? undefined : `Contribution 草稿 ${draftStatementCount} 条`
-  }
-  if (toolName === 'read_evidence') {
-    const start = typeof record.start === 'string' && /^L\d{6,}:C\d+$/.test(record.start)
-      ? record.start
-      : undefined
-    const end = typeof record.end === 'string' && /^L\d{6,}:C\d+$/.test(record.end)
-      ? record.end
-      : undefined
-    const returnedCharacters = safeTraceInteger(record.returnedCharacters)
-    const next = typeof record.next === 'string' && /^L\d{6,}:C\d+$/.test(record.next)
-      ? `next ${record.next}`
-      : record.next === null
-        ? 'EOF'
-        : undefined
-    return [
-      start && end ? `${start}-${end}` : start,
-      returnedCharacters === undefined ? undefined : `${returnedCharacters} 字符`,
-      next
-    ].filter(Boolean).join(' · ') || undefined
-  }
-  return undefined
-}
-
-function modelTraceDetail(message: AssistantMessage): string {
-  const toolNames = message.content
-    .filter((content) => content.type === 'toolCall')
-    .map((content) => safeTraceToolName(content.name))
-  return [
-    `stop=${message.stopReason}`,
-    `tokens=${message.usage.totalTokens}`,
-    toolNames.length ? `tools=${toolNames.join(', ')}` : undefined
-  ].filter((part): part is string => Boolean(part)).join(' · ')
-}
-
-function traceJson(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2) ?? String(value)
-  } catch {
-    return String(value)
-  }
-}
-
-function modelTraceOutput(message: AssistantMessage): string | undefined {
-  const blocks = message.content.flatMap((content) => {
-    if (content.type === 'text') return content.text.trim() ? [content.text] : []
-    if (content.type === 'thinking') {
-      if (content.redacted) return ['Reasoning\n[redacted by provider]']
-      return content.thinking.trim() ? [`Reasoning\n${content.thinking}`] : []
-    }
-    const toolName = safeTraceToolName(content.name)
-    return [toolName === UNKNOWN_TRACE_TOOL_NAME
-      ? `Tool call · ${toolName}\n[arguments hidden]`
-      : `Tool call · ${toolName}\n${traceJson(content.arguments)}`]
-  })
-  if (message.errorMessage) blocks.push(`Error\n${message.errorMessage}`)
-  return blocks.length ? blocks.join('\n\n') : undefined
-}
-
-function toolTraceOutput(result: unknown): string | undefined {
-  if (!result || typeof result !== 'object') return result === undefined ? undefined : traceJson(result)
-  const record = result as { content?: unknown; details?: unknown }
-  const blocks: string[] = []
-  if (Array.isArray(record.content)) {
-    for (const content of record.content) {
-      if (!content || typeof content !== 'object') {
-        blocks.push(traceJson(content))
-        continue
-      }
-      const item = content as Record<string, unknown>
-      if (item.type === 'text' && typeof item.text === 'string') {
-        blocks.push(item.text)
-      } else if (item.type === 'image' && typeof item.mimeType === 'string') {
-        blocks.push(`[Image result · ${item.mimeType}]`)
-      } else {
-        blocks.push(traceJson(item))
-      }
-    }
-  }
-  if (record.details !== undefined) blocks.push(`Details\n${traceJson(record.details)}`)
-  return blocks.filter((block) => block.trim()).join('\n\n') || undefined
 }
 
 function searchResultText(
@@ -327,46 +183,35 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
     validateRunInput(input)
     const runtime: ModelRuntime = input.runtime
     const contributionDraft = new KnowledgeContributionWorkspace()
-    let modelCallCount = 0
-    const toolCalls: string[] = []
     let compactionError: Error | undefined
-    let activeModelCall: number | undefined
-    let activeCompactionCall: number | undefined
 
     const agentRuntime = createPiAgentRuntime({
-      initialTodos: input.initialTodos ?? []
+      initialTodos: input.initialTodos ?? [],
+      run: { runId: input.runId, onUpdate: input.onRunUpdate }
     })
-
-    const reportTrace = (event: Parameters<NonNullable<KnowledgeAgentRunInput['onTrace']>>[0]): void => {
-      try {
-        input.onTrace?.(event)
-      } catch {
-        // Diagnostics must not change Agent execution.
-      }
-    }
 
     const reportWorkspaceStatus = (): void => {
       const todos = agentRuntime.todos.list()
       const pending = todos.filter((todo) => todo.status === 'pending').length
-      reportTrace({
-        type: 'workspace_status',
-        todos: {
-          total: todos.length,
-          pending,
-          completed: todos.length - pending
-        },
-        draftStatementCount: contributionDraft.size
-      })
+      try {
+        input.onWorkspaceStatus?.({
+          todos: {
+            total: todos.length,
+            pending,
+            completed: todos.length - pending
+          },
+          draftStatementCount: contributionDraft.size
+        })
+      } catch {
+        // Business UI observation must not change Agent execution.
+      }
     }
 
     reportWorkspaceStatus()
 
-    const guardedStreamFn: StreamFn = (model, context, options) => {
-      modelCallCount++
-      activeModelCall = modelCallCount
-      reportTrace({ type: 'model_started', callNumber: modelCallCount })
+    const guardedStreamFn: StreamFn = async (model, context, options) => {
       try {
-        return runtime.streamFn(model, context, options)
+        return await runtime.streamFn(model, context, options)
       } catch (error) {
         const normalized = asError(error, '模型 Runtime 调用失败')
         return failedModelStream(model, normalized.message)
@@ -519,40 +364,10 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
     const thinkingLevel = runtime.model.reasoning ? (input.reasoningEffort ?? 'off') : 'off'
     const compactContext = createPiContextCompactor({
       model: runtime.model,
-      streamFn: runtime.streamFn,
+      streamFn: agentRuntime.run.wrapStreamFn(guardedStreamFn, 'context_compaction'),
       systemPrompt: input.systemPrompt,
       tools,
-      thinkingLevel,
-      onModelCall: (event) => {
-        if (event.type === 'started') {
-          modelCallCount++
-          activeCompactionCall = modelCallCount
-          reportTrace({
-            type: 'model_started',
-            callNumber: modelCallCount,
-            purpose: 'context_compaction'
-          })
-          return
-        }
-        if (event.type === 'failed') {
-          compactionError = event.error ?? new Error('Context compaction failed')
-        }
-        if (activeCompactionCall === undefined) return
-        reportTrace({
-          type: 'model_completed',
-          callNumber: activeCompactionCall,
-          status: event.type === 'completed'
-            ? 'completed'
-            : input.signal.aborted ? 'cancelled' : 'failed',
-          detail: event.message
-            ? `context compaction · ${modelTraceDetail(event.message)}`
-            : input.signal.aborted
-              ? 'context compaction cancelled'
-              : 'context compaction failed',
-          output: event.message ? modelTraceOutput(event.message) : undefined
-        })
-        activeCompactionCall = undefined
-      }
+      thinkingLevel
     })
     const agent = new Agent({
       initialState: {
@@ -561,7 +376,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
         thinkingLevel,
         tools
       },
-      streamFn: guardedStreamFn,
+      streamFn: agentRuntime.run.wrapStreamFn(guardedStreamFn),
       convertToLlm: convertPiAgentMessages,
       transformContext: async (messages, signal) => {
         try {
@@ -574,62 +389,16 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
       toolExecution: 'sequential'
     })
 
-    agentRuntime.attach(agent)
+    const detachRuntime = agentRuntime.attach(agent)
 
     agent.subscribe((event) => {
-      if (event.type === 'message_end' && event.message.role === 'assistant') {
-        if (activeModelCall !== undefined) {
-          const status = event.message.stopReason === 'aborted' && input.signal.aborted
-            ? 'cancelled'
-            : event.message.stopReason === 'error' || event.message.stopReason === 'aborted'
-              ? 'failed'
-              : 'completed'
-          reportTrace({
-            type: 'model_completed',
-            callNumber: activeModelCall,
-            status,
-            detail: modelTraceDetail(event.message),
-            output: modelTraceOutput(event.message)
-          })
-          activeModelCall = undefined
-        }
-        return
-      }
       if (event.type === 'tool_execution_end') {
-        const toolName = safeTraceToolName(event.toolName)
-        const traceable = TRACEABLE_TOOL_NAMES.has(event.toolName)
-        const status = event.isError
-          ? (input.signal.aborted ? 'cancelled' : 'failed')
-          : 'completed'
-        reportTrace({
-          type: 'tool_completed',
-          toolCallId: event.toolCallId,
-          toolName,
-          status,
-          detail: status === 'cancelled'
-            ? '工具调用已取消'
-            : safeTraceDetails(event.toolName, event.result, event.isError),
-          output: traceable ? toolTraceOutput(event.result) : undefined
-        })
         if (
           !event.isError
           && (event.toolName === 'list_todos'
             || event.toolName === 'add_todos'
             || event.toolName === 'complete_todos')
         ) reportWorkspaceStatus()
-        return
-      }
-      if (event.type === 'tool_execution_start') {
-        const toolName = safeTraceToolName(event.toolName)
-        const traceable = TRACEABLE_TOOL_NAMES.has(event.toolName)
-        reportTrace({
-          type: 'tool_started',
-          toolCallId: event.toolCallId,
-          toolName,
-          input: traceable ? traceJson(event.args) : undefined
-        })
-        toolCalls.push(toolName)
-        return
       }
     })
 
@@ -640,64 +409,48 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
       const run = agent.prompt(taskPrompt(input))
       if (input.signal.aborted) agent.abort()
       await run
+      if (input.signal.aborted) throw asError(input.signal.reason, 'Knowledge Maintenance Agent 运行已取消')
+      if (
+        compactionError instanceof PiContextWindowError
+        || compactionError instanceof PiContextCompactionOutputError
+      ) throw compactionError
+      if (compactionError) throw new ModelConnectionFailureError(compactionError)
+      if (agent.state.errorMessage) {
+        throw new ModelConnectionFailureError(
+          new Error(`Knowledge Maintenance Agent 模型调用失败：${agent.state.errorMessage}`)
+        )
+      }
+      let finalAssistantMessage: AssistantMessage | undefined
+      for (let index = agent.state.messages.length - 1; index >= 0; index--) {
+        const message = agent.state.messages[index]
+        if (message.role !== 'assistant') continue
+        finalAssistantMessage = message
+        break
+      }
+      if (finalAssistantMessage?.stopReason === 'length') {
+        throw new ModelOutputTruncatedError('Knowledge Maintenance Agent 的最终模型输出达到长度上限，运行结果不完整')
+      }
+      if (!finalAssistantMessage || finalAssistantMessage.stopReason !== 'stop') {
+        throw new Error('Knowledge Maintenance Agent 未正常自然结束')
+      }
+      if (agentRuntime.todos.pendingCount) {
+        throw new Error('Knowledge Maintenance Agent 结束时仍有 pending Todo')
+      }
+      const contribution = contributionDraft.contribution(input.contributionRunRef)
+      const recordedRun = agentRuntime.run.complete('completed')
+      return {
+        contribution,
+        todos: agentRuntime.todos.list(),
+        run: recordedRun,
+        modelCallCount: recordedRun.modelCalls.length,
+        toolCalls: recordedRun.toolCalls.map((call) => call.name)
+      }
+    } catch (error) {
+      agentRuntime.run.complete(input.signal.aborted ? 'cancelled' : 'failed', error)
+      throw error
     } finally {
       input.signal.removeEventListener('abort', abortAgent)
-      if (activeModelCall !== undefined) {
-        reportTrace({
-          type: 'model_completed',
-          callNumber: activeModelCall,
-          status: input.signal.aborted ? 'cancelled' : 'failed',
-          detail: '模型调用未正常完成'
-        })
-        activeModelCall = undefined
-      }
-      if (activeCompactionCall !== undefined) {
-        reportTrace({
-          type: 'model_completed',
-          callNumber: activeCompactionCall,
-          status: input.signal.aborted ? 'cancelled' : 'failed',
-          detail: 'context compaction did not complete normally'
-        })
-        activeCompactionCall = undefined
-      }
-    }
-
-    if (input.signal.aborted) throw asError(input.signal.reason, 'Knowledge Maintenance Agent 运行已取消')
-    if (
-      compactionError instanceof PiContextWindowError
-      || compactionError instanceof PiContextCompactionOutputError
-    ) throw compactionError
-    if (compactionError) {
-      throw new ModelConnectionFailureError(compactionError)
-    }
-    if (agent.state.errorMessage) {
-      throw new ModelConnectionFailureError(
-        new Error(`Knowledge Maintenance Agent 模型调用失败：${agent.state.errorMessage}`)
-      )
-    }
-    let finalAssistantMessage: AssistantMessage | undefined
-    for (let index = agent.state.messages.length - 1; index >= 0; index--) {
-      const message = agent.state.messages[index]
-      if (message.role !== 'assistant') continue
-      finalAssistantMessage = message
-      break
-    }
-    if (finalAssistantMessage?.stopReason === 'length') {
-      throw new ModelOutputTruncatedError('Knowledge Maintenance Agent 的最终模型输出达到长度上限，运行结果不完整')
-    }
-    if (!finalAssistantMessage || finalAssistantMessage.stopReason !== 'stop') {
-      throw new Error('Knowledge Maintenance Agent 未正常自然结束')
-    }
-    if (agentRuntime.todos.pendingCount) {
-      throw new Error('Knowledge Maintenance Agent 结束时仍有 pending Todo')
-    }
-    const contribution = contributionDraft.contribution(input.contributionRunRef)
-
-    return {
-      contribution,
-      todos: agentRuntime.todos.list(),
-      modelCallCount,
-      toolCalls: [...toolCalls]
+      detachRuntime()
     }
   }
 }

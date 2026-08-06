@@ -13,19 +13,16 @@ import type {
   KnowledgeContributionDraft,
   KnowledgeStatement
 } from './knowledge'
-import type { AgentTodo, AgentTodoCounts } from './agent-runtime'
+import type {
+  AgentRunRecord,
+  AgentTodo,
+  AgentTodoCounts,
+  SerializableJsonValue
+} from './agent-runtime'
 
 export const PROCESSING_STAGE_IDS = ['knowledge_maintenance_agent'] as const
 export type ProcessingStageId = (typeof PROCESSING_STAGE_IDS)[number]
 export type ProcessingRuntime = 'pi_agent_core'
-
-export type SerializableJsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | SerializableJsonValue[]
-  | { [key: string]: SerializableJsonValue }
 
 export interface ProcessingToolView {
   name: string
@@ -75,45 +72,17 @@ export interface KnowledgeProcessingSnapshot {
 }
 
 export type ProcessingDebugTraceOrigin = 'stage_debug' | 'full_chain'
-export type ProcessingDebugStatus = 'running' | 'completed' | 'failed' | 'cancelled'
-
-export interface KnowledgeMaintenanceTraceEvent {
-  id: string
-  sequence: number
-  kind: 'model_call' | 'tool_call'
-  label: string
-  status: ProcessingDebugStatus
-  startedAt: string
-  completedAt?: string
-  durationMs?: number
-  detail?: string
-  input?: string
-  inputTruncated?: boolean
-  output?: string
-  outputTruncated?: boolean
-}
 
 export interface KnowledgeMaintenanceWorkspaceStatus {
   todos: AgentTodoCounts
   draftStatementCount: number
 }
 
-export interface KnowledgeMaintenanceDebugTrace {
-  modelCallCount: number
-  toolCallCount: number
-  workspace?: KnowledgeMaintenanceWorkspaceStatus
-  events: KnowledgeMaintenanceTraceEvent[]
-}
-
-/** Bounded, in-memory diagnostics for the latest confirmed run in each UI origin. */
+/** Processing-specific placement of a generic Agent run and its separate workspace state. */
 export interface KnowledgeProcessingDebugTrace {
-  id: string
   origin: ProcessingDebugTraceOrigin
-  status: ProcessingDebugStatus
-  startedAt: string
-  completedAt?: string
-  error?: string
-  maintenance: KnowledgeMaintenanceDebugTrace
+  run: AgentRunRecord
+  workspace?: KnowledgeMaintenanceWorkspaceStatus
 }
 
 export interface SaveProcessingStageInput {
@@ -187,7 +156,7 @@ export interface KnowledgeFullChainStageSnapshot {
 }
 
 export interface KnowledgeFullChainRunRecord {
-  formatVersion: 3
+  formatVersion: 4
   runId: string
   attention?: string
   configuration: {

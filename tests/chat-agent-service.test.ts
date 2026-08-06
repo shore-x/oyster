@@ -217,6 +217,13 @@ describe('ChatAgentService', () => {
         updatedTitles: ['Project P']
       }
     })
+    expect(detail.runs).toHaveLength(1)
+    expect(detail.runs[0].modelCalls).toHaveLength(4)
+    expect(detail.runs[0].toolCalls.map((call) => call.name)).toEqual([
+      'search_knowledge',
+      'read_knowledge',
+      'upsert_knowledge'
+    ])
     expect(fixture.knowledgeStore.getStatement('Project P')?.content).toContain('SQLite')
     expect(fixture.knowledgeStore.getStatement('SQLite')).toBeDefined()
     expect(events).toContainEqual(expect.objectContaining({
@@ -225,15 +232,10 @@ describe('ChatAgentService', () => {
       status: 'completed'
     }))
     expect(events).toContainEqual(expect.objectContaining({
-      type: 'message_updated',
-      sessionId: session.id
+      type: 'run_updated',
+      sessionId: session.id,
+      run: expect.objectContaining({ status: 'completed' })
     }))
-    expect(events).toContainEqual(expect.objectContaining({
-      type: 'tool_completed',
-      toolName: 'upsert_knowledge',
-      isError: false
-    }))
-
     const snapshot = await fixture.service.getSnapshot()
     expect(snapshot.agent).toMatchObject({
       builtInInstructions: DEFAULT_CHAT_AGENT_SYSTEM_PROMPT,
@@ -542,17 +544,29 @@ describe('ChatAgentService', () => {
     expect(toolMessages[4]).toMatchObject({
       text: expect.stringContaining(ARTIFACT_GIT_BINARY_PATH)
     })
-    for (const toolName of ['write', 'edit', 'read', 'bash']) {
-      expect(events).toContainEqual(expect.objectContaining({
-        type: 'tool_started',
-        toolName
-      }))
-      expect(events).toContainEqual(expect.objectContaining({
-        type: 'tool_completed',
-        toolName,
-        isError: false
-      }))
-    }
+    const latestRunEvent = events
+      .filter((event): event is Extract<ChatEvent, { type: 'run_updated' }> => (
+        event.type === 'run_updated'
+      ))
+      .at(-1)
+    const expectedToolCalls = [
+      ['write', 'completed', false],
+      ['edit', 'completed', false],
+      ['read', 'completed', false],
+      ['write', 'completed', false],
+      ['bash', 'completed', false]
+    ]
+    expect(latestRunEvent?.run.status).toBe('completed')
+    expect(latestRunEvent?.run.toolCalls.map((call) => [
+      call.name,
+      call.status,
+      call.isError
+    ])).toEqual(expectedToolCalls)
+    expect(detail.runs.at(-1)?.toolCalls.map((call) => [
+      call.name,
+      call.status,
+      call.isError
+    ])).toEqual(expectedToolCalls)
 
     fixture.service.dispose()
     fixture.knowledgeStore.close()

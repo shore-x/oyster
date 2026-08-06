@@ -2,7 +2,7 @@
 
 > 状态：当前实现规格
 >
-> 日期：2026-08-05
+> 日期：2026-08-06
 
 ## 1. 目的与边界
 
@@ -47,10 +47,16 @@ End Check 不判断 Agent 的工作质量，也不证明 Todo 已被正确完成
 - Todo Store 独立于 `transformContext`，现有 transcript compaction 不负责保存、重建或注入 Todo；
 - Runtime Feedback 通过统一 `convertToLlm` 转换，保持 Host 内部消息与真实用户消息的身份区别。
 
+Runtime 同时提供一项旁路的 **Run Recorder**。它订阅 Pi Core 的 `agent_*`、`turn_*`、`message_*` 和 `tool_execution_*` 事件，并包装实际 `streamFn`，形成统一的 Run、Turn、Message、Tool Call 与 Model Call 记录。记录器不参与 Todo 判断、上下文变换、工具执行或结束决策；观察回调失败不得改变 Agent 行为。
+
+普通 Pi 事件足以重建消息和工具 Timeline，但不能证明单次模型实际收到什么。Recorder 因此在 `streamFn` 边界保存已经经过 `transformContext` 和 `convertToLlm` 的 Pi Context，包括 System Prompt、messages 与模型可见工具 Schema，并通过流的 `result()` 旁路保存最终 Assistant 输出。Agent 主调用和上下文压缩分别标记为 `agent` 与 `context_compaction`。记录只到 Pi Context 层：不保存 API Key、Header、环境变量、AbortSignal 或回调，也不观察、复制 Provider Payload。
+
+运行记录是本地开发与解释界面，不是 Knowledge、Artifact、Raw Evidence 或审计真相。Todo、Contribution Draft 等业务工作状态仍由各自 Workspace 持有并单独展示，不进入通用轨迹模型。加工测试把成功运行记录随 V4 历史结果保存；Chat 使用 Pi Custom Entry 将 Run 绑定到 Session，Custom Entry 默认不参与后续模型 Context。Renderer 以同一个 Timeline 和 Model Call Inspector 展示两者，可从 Assistant 消息定位具体调用并按需查看完整 Pi Context 与输出。
+
 Knowledge Maintenance Agent 使用同一 Todo Store 跟踪本次调查工作，并独立持有 Contribution Draft。Host 在启动时把完整 Raw Evidence 确定性组织为粗粒度 Evidence Segment，每一段作为普通 initial Todo 绑定到运行；段内可以列出多个有界 `read_evidence` 调用，工具分页不会各自产生 Todo。Agent 可继续增加调查 Todo，但 Runtime 不引入证据专用状态或工具。Agent 主动使用 `list_todos`、`add_todos` 和 `complete_todos`，Runtime 不在每次模型调用前注入工作清单。
 
 Knowledge Maintenance Agent 也没有专用的提交或终止工具。只要仍有 pending Todo，通用结束检查就会拒绝自然结束并续跑；当 Todo 全部完成且 Agent 自然结束时，Host 才把完整的当前 Draft 冻结为本次 Knowledge Contribution。这是 Host 对整次运行的解释，不是单次工具调用的提交。
 
 ## 5. 当前非目标
 
-当前 Runtime 不负责 Maintainer 与 Reviewer 的外层交接，不定义跨 Agent 工作项协议，也不把 Todo 持久化为新的领域对象。跨运行恢复、运行级 UI、Todo 历史以及更一般的工作交接只有在出现明确需求后再设计。
+当前 Runtime 不负责 Maintainer 与 Reviewer 的外层交接，不定义跨 Agent 工作项协议，也不把 Todo 持久化为新的领域对象。Run Recorder 不提供分布式 Trace、Provider Payload 检查、跨运行恢复或长期 Todo 历史；更一般的工作交接仍在出现明确需求后再设计。

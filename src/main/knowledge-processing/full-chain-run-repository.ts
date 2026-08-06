@@ -6,7 +6,7 @@ import type {
   KnowledgeFullChainRunSummary
 } from '../../shared/knowledge-processing'
 
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 const MAX_RUN_ID_LENGTH = 256
 
 interface FullChainRunSummaryRow {
@@ -38,7 +38,7 @@ function normalizedRunId(value: unknown): string {
 function parseRecord(payload: string, expectedRunId: string): KnowledgeFullChainRunRecord {
   const record = JSON.parse(payload) as KnowledgeFullChainRunRecord
   if (
-    record?.formatVersion !== 3
+    record?.formatVersion !== 4
     || record.runId !== expectedRunId
     || record.result?.runId !== expectedRunId
     || !record.result.completedAt
@@ -104,7 +104,7 @@ export class SqliteKnowledgeFullChainRunRepository implements KnowledgeFullChain
   save(record: KnowledgeFullChainRunRecord): void {
     this.assertOpen()
     const runId = normalizedRunId(record?.runId)
-    if (record.formatVersion !== 3) throw new Error('加工测试历史格式版本无效')
+    if (record.formatVersion !== 4) throw new Error('加工测试历史格式版本无效')
     if (record.result?.runId !== runId) throw new Error('加工测试历史与运行结果不匹配')
     const { result } = record
     this.database.prepare(`

@@ -78,7 +78,7 @@ export function FullChainActivityDetail(props: {
           <p>{props.description || '选择一次模型或工具调用，检查该事件的输出与结果。'}</p>
         </div>
       </div>
-      <p class="chain-test__detail-disclosure">模型输出和工具结果可能包含原始观察材料；这里只保存有界的本地调试副本。</p>
+      <p class="chain-test__detail-disclosure">运行记录可能包含原始观察材料和完整 Pi Context；数据仅保存在本地，不包含 Provider Payload 或鉴权信息。</p>
       <Show when={props.trace} fallback={<div class="chain-test__empty">当前没有可查看的运行轨迹。</div>}>
         {(trace) => <ProcessingTraceExplorer trace={trace()} />}
       </Show>

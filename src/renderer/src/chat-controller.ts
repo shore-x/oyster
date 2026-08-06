@@ -1,9 +1,7 @@
 import { createSignal, onCleanup, onMount } from 'solid-js'
 import type { AiBackendSnapshot } from '../../shared/ai-backends'
-import type { SerializableJsonValue } from '../../shared/knowledge-processing'
 import type {
   ChatEvent,
-  ChatMessageView,
   ChatSessionDetail,
   ChatSnapshot
 } from '../../shared/chat'
@@ -23,14 +21,6 @@ const EMPTY_CHAT_SNAPSHOT: ChatSnapshot = {
 }
 
 const EMPTY_BACKEND_SNAPSHOT: AiBackendSnapshot = { options: [], connections: [] }
-
-export interface LiveChatToolActivity {
-  toolCallId: string
-  toolName: string
-  input: SerializableJsonValue
-  result?: SerializableJsonValue
-  status: 'running' | 'completed' | 'failed'
-}
 
 export interface ChatSendOutcome {
   completed: boolean
@@ -58,8 +48,6 @@ export function createChatController() {
   const [cancellingSessionId, setCancellingSessionId] = createSignal<string>()
   const [error, setError] = createSignal<string>()
   const [runStates, setRunStates] = createSignal<Record<string, ChatEvent & { type: 'run_state_changed' }>>({})
-  const [streamingMessages, setStreamingMessages] = createSignal<Record<string, ChatMessageView>>({})
-  const [toolActivities, setToolActivities] = createSignal<Record<string, Record<string, LiveChatToolActivity>>>({})
   let readGeneration = 0
   let selectionInitialized = false
 
@@ -73,23 +61,6 @@ export function createChatController() {
     })
   }
 
-  function setStreamingMessage(sessionId: string, message: ChatMessageView | undefined): void {
-    setStreamingMessages((current) => {
-      if (message) return { ...current, [sessionId]: message }
-      const next = { ...current }
-      delete next[sessionId]
-      return next
-    })
-  }
-
-  function clearLiveTools(sessionId: string): void {
-    setToolActivities((current) => {
-      const next = { ...current }
-      delete next[sessionId]
-      return next
-    })
-  }
-
   function handleEvent(event: ChatEvent): void {
     if (event.type === 'snapshot_changed') {
       setSnapshot(event.snapshot)
@@ -98,11 +69,6 @@ export function createChatController() {
     if (event.type === 'run_state_changed') {
       setRunStates((current) => ({ ...current, [event.sessionId]: event }))
       if (event.status === 'failed') setError(event.error || '对话 Agent 运行失败。')
-      if (event.status !== 'running') setStreamingMessage(event.sessionId, undefined)
-      return
-    }
-    if (event.type === 'message_updated') {
-      setStreamingMessage(event.sessionId, event.message)
       return
     }
     if (event.type === 'message_appended') {
@@ -115,39 +81,20 @@ export function createChatController() {
           return { ...current, messages, messageCount: messages.length }
         })
       }
-      if (event.entry.message.role === 'assistant') {
-        setStreamingMessage(event.sessionId, undefined)
+      return
+    }
+    if (event.type === 'run_updated') {
+      if (event.sessionId === selectedSessionId()) {
+        setSession((current) => {
+          if (!current || current.id !== event.sessionId) return current
+          const runs = current.runs.some((run) => run.id === event.run.id)
+            ? current.runs.map((run) => run.id === event.run.id ? event.run : run)
+            : [...current.runs, event.run]
+          return { ...current, runs }
+        })
       }
       return
     }
-    if (event.type === 'tool_started') {
-      setToolActivities((current) => ({
-        ...current,
-        [event.sessionId]: {
-          ...(current[event.sessionId] ?? {}),
-          [event.toolCallId]: {
-            toolCallId: event.toolCallId,
-            toolName: event.toolName,
-            input: event.input,
-            status: 'running'
-          }
-        }
-      }))
-      return
-    }
-    setToolActivities((current) => ({
-      ...current,
-      [event.sessionId]: {
-        ...(current[event.sessionId] ?? {}),
-        [event.toolCallId]: {
-          toolCallId: event.toolCallId,
-          toolName: event.toolName,
-          input: current[event.sessionId]?.[event.toolCallId]?.input,
-          result: event.result,
-          status: event.isError ? 'failed' : 'completed'
-        }
-      }
-    }))
   }
 
   async function readSession(sessionId: string): Promise<boolean> {
@@ -240,8 +187,6 @@ export function createChatController() {
       const detail = await window.oyster.chat.sendMessage({ sessionId, text: normalized })
       if (selectedSessionId() === sessionId) setSession(detail)
       replaceSummary(detail)
-      setStreamingMessage(sessionId, undefined)
-      clearLiveTools(sessionId)
       return { completed: true, userMessageRecorded: true }
     } catch (cause) {
       if (sessionId) {
@@ -310,14 +255,6 @@ export function createChatController() {
     sending,
     cancellingSessionId,
     error,
-    streamingMessage: () => {
-      const sessionId = selectedSessionId()
-      return sessionId ? streamingMessages()[sessionId] : undefined
-    },
-    liveToolActivities: () => {
-      const sessionId = selectedSessionId()
-      return sessionId ? Object.values(toolActivities()[sessionId] ?? {}) : []
-    },
     isSessionRunning,
     startNew,
     readSession,

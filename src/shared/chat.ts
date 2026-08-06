@@ -1,5 +1,6 @@
 import type { LlmBinding } from './ai-backends'
-import type { ProcessingToolView, SerializableJsonValue } from './knowledge-processing'
+import type { AgentRunRecord, SerializableJsonValue } from './agent-runtime'
+import type { ProcessingToolView } from './knowledge-processing'
 
 export const CHAT_AGENT_ID = 'chat_agent' as const
 
@@ -60,6 +61,7 @@ export interface ChatSessionSummary {
 
 export interface ChatSessionDetail extends ChatSessionSummary {
   messages: ChatTranscriptEntry[]
+  runs: AgentRunRecord[]
 }
 
 export interface ChatAgentConfigurationView {
@@ -110,29 +112,14 @@ export type ChatEvent =
       error?: string
     }
   | {
-      type: 'message_updated'
-      sessionId: string
-      message: ChatMessageView
-    }
-  | {
       type: 'message_appended'
       sessionId: string
       entry: ChatTranscriptEntry
     }
   | {
-      type: 'tool_started'
+      type: 'run_updated'
       sessionId: string
-      toolCallId: string
-      toolName: string
-      input: SerializableJsonValue
-    }
-  | {
-      type: 'tool_completed'
-      sessionId: string
-      toolCallId: string
-      toolName: string
-      result: SerializableJsonValue
-      isError: boolean
+      run: AgentRunRecord
     }
 
 export interface ChatApi {

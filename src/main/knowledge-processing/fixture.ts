@@ -1,4 +1,5 @@
 import type { AiBackendService } from '../ai-backends/ai-backend-service'
+import type { AgentRunRecord, SerializableJsonValue } from '../../shared/agent-runtime'
 import { AgentTodoStore } from '../agent-runtime/agent-todos'
 import type { KnowledgeAgentRunInput, KnowledgeAgentRunResult, KnowledgeAgentRuntime } from './model'
 import { InMemoryKnowledgeProcessingRepository } from './repository'
@@ -9,8 +10,7 @@ export class FixtureKnowledgeAgentRuntime implements KnowledgeAgentRuntime {
     input.signal.throwIfAborted()
     const todoStore = new AgentTodoStore(input.initialTodos)
     const pendingTodos = todoStore.list()
-    input.onTrace?.({
-      type: 'workspace_status',
+    input.onWorkspaceStatus?.({
       todos: {
         total: pendingTodos.length,
         pending: pendingTodos.length,
@@ -18,45 +18,8 @@ export class FixtureKnowledgeAgentRuntime implements KnowledgeAgentRuntime {
       },
       draftStatementCount: 0
     })
-    input.onTrace?.({ type: 'model_started', callNumber: 1 })
-    input.onTrace?.({
-      type: 'model_completed',
-      callNumber: 1,
-      status: 'completed',
-      detail: 'stop=toolUse · tokens=48 · tools=list_todos, read_evidence, complete_todos',
-      output: 'Tool call · read_evidence\n{"line":1,"offset":0,"limit":48}'
-    })
-    input.onTrace?.({
-      type: 'tool_started',
-      toolCallId: 'fixture-read',
-      toolName: 'read_evidence',
-      input: '{"line":1,"offset":0,"limit":48}'
-    })
-    input.onTrace?.({
-      type: 'tool_completed',
-      toolCallId: 'fixture-read',
-      toolName: 'read_evidence',
-      status: 'completed',
-      detail: 'L000001:C0-L000001:C48 · 48 字符 · EOF',
-      output: 'Fixture raw evidence for knowledge processing.'
-    })
-    input.onTrace?.({
-      type: 'tool_started',
-      toolCallId: 'fixture-complete',
-      toolName: 'complete_todos',
-      input: JSON.stringify({ ids: pendingTodos.map((todo) => todo.id) })
-    })
     todoStore.complete(pendingTodos.map((todo) => todo.id))
-    input.onTrace?.({
-      type: 'tool_completed',
-      toolCallId: 'fixture-complete',
-      toolName: 'complete_todos',
-      status: 'completed',
-      detail: 'Todo · 0 个待处理',
-      output: `Completed ${pendingTodos.length} Todos.`
-    })
-    input.onTrace?.({
-      type: 'workspace_status',
+    input.onWorkspaceStatus?.({
       todos: {
         total: pendingTodos.length,
         pending: 0,
@@ -64,6 +27,118 @@ export class FixtureKnowledgeAgentRuntime implements KnowledgeAgentRuntime {
       },
       draftStatementCount: 2
     })
+    const startedAt = new Date().toISOString()
+    const modelId = input.runtime.model.id
+    const userMessageId = `${input.runId}:message:1`
+    const assistantMessageId = `${input.runId}:message:2`
+    const evidenceCallId = 'fixture-read'
+    const todoCallId = 'fixture-complete'
+    const assistantOutput: SerializableJsonValue = {
+      role: 'assistant' as const,
+      content: [
+        { type: 'toolCall' as const, id: evidenceCallId, name: 'read_evidence', arguments: { line: 1, offset: 0, limit: 48 } },
+        { type: 'toolCall' as const, id: todoCallId, name: 'complete_todos', arguments: { ids: pendingTodos.map((todo) => todo.id) } }
+      ],
+      api: input.runtime.model.api,
+      provider: input.runtime.model.provider,
+      model: modelId,
+      usage: {
+        input: 32,
+        output: 16,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 48,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+      },
+      stopReason: 'toolUse' as const,
+      timestamp: Date.now()
+    }
+    const run: AgentRunRecord = {
+      id: input.runId,
+      status: 'completed' as const,
+      startedAt,
+      completedAt: startedAt,
+      durationMs: 0,
+      turns: [{
+        id: `${input.runId}:turn:1`,
+        sequence: 1,
+        status: 'completed' as const,
+        startedAt,
+        completedAt: startedAt,
+        durationMs: 0,
+        messageIds: [userMessageId, assistantMessageId],
+        toolCallIds: [evidenceCallId, todoCallId]
+      }],
+      messages: [{
+        id: userMessageId,
+        sequence: 2,
+        turnId: `${input.runId}:turn:1`,
+        status: 'completed' as const,
+        role: 'user' as const,
+        message: { role: 'user', content: 'Fixture knowledge maintenance task.', timestamp: Date.now() }
+      }, {
+        id: assistantMessageId,
+        sequence: 4,
+        turnId: `${input.runId}:turn:1`,
+        status: 'completed' as const,
+        role: 'assistant' as const,
+        message: assistantOutput
+      }],
+      modelCalls: [{
+        id: `${input.runId}:model:1`,
+        sequence: 3,
+        turnId: `${input.runId}:turn:1`,
+        outputMessageId: assistantMessageId,
+        purpose: 'agent' as const,
+        status: 'completed' as const,
+        startedAt,
+        completedAt: startedAt,
+        durationMs: 0,
+        model: {
+          id: modelId,
+          name: input.runtime.model.name,
+          provider: input.runtime.model.provider,
+          api: input.runtime.model.api,
+          reasoning: input.runtime.model.reasoning,
+          contextWindow: input.runtime.model.contextWindow,
+          maxTokens: input.runtime.model.maxTokens
+        },
+        context: {
+          systemPrompt: input.systemPrompt,
+          messages: [{ role: 'user', content: 'Fixture knowledge maintenance task.', timestamp: Date.now() }],
+          tools: [{ name: 'read_evidence', description: 'Read Raw Evidence.', parameters: { type: 'object' } }]
+        },
+        output: assistantOutput
+      }],
+      toolCalls: [{
+        id: evidenceCallId,
+        sequence: 5,
+        turnId: `${input.runId}:turn:1`,
+        assistantMessageId,
+        name: 'read_evidence',
+        status: 'completed' as const,
+        startedAt,
+        completedAt: startedAt,
+        durationMs: 0,
+        input: { line: 1, offset: 0, limit: 48 },
+        result: { content: [{ type: 'text', text: 'Fixture raw evidence for knowledge processing.' }] },
+        isError: false
+      }, {
+        id: todoCallId,
+        sequence: 6,
+        turnId: `${input.runId}:turn:1`,
+        assistantMessageId,
+        name: 'complete_todos',
+        status: 'completed' as const,
+        startedAt,
+        completedAt: startedAt,
+        durationMs: 0,
+        input: { ids: pendingTodos.map((todo) => todo.id) },
+        result: { content: [{ type: 'text', text: `Completed ${pendingTodos.length} Todos.` }] },
+        isError: false
+      }]
+    }
+    input.onRunUpdate?.(run)
     return {
       contribution: {
         runRef: input.contributionRunRef,
@@ -79,6 +154,7 @@ export class FixtureKnowledgeAgentRuntime implements KnowledgeAgentRuntime {
         ]
       },
       todos: todoStore.list(),
+      run,
       modelCallCount: 1,
       toolCalls: ['read_evidence', 'complete_todos']
     }

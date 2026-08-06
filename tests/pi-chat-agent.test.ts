@@ -77,6 +77,11 @@ describe('PiChatAgent', () => {
       role: 'assistant',
       text: 'Continued after compaction.'
     })
+    expect(detail.runs).toHaveLength(1)
+    expect(detail.runs[0].modelCalls.some((call) => call.purpose === 'context_compaction')).toBe(true)
+    expect(detail.runs[0].modelCalls.some((call) => call.purpose === 'agent')).toBe(true)
+    expect(detail.runs[0].modelCalls.find((call) => call.purpose === 'agent')?.context.messages)
+      .toContainEqual(expect.objectContaining({ role: 'user' }))
     knowledgeStore.close()
     await sessions.dispose()
   })
@@ -139,6 +144,9 @@ describe('PiChatAgent', () => {
       role: 'assistant',
       text: 'Finished after completing the Todo.'
     })
+    expect(detail.runs).toHaveLength(1)
+    expect(detail.runs[0]).toMatchObject({ status: 'completed' })
+    expect(detail.runs[0].modelCalls).toHaveLength(4)
     const rawContext = await opened.session.buildContext()
     expect(rawContext.messages).toContainEqual(expect.objectContaining({ role: 'runtimeFeedback' }))
 

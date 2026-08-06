@@ -393,6 +393,17 @@ if (!chat.assistantStrongText?.includes('Fixture 对话 Agent') || chat.assistan
 if (!chat.composerVisible || !chat.workspaceWithinViewport || chat.overflowX) {
   throw new Error('The conversational workspace does not remain within the viewport')
 }
+if (
+  chat.runViewCount !== 1
+  || !chat.modelCallAction
+  || !chat.modelCallInspector
+  || !chat.modelCallContext?.includes('请简要介绍你能如何使用知识库')
+) {
+  throw new Error('The conversational page does not use the shared Agent run visualization')
+}
+if (chat.overflowWithInspector) {
+  throw new Error('The conversational Model Call inspector causes horizontal overflow')
+}
 
 const processing = semantics.processing
 if (processing.title !== '加工测试') throw new Error('Knowledge processing page was not rendered')
@@ -450,13 +461,19 @@ if (processing.fullChainRun.overviewHasTraceExplorer) {
 if (processing.fullChainRun.summaryStatementCount !== '2') {
   throw new Error('The full-chain overview does not expose compact result counts')
 }
-if (!processing.fullChainRun.traceExplorerExists || processing.fullChainRun.traceEventCount !== 3) {
-  throw new Error('The secondary run-detail page does not expose the complete event list')
+if (!processing.fullChainRun.traceExplorerExists || processing.fullChainRun.traceEventCount !== 4) {
+  throw new Error('The secondary run-detail page does not expose the shared Agent timeline')
 }
-if (!processing.fullChainRun.modelOutput?.includes('Tool call · read_evidence')) {
+if (!processing.fullChainRun.modelOutput?.includes('read_evidence')) {
   throw new Error('The run-detail page does not expose each model call output')
 }
-if (!processing.fullChainRun.toolInput?.includes('"line":1') || !processing.fullChainRun.toolOutput?.includes('Fixture raw evidence')) {
+if (
+  !processing.fullChainRun.modelContext?.includes('Fixture knowledge maintenance task')
+  || !processing.fullChainRun.systemPrompt?.includes('Knowledge Maintenance Agent')
+) {
+  throw new Error('The Model Call inspector does not expose the complete Pi Context')
+}
+if (!processing.fullChainRun.toolInput?.includes('"line": 1') || !processing.fullChainRun.toolOutput?.includes('Fixture raw evidence')) {
   throw new Error('The run-detail page does not expose tool arguments and results')
 }
 if (!processing.fullChainRun.resultDetailExists || !processing.fullChainRun.returnedToOverview) {
@@ -511,10 +528,11 @@ if (processing.history.overflowAfterStatementBack) {
 }
 if (
   !processing.history.activityDetailExists
-  || processing.history.traceEventCount !== 3
+  || processing.history.traceEventCount !== 4
   || !processing.history.traceText?.includes('Fixture raw evidence')
+  || !processing.history.contextText?.includes('Fixture knowledge maintenance task')
 ) {
-  throw new Error('Historical run details do not expose the persisted model and tool trace')
+  throw new Error('Historical run details do not expose the persisted Agent Run')
 }
 if (!processing.history.returnedToHistory) {
   throw new Error('Historical secondary pages do not return to the history list')
@@ -576,10 +594,13 @@ if (!processing.promptRestore.matchesOriginal || processing.promptRestore.defaul
   throw new Error('Restore default did not reset an unsaved prompt draft after a successful save')
 }
 if (processing.trace.panelCount !== 1) throw new Error('The processing debug trace panel must be rendered')
-if (processing.trace.maintenanceEventCount !== 3) {
-  throw new Error(`Expected 3 safe maintenance trace events, got ${processing.trace.maintenanceEventCount}`)
+if (processing.trace.maintenanceEventCount !== 4) {
+  throw new Error(`Expected 4 Agent timeline items, got ${processing.trace.maintenanceEventCount}`)
 }
-for (const requiredCopy of ['模型轮次 1', '读取原始观察证据', '完成待办事项']) {
+if (!processing.trace.modelCallAction) {
+  throw new Error('Knowledge maintenance debug trace cannot open the shared Model Call inspector')
+}
+for (const requiredCopy of ['Fixture knowledge maintenance task', 'read_evidence', 'complete_todos']) {
   if (!processing.trace.bodyText.includes(requiredCopy)) {
     throw new Error(`Knowledge processing trace is missing: ${requiredCopy}`)
   }

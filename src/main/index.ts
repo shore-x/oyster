@@ -578,7 +578,15 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const browserWithinViewport = Boolean(browserBounds)
       && browserBounds.top >= 0
       && browserBounds.bottom <= window.innerHeight + 1
-    referenceFocusedTwoHopNode?.click()
+    const referenceNavigationDisclosureNode = Array.from(
+      referenceGraph?.querySelectorAll('.knowledge-local-graph__node') ?? []
+    ).find((node) => Number(node.dataset.distance) === 1)
+    referenceNavigationDisclosureNode?.dispatchEvent(new MouseEvent('mouseenter'))
+    await new Promise((resolve) => setTimeout(resolve, 160))
+    const referenceNavigationNode = Array.from(
+      referenceGraph?.querySelectorAll('.knowledge-local-graph__node') ?? []
+    ).find((node) => node.dataset.title === referenceTwoHopTitle)
+    referenceNavigationNode?.click()
     deadline = Date.now() + 2_000
     while (
       page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim() !== referenceTwoHopTitle
@@ -604,7 +612,8 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     link?.click()
     deadline = Date.now() + 2_000
     while (
-      page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim() !== 'Knowledge Maintenance Agent'
+      (page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim() !== 'Knowledge Maintenance Agent'
+        || page.querySelector('[data-testid="statement-nav-back"]')?.disabled !== false)
       && Date.now() < deadline
     ) await new Promise((resolve) => setTimeout(resolve, 25))
     const linkedTitle = page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
@@ -613,7 +622,8 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     backButton?.click()
     deadline = Date.now() + 2_000
     while (
-      page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim() !== 'Oyster 知识加工链路'
+      (page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim() !== 'Oyster 知识加工链路'
+        || page.querySelector('[data-testid="statement-nav-forward"]')?.disabled !== false)
       && Date.now() < deadline
     ) await new Promise((resolve) => setTimeout(resolve, 25))
     const titleAfterBack = page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
@@ -802,19 +812,22 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       const error = page.querySelector('.page-error')?.textContent?.trim()
       if (completed || error) {
         if (error) return { completed, runningStateVisible, error }
-        const overviewHasTraceExplorer = Boolean(page.querySelector('[data-testid="processing-trace-explorer"]'))
+        const overviewHasTraceExplorer = Boolean(page.querySelector('[data-testid="agent-run-view"]'))
         const summaryStatementCount = page.querySelector('[data-testid="full-chain-result-statement-count"]')?.textContent?.trim()
         page.querySelector('[data-testid="open-full-chain-activity"]')?.click()
         await new Promise((resolve) => requestAnimationFrame(resolve))
-        const traceExplorerExists = Boolean(page.querySelector('[data-testid="processing-trace-explorer"]'))
-        const traceEventCount = page.querySelectorAll('.trace-explorer-event').length
-        page.querySelector('[data-testid="trace-explorer-event-maintenance-model-call-1"]')?.click()
+        const traceExplorerExists = Boolean(page.querySelector('[data-testid="agent-run-view"]'))
+        const traceEventCount = page.querySelectorAll('.agent-trace-message, .agent-trace-tool, .agent-trace-model-activity').length
+        page.querySelector('.agent-trace-message--assistant button')?.click()
         await new Promise((resolve) => requestAnimationFrame(resolve))
-        const modelOutput = page.querySelector('[data-testid="trace-explorer-event-output"]')?.textContent
-        page.querySelector('[data-testid="trace-explorer-event-maintenance-tool-call-1"]')?.click()
+        const modelOutput = page.querySelector('[data-testid="agent-model-call-output"]')?.textContent
+        const modelContext = page.querySelector('[data-testid="agent-model-call-context"]')?.textContent
+        const systemPrompt = page.querySelector('[data-testid="agent-model-call-system-prompt"]')?.textContent
+        const tool = page.querySelector('.agent-trace-tool')
+        if (tool) tool.open = true
         await new Promise((resolve) => requestAnimationFrame(resolve))
-        const toolInput = page.querySelector('[data-testid="trace-explorer-event-input"]')?.textContent
-        const toolOutput = page.querySelector('[data-testid="trace-explorer-event-output"]')?.textContent
+        const toolInput = tool?.querySelectorAll('pre')[0]?.textContent
+        const toolOutput = tool?.querySelectorAll('pre')[1]?.textContent
         page.querySelector('[data-testid="full-chain-detail-back"]')?.click()
         await new Promise((resolve) => requestAnimationFrame(resolve))
         page.querySelector('[data-testid="open-full-chain-result"]')?.click()
@@ -861,6 +874,8 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
           traceExplorerExists,
           traceEventCount,
           modelOutput,
+          modelContext,
+          systemPrompt,
           toolInput,
           toolOutput,
           resultDetailExists,
@@ -928,8 +943,11 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
     const activityDetailExists = Boolean(page.querySelector('[data-testid="history-run-activity-detail"]'))
-    const traceEventCount = page.querySelectorAll('[data-testid="history-run-activity-detail"] .trace-explorer-event').length
+    const traceEventCount = page.querySelectorAll('[data-testid="history-run-activity-detail"] .agent-trace-message, [data-testid="history-run-activity-detail"] .agent-trace-tool, [data-testid="history-run-activity-detail"] .agent-trace-model-activity').length
+    page.querySelector('[data-testid="history-run-activity-detail"] .agent-trace-message--assistant button')?.click()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
     const traceText = page.querySelector('[data-testid="history-run-activity-detail"]')?.textContent
+    const contextText = page.querySelector('[data-testid="history-run-activity-detail"] [data-testid="agent-model-call-context"]')?.textContent
     page.querySelector('[data-testid="history-run-activity-back"]')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
     return {
@@ -943,6 +961,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       activityDetailExists,
       traceEventCount,
       traceText,
+      contextText,
       returnedToHistory: Boolean(page.querySelector('.processing-history__list'))
     }
   })()`)
@@ -1021,7 +1040,8 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     workspace?.scrollIntoView({ block: 'center' })
     return {
       panelCount: stageTraces.length,
-      maintenanceEventCount: page.querySelectorAll('.processing-stage [data-testid^="maintenance-event-"]').length,
+      maintenanceEventCount: page.querySelectorAll('.processing-stage .agent-trace-message, .processing-stage .agent-trace-tool, .processing-stage .agent-trace-model-activity').length,
+      modelCallAction: Boolean(page.querySelector('.processing-stage .agent-trace-message--assistant button')),
       workspaceValues: Array.from(workspace?.querySelectorAll('strong') ?? []).map((node) => node.textContent?.trim()),
       bodyText: page.innerText,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
@@ -1248,20 +1268,33 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     page.querySelector('[data-testid="chat-send"]')?.click()
     deadline = Date.now() + 5_000
     while (
-      !page.querySelector('.chat-message--assistant')?.textContent?.includes('Fixture 对话 Agent')
+      !page.querySelector('.agent-trace-message--assistant')?.textContent?.includes('Fixture 对话 Agent')
       && !page.querySelector('.page-error')
       && Date.now() < deadline
     ) await new Promise((resolve) => setTimeout(resolve, 25))
+    const modelCallButton = page.querySelector('.agent-trace-message--assistant button')
+    modelCallButton?.click()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const modelCallInspector = page.querySelector('[data-testid="agent-model-call-inspector"]')
+    const modelCallContext = page.querySelector('[data-testid="agent-model-call-context"]')?.textContent
+    const overflowWithInspector = document.documentElement.scrollWidth > document.documentElement.clientWidth
+    page.querySelector('.agent-run-view__close')?.click()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
     const workspace = page.querySelector('.chat-workspace')?.getBoundingClientRect()
     return {
       title: page.querySelector('h1')?.textContent?.trim(),
       sessionCount: page.querySelectorAll('.chat-session').length,
       selectedModel,
       binding: page.querySelector('[data-testid="chat-current-binding"]')?.textContent?.trim(),
-      userText: page.querySelector('.chat-message--user')?.textContent?.trim(),
-      assistantText: page.querySelector('.chat-message--assistant')?.textContent?.trim(),
-      assistantStrongText: page.querySelector('.chat-message--assistant strong')?.textContent?.trim(),
-      assistantListItems: page.querySelectorAll('.chat-message--assistant li').length,
+      userText: page.querySelector('.agent-trace-message--user')?.textContent?.trim(),
+      assistantText: page.querySelector('.agent-trace-message--assistant')?.textContent?.trim(),
+      assistantStrongText: page.querySelector('.agent-trace-message--assistant .agent-trace-message__text strong')?.textContent?.trim(),
+      assistantListItems: page.querySelectorAll('.agent-trace-message--assistant li').length,
+      runViewCount: page.querySelectorAll('[data-testid="agent-run-view"]').length,
+      modelCallAction: Boolean(modelCallButton),
+      modelCallInspector: Boolean(modelCallInspector),
+      modelCallContext,
+      overflowWithInspector,
       composerVisible: Boolean(composer),
       pageError: page.querySelector('.page-error')?.textContent?.trim(),
       workspaceWithinViewport: Boolean(workspace && workspace.bottom <= window.innerHeight + 1),

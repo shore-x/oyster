@@ -5,21 +5,18 @@ import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { KnowledgeFullChainRunRecord } from '../src/shared/knowledge-processing'
 import { SqliteKnowledgeFullChainRunRepository } from '../src/main/knowledge-processing/full-chain-run-repository'
+import { completedAgentRun } from './agent-run-fixture'
 
 const temporaryDirectories: string[] = []
 
 function record(runId: string, completedAt: string, title: string): KnowledgeFullChainRunRecord {
   const statement = { title: 'Database', content: `Body for ${runId}` }
   const debugTrace = {
-    id: runId,
     origin: 'full_chain' as const,
-    status: 'completed' as const,
-    startedAt: completedAt,
-    completedAt,
-    maintenance: { modelCallCount: 1, toolCallCount: 1, events: [] }
+    run: completedAgentRun(runId, ['read_evidence'])
   }
   return {
-    formatVersion: 3,
+    formatVersion: 4,
     runId,
     attention: 'Focus on names.',
     configuration: {

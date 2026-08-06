@@ -12,10 +12,10 @@ import {
   type SaveProcessingStageInput
 } from '../../shared/knowledge-processing'
 import type { AiBackendSnapshot, AiConnection, ReasoningEffort } from '../../shared/ai-backends'
+import type { AgentRunRecord } from '../../shared/agent-runtime'
 import type { RawEvidence } from '../observation/model'
 import type {
   AiBackendPort,
-  KnowledgeAgentTraceEvent,
   KnowledgeAgentRuntime,
   KnowledgeProcessingRepository,
   KnowledgeProcessingStateData,
@@ -23,7 +23,6 @@ import type {
   StoredProcessingStage
 } from './model'
 import { PROCESSING_STAGE_DEFINITIONS, stageDefinition } from './prompts'
-import { KNOWLEDGE_MAINTENANCE_TOOL_CATALOG } from './knowledge-maintenance-tool-catalog'
 import {
   evidenceSegmentCharacterLimit,
   planEvidenceSegmentTodos
@@ -31,8 +30,6 @@ import {
 
 const MAX_SOURCE_REF_CHARACTERS = 512
 const MAX_DEBUG_TRACE_ERROR_CHARACTERS = 2 * 1_024
-const MAX_DEBUG_TRACE_DETAIL_CHARACTERS = 1 * 1_024
-const MAX_DEBUG_TRACE_EVENT_PAYLOAD_CHARACTERS = 64 * 1_024
 
 export interface ProcessingStageRunBinding {
   connectionId: string
@@ -67,43 +64,12 @@ function boundedDebugText(value: string, maximum: number): string {
   return value.length <= maximum ? value : `${value.slice(0, maximum - 1)}…`
 }
 
-function setBoundedEventPayload(
-  target: {
-    input?: string
-    inputTruncated?: boolean
-    output?: string
-    outputTruncated?: boolean
-  },
-  field: 'input' | 'output',
-  value?: string
-): void {
-  if (value === undefined) return
-  target[field] = boundedDebugText(value, MAX_DEBUG_TRACE_EVENT_PAYLOAD_CHARACTERS)
-  if (value.length > MAX_DEBUG_TRACE_EVENT_PAYLOAD_CHARACTERS) {
-    target[field === 'input' ? 'inputTruncated' : 'outputTruncated'] = true
-  }
-}
-
 function debugError(error: unknown): string {
   return boundedDebugText(errorText(error), MAX_DEBUG_TRACE_ERROR_CHARACTERS)
 }
 
 function traceTerminalStatus(signal: AbortSignal): 'failed' | 'cancelled' {
   return signal.aborted ? 'cancelled' : 'failed'
-}
-
-const KNOWLEDGE_TOOL_LABELS: Record<string, string> = Object.fromEntries(
-  KNOWLEDGE_MAINTENANCE_TOOL_CATALOG.map((tool) => [tool.name, tool.label])
-)
-
-function knowledgeToolLabel(toolName: string): string {
-  return KNOWLEDGE_TOOL_LABELS[toolName] ?? '未知工具'
-}
-
-function safeKnowledgeToolName(toolName: string): string | undefined {
-  return Object.prototype.hasOwnProperty.call(KNOWLEDGE_TOOL_LABELS, toolName)
-    ? toolName
-    : undefined
 }
 
 function isStageId(value: unknown): value is ProcessingStageId {
@@ -213,10 +179,6 @@ export class KnowledgeProcessingService {
   private readonly listeners = new Set<ProcessingSnapshotListener>()
   private readonly activeRuns = new Map<ProcessingStageId, AbortController>()
   private readonly debugTraces = new Map<ProcessingDebugTraceOrigin, KnowledgeProcessingDebugTrace>()
-  private readonly maintenanceToolTraceIds = new Map<ProcessingDebugTraceOrigin, {
-    traceId: string
-    eventIds: Map<string, string>
-  }>()
   private exclusiveLease?: ProcessingRunLease
   private readonly unsubscribeAiBackend: () => void
 
@@ -416,20 +378,17 @@ export class KnowledgeProcessingService {
 
   private beginMaintenanceDebugTrace(context: ProcessingDebugTraceContext): void {
     const trace: KnowledgeProcessingDebugTrace = {
-      id: context.id,
       origin: context.origin,
-      status: 'running',
-      startedAt: new Date().toISOString(),
-      maintenance: {
-        modelCallCount: 0,
-        toolCallCount: 0,
-        events: []
+      run: {
+        id: context.id,
+        status: 'running',
+        startedAt: new Date().toISOString(),
+        turns: [],
+        messages: [],
+        toolCalls: [],
+        modelCalls: []
       }
     }
-    this.maintenanceToolTraceIds.set(context.origin, {
-      traceId: context.id,
-      eventIds: new Map()
-    })
     this.debugTraces.set(context.origin, trace)
     this.emit()
   }
@@ -439,35 +398,17 @@ export class KnowledgeProcessingService {
     update: (trace: KnowledgeProcessingDebugTrace) => void
   ): void {
     const trace = this.debugTraces.get(context.origin)
-    if (!trace || trace.id !== context.id) return
+    if (!trace || trace.run.id !== context.id) return
     update(trace)
     this.emit()
   }
 
-  private finishMaintenanceToolTrace(context: ProcessingDebugTraceContext): void {
-    const toolTraceIds = this.maintenanceToolTraceIds.get(context.origin)
-    if (toolTraceIds?.traceId === context.id) this.maintenanceToolTraceIds.delete(context.origin)
-  }
-
   private completeStageDebugTrace(context: ProcessingDebugTraceContext): KnowledgeProcessingDebugTrace {
-    this.finishMaintenanceToolTrace(context)
-    this.updateDebugTrace(context, (trace) => {
-      if (context.origin === 'stage_debug') {
-        trace.status = 'completed'
-        trace.completedAt = new Date().toISOString()
-      }
-      delete trace.error
-    })
     return this.debugTraceSnapshot(context)
   }
 
   completeFullChainDebugTrace(context: ProcessingDebugTraceContext): KnowledgeProcessingDebugTrace {
     if (context.origin !== 'full_chain') throw new Error('完整链路调试轨迹来源无效')
-    this.updateDebugTrace(context, (trace) => {
-      trace.status = 'completed'
-      trace.completedAt = new Date().toISOString()
-      delete trace.error
-    })
     return this.debugTraceSnapshot(context)
   }
 
@@ -486,107 +427,29 @@ export class KnowledgeProcessingService {
   ): void {
     const completedAt = new Date().toISOString()
     this.updateDebugTrace(context, (trace) => {
-      const hasFailedEvent = trace.maintenance.events.some(
-        (event) => event.status === 'failed' || event.status === 'cancelled'
+      if (trace.run.status !== 'running') return
+      trace.run.status = status
+      trace.run.completedAt = completedAt
+      trace.run.durationMs = Math.max(
+        0,
+        new Date(completedAt).getTime() - new Date(trace.run.startedAt).getTime()
       )
-      const message = status === 'cancelled'
-        ? '知识加工运行已取消'
-        : hasFailedEvent ? '知识维护 Agent 运行失败' : debugError(error)
-      trace.status = status
-      trace.completedAt = completedAt
-      trace.error = message
-      for (const event of trace.maintenance.events) {
-        if (event.status !== 'running') continue
-        event.status = status
-        event.completedAt = completedAt
-        event.durationMs = Date.now() - new Date(event.startedAt).getTime()
-        event.detail ??= message
-      }
+      trace.run.error = status === 'cancelled' ? '知识加工运行已取消' : debugError(error)
     })
-    this.finishMaintenanceToolTrace(context)
   }
 
   private debugTraceSnapshot(context: ProcessingDebugTraceContext): KnowledgeProcessingDebugTrace {
     const trace = this.debugTraces.get(context.origin)
-    if (!trace || trace.id !== context.id) throw new Error('知识加工调试轨迹已失效')
+    if (!trace || trace.run.id !== context.id) throw new Error('知识加工调试轨迹已失效')
     return structuredClone(trace)
   }
 
-  private recordKnowledgeAgentTrace(
+  private recordKnowledgeAgentRun(
     context: ProcessingDebugTraceContext,
-    event: KnowledgeAgentTraceEvent
+    run: AgentRunRecord
   ): void {
     this.updateDebugTrace(context, (trace) => {
-      const maintenance = trace.maintenance
-      if (event.type === 'model_started') {
-        maintenance.modelCallCount = Math.max(maintenance.modelCallCount, event.callNumber)
-        maintenance.events.push({
-          id: `model-call-${event.callNumber}`,
-          sequence: maintenance.events.length + 1,
-          kind: 'model_call',
-          label: event.purpose === 'context_compaction'
-            ? `上下文压缩 ${event.callNumber}`
-            : `模型轮次 ${event.callNumber}`,
-          status: 'running',
-          startedAt: new Date().toISOString()
-        })
-        return
-      }
-      if (event.type === 'model_completed') {
-        const modelEvent = maintenance.events.find(
-          (candidate) => candidate.id === `model-call-${event.callNumber}`
-        )
-        if (!modelEvent || modelEvent.status !== 'running') return
-        modelEvent.status = event.status
-        modelEvent.completedAt = new Date().toISOString()
-        modelEvent.durationMs = Date.now() - new Date(modelEvent.startedAt).getTime()
-        if (event.detail) modelEvent.detail = boundedDebugText(event.detail, MAX_DEBUG_TRACE_DETAIL_CHARACTERS)
-        setBoundedEventPayload(modelEvent, 'output', event.output)
-        return
-      }
-      if (event.type === 'workspace_status') {
-        maintenance.workspace = {
-          todos: { ...event.todos },
-          draftStatementCount: event.draftStatementCount
-        }
-        return
-      }
-
-      const toolName = safeKnowledgeToolName(event.toolName)
-      const traceToolName = toolName ?? 'unknown_tool'
-      if (event.type === 'tool_started') {
-        maintenance.toolCallCount++
-        const eventId = `tool-call-${maintenance.toolCallCount}`
-        const toolTraceIds = this.maintenanceToolTraceIds.get(context.origin)
-        if (toolTraceIds?.traceId === context.id) {
-          toolTraceIds.eventIds.set(event.toolCallId, eventId)
-        }
-        maintenance.events.push({
-          id: eventId,
-          sequence: maintenance.events.length + 1,
-          kind: 'tool_call',
-          label: knowledgeToolLabel(event.toolName),
-          status: 'running',
-          startedAt: new Date().toISOString(),
-          detail: traceToolName
-        })
-        setBoundedEventPayload(maintenance.events.at(-1)!, 'input', event.input)
-        return
-      }
-      const toolTraceIds = this.maintenanceToolTraceIds.get(context.origin)
-      const eventId = toolTraceIds?.traceId === context.id
-        ? toolTraceIds.eventIds.get(event.toolCallId)
-        : undefined
-      if (eventId) toolTraceIds?.eventIds.delete(event.toolCallId)
-      const toolEvent = eventId
-        ? maintenance.events.find((candidate) => candidate.id === eventId)
-        : undefined
-      if (!toolEvent || toolEvent.status !== 'running') return
-      toolEvent.status = event.status
-      toolEvent.completedAt = new Date().toISOString()
-      toolEvent.durationMs = Date.now() - new Date(toolEvent.startedAt).getTime()
-      if (event.detail) toolEvent.detail = boundedDebugText(event.detail, MAX_DEBUG_TRACE_DETAIL_CHARACTERS)
-      setBoundedEventPayload(toolEvent, 'output', event.output)
+      trace.run = structuredClone(run)
     })
   }
 
@@ -628,11 +491,21 @@ export class KnowledgeProcessingService {
             attention: normalizedAttention,
             initialTodos: [...plan.todos, ...(options.initialTodos ?? [])],
             reasoningEffort: stage.reasoningEffort,
-            onTrace: (event) => {
+            runId: debugTrace.id,
+            onRunUpdate: (run) => {
               try {
-                this.recordKnowledgeAgentTrace(debugTrace, event)
+                this.recordKnowledgeAgentRun(debugTrace, run)
               } catch {
                 // Debug telemetry must never change the Agent result.
+              }
+            },
+            onWorkspaceStatus: (workspace) => {
+              try {
+                this.updateDebugTrace(debugTrace, (trace) => {
+                  trace.workspace = structuredClone(workspace)
+                })
+              } catch {
+                // Business UI telemetry must never change the Agent result.
               }
             },
             signal: controller.signal
@@ -643,10 +516,7 @@ export class KnowledgeProcessingService {
       )
       const { result, plan } = outcome
       controller.signal.throwIfAborted()
-      this.updateDebugTrace(debugTrace, (trace) => {
-        trace.maintenance.modelCallCount = result.modelCallCount
-        trace.maintenance.toolCallCount = result.toolCalls.length
-      })
+      this.recordKnowledgeAgentRun(debugTrace, result.run)
       const completedDebugTrace = this.completeStageDebugTrace(debugTrace)
       return {
         stageId: 'knowledge_maintenance_agent',
@@ -700,7 +570,6 @@ export class KnowledgeProcessingService {
     this.activeRuns.clear()
     this.exclusiveLease = undefined
     this.debugTraces.clear()
-    this.maintenanceToolTraceIds.clear()
     this.listeners.clear()
   }
 }

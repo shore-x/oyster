@@ -1,6 +1,6 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core'
 import type { ChatMessageView } from '../../shared/chat'
-import type { SerializableJsonValue } from '../../shared/knowledge-processing'
+import type { SerializableJsonValue } from '../../shared/agent-runtime'
 
 export function serializableChatValue(value: unknown): SerializableJsonValue {
   if (value === undefined) return null

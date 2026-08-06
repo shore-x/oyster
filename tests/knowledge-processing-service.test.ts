@@ -10,6 +10,7 @@ import type {
 import { KnowledgeProcessingService } from '../src/main/knowledge-processing/knowledge-processing-service'
 import { InMemoryKnowledgeProcessingRepository } from '../src/main/knowledge-processing/repository'
 import { KNOWLEDGE_MAINTENANCE_AGENT_PROMPT } from '../src/main/knowledge-processing/prompts'
+import { completedAgentRun } from './agent-run-fixture'
 
 function connection(): AiConnection {
   return {
@@ -78,8 +79,12 @@ class CapturingAgent implements KnowledgeAgentRuntime {
 
   async run(input: KnowledgeAgentRunInput): Promise<KnowledgeAgentRunResult> {
     this.calls.push(input)
-    input.onTrace?.({ type: 'model_started', callNumber: 1 })
-    input.onTrace?.({ type: 'model_completed', callNumber: 1, status: 'completed', output: 'done' })
+    const run = completedAgentRun(input.runId, [
+      'list_todos',
+      'read_evidence',
+      'complete_todos'
+    ])
+    input.onRunUpdate?.(run)
     return {
       contribution: {
         runRef: input.contributionRunRef,
@@ -90,6 +95,7 @@ class CapturingAgent implements KnowledgeAgentRuntime {
         content,
         status: 'completed'
       })),
+      run,
       modelCallCount: 1,
       toolCalls: ['list_todos', 'read_evidence', 'complete_todos']
     }
@@ -164,7 +170,7 @@ describe('KnowledgeProcessingService', () => {
     expect(result.evidenceSegmentCount).toBe(1)
     expect(result.sourceRef).toBe('session:codex:one@revision')
     expect(result.todos.every((todo) => todo.status === 'completed')).toBe(true)
-    expect(result.debugTrace.maintenance.modelCallCount).toBe(1)
+    expect(result.debugTrace.run.modelCalls).toHaveLength(1)
   })
 
   it('rejects malformed Raw Evidence before starting the Agent', async () => {

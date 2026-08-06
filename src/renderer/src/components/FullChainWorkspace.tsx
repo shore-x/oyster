@@ -211,7 +211,7 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
                 <p>主页面只保留阶段状态；逐次调用在运行详情中查看。</p>
               </div>
               <Show when={visibleDebugTrace()}>
-                {(trace) => <span class={`chain-test__status chain-test__status--${trace().status}`}>{trace().status === 'running' ? '运行中' : trace().status === 'completed' ? '已完成' : trace().status === 'cancelled' ? '已取消' : '失败'}</span>}
+                {(trace) => <span class={`chain-test__status chain-test__status--${trace().run.status}`}>{trace().run.status === 'running' ? '运行中' : trace().run.status === 'completed' ? '已完成' : trace().run.status === 'cancelled' ? '已取消' : '失败'}</span>}
               </Show>
             </div>
             <Show
@@ -223,10 +223,10 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
                   <div class="chain-test__activity-summary" data-testid="full-chain-activity-summary">
                     <div>
                       <span class="processing-debug__marker" aria-hidden="true" />
-                      <div><strong>知识维护</strong><p>{`${trace().maintenance.modelCallCount} 次模型 · ${trace().maintenance.toolCallCount} 次工具 · ${trace().maintenance.workspace?.todos.pending ?? 0} 个 Todo 待处理`}</p></div>
+                      <div><strong>知识维护</strong><p>{`${trace().run.modelCalls.length} 次模型 · ${trace().run.toolCalls.length} 次工具 · ${trace().workspace?.todos.pending ?? 0} 个 Todo 待处理`}</p></div>
                     </div>
                   </div>
-                  <Show when={trace().error}>{(error) => <p class="processing-debug__error">{error()}</p>}</Show>
+                  <Show when={trace().run.error}>{(error) => <p class="processing-debug__error">{error()}</p>}</Show>
                   <div class="chain-test__activity-actions">
                     <Button
                       variant="secondary"

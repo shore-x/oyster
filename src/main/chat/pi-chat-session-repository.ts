@@ -15,8 +15,10 @@ import type {
 import type { ChatSessionRepository, PersistedChatSession } from './model'
 import { chatMessageView } from './chat-message-view'
 import { isAgentRuntimeFeedbackMessage } from '../agent-runtime/pi-agent-runtime'
+import type { AgentRunRecord } from '../../shared/agent-runtime'
 
 const CHAT_METADATA_KIND = 'oyster-chat'
+const CHAT_RUN_CUSTOM_ENTRY = 'oyster-agent-run-v1'
 const MAX_CHAT_TITLE_LENGTH = 512
 
 interface ChatSessionMetadataPayload {
@@ -67,6 +69,27 @@ function messageEntries(entries: readonly SessionTreeEntry[]): ChatTranscriptEnt
   return entries.flatMap((entry) => entry.type === 'message' && !isAgentRuntimeFeedbackMessage(entry.message)
     ? [{ id: entry.id, createdAt: entry.timestamp, message: chatMessageView(entry.message) }]
     : [])
+}
+
+function runEntries(entries: readonly SessionTreeEntry[]): AgentRunRecord[] {
+  return entries.flatMap((entry) => {
+    if (entry.type !== 'custom' || entry.customType !== CHAT_RUN_CUSTOM_ENTRY) return []
+    const run = entry.data as AgentRunRecord | undefined
+    if (
+      !run
+      || typeof run !== 'object'
+      || typeof run.id !== 'string'
+      || !Array.isArray(run.turns)
+      || !Array.isArray(run.messages)
+      || !Array.isArray(run.toolCalls)
+      || !Array.isArray(run.modelCalls)
+    ) return []
+    return [structuredClone(run)]
+  })
+}
+
+export async function appendChatAgentRun(session: Session, run: AgentRunRecord): Promise<void> {
+  await session.appendCustomEntry(CHAT_RUN_CUSTOM_ENTRY, structuredClone(run))
 }
 
 async function sessionSummary(
@@ -165,7 +188,8 @@ export class PiChatSessionRepository implements ChatSessionRepository {
     const entries = await opened.session.getEntries()
     return {
       ...await sessionSummary(opened.session, opened.binding, running),
-      messages: messageEntries(entries)
+      messages: messageEntries(entries),
+      runs: runEntries(entries)
     }
   }
 

@@ -9,7 +9,7 @@ import type {
   KnowledgeProcessingSnapshot,
   ProcessingStageId
 } from '../../shared/knowledge-processing'
-import type { AgentTodo, AgentTodoCounts } from '../../shared/agent-runtime'
+import type { AgentRunRecord, AgentTodo, AgentTodoCounts } from '../../shared/agent-runtime'
 
 export interface StoredProcessingStage {
   stageId: ProcessingStageId
@@ -70,41 +70,21 @@ export interface KnowledgeAgentRunInput {
   /** Host-owned initial work items bound to this Agent run, not prompt content. */
   initialTodos?: readonly string[]
   reasoningEffort?: ReasoningEffort
-  onTrace?: (event: KnowledgeAgentTraceEvent) => void
+  runId: string
+  onRunUpdate?: (run: AgentRunRecord) => void
+  onWorkspaceStatus?: (status: KnowledgeAgentWorkspaceStatus) => void
   signal: AbortSignal
 }
 
-export type KnowledgeAgentTraceEvent =
-  | {
-      type: 'model_started'
-      callNumber: number
-      purpose?: 'agent' | 'context_compaction'
-    }
-  | {
-      type: 'model_completed'
-      callNumber: number
-      status: 'completed' | 'failed' | 'cancelled'
-      detail?: string
-      output?: string
-    }
-  | { type: 'tool_started'; toolCallId: string; toolName: string; input?: string }
-  | {
-      type: 'tool_completed'
-      toolCallId: string
-      toolName: string
-      status: 'completed' | 'failed' | 'cancelled'
-      detail?: string
-      output?: string
-    }
-  | {
-      type: 'workspace_status'
-      todos: AgentTodoCounts
-      draftStatementCount: number
-    }
+export interface KnowledgeAgentWorkspaceStatus {
+  todos: AgentTodoCounts
+  draftStatementCount: number
+}
 
 export interface KnowledgeAgentRunResult {
   contribution: KnowledgeContributionDraft
   todos: AgentTodo[]
+  run: AgentRunRecord
   modelCallCount: number
   toolCalls: string[]
 }

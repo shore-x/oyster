@@ -26,6 +26,8 @@ import {
 } from '../knowledge-processing/knowledge-maintenance-tool-catalog'
 import { createArtifactGitEnvironment } from '../artifacts/git-runtime'
 import { chatAgentSystemPrompt } from './prompt'
+import { appendChatAgentRun } from './pi-chat-session-repository'
+import type { PiAgentRunRecorder } from '../agent-runtime/pi-agent-run-recorder'
 
 function asError(value: unknown, fallback: string): Error {
   if (value instanceof Error) return value
@@ -56,6 +58,7 @@ function finalAssistantText(messages: readonly AgentMessage[]): string {
 
 interface CreatedAgentRun {
   agent: Agent
+  recorder: PiAgentRunRecorder
   getCompactionError(): Error | undefined
 }
 
@@ -223,10 +226,14 @@ export class PiChatAgent {
     const createRun: (
       agentRunId: string,
       messages: AgentMessage[],
-      initialTodos?: readonly string[]
-    ) => CreatedAgentRun = (agentRunId, messages, initialTodos) => {
+      initialTodos?: readonly string[],
+      onRunUpdate?: PiChatAgentRunInput['onRunUpdate']
+    ) => CreatedAgentRun = (agentRunId, messages, initialTodos, onRunUpdate) => {
       let compactionError: Error | undefined
-      const agentRuntime = createPiAgentRuntime({ initialTodos })
+      const agentRuntime = createPiAgentRuntime({
+        initialTodos,
+        run: { runId: agentRunId, onUpdate: onRunUpdate }
+      })
       const tools: AgentTool[] = [
         ...codingTools(this.artifactRepositoryPath),
         ...knowledgeTools(this.knowledgeStore, agentRunId),
@@ -258,7 +265,7 @@ export class PiChatAgent {
       ]
       const compactContext = createPiContextCompactor({
         model: input.runtime.model,
-        streamFn: input.runtime.streamFn,
+        streamFn: agentRuntime.run.wrapStreamFn(input.runtime.streamFn, 'context_compaction'),
         systemPrompt,
         tools,
         thinkingLevel,
@@ -276,7 +283,7 @@ export class PiChatAgent {
           tools,
           messages
         },
-        streamFn: input.runtime.streamFn,
+        streamFn: agentRuntime.run.wrapStreamFn(input.runtime.streamFn),
         convertToLlm: convertPiAgentMessages,
         transformContext: async (currentMessages, signal) => {
           try {
@@ -292,22 +299,23 @@ export class PiChatAgent {
       agentRuntime.attach(agent)
       return {
         agent,
+        recorder: agentRuntime.run,
         getCompactionError: () => compactionError
       }
     }
 
-    const rootRun = createRun(input.sessionId, context.messages, input.initialTodos)
+    const rootRunId = randomUUID()
+    const rootRun = createRun(rootRunId, context.messages, input.initialTodos, (run) => {
+      try {
+        input.onRunUpdate?.(run)
+        safeEmit(input, { type: 'run_updated', sessionId: input.sessionId, run })
+      } catch {
+        // Run observation must not change conversational Agent behavior.
+      }
+    })
     const agent = rootRun.agent
 
     agent.subscribe(async (event) => {
-      if (event.type === 'message_update') {
-        safeEmit(input, {
-          type: 'message_updated',
-          sessionId: input.sessionId,
-          message: chatMessageView(event.message)
-        })
-        return
-      }
       if (event.type === 'message_end') {
         const entryId = await input.session.appendMessage(event.message)
         if (isAgentRuntimeFeedbackMessage(event.message)) return
@@ -322,30 +330,17 @@ export class PiChatAgent {
             message: chatMessageView(entry.message)
           }
         })
-        return
-      }
-      if (event.type === 'tool_execution_start') {
-        safeEmit(input, {
-          type: 'tool_started',
-          sessionId: input.sessionId,
-          toolCallId: event.toolCallId,
-          toolName: event.toolName,
-          input: serializableChatValue(event.args)
-        })
-        return
-      }
-      if (event.type === 'tool_execution_end') {
-        safeEmit(input, {
-          type: 'tool_completed',
-          sessionId: input.sessionId,
-          toolCallId: event.toolCallId,
-          toolName: event.toolName,
-          result: serializableChatValue(event.result),
-          isError: event.isError
-        })
       }
     })
 
-    await promptAgentRun(rootRun, input.text, input.signal, '对话 Agent')
+    try {
+      await promptAgentRun(rootRun, input.text, input.signal, '对话 Agent')
+      rootRun.recorder.complete('completed')
+    } catch (error) {
+      rootRun.recorder.complete(input.signal.aborted ? 'cancelled' : 'failed', error)
+      throw error
+    } finally {
+      await appendChatAgentRun(input.session, rootRun.recorder.snapshot())
+    }
   }
 }

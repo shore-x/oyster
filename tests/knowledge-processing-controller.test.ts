@@ -11,6 +11,7 @@ import type {
   KnowledgeProcessingSnapshot,
   RunKnowledgeMaintenanceInput
 } from '../src/shared/knowledge-processing'
+import { completedAgentRun } from './agent-run-fixture'
 import { createKnowledgeProcessingController } from '../src/renderer/src/knowledge-processing-controller'
 
 vi.mock('solid-js', async () => vi.importActual('solid-js/dist/solid.js'))
@@ -53,12 +54,8 @@ function maintenanceResult(): KnowledgeMaintenanceResult {
     },
     todos: [{ id: 'T000001', content: 'Inspect Raw Evidence segment 1 of 1.', status: 'completed' }],
     debugTrace: {
-      id: 'maintenance-run-1',
       origin: 'stage_debug',
-      status: 'completed',
-      startedAt: '2026-07-26T00:00:00.000Z',
-      completedAt,
-      maintenance: { modelCallCount: 1, toolCallCount: 1, events: [] }
+      run: completedAgentRun('maintenance-run-1', ['read_evidence'])
     },
     durationMs: 20,
     completedAt,

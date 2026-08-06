@@ -9,6 +9,7 @@ import type {
 import type { KnowledgeCommitResult, KnowledgeContributionDraft, KnowledgeStatement } from '../../shared/knowledge'
 import type { ModelRuntime } from '../ai-backends/model'
 import type { KnowledgeStatementRecord } from '../knowledge-processing/model'
+import type { AgentRunRecord } from '../../shared/agent-runtime'
 
 export interface ChatConfigurationStateData {
   defaultInstructionsOverride?: string
@@ -62,6 +63,7 @@ export interface PiChatAgentRunInput {
   /** Host-owned initial work items bound to this Agent run, not transcript messages. */
   initialTodos?: readonly string[]
   signal: AbortSignal
+  onRunUpdate?: (run: AgentRunRecord) => void
   onEvent?: (event: Exclude<ChatEvent, { type: 'snapshot_changed' | 'run_state_changed' }>) => void
 }
 

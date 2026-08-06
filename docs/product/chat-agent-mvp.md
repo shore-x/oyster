@@ -2,7 +2,7 @@
 
 > 状态：当前 MVP 规格
 >
-> 日期：2026-08-05
+> 日期：2026-08-06
 
 ## 1. 目的
 
@@ -83,7 +83,9 @@ Other internal structure is arbitrary. No Artifact is preselected.
 
 ## 6. 界面与持久化
 
-“对话”页面继续使用一套持久 Session 和消息界面。新 Session 在首次发送时创建；若 AI 后端页面尚未配置 Default LLM，创建会被明确阻止。完整的 user、assistant 和 tool-result 消息使用 Pi JSONL Session Repository 保存在 Oyster 用户数据目录中。模型输出按事件流更新，每次工具调用显示状态，并可展开查看 Input 与 Result。
+“对话”页面继续使用一套持久 Session 和消息界面。新 Session 在首次发送时创建；若 AI 后端页面尚未配置 Default LLM，创建会被明确阻止。完整的 user、assistant 和 tool-result 消息使用 Pi JSONL Session Repository 保存在 Oyster 用户数据目录中。
+
+每次发送同时形成一个通用 Agent Run。Run 通过不参与模型 Context 的 Pi Custom Entry 绑定到 Session，实时更新和历史回读使用与加工测试相同的 Timeline：普通消息、折叠 Thinking、工具状态及可展开的 Input/Result 均来自 Pi 事件。点击 Assistant 消息可定位具体 Model Call，并查看该次调用转换后的完整 Pi Context 与输出；Context Compaction 作为独立调用显示。该检查只到 Pi 层，不包含 Provider Payload、凭据或请求 Header。
 
 Agent 配置页展示实际使用通用 Agent Runtime 的 Agent，包括面向用户对话的通用管理 Agent 和 Knowledge Maintenance Agent，并投影各自实际工具。用户可以编辑或恢复 Agent 的默认 System Prompt；工具由代码拥有，在页面中只读展示。Artifact 页面可以通过普通对话入口帮助用户描述目标，但不创建隐藏绑定或不同类型的 Session。子 Agent 运行不进入 Session 列表，其内部 transcript 只随父 Session 的 `spawn_agent` Tool Result 保存。
 

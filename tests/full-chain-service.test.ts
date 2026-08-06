@@ -22,6 +22,7 @@ import type {
 import { InMemoryKnowledgeProcessingRepository } from '../src/main/knowledge-processing/repository'
 import { SqliteKnowledgeStoreManager } from '../src/main/knowledge-store/knowledge-store-manager'
 import type { KnowledgeFullChainRunRecord } from '../src/shared/knowledge-processing'
+import { completedAgentRun } from './agent-run-fixture'
 
 const temporaryDirectories: string[] = []
 const disposals: Array<() => void> = []
@@ -136,7 +137,7 @@ afterEach(async () => {
 })
 
 describe('KnowledgeFullChainService', () => {
-  it('runs one evidence-driven Maintainer in a Sandbox and stores a V3 snapshot', async () => {
+  it('runs one evidence-driven Maintainer in a Sandbox and stores a V4 snapshot', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'oyster-full-chain-'))
     temporaryDirectories.push(directory)
     const stores = await SqliteKnowledgeStoreManager.open(join(directory, 'knowledge'))
@@ -161,6 +162,8 @@ describe('KnowledgeFullChainService', () => {
     const factory = (_reader: KnowledgeReader): KnowledgeAgentRuntime => ({
       run: async (input) => {
         agentInputs.push(input)
+        const run = completedAgentRun(input.runId, ['read_evidence', 'complete_todos'])
+        input.onRunUpdate?.(run)
         return {
           contribution: {
             runRef: input.contributionRunRef,
@@ -171,6 +174,7 @@ describe('KnowledgeFullChainService', () => {
             content,
             status: 'completed'
           })),
+          run,
           modelCallCount: 1,
           toolCalls: ['read_evidence', 'complete_todos']
         }
@@ -195,7 +199,7 @@ describe('KnowledgeFullChainService', () => {
     expect(stores.production.listStatements()).toEqual([])
     expect(historyRecords).toHaveLength(1)
     expect(historyRecords[0]).toMatchObject({
-      formatVersion: 3,
+      formatVersion: 4,
       configuration: { maintainer: { modelId: 'maintainer' } }
     })
   })
