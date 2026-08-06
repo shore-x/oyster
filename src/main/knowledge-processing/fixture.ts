@@ -1,5 +1,9 @@
 import type { AiBackendService } from '../ai-backends/ai-backend-service'
-import type { AgentRunRecord, SerializableJsonValue } from '../../shared/agent-runtime'
+import {
+  AGENT_RUN_FORMAT_VERSION,
+  type AgentRunRecord,
+  type SerializableJsonValue
+} from '../../shared/agent-runtime'
 import { AgentTodoStore } from '../agent-runtime/agent-todos'
 import type { KnowledgeAgentRunInput, KnowledgeAgentRunResult, KnowledgeAgentRuntime } from './model'
 import { InMemoryKnowledgeProcessingRepository } from './repository'
@@ -8,6 +12,18 @@ import { KnowledgeProcessingService } from './knowledge-processing-service'
 export class FixtureKnowledgeAgentRuntime implements KnowledgeAgentRuntime {
   async run(input: KnowledgeAgentRunInput): Promise<KnowledgeAgentRunResult> {
     input.signal.throwIfAborted()
+    const startedAt = new Date().toISOString()
+    input.onRunUpdate?.({
+      formatVersion: AGENT_RUN_FORMAT_VERSION,
+      id: input.runId,
+      agentId: 'knowledge_maintenance_agent',
+      status: 'running',
+      startedAt,
+      turns: [],
+      messages: [],
+      modelCalls: [],
+      toolCalls: []
+    })
     const todoStore = new AgentTodoStore(input.initialTodos)
     const pendingTodos = todoStore.list()
     input.onWorkspaceStatus?.({
@@ -27,7 +43,6 @@ export class FixtureKnowledgeAgentRuntime implements KnowledgeAgentRuntime {
       },
       draftStatementCount: 2
     })
-    const startedAt = new Date().toISOString()
     const modelId = input.runtime.model.id
     const userMessageId = `${input.runId}:message:1`
     const assistantMessageId = `${input.runId}:message:2`
@@ -54,7 +69,9 @@ export class FixtureKnowledgeAgentRuntime implements KnowledgeAgentRuntime {
       timestamp: Date.now()
     }
     const run: AgentRunRecord = {
+      formatVersion: AGENT_RUN_FORMAT_VERSION,
       id: input.runId,
+      agentId: 'knowledge_maintenance_agent',
       status: 'completed' as const,
       startedAt,
       completedAt: startedAt,

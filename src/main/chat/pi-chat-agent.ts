@@ -13,6 +13,8 @@ import {
   isAgentRuntimeFeedbackMessage
 } from '../agent-runtime/pi-agent-runtime'
 import type { KnowledgeStatement } from '../../shared/knowledge'
+import { CHAT_AGENT_ID } from '../../shared/chat'
+import type { AgentRunRecord } from '../../shared/agent-runtime'
 import type { PiChatAgentRunInput, ChatKnowledgeStore } from './model'
 import { chatMessageView, serializableChatValue } from './chat-message-view'
 import {
@@ -223,16 +225,30 @@ export class PiChatAgent {
       ? (input.binding.reasoningEffort ?? 'off')
       : 'off'
 
+    const childRuns: CreatedAgentRun[] = []
+    const observeRun = (run: AgentRunRecord): void => {
+      try {
+        input.onRunUpdate?.(run)
+        safeEmit(input, { type: 'run_updated', sessionId: input.sessionId, run })
+      } catch {
+        // Run observation must not change conversational Agent behavior.
+      }
+    }
     const createRun: (
       agentRunId: string,
       messages: AgentMessage[],
       initialTodos?: readonly string[],
-      onRunUpdate?: PiChatAgentRunInput['onRunUpdate']
-    ) => CreatedAgentRun = (agentRunId, messages, initialTodos, onRunUpdate) => {
+      parentRunId?: string
+    ) => CreatedAgentRun = (agentRunId, messages, initialTodos, parentRunId) => {
       let compactionError: Error | undefined
       const agentRuntime = createPiAgentRuntime({
+        agentId: CHAT_AGENT_ID,
         initialTodos,
-        run: { runId: agentRunId, onUpdate: onRunUpdate }
+        run: {
+          runId: agentRunId,
+          ...(parentRunId ? { parentRunId } : {}),
+          onUpdate: observeRun
+        }
       })
       const tools: AgentTool[] = [
         ...codingTools(this.artifactRepositoryPath),
@@ -245,19 +261,26 @@ export class PiChatAgent {
             signal?.throwIfAborted()
 
             const childRunId = randomUUID()
-            const childRun = createRun(childRunId, [])
-            await promptAgentRun(childRun, task, signal, '子 Agent')
-            return {
-              content: [{
-                type: 'text',
-                text: finalAssistantText(childRun.agent.state.messages)
-                  || 'Child Agent completed without a final text response.'
-              }],
-              details: {
-                runId: childRunId,
-                modelId: input.runtime.model.id,
-                transcript: serializableChatValue(childRun.agent.state.messages)
+            const childRun = createRun(childRunId, [], undefined, agentRunId)
+            childRuns.push(childRun)
+            try {
+              await promptAgentRun(childRun, task, signal, '子 Agent')
+              childRun.recorder.complete('completed')
+              return {
+                content: [{
+                  type: 'text',
+                  text: finalAssistantText(childRun.agent.state.messages)
+                    || 'Child Agent completed without a final text response.'
+                }],
+                details: {
+                  runId: childRunId,
+                  modelId: input.runtime.model.id,
+                  transcript: serializableChatValue(childRun.agent.state.messages)
+                }
               }
+            } catch (error) {
+              childRun.recorder.complete(signal?.aborted ? 'cancelled' : 'failed', error)
+              throw error
             }
           }
         } as AgentTool<typeof spawnAgentParameters>,
@@ -305,14 +328,7 @@ export class PiChatAgent {
     }
 
     const rootRunId = randomUUID()
-    const rootRun = createRun(rootRunId, context.messages, input.initialTodos, (run) => {
-      try {
-        input.onRunUpdate?.(run)
-        safeEmit(input, { type: 'run_updated', sessionId: input.sessionId, run })
-      } catch {
-        // Run observation must not change conversational Agent behavior.
-      }
-    })
+    const rootRun = createRun(rootRunId, context.messages, input.initialTodos)
     const agent = rootRun.agent
 
     agent.subscribe(async (event) => {
@@ -341,6 +357,9 @@ export class PiChatAgent {
       throw error
     } finally {
       await appendChatAgentRun(input.session, rootRun.recorder.snapshot())
+      for (const childRun of childRuns) {
+        await appendChatAgentRun(input.session, childRun.recorder.snapshot())
+      }
     }
   }
 }

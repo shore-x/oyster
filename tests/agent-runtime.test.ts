@@ -12,18 +12,19 @@ import { AgentTodoStore } from '../src/main/agent-runtime/agent-todos'
 import {
   convertPiAgentMessages,
   createPiAgentRuntime,
-  isAgentRuntimeFeedbackMessage
+  isAgentRuntimeFeedbackMessage,
+  type PiAgentRuntimeOptions
 } from '../src/main/agent-runtime/pi-agent-runtime'
 
 function testAgent(
   responses: FauxResponseStep[],
-  options: Parameters<typeof createPiAgentRuntime>[0] = {}
+  options: Omit<PiAgentRuntimeOptions, 'agentId'> = {}
 ) {
   const faux = fauxProvider()
   faux.setResponses(responses)
   const models = createModels()
   models.setProvider(faux.provider)
-  const runtime = createPiAgentRuntime(options)
+  const runtime = createPiAgentRuntime({ agentId: 'test_agent', ...options })
   const agent = new Agent({
     initialState: {
       systemPrompt: 'Test the general Agent Runtime.',

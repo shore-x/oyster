@@ -477,16 +477,25 @@ h1 { margin: 0 0 10px; font-size: var(--font-size-display); line-height: 1.25; l
 .processing-history__list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
 .processing-history__empty { display: grid; place-items: center; min-height: 260px; margin-top: 14px; color: var(--text-muted); background: var(--surface-subtle); border: 1px dashed var(--border-strong); border-radius: var(--radius-control); font-size: var(--font-size-label); }
 .processing-history-run { min-width: 0; padding: 14px; background: var(--surface-subtle); border: 1px solid var(--border-default); border-radius: var(--radius-control); }
+.processing-history-run--failed { border-color: #e8c9c6; }
+.processing-history-run--cancelled { border-color: #ddd1c1; }
 .processing-history-run__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .processing-history-run__heading > div { min-width: 0; }
 .processing-history-run__heading h3 { margin: 0; overflow: hidden; color: var(--text-primary); font-size: var(--font-size-body-sm); font-weight: var(--font-weight-semibold); text-overflow: ellipsis; white-space: nowrap; }
 .processing-history-run__heading p { margin: 4px 0 0; overflow: hidden; color: var(--text-muted); font-size: var(--font-size-caption); text-overflow: ellipsis; white-space: nowrap; }
 .processing-history-run__heading time { flex: 0 0 auto; color: var(--text-muted); font-size: var(--font-size-caption); white-space: nowrap; }
+.processing-history-run--failed .processing-history-run__heading time { color: #98514b; }
+.processing-history-run--cancelled .processing-history-run__heading time { color: #806c52; }
 .processing-history-run__metrics { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 13px; color: var(--text-muted); font-size: var(--font-size-caption); }
 .processing-history-run__metrics strong { color: var(--text-secondary); font-size: var(--font-size-label); font-weight: var(--font-weight-semibold); }
 .processing-history-run__models { display: grid; gap: 4px; margin-top: 11px; padding-top: 10px; border-top: 1px solid var(--border-default); }
 .processing-history-run__models span { overflow: hidden; color: var(--text-tertiary); font-size: var(--font-size-caption); text-overflow: ellipsis; white-space: nowrap; }
 .processing-history-run__actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 12px; }
+.processing-history-detail-status { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 14px; padding: 10px 12px; color: #397152; background: #f0f7f2; border: 1px solid #d7e9dd; border-radius: var(--radius-control); }
+.processing-history-detail-status--failed,
+.processing-history-detail-status--cancelled { color: #98514b; background: #fbf2f1; border-color: #e8c9c6; }
+.processing-history-detail-status strong { flex: 0 0 auto; font-size: var(--font-size-label); }
+.processing-history-detail-status p { margin: 0; font-size: var(--font-size-caption); line-height: 1.5; overflow-wrap: anywhere; }
 
 
 .sandbox-badge { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; color: #315f7a; background: #f0f6f9; border: 1px solid #dcebf2; border-radius: var(--radius-pill); font-size: var(--font-size-caption); font-weight: var(--font-weight-semibold); }
@@ -657,7 +666,20 @@ h1 { margin: 0 0 10px; font-size: var(--font-size-display); line-height: 1.25; l
 /* Shared Pi Agent run visualization */
 .agent-run-view { min-width: 0; }
 .agent-run-view + .agent-run-view { margin-top: 28px; padding-top: 28px; border-top: 1px solid var(--border-default); }
-.agent-run-view__summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; overflow: hidden; margin-bottom: 16px; background: var(--border-default); border: 1px solid var(--border-default); border-radius: var(--radius-control); }
+.agent-run-view__compact-header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: var(--text-muted); font-size: var(--font-size-caption); }
+.agent-run-view__compact-header strong { min-width: 0; overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; }
+.agent-run-view__compact-header span { flex: 0 0 auto; }
+.agent-run-collection { min-width: 0; }
+.agent-run-collection__selector { display: grid; min-width: 0; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin-bottom: 14px; }
+.agent-run-collection__selector button { display: grid; min-width: 0; grid-template-columns: 22px minmax(0, 1fr); align-items: center; gap: 2px 8px; padding: 9px 11px; color: var(--text-muted); background: var(--surface-subtle); border: 1px solid var(--border-default); border-radius: var(--radius-control); cursor: pointer; text-align: left; }
+.agent-run-collection__selector button:hover { background: var(--surface-hover); border-color: var(--border-strong); }
+.agent-run-collection__selector button[aria-selected="true"] { color: #456c83; background: #eef5f8; border-color: #bed2dc; }
+.agent-run-collection__selector button > span { grid-row: 1 / 3; display: grid; width: 22px; height: 22px; place-items: center; background: #fff; border: 1px solid currentColor; border-radius: 50%; font-size: var(--font-size-caption); }
+.agent-run-collection__selector strong,
+.agent-run-collection__selector small { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-run-collection__selector strong { color: var(--text-secondary); font-size: var(--font-size-body-sm); }
+.agent-run-collection__selector small { font-size: var(--font-size-caption); }
+.agent-run-view__summary { display: grid; grid-template-columns: minmax(0, 1.4fr) repeat(4, minmax(0, 1fr)); gap: 1px; overflow: hidden; margin-bottom: 16px; background: var(--border-default); border: 1px solid var(--border-default); border-radius: var(--radius-control); }
 .agent-run-view__summary > div { min-width: 0; padding: 11px 13px; background: var(--surface-subtle); }
 .agent-run-view__summary span,
 .agent-run-view__summary strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

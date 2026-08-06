@@ -53,10 +53,7 @@ function maintenanceResult(): KnowledgeMaintenanceResult {
       statements: [{ title: 'Raw Evidence', content: 'Raw Evidence content' }]
     },
     todos: [{ id: 'T000001', content: 'Inspect Raw Evidence segment 1 of 1.', status: 'completed' }],
-    debugTrace: {
-      origin: 'stage_debug',
-      run: completedAgentRun('maintenance-run-1', ['read_evidence'])
-    },
+    agentRunId: 'maintenance-run-1',
     durationMs: 20,
     completedAt,
     execution: {

@@ -16,6 +16,10 @@ import type { ChatSessionRepository, PersistedChatSession } from './model'
 import { chatMessageView } from './chat-message-view'
 import { isAgentRuntimeFeedbackMessage } from '../agent-runtime/pi-agent-runtime'
 import type { AgentRunRecord } from '../../shared/agent-runtime'
+import {
+  parseAgentRunRecord,
+  parseTerminalAgentRunRecord
+} from '../agent-runtime/agent-run-record'
 
 const CHAT_METADATA_KIND = 'oyster-chat'
 const CHAT_RUN_CUSTOM_ENTRY = 'oyster-agent-run-v1'
@@ -74,22 +78,16 @@ function messageEntries(entries: readonly SessionTreeEntry[]): ChatTranscriptEnt
 function runEntries(entries: readonly SessionTreeEntry[]): AgentRunRecord[] {
   return entries.flatMap((entry) => {
     if (entry.type !== 'custom' || entry.customType !== CHAT_RUN_CUSTOM_ENTRY) return []
-    const run = entry.data as AgentRunRecord | undefined
-    if (
-      !run
-      || typeof run !== 'object'
-      || typeof run.id !== 'string'
-      || !Array.isArray(run.turns)
-      || !Array.isArray(run.messages)
-      || !Array.isArray(run.toolCalls)
-      || !Array.isArray(run.modelCalls)
-    ) return []
-    return [structuredClone(run)]
+    try {
+      return [parseAgentRunRecord(entry.data)]
+    } catch {
+      return []
+    }
   })
 }
 
 export async function appendChatAgentRun(session: Session, run: AgentRunRecord): Promise<void> {
-  await session.appendCustomEntry(CHAT_RUN_CUSTOM_ENTRY, structuredClone(run))
+  await session.appendCustomEntry(CHAT_RUN_CUSTOM_ENTRY, parseTerminalAgentRunRecord(run))
 }
 
 async function sessionSummary(

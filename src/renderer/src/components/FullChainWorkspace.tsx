@@ -33,7 +33,6 @@ export interface FullChainResultView {
   completedAt?: string
   durationMs?: number
   todos: AgentTodo[]
-  debugTrace: KnowledgeProcessingDebugTrace
   steps: FullChainStepView[]
   statements: KnowledgeStatement[]
 }
@@ -111,7 +110,7 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
     if (!maintainer().runnable) return `${maintainer().name} 尚未完成可用的模型配置。`
     return undefined
   })
-  const visibleDebugTrace = createMemo(() => props.debugTrace ?? props.result?.debugTrace)
+  const visibleDebugTrace = createMemo(() => props.debugTrace)
   const completedTodoCount = createMemo(() => props.result?.todos.filter(
     (todo) => todo.status === 'completed'
   ).length ?? 0)

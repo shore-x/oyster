@@ -130,14 +130,12 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
   ))
   const maintenanceTrace = createMemo(() => controller.debugTrace('stage_debug'))
   const fullChainTrace = createMemo(() => {
-    const live = controller.debugTrace('full_chain')
-    const completed = controller.fullChainResult()?.maintenance.debugTrace
-    return live ?? completed
+    return controller.debugTrace('full_chain')
   })
   const currentMaintenanceResult = createMemo(() => {
     const result = controller.maintenanceResult()
     const trace = maintenanceTrace()
-    if (!result || (trace && trace.run.id !== result.debugTrace.run.id)) return undefined
+    if (!result || (trace && trace.run.id !== result.agentRunId)) return undefined
     return result
   })
   const anyRunning = createMemo(() => (

@@ -122,7 +122,8 @@ export interface KnowledgeMaintenanceResult {
   evidenceSegmentCount: number
   contribution: KnowledgeContributionDraft
   todos: AgentTodo[]
-  debugTrace: KnowledgeProcessingDebugTrace
+  /** References the generic Runtime observation without embedding it in the business result. */
+  agentRunId: string
   durationMs: number
   completedAt: string
   execution: ProcessingExecutionSummary
@@ -156,26 +157,36 @@ export interface KnowledgeFullChainStageSnapshot {
 }
 
 export interface KnowledgeFullChainRunRecord {
-  formatVersion: 4
+  formatVersion: 5
   runId: string
-  attention?: string
+  status: Exclude<AgentRunRecord['status'], 'running'>
+  startedAt: string
+  completedAt: string
+  durationMs: number
+  input: RunKnowledgeFullChainInput
+  /** Available after the selected external Session revision has been resolved. */
+  session?: AvailableSessionSummary
   configuration: {
     maintainer: KnowledgeFullChainStageSnapshot
   }
-  result: KnowledgeFullChainResult
+  agentRuns: AgentRunRecord[]
+  result?: KnowledgeFullChainResult
+  error?: string
 }
 
 export interface KnowledgeFullChainRunSummary {
   runId: string
+  status: KnowledgeFullChainRunRecord['status']
   completedAt: string
   durationMs: number
   sessionTitle?: string
-  sourceDisplayName: string
+  sourceDisplayName?: string
   projectPath?: string
-  startedAt?: string
-  endedAt?: string
   statementCount: number
   maintainerModel: string
+  agentRunCount: number
+  modelCallCount: number
+  error?: string
 }
 
 export interface KnowledgeProcessingApi {

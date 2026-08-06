@@ -19,7 +19,7 @@ describe('Pi Agent run recorder', () => {
     const models = createModels()
     models.setProvider(faux.provider)
     const receivedContexts: Context[] = []
-    const runtime = createPiAgentRuntime({ run: { runId: 'run:context' } })
+    const runtime = createPiAgentRuntime({ agentId: 'test_agent', run: { runId: 'run:context' } })
     const agent = new Agent({
       initialState: {
         systemPrompt: 'Recorder system prompt.',
@@ -76,7 +76,7 @@ describe('Pi Agent run recorder', () => {
     ])
     const models = createModels()
     models.setProvider(faux.provider)
-    const runtime = createPiAgentRuntime({ run: { runId: 'run:tool' } })
+    const runtime = createPiAgentRuntime({ agentId: 'test_agent', run: { runId: 'run:tool' } })
     const agent = new Agent({
       initialState: {
         systemPrompt: 'Use tools.',
@@ -108,7 +108,7 @@ describe('Pi Agent run recorder', () => {
     faux.setResponses([fauxAssistantMessage('Summary.')])
     const models = createModels()
     models.setProvider(faux.provider)
-    const runtime = createPiAgentRuntime({ run: { runId: 'run:compaction' } })
+    const runtime = createPiAgentRuntime({ agentId: 'test_agent', run: { runId: 'run:compaction' } })
     const stream = await runtime.run.wrapStreamFn(
       (model, context, options) => models.streamSimple(model, context, options),
       'context_compaction'
@@ -137,6 +137,7 @@ describe('Pi Agent run recorder', () => {
     const models = createModels()
     models.setProvider(faux.provider)
     const runtime = createPiAgentRuntime({
+      agentId: 'test_agent',
       run: {
         runId: 'run:observer',
         onUpdate: () => { throw new Error('observer failed') }

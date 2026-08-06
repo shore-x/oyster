@@ -14,6 +14,7 @@ import {
 import type { AiBackendSnapshot, AiConnection, ReasoningEffort } from '../../shared/ai-backends'
 import type { AgentRunRecord } from '../../shared/agent-runtime'
 import type { RawEvidence } from '../observation/model'
+import { parseAgentRunRecord } from '../agent-runtime/agent-run-record'
 import type {
   AiBackendPort,
   KnowledgeAgentRuntime,
@@ -371,28 +372,6 @@ export class KnowledgeProcessingService {
     this.emit()
   }
 
-  beginFullChainDebugTrace(context: ProcessingDebugTraceContext): void {
-    if (context.origin !== 'full_chain') throw new Error('完整链路调试轨迹来源无效')
-    this.beginMaintenanceDebugTrace(context)
-  }
-
-  private beginMaintenanceDebugTrace(context: ProcessingDebugTraceContext): void {
-    const trace: KnowledgeProcessingDebugTrace = {
-      origin: context.origin,
-      run: {
-        id: context.id,
-        status: 'running',
-        startedAt: new Date().toISOString(),
-        turns: [],
-        messages: [],
-        toolCalls: [],
-        modelCalls: []
-      }
-    }
-    this.debugTraces.set(context.origin, trace)
-    this.emit()
-  }
-
   private updateDebugTrace(
     context: ProcessingDebugTraceContext,
     update: (trace: KnowledgeProcessingDebugTrace) => void
@@ -401,15 +380,6 @@ export class KnowledgeProcessingService {
     if (!trace || trace.run.id !== context.id) return
     update(trace)
     this.emit()
-  }
-
-  private completeStageDebugTrace(context: ProcessingDebugTraceContext): KnowledgeProcessingDebugTrace {
-    return this.debugTraceSnapshot(context)
-  }
-
-  completeFullChainDebugTrace(context: ProcessingDebugTraceContext): KnowledgeProcessingDebugTrace {
-    if (context.origin !== 'full_chain') throw new Error('完整链路调试轨迹来源无效')
-    return this.debugTraceSnapshot(context)
   }
 
   failFullChainDebugTrace(
@@ -438,18 +408,31 @@ export class KnowledgeProcessingService {
     })
   }
 
-  private debugTraceSnapshot(context: ProcessingDebugTraceContext): KnowledgeProcessingDebugTrace {
+  private debugTraceSnapshot(context: ProcessingDebugTraceContext): KnowledgeProcessingDebugTrace | undefined {
     const trace = this.debugTraces.get(context.origin)
-    if (!trace || trace.run.id !== context.id) throw new Error('知识加工调试轨迹已失效')
-    return structuredClone(trace)
+    return trace?.run.id === context.id ? structuredClone(trace) : undefined
+  }
+
+  agentRunSnapshot(context: ProcessingDebugTraceContext): AgentRunRecord | undefined {
+    return this.debugTraceSnapshot(context)?.run
   }
 
   private recordKnowledgeAgentRun(
     context: ProcessingDebugTraceContext,
     run: AgentRunRecord
   ): void {
+    const record = parseAgentRunRecord(run, context.id)
+    if (record.agentId !== 'knowledge_maintenance_agent') {
+      throw new Error(`知识维护运行的 Agent ID 无效：${record.agentId}`)
+    }
+    const current = this.debugTraces.get(context.origin)
+    if (!current || current.run.id !== context.id) {
+      this.debugTraces.set(context.origin, { origin: context.origin, run: record })
+      this.emit()
+      return
+    }
     this.updateDebugTrace(context, (trace) => {
-      trace.run = structuredClone(run)
+      trace.run = record
     })
   }
 
@@ -469,7 +452,6 @@ export class KnowledgeProcessingService {
     if (!connection) throw new Error('已配置的 Connection 不再可用')
     const controller = this.beginRun(options.lease)
     const debugTrace = options.debugTrace ?? { id: randomUUID(), origin: 'stage_debug' }
-    this.beginMaintenanceDebugTrace(debugTrace)
     const startedAt = Date.now()
 
     try {
@@ -517,14 +499,13 @@ export class KnowledgeProcessingService {
       const { result, plan } = outcome
       controller.signal.throwIfAborted()
       this.recordKnowledgeAgentRun(debugTrace, result.run)
-      const completedDebugTrace = this.completeStageDebugTrace(debugTrace)
       return {
         stageId: 'knowledge_maintenance_agent',
         sourceRef,
         evidenceSegmentCount: plan.segmentCount,
         contribution: result.contribution,
         todos: result.todos.map((todo) => ({ ...todo })),
-        debugTrace: completedDebugTrace,
+        agentRunId: result.run.id,
         durationMs: Date.now() - startedAt,
         completedAt: new Date().toISOString(),
         execution: executionSummary(

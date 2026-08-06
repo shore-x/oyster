@@ -23,6 +23,8 @@ declare module '@earendil-works/pi-agent-core' {
 export type AgentEndCheck = () => string | undefined | Promise<string | undefined>
 
 export interface PiAgentRuntimeOptions {
+  /** Stable logical Agent definition; Runtime behavior remains independent from its meaning. */
+  agentId: string
   initialTodos?: readonly string[]
   endChecks?: readonly AgentEndCheck[]
   run?: Partial<Pick<PiAgentRunRecorderOptions, 'runId' | 'parentRunId' | 'onUpdate'>>
@@ -68,9 +70,10 @@ function feedbackMessage(reasons: readonly string[]): AgentRuntimeFeedbackMessag
   }
 }
 
-export function createPiAgentRuntime(options: PiAgentRuntimeOptions = {}): PiAgentRuntime {
+export function createPiAgentRuntime(options: PiAgentRuntimeOptions): PiAgentRuntime {
   const todos = new AgentTodoStore(options.initialTodos)
   const run = createPiAgentRunRecorder({
+    agentId: options.agentId,
     runId: options.run?.runId ?? randomUUID(),
     ...(options.run?.parentRunId ? { parentRunId: options.run.parentRunId } : {}),
     ...(options.run?.onUpdate ? { onUpdate: options.run.onUpdate } : {})

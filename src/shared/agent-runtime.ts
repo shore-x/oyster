@@ -24,6 +24,7 @@ export type SerializableJsonValue =
 export type AgentRunStatus = 'running' | 'completed' | 'failed' | 'cancelled'
 export type AgentActivityStatus = AgentRunStatus
 export type AgentModelCallPurpose = 'agent' | 'context_compaction'
+export const AGENT_RUN_FORMAT_VERSION = 1 as const
 
 export interface AgentTurnRecord {
   id: string
@@ -101,7 +102,10 @@ export interface AgentModelCallRecord {
 
 /** Generic, renderer-safe observation of one Pi Agent prompt run. */
 export interface AgentRunRecord {
+  formatVersion: typeof AGENT_RUN_FORMAT_VERSION
   id: string
+  /** Stable logical Agent definition, independent from this run instance and its business owner. */
+  agentId: string
   parentRunId?: string
   status: AgentRunStatus
   startedAt: string

@@ -186,6 +186,7 @@ export class PiKnowledgeMaintenanceAgent implements KnowledgeAgentRuntime {
     let compactionError: Error | undefined
 
     const agentRuntime = createPiAgentRuntime({
+      agentId: 'knowledge_maintenance_agent',
       initialTodos: input.initialTodos ?? [],
       run: { runId: input.runId, onUpdate: input.onRunUpdate }
     })

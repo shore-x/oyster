@@ -3,11 +3,14 @@ import type { AgentRunRecord } from '../src/shared/agent-runtime'
 export function completedAgentRun(
   id: string,
   toolNames: readonly string[] = [],
-  modelCallCount = 1
+  modelCallCount = 1,
+  agentId = 'test_agent'
 ): AgentRunRecord {
   const timestamp = '2026-07-20T10:00:00.000Z'
   return {
+    formatVersion: 1,
     id,
+    agentId,
     status: 'completed',
     startedAt: timestamp,
     completedAt: timestamp,

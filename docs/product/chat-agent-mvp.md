@@ -1,8 +1,10 @@
 # 通用管理 Agent MVP
 
-> 状态：当前 MVP 规格
+> 状态：当前生产实现记录；Knowledge 工具与独立 Artifact Repository 等待统一 Git 迁移
 >
 > 日期：2026-08-06
+>
+> 迁移说明：本文以下十一项工具和分离 Store 如实描述当前生产代码。目标架构中通用 Agent 直接从统一 Repository 使用文件与 Git 能力维护 `knowledge/` 和 `artifacts/`，`search_knowledge`、`read_knowledge`、`upsert_knowledge` 不再承担权威写入协议；见[《统一 Git Repository 与 Agent 协作》](../architecture/unified-git-agent-collaboration.md)。
 
 ## 1. 目的
 

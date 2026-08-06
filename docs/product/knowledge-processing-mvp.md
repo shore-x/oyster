@@ -1,10 +1,12 @@
 # 知识加工验证 MVP
 
-> 状态：当前实现规格
+> 状态：当前生产实现记录；目标架构已被统一 Git 协作取代，尚未迁移
 >
 > 日期：2026-08-06
 >
 > 范围：验证“外部 Session 的确定版本 → 完整 Raw Evidence 粗粒度分段 → 通用 Todo 驱动的 Knowledge Maintenance Agent → Host 冻结 Contribution → 隔离 Knowledge Sandbox 写入与回读”的最小闭环。
+>
+> 迁移说明：本文以下内容如实描述仍在运行的 SQLite/Contribution Draft 验证切片，不再定义下一阶段架构。目标设计见[《统一 Git Repository 与 Agent 协作》](../architecture/unified-git-agent-collaboration.md)：Knowledge 与 Artifact 共用 Repository，Maintainer/Reviewer 在同一协作分支上用文件和普通 Git commit 交接，Reviewer 用通用 `REVIEW` 标记提出问题并以 merge commit 表达接受。
 
 ## 1. 当前链路
 
@@ -62,29 +64,31 @@ Agent 使用 Draft 工具增量创建、读取、替换和删除候选 Statement
 
 Maintainer 没有专用提交工具。所有 Todo 完成且 Agent 自然结束后，Host 冻结完整 Draft；独立高级调试只展示该 Contribution，不写入任何 Store。完整链路把它提交到物理隔离的 Knowledge Sandbox，并回读实际结果。运行失败或取消时丢弃 Sandbox；正式知识只有在用户从当前或历史测试结果显式导入时才发生变化。
 
-## 5. Reviewer 方向
+## 5. 旧实现尚未接入 Reviewer
 
-未来的 Reviewer 与 Maintainer 对应，目标是检查冻结 Draft 和相关知识能否在脱离原始 Session 后自我解释、引用完整且内部一致。为避免原始语境替模型补全缺失信息，Reviewer 不访问 Raw Evidence、Maintainer transcript、工具轨迹或 Maintainer Todo。
+当前生产切片尚未接入 Reviewer。已确认目标中的 Reviewer 检查协作分支的精确 HEAD 能否在脱离原始 Session 后自我解释、引用完整且内部一致；为避免原始语境替模型补全缺失信息，它不访问 Raw Evidence、Maintainer transcript、工具轨迹或 Maintainer Todo。
 
-Reviewer 尚未接入当前链路。Maintainer 与 Reviewer 的外层交接、问题表示和重新维护循环仍待设计；通用 Todo 只管理单次 Agent 内部工作，不承担跨 Agent 协议。当前也不增加第二个长上下文证据审查 Agent；证据支持、限定和覆盖由读取完整 Raw Evidence 的 Maintainer 负责。
+Maintainer 与 Reviewer 的交接已经在独立原型中确定：Reviewer 直接在文件中加入通用 `REVIEW` 标记并提交，Maintainer 在该 commit 上继续解决；通过时由 Reviewer 创建 merge commit。旧生产切片中的 Contribution Draft 不参与这条新协作链路。
 
 ## 6. 页面与配置
 
 “加工测试”页面提供三个工作面：
 
 - **链路测试**：选择 Session 与可选 Attention，在 Sandbox 中运行完整 Maintainer 和提交链路；
-- **历史记录**：按需读取成功运行的不可变结果与 Agent Run，并可显式导入；
+- **历史记录**：按需读取成功、失败和取消的终态快照及 Agent Runs；只有成功结果可以显式导入；
 - **高级调试**：单独运行 Maintainer，配置调试 Prompt，并查看证据段 Todo、Contribution、模型轮次与工具活动。
 
 Agent 配置页列出真正使用通用 Agent Runtime 的 Agent，包括 Knowledge Maintenance Agent 和通用管理 Agent。Maintainer 的代码内置 Prompt、用户默认 Prompt 与加工页调试覆盖分别承担 fallback、默认和单次调试配置。Connection、Model 和思考强度只在“AI 后端”页面作为唯一 Default LLM 配置；Maintainer 每次新运行在开始时固定当时的 Default LLM 和生效 Prompt。
 
-知识维护与对话复用通用 Agent Run 展示。Timeline 来自 Pi 的 Turn、Message 和 Tool 事件；单次 Model Call 由 `streamFn` 旁路记录，保存转换后的完整 Pi Context、模型可见工具 Schema 与最终输出，并区分 Agent 主调用和 Context Compaction。它不下探 Provider Payload，也不保存凭据、Header、环境变量或 AbortSignal。Todo 和 Contribution Draft 是业务 Workspace 状态，继续在加工页面单独展示，不进入通用轨迹模型。
+知识维护与对话复用通用 Agent Run 展示。Timeline 来自 Pi 的 Turn、Message 和 Tool 事件；单次 Model Call 由 `streamFn` 旁路记录，保存转换后的完整 Pi Context、模型可见工具 Schema 与最终输出，并区分 Agent 主调用和 Context Compaction。它不下探 Provider Payload，也不保存凭据、Header、环境变量或 AbortSignal。Todo 和 Contribution Draft 是业务 Workspace 状态，继续在加工页面单独展示，不进入通用轨迹模型。多个 Agent Runs 使用同一个通用选择器和详情组件，具体加工页面只决定哪些 Runs 属于同一次产品运行。
 
 Agent Run 不是知识或审计真相，但可能包含完整原始材料。UI 必须如实提示敏感性，并按用户选择的调用展开 Context；Renderer 不获得来源路径、凭据或底层数据库写权限。
 
 ## 7. 历史与升级
 
-成功链路记录使用当前 V4 payload，保存当次已固定的 Maintainer 执行绑定、结果、Sandbox 写入结果和完整 Agent Run。历史 SQLite schema 升级时直接删除并重建旧表，不迁移旧记录。`knowledge-processing.json` 使用 V2 格式，只保存 Maintainer Prompt 覆盖；无版本或 V1 配置直接重建为空配置，不迁移旧的阶段模型绑定。Default LLM 保存在 `ai-connections.json`。当前版本格式损坏或来自更高版本时仍明确报错。
+加工历史使用 V5 终态 Envelope，产品运行 ID 与 Agent Run ID 相互独立。Envelope 保存输入、冻结的 Maintainer 执行绑定、`completed | failed | cancelled` 状态以及零个或多个版本化 Agent Runs；只有 `completed` 保存可导入结果，其他状态保存错误。来源读取或 Sandbox 创建提前失败时不会伪造 Agent Run，Agent 已启动后的失败和取消则保留其终态调用记录。
+
+SQLite 继续以摘要列支持轻量列表，以单个 `payload_json` 保存按需读取的不可变详情。进入 V5 时会最后一次重建旧的开发期历史表；V5 稳定格式之后的 Schema 变化必须显式迁移，不再默认清空历史。`knowledge-processing.json` 使用 V2 格式，只保存 Maintainer Prompt 覆盖；无版本或 V1 配置直接重建为空配置，不迁移旧的阶段模型绑定。Default LLM 保存在 `ai-connections.json`。当前版本格式损坏或来自更高版本时仍明确报错。
 
 ## 8. 当前验收边界
 
@@ -94,5 +98,5 @@ Agent Run 不是知识或审计真相，但可能包含完整原始材料。UI �
 - Prompt 明确要求核查 Skill 激活、名称、指代和必要背景；
 - 成功结果只在 Sandbox 中自动提交，正式知识必须显式导入；
 - 取消、来源版本变化、模型失败或提交失败不会留下半写入正式知识；
-- UI、共享类型、IPC、历史记录和文档只呈现单 Maintainer 链路。
+- 当前产品编排仍只运行一个 Maintainer，但 V5 Envelope、共享类型和历史详情支持零个或多个 Agent Runs，不把单 Agent 偶然性固化进 Runtime。
 - 加工测试与对话使用同一 Agent Timeline 和 Model Call Inspector；Inspector 能查看完整 Pi Context，但不提供 Provider Payload。

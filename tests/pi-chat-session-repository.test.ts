@@ -3,7 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { fauxAssistantMessage, fauxToolCall, type ToolResultMessage } from '@earendil-works/pi-ai'
-import { PiChatSessionRepository } from '../src/main/chat/pi-chat-session-repository'
+import {
+  appendChatAgentRun,
+  PiChatSessionRepository
+} from '../src/main/chat/pi-chat-session-repository'
+import { completedAgentRun } from './agent-run-fixture'
 
 const temporaryPaths: string[] = []
 
@@ -91,5 +95,32 @@ describe('PiChatSessionRepository', () => {
     await expect(reopened.open(metadata.id)).rejects.toThrow('不存在')
     await repository.dispose()
     await reopened.dispose()
+  })
+
+  it('persists only terminal, supported Agent Run records through the shared validator', async () => {
+    const rootPath = await temporaryPath()
+    const repository = new PiChatSessionRepository(rootPath)
+    const opened = await repository.create({
+      connectionId: 'connection:one',
+      modelId: 'model-small',
+      systemPrompt: 'Use the Knowledge Store.'
+    })
+    const metadata = await opened.session.getMetadata()
+
+    const running = completedAgentRun('chat-running', [], 1, 'chat_agent')
+    running.status = 'running'
+    delete running.completedAt
+    delete running.durationMs
+    await expect(appendChatAgentRun(opened.session, running)).rejects.toThrow('尚未终态化')
+
+    const unknownVersion = completedAgentRun('chat-unknown', [], 1, 'chat_agent')
+    unknownVersion.formatVersion = 99 as 1
+    await expect(appendChatAgentRun(opened.session, unknownVersion)).rejects.toThrow('格式版本无效')
+
+    const completed = completedAgentRun('chat-completed', [], 1, 'chat_agent')
+    await appendChatAgentRun(opened.session, completed)
+    expect((await repository.detail(metadata.id)).runs).toEqual([completed])
+
+    await repository.dispose()
   })
 })

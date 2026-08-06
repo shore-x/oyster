@@ -10,6 +10,7 @@ import type {
   KnowledgeFullChainResult,
   RunKnowledgeFullChainInput
 } from '../../shared/knowledge-processing'
+import type { AvailableSessionSummary } from '../../shared/discovery'
 import type { DiscoveryService } from '../discovery/discovery-service'
 import type { SqliteKnowledgeStoreManager } from '../knowledge-store/knowledge-store-manager'
 import type { KnowledgeAgentRuntime, KnowledgeReader } from './model'
@@ -36,6 +37,15 @@ interface ActiveFullChainRun {
   controller: AbortController
   lease: ProcessingRunLease
   sandboxId?: string
+}
+
+function terminalStatus(signal: AbortSignal): 'failed' | 'cancelled' {
+  return signal.aborted ? 'cancelled' : 'failed'
+}
+
+function terminalError(error: unknown, status: 'failed' | 'cancelled'): string {
+  if (status === 'cancelled') return '加工测试运行已取消'
+  return error instanceof Error ? error.message : String(error)
 }
 
 function validateInput(input: RunKnowledgeFullChainInput): void {
@@ -83,16 +93,48 @@ export class KnowledgeFullChainService {
 
     const lease = this.processing.acquireExclusiveRun()
     const runId = randomUUID()
-    const debugTrace: ProcessingDebugTraceContext = { id: runId, origin: 'full_chain' }
+    const debugTrace: ProcessingDebugTraceContext = { id: randomUUID(), origin: 'full_chain' }
     const controller = new AbortController()
     const active: ActiveFullChainRun = { runId, controller, lease }
     this.active = active
     const startedAt = Date.now()
+    const startedAtIso = new Date(startedAt).toISOString()
     let sandboxId: string | undefined
+    let session: AvailableSessionSummary | undefined
+    let historySaveAttempted = false
+
+    const saveHistory = (
+      status: KnowledgeFullChainRunRecord['status'],
+      completedAt: string,
+      durationMs: number,
+      result?: KnowledgeFullChainResult,
+      error?: string
+    ): void => {
+      if (!this.history) return
+      historySaveAttempted = true
+      const agentRun = this.processing.agentRunSnapshot(debugTrace)
+      this.history.save({
+        formatVersion: 5,
+        runId,
+        status,
+        startedAt: startedAtIso,
+        completedAt,
+        durationMs,
+        input: structuredClone(input),
+        ...(session ? { session: structuredClone(session) } : {}),
+        configuration: {
+          maintainer: structuredClone(bindings.maintainer)
+        },
+        agentRuns: agentRun ? [agentRun] : [],
+        ...(result ? { result } : {}),
+        ...(error ? { error } : {})
+      })
+    }
 
     try {
-      this.processing.beginFullChainDebugTrace(debugTrace)
-      const { session, evidence, sourceRef } = await loadSessionMaterial(this.discovery, input)
+      const material = await loadSessionMaterial(this.discovery, input)
+      session = material.session
+      const { evidence, sourceRef } = material
       controller.signal.throwIfAborted()
       const sandbox = await this.stores.createSandbox()
       sandboxId = sandbox.id
@@ -133,14 +175,12 @@ export class KnowledgeFullChainService {
         }
       }
       controller.signal.throwIfAborted()
-      const completedDebugTrace = this.processing.completeFullChainDebugTrace(debugTrace)
-
       const result: KnowledgeFullChainResult = {
         runId,
         session: structuredClone(session),
         sandbox: { id: sandbox.id, baselineCreatedAt: sandbox.baselineCreatedAt },
         sourceRef,
-        maintenance: { ...maintenance, debugTrace: completedDebugTrace },
+        maintenance,
         commit,
         knowledge: {
           writtenStatementTitles: commit.statements.map((statement) => statement.title),
@@ -149,21 +189,14 @@ export class KnowledgeFullChainService {
         durationMs: Date.now() - startedAt,
         completedAt: new Date().toISOString()
       }
-      this.history?.save({
-        formatVersion: 4,
-        runId,
-        ...(input.attention ? { attention: input.attention } : {}),
-        configuration: {
-          maintainer: structuredClone(bindings.maintainer)
-        },
-        result
-      })
+      saveHistory('completed', result.completedAt, result.durationMs, result)
       this.ownedSandboxes.add(sandbox.id)
       return result
     } catch (error) {
+      const status = terminalStatus(controller.signal)
       this.processing.failFullChainDebugTrace(
         debugTrace,
-        controller.signal.aborted ? 'cancelled' : 'failed',
+        status,
         error
       )
       if (sandboxId) {
@@ -172,6 +205,16 @@ export class KnowledgeFullChainService {
         } catch {
           // Preserve the processing failure/cancellation. Stale Sandboxes are cleaned on startup.
         }
+      }
+      if (!historySaveAttempted) {
+        const completedAt = new Date().toISOString()
+        saveHistory(
+          status,
+          completedAt,
+          Math.max(0, new Date(completedAt).getTime() - startedAt),
+          undefined,
+          terminalError(error, status)
+        )
       }
       throw error
     } finally {
@@ -228,6 +271,9 @@ export class KnowledgeFullChainService {
     try {
       const record = this.history?.read(runId)
       if (!record) throw new Error('未找到要导入的加工测试记录')
+      if (record.status !== 'completed' || !record.result) {
+        throw new Error('只有成功完成的加工测试记录可以导入')
+      }
       return this.stores.production.commit({
         runRef: `full-chain-import:${record.runId}:${randomUUID()}`,
         statements: record.result.knowledge.statements.map(({ title, content }) => ({

@@ -270,8 +270,15 @@ export function AgentRunExplorer(props: AgentRunViewProps & { compact?: boolean 
   })
   return (
     <section class={`agent-run-view agent-run-view--${props.run.status}${props.compact ? ' agent-run-view--compact' : ''}`} data-testid="agent-run-view">
+      <Show when={props.compact}>
+        <header class="agent-run-view__compact-header">
+          <strong>{props.run.agentId}</strong>
+          <span title={props.run.parentRunId}>{props.run.parentRunId ? '子 Agent' : '根 Agent'} · {agentRunStatusLabel(props.run.status)}</span>
+        </header>
+      </Show>
       <Show when={!props.compact}>
         <header class="agent-run-view__summary">
+          <div><span>Agent</span><strong>{props.run.agentId}</strong></div>
           <div><span>Turns</span><strong>{props.run.turns.length}</strong></div>
           <div><span>Model Calls</span><strong>{props.run.modelCalls.length}</strong></div>
           <div><span>Tool Calls</span><strong>{props.run.toolCalls.length}</strong></div>
@@ -308,6 +315,46 @@ export function AgentRunExplorer(props: AgentRunViewProps & { compact?: boolean 
           </>
         )}</Show>
       </div>
+    </section>
+  )
+}
+
+/** Generic multi-Agent projection; business pages only decide which runs belong together. */
+export function AgentRunCollectionExplorer(props: {
+  runs: AgentRunRecord[]
+  toolLabel?: AgentRunViewProps['toolLabel']
+  onOpenKnowledge?: AgentRunViewProps['onOpenKnowledge']
+}) {
+  const [selectedRunId, setSelectedRunId] = createSignal<string>()
+  const selectedRun = createMemo(() => props.runs.find((run) => run.id === selectedRunId()))
+  createEffect(() => {
+    if (selectedRun()) return
+    setSelectedRunId(props.runs.find((run) => run.status === 'failed')?.id ?? props.runs[0]?.id)
+  })
+  return (
+    <section class="agent-run-collection" data-testid="agent-run-collection">
+      <Show when={props.runs.length > 1}>
+        <div class="agent-run-collection__selector" aria-label="Agent Runs">
+          <For each={props.runs}>{(run, index) => (
+            <button
+              type="button"
+              aria-selected={selectedRun()?.id === run.id}
+              onClick={() => setSelectedRunId(run.id)}
+            >
+              <span>{index() + 1}</span>
+              <strong>{run.agentId}</strong>
+              <small>{agentRunStatusLabel(run.status)} · {run.modelCalls.length} 次模型</small>
+            </button>
+          )}</For>
+        </div>
+      </Show>
+      <Show when={selectedRun()} fallback={<div class="agent-trace-empty">没有实际启动的 Agent Run。</div>}>
+        {(run) => <AgentRunExplorer
+          run={run()}
+          toolLabel={props.toolLabel}
+          onOpenKnowledge={props.onOpenKnowledge}
+        />}
+      </Show>
     </section>
   )
 }

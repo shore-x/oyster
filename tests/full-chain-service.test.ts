@@ -22,6 +22,7 @@ import type {
 import { InMemoryKnowledgeProcessingRepository } from '../src/main/knowledge-processing/repository'
 import { SqliteKnowledgeStoreManager } from '../src/main/knowledge-store/knowledge-store-manager'
 import type { KnowledgeFullChainRunRecord } from '../src/shared/knowledge-processing'
+import type { AgentRunRecord } from '../src/shared/agent-runtime'
 import { completedAgentRun } from './agent-run-fixture'
 
 const temporaryDirectories: string[] = []
@@ -129,6 +130,50 @@ function fakeDiscovery() {
   return { service, session }
 }
 
+function inMemoryHistory(): {
+  history: KnowledgeFullChainRunHistory
+  records: KnowledgeFullChainRunRecord[]
+} {
+  const records: KnowledgeFullChainRunRecord[] = []
+  return {
+    records,
+    history: {
+      save: (record) => records.push(structuredClone(record)),
+      list: () => [],
+      read: (runId) => records.find((record) => record.runId === runId)
+    }
+  }
+}
+
+function terminalAgentRun(
+  id: string,
+  status: 'failed' | 'cancelled',
+  error: string
+): AgentRunRecord {
+  const run = completedAgentRun(id, [], 1, 'knowledge_maintenance_agent')
+  run.status = status
+  run.error = error
+  const modelCall = run.modelCalls[0]
+  if (modelCall) {
+    modelCall.status = status
+    modelCall.error = error
+  }
+  return run
+}
+
+function runningAgentRun(id: string): AgentRunRecord {
+  const run = completedAgentRun(id, [], 1, 'knowledge_maintenance_agent')
+  run.status = 'running'
+  delete run.completedAt
+  delete run.durationMs
+  for (const modelCall of run.modelCalls) {
+    modelCall.status = 'running'
+    delete modelCall.completedAt
+    delete modelCall.durationMs
+  }
+  return run
+}
+
 afterEach(async () => {
   for (const dispose of disposals.splice(0)) dispose()
   await Promise.all(temporaryDirectories.splice(0).map(
@@ -137,7 +182,7 @@ afterEach(async () => {
 })
 
 describe('KnowledgeFullChainService', () => {
-  it('runs one evidence-driven Maintainer in a Sandbox and stores a V4 snapshot', async () => {
+  it('runs one evidence-driven Maintainer in a Sandbox and stores a V5 terminal snapshot', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'oyster-full-chain-'))
     temporaryDirectories.push(directory)
     const stores = await SqliteKnowledgeStoreManager.open(join(directory, 'knowledge'))
@@ -153,16 +198,16 @@ describe('KnowledgeFullChainService', () => {
     disposals.push(() => processing.dispose())
     const discovery = fakeDiscovery()
     const agentInputs: KnowledgeAgentRunInput[] = []
-    const historyRecords: KnowledgeFullChainRunRecord[] = []
-    const history: KnowledgeFullChainRunHistory = {
-      save: (record) => historyRecords.push(structuredClone(record)),
-      list: () => [],
-      read: (runId) => historyRecords.find((record) => record.runId === runId)
-    }
+    const { history, records: historyRecords } = inMemoryHistory()
     const factory = (_reader: KnowledgeReader): KnowledgeAgentRuntime => ({
       run: async (input) => {
         agentInputs.push(input)
-        const run = completedAgentRun(input.runId, ['read_evidence', 'complete_todos'])
+        const run = completedAgentRun(
+          input.runId,
+          ['read_evidence', 'complete_todos'],
+          1,
+          'knowledge_maintenance_agent'
+        )
         input.onRunUpdate?.(run)
         return {
           contribution: {
@@ -199,9 +244,18 @@ describe('KnowledgeFullChainService', () => {
     expect(stores.production.listStatements()).toEqual([])
     expect(historyRecords).toHaveLength(1)
     expect(historyRecords[0]).toMatchObject({
-      formatVersion: 4,
+      formatVersion: 5,
+      status: 'completed',
       configuration: { maintainer: { modelId: 'maintainer' } }
     })
+    expect(historyRecords[0].runId).toBe(result.runId)
+    expect(historyRecords[0].agentRuns).toHaveLength(1)
+    expect(historyRecords[0].agentRuns[0]).toMatchObject({
+      id: result.maintenance.agentRunId,
+      agentId: 'knowledge_maintenance_agent',
+      status: 'completed'
+    })
+    expect(historyRecords[0].agentRuns[0].id).not.toBe(result.runId)
   })
 
   it('rejects a stale Session selection before creating a Sandbox', async () => {
@@ -217,9 +271,10 @@ describe('KnowledgeFullChainService', () => {
     await processing.initialize()
     disposals.push(() => processing.dispose())
     const discovery = fakeDiscovery()
+    const { history, records } = inMemoryHistory()
     const service = new KnowledgeFullChainService(discovery.service, processing, stores, () => ({
       run: async () => { throw new Error('not used') }
-    }))
+    }), history)
 
     await expect(service.run({
       sourceRecordId: discovery.session.sourceRecordId,
@@ -231,6 +286,120 @@ describe('KnowledgeFullChainService', () => {
         instructions: 'Maintain knowledge.'
       }
     })).rejects.toThrow('Session 已失效')
+    expect(await stores.listSandboxes()).toEqual([])
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({
+      formatVersion: 5,
+      status: 'failed',
+      error: expect.stringContaining('Session 已失效'),
+      agentRuns: []
+    })
+    expect(records[0].session).toBeUndefined()
+  })
+
+  it('stores the failed Agent Run when knowledge maintenance fails', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'oyster-full-chain-'))
+    temporaryDirectories.push(directory)
+    const stores = await SqliteKnowledgeStoreManager.open(join(directory, 'knowledge'))
+    disposals.push(() => stores.close())
+    const processing = new KnowledgeProcessingService(
+      new InMemoryKnowledgeProcessingRepository(),
+      new FakeBackend(),
+      { run: async () => { throw new Error('not used') } }
+    )
+    await processing.initialize()
+    disposals.push(() => processing.dispose())
+    const discovery = fakeDiscovery()
+    const { history, records } = inMemoryHistory()
+    const service = new KnowledgeFullChainService(discovery.service, processing, stores, () => ({
+      run: async (input) => {
+        const error = 'maintainer model unavailable'
+        input.onRunUpdate?.(terminalAgentRun(input.runId, 'failed', error))
+        throw new Error(error)
+      }
+    }), history)
+
+    await expect(service.run({
+      sourceRecordId: discovery.session.sourceRecordId,
+      expectedRevision: discovery.session.revision
+    }, {
+      maintainer: {
+        connectionId: 'model:maintainer',
+        modelId: 'maintainer',
+        instructions: 'Maintain knowledge.'
+      }
+    })).rejects.toThrow('maintainer model unavailable')
+
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({
+      status: 'failed',
+      error: 'maintainer model unavailable',
+      agentRuns: [{
+        agentId: 'knowledge_maintenance_agent',
+        status: 'failed',
+        error: 'maintainer model unavailable',
+        modelCalls: [{ status: 'failed' }]
+      }]
+    })
+    expect(records[0].agentRuns[0].id).not.toBe(records[0].runId)
+    expect(await stores.listSandboxes()).toEqual([])
+  })
+
+  it('stores a cancelled terminal snapshot with the active Agent Run', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'oyster-full-chain-'))
+    temporaryDirectories.push(directory)
+    const stores = await SqliteKnowledgeStoreManager.open(join(directory, 'knowledge'))
+    disposals.push(() => stores.close())
+    const processing = new KnowledgeProcessingService(
+      new InMemoryKnowledgeProcessingRepository(),
+      new FakeBackend(),
+      { run: async () => { throw new Error('not used') } }
+    )
+    await processing.initialize()
+    disposals.push(() => processing.dispose())
+    const discovery = fakeDiscovery()
+    const { history, records } = inMemoryHistory()
+    let markStarted!: () => void
+    const started = new Promise<void>((resolve) => { markStarted = resolve })
+    const service = new KnowledgeFullChainService(discovery.service, processing, stores, () => ({
+      run: async (input) => {
+        input.onRunUpdate?.(runningAgentRun(input.runId))
+        markStarted()
+        return new Promise<never>((_resolve, reject) => {
+          const cancel = (): void => {
+            input.onRunUpdate?.(terminalAgentRun(input.runId, 'cancelled', '用户取消了运行'))
+            reject(input.signal.reason)
+          }
+          if (input.signal.aborted) cancel()
+          else input.signal.addEventListener('abort', cancel, { once: true })
+        })
+      }
+    }), history)
+
+    const run = service.run({
+      sourceRecordId: discovery.session.sourceRecordId,
+      expectedRevision: discovery.session.revision
+    }, {
+      maintainer: {
+        connectionId: 'model:maintainer',
+        modelId: 'maintainer',
+        instructions: 'Maintain knowledge.'
+      }
+    })
+    await started
+    service.cancel()
+    await expect(run).rejects.toThrow('取消')
+
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({
+      status: 'cancelled',
+      error: '加工测试运行已取消',
+      agentRuns: [{
+        agentId: 'knowledge_maintenance_agent',
+        status: 'cancelled',
+        modelCalls: [{ status: 'cancelled' }]
+      }]
+    })
     expect(await stores.listSandboxes()).toEqual([])
   })
 })

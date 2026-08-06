@@ -20,6 +20,7 @@ import type {
   AgentRunStatus,
   SerializableJsonValue
 } from '../../shared/agent-runtime'
+import { AGENT_RUN_FORMAT_VERSION } from '../../shared/agent-runtime'
 
 const SAFE_STREAM_OPTION_KEYS = [
   'temperature',
@@ -36,6 +37,7 @@ const SAFE_STREAM_OPTION_KEYS = [
 ] as const
 
 export interface PiAgentRunRecorderOptions {
+  agentId: string
   runId: string
   parentRunId?: string
   onUpdate?: (run: AgentRunRecord) => void
@@ -128,7 +130,9 @@ export function createPiAgentRunRecorder(
   let currentMessageId: string | undefined
   const assistantMessageIdsByToolCall = new Map<string, string>()
   const run: AgentRunRecord = {
+    formatVersion: AGENT_RUN_FORMAT_VERSION,
     id: options.runId,
+    agentId: options.agentId,
     ...(options.parentRunId ? { parentRunId: options.parentRunId } : {}),
     status: 'running',
     startedAt: new Date().toISOString(),

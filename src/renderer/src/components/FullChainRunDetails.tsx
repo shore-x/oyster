@@ -2,13 +2,15 @@ import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
 import { Button } from '../ui'
 import type { KnowledgeCommitResult } from '../../../shared/knowledge'
 import { KnowledgeStatementBrowser, statementPreview } from './KnowledgeStatementBrowser'
-import { ProcessingTraceExplorer } from './ProcessingDebugTracePanel'
+import { AgentRunCollectionExplorer } from './AgentRunView'
 import { AgentTodoList } from './AgentTodoList'
 import type { FullChainResultView, FullChainStepView } from './FullChainWorkspace'
 import type {
+  KnowledgeFullChainRunRecord,
   KnowledgeFullChainResult,
   KnowledgeProcessingDebugTrace
 } from '../../../shared/knowledge-processing'
+import type { AgentRunRecord } from '../../../shared/agent-runtime'
 
 function formatTime(value?: string): string {
   if (!value) return '—'
@@ -27,7 +29,6 @@ export function fullChainResultView(result: KnowledgeFullChainResult): FullChain
     completedAt: result.completedAt,
     durationMs: result.durationMs,
     todos: result.maintenance.todos,
-    debugTrace: result.maintenance.debugTrace,
     steps: [
       {
         id: 'session',
@@ -60,8 +61,17 @@ function stepMarker(step: FullChainStepView, index: number): string {
   return String(index + 1)
 }
 
+function terminalStatusLabel(status: KnowledgeFullChainRunRecord['status']): string {
+  if (status === 'completed') return '已完成'
+  if (status === 'cancelled') return '已取消'
+  return '失败'
+}
+
 export function FullChainActivityDetail(props: {
   trace?: KnowledgeProcessingDebugTrace
+  runs?: AgentRunRecord[]
+  status?: KnowledgeFullChainRunRecord['status']
+  error?: string
   title?: string
   description?: string
   backLabel: string
@@ -69,6 +79,7 @@ export function FullChainActivityDetail(props: {
   backTestId: string
   onBack(): void
 }) {
+  const runs = () => props.runs ?? (props.trace ? [props.trace.run] : [])
   return (
     <section class="chain-test__detail-page" data-testid={props.detailTestId}>
       <div class="chain-test__detail-header">
@@ -79,8 +90,17 @@ export function FullChainActivityDetail(props: {
         </div>
       </div>
       <p class="chain-test__detail-disclosure">运行记录可能包含原始观察材料和完整 Pi Context；数据仅保存在本地，不包含 Provider Payload 或鉴权信息。</p>
-      <Show when={props.trace} fallback={<div class="chain-test__empty">当前没有可查看的运行轨迹。</div>}>
-        {(trace) => <ProcessingTraceExplorer trace={trace()} />}
+      <Show when={props.status}>{(status) => (
+        <div
+          class={`processing-history-detail-status processing-history-detail-status--${status()}`}
+          data-testid="history-run-status"
+        >
+          <strong>{terminalStatusLabel(status())}</strong>
+          <Show when={props.error}>{(error) => <p>{error()}</p>}</Show>
+        </div>
+      )}</Show>
+      <Show when={runs().length} fallback={<div class="chain-test__empty">这次测试没有实际启动 Agent。</div>}>
+        <AgentRunCollectionExplorer runs={runs()} />
       </Show>
     </section>
   )

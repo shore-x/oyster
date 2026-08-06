@@ -11,14 +11,38 @@ const temporaryDirectories: string[] = []
 
 function record(runId: string, completedAt: string, title: string): KnowledgeFullChainRunRecord {
   const statement = { title: 'Database', content: `Body for ${runId}` }
-  const debugTrace = {
-    origin: 'full_chain' as const,
-    run: completedAgentRun(runId, ['read_evidence'])
+  const session = {
+    sourceRecordId: `source-record:${runId}`,
+    sourceId: 'source:codex',
+    agentType: 'codex' as const,
+    sourceDisplayName: 'Codex',
+    externalId: `session:${runId}`,
+    title,
+    projectPath: '/projects/oyster',
+    startedAt: '2026-07-20T10:00:00.000Z',
+    endedAt: '2026-07-20T10:30:00.000Z',
+    sizeBytes: 512,
+    revision: 'a'.repeat(64)
   }
+  const agentRun = completedAgentRun(
+    `${runId}:agent:1`,
+    ['read_evidence'],
+    1,
+    'knowledge_maintenance_agent'
+  )
   return {
-    formatVersion: 4,
+    formatVersion: 5,
     runId,
-    attention: 'Focus on names.',
+    status: 'completed',
+    startedAt: '2026-07-20T10:30:58.500Z',
+    completedAt,
+    durationMs: 1_500,
+    input: {
+      sourceRecordId: session.sourceRecordId,
+      expectedRevision: session.revision,
+      attention: 'Focus on names.'
+    },
+    session,
     configuration: {
       maintainer: {
         connectionId: 'model:maintainer',
@@ -26,21 +50,10 @@ function record(runId: string, completedAt: string, title: string): KnowledgeFul
         instructions: 'Maintain Statements.'
       }
     },
+    agentRuns: [agentRun],
     result: {
       runId,
-      session: {
-        sourceRecordId: `source-record:${runId}`,
-        sourceId: 'source:codex',
-        agentType: 'codex',
-        sourceDisplayName: 'Codex',
-        externalId: `session:${runId}`,
-        title,
-        projectPath: '/projects/oyster',
-        startedAt: '2026-07-20T10:00:00.000Z',
-        endedAt: '2026-07-20T10:30:00.000Z',
-        sizeBytes: 512,
-        revision: 'a'.repeat(64)
-      },
+      session,
       sandbox: { id: `sandbox:${runId}`, baselineCreatedAt: completedAt },
       sourceRef: `raw:${runId}`,
       maintenance: {
@@ -49,7 +62,7 @@ function record(runId: string, completedAt: string, title: string): KnowledgeFul
         evidenceSegmentCount: 1,
         contribution: { runRef: `full-chain:${runId}`, statements: [statement] },
         todos: [{ id: 'T000001', content: 'Inspect Raw Evidence segment 1 of 1.', status: 'completed' }],
-        debugTrace,
+        agentRunId: agentRun.id,
         durationMs: 500,
         completedAt,
         execution: {
@@ -76,6 +89,22 @@ function record(runId: string, completedAt: string, title: string): KnowledgeFul
   }
 }
 
+function failedRecord(runId: string, completedAt: string): KnowledgeFullChainRunRecord {
+  const failed = record(runId, completedAt, 'Failed Session')
+  failed.status = 'failed'
+  failed.error = 'Maintainer model unavailable'
+  delete failed.result
+  const agentRun = failed.agentRuns[0]
+  agentRun.status = 'failed'
+  agentRun.error = 'Maintainer model unavailable'
+  const modelCall = agentRun.modelCalls[0]
+  if (modelCall) {
+    modelCall.status = 'failed'
+    modelCall.error = 'Maintainer model unavailable'
+  }
+  return failed
+}
+
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map(
     (directory) => rm(directory, { recursive: true, force: true })
@@ -98,6 +127,50 @@ describe('SqliteKnowledgeFullChainRunRepository', () => {
     expect(JSON.stringify(repository.list())).not.toContain('Body for run-1')
     expect(repository.read('run-1')).toEqual(record('run-1', '2026-07-20T10:31:00.000Z', 'First Session'))
     expect(() => repository.save(record('run-1', '2026-07-20T10:31:00.000Z', 'First Session'))).toThrow()
+    repository.close()
+  })
+
+  it('persists failed terminal details while keeping the list compact', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'oyster-processing-history-'))
+    temporaryDirectories.push(directory)
+    const repository = await SqliteKnowledgeFullChainRunRepository.open(join(directory, 'history.sqlite'))
+    const failed = failedRecord('run-failed', '2026-07-22T10:31:00.000Z')
+
+    repository.save(failed)
+
+    expect(repository.list()).toEqual([expect.objectContaining({
+      runId: 'run-failed',
+      status: 'failed',
+      statementCount: 0,
+      agentRunCount: 1,
+      modelCallCount: 1,
+      error: 'Maintainer model unavailable'
+    })])
+    expect(JSON.stringify(repository.list())).not.toContain('Body for run-failed')
+    expect(repository.read('run-failed')).toEqual(failed)
+    repository.close()
+  })
+
+  it('rejects non-terminal and unknown-version Agent Run records at the shared boundary', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'oyster-processing-history-'))
+    temporaryDirectories.push(directory)
+    const repository = await SqliteKnowledgeFullChainRunRepository.open(join(directory, 'history.sqlite'))
+    const running = record('run-running', '2026-07-22T10:31:00.000Z', 'Running Session')
+    running.agentRuns[0].status = 'running'
+    delete running.agentRuns[0].completedAt
+    delete running.agentRuns[0].durationMs
+    expect(() => repository.save(running)).toThrow('尚未终态化')
+
+    const incomplete = record('run-incomplete', '2026-07-22T10:31:30.000Z', 'Incomplete Session')
+    incomplete.agentRuns[0].modelCalls[0].status = 'running'
+    delete incomplete.agentRuns[0].modelCalls[0].completedAt
+    delete incomplete.agentRuns[0].modelCalls[0].durationMs
+    expect(() => repository.save(incomplete)).toThrow('仍包含运行中活动')
+
+    const unknownVersion = record('run-unknown', '2026-07-22T10:32:00.000Z', 'Unknown Session')
+    unknownVersion.agentRuns[0].formatVersion = 99 as 1
+    expect(() => repository.save(unknownVersion)).toThrow('格式版本无效')
+    expect(repository.list()).toEqual([])
     repository.close()
   })
 

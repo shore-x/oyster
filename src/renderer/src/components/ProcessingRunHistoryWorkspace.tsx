@@ -21,6 +21,12 @@ function formatDuration(durationMs: number): string {
   return `${(durationMs / 1_000).toFixed(1)} s`
 }
 
+function statusLabel(status: KnowledgeFullChainRunSummary['status']): string {
+  if (status === 'completed') return '已完成'
+  if (status === 'cancelled') return '已取消'
+  return '失败'
+}
+
 export function ProcessingRunHistoryWorkspace(props: {
   runs: KnowledgeFullChainRunSummary[]
   loading: boolean
@@ -48,7 +54,7 @@ export function ProcessingRunHistoryWorkspace(props: {
           <div class="processing-history__heading">
             <div>
               <h2>测试历史</h2>
-              <p>每次成功运行都会保存为本地不可变快照；详情和调用轨迹按需读取。</p>
+              <p>成功、失败和取消都会保存为本地终态快照；详情和调用轨迹按需读取。</p>
             </div>
             <strong>{props.runs.length}</strong>
           </div>
@@ -58,25 +64,28 @@ export function ProcessingRunHistoryWorkspace(props: {
           >
             <Show
               when={props.runs.length}
-              fallback={<div class="processing-history__empty">还没有已完成的链路测试。</div>}
+              fallback={<div class="processing-history__empty">还没有终态链路测试。</div>}
             >
               <div class="processing-history__list">
                 <For each={props.runs}>{(run) => (
-                  <article class="processing-history-run" data-testid={`history-run-${run.runId}`}>
+                  <article class={`processing-history-run processing-history-run--${run.status}`} data-testid={`history-run-${run.runId}`}>
                     <div class="processing-history-run__heading">
                       <div>
                         <h3>{run.sessionTitle || '未命名 Session'}</h3>
-                        <p>{run.sourceDisplayName}{run.projectPath ? ` · ${run.projectPath}` : ''}</p>
+                        <p>{run.sourceDisplayName || 'Session 尚未解析'}{run.projectPath ? ` · ${run.projectPath}` : ''}</p>
                       </div>
-                      <time>{formatTime(run.completedAt)}</time>
+                      <time>{statusLabel(run.status)} · {formatTime(run.completedAt)}</time>
                     </div>
                     <div class="processing-history-run__metrics">
                       <span><strong>{run.statementCount}</strong> Statements</span>
                       <span><strong>{formatDuration(run.durationMs)}</strong> 耗时</span>
+                      <span><strong>{run.agentRunCount}</strong> Agent Runs</span>
+                      <span><strong>{run.modelCallCount}</strong> Model Calls</span>
                     </div>
                     <div class="processing-history-run__models">
                       <span>知识维护 · {run.maintainerModel}</span>
                     </div>
+                    <Show when={run.error}><p class="agent-trace-error">{run.error}</p></Show>
                     <div class="processing-history-run__actions">
                       <Button
                         variant="secondary"
@@ -88,7 +97,7 @@ export function ProcessingRunHistoryWorkspace(props: {
                       <Button
                         variant="primary"
                         icon="layers"
-                        disabled={props.loadingRunId === run.runId}
+                        disabled={run.status !== 'completed' || props.loadingRunId === run.runId}
                         data-testid={`open-history-result-${run.runId}`}
                         onClick={() => void open(run.runId, 'result')}
                       >{props.loadingRunId === run.runId ? '正在读取…' : '查看结果'}</Button>
@@ -103,9 +112,11 @@ export function ProcessingRunHistoryWorkspace(props: {
 
       <Show when={page() === 'activity' && props.selected ? props.selected : undefined}>
         {(record) => <FullChainActivityDetail
-          trace={record().result.maintenance.debugTrace}
+          runs={record().agentRuns}
+          status={record().status}
+          error={record().error}
           title="历史运行详情"
-          description="这是该次测试完成时保存的模型与工具调用快照。"
+          description="这是该次测试结束时保存的模型与工具调用快照。"
           backLabel="返回历史"
           detailTestId="history-run-activity-detail"
           backTestId="history-run-activity-back"
@@ -113,9 +124,11 @@ export function ProcessingRunHistoryWorkspace(props: {
         />}
       </Show>
 
-      <Show when={page() === 'result' && props.selected ? props.selected : undefined}>
+      <Show when={page() === 'result' && props.selected?.status === 'completed' && props.selected.result
+        ? props.selected
+        : undefined}>
         {(record) => <FullChainResultDetail
-          result={fullChainResultView(record().result)}
+          result={fullChainResultView(record().result!)}
           title="历史结果快照"
           description="这是该次测试完成时保存的隔离结果，不会随当前知识库变化。"
           listLabel="历史 Statements"

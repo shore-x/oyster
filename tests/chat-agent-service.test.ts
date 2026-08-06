@@ -374,6 +374,20 @@ describe('ChatAgentService', () => {
       'assistant'
     ])
     expect(JSON.stringify(details.transcript)).not.toContain(parentOnlyContext)
+    expect(detail.runs).toHaveLength(2)
+    const rootRun = detail.runs.find((run) => run.parentRunId === undefined)
+    const childRun = detail.runs.find((run) => run.id === details.runId)
+    expect(rootRun).toMatchObject({
+      formatVersion: 1,
+      agentId: 'chat_agent',
+      status: 'completed'
+    })
+    expect(childRun).toMatchObject({
+      formatVersion: 1,
+      agentId: 'chat_agent',
+      parentRunId: rootRun?.id,
+      status: 'completed'
+    })
 
     fixture.knowledgeStore.close()
     await fixture.sessions.dispose()
@@ -417,6 +431,14 @@ describe('ChatAgentService', () => {
     expect(detail.messages.at(-1)?.message).toMatchObject({
       role: 'assistant',
       text: 'Parent recovered from the child failure.'
+    })
+    const rootRun = detail.runs.find((run) => run.parentRunId === undefined)
+    const childRun = detail.runs.find((run) => run.parentRunId === rootRun?.id)
+    expect(rootRun).toMatchObject({ agentId: 'chat_agent', status: 'completed' })
+    expect(childRun).toMatchObject({
+      agentId: 'chat_agent',
+      status: 'failed',
+      error: expect.stringContaining('child model unavailable')
     })
 
     fixture.knowledgeStore.close()

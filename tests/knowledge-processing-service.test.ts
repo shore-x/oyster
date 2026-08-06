@@ -83,7 +83,7 @@ class CapturingAgent implements KnowledgeAgentRuntime {
       'list_todos',
       'read_evidence',
       'complete_todos'
-    ])
+    ], 1, 'knowledge_maintenance_agent')
     input.onRunUpdate?.(run)
     return {
       contribution: {
@@ -170,7 +170,8 @@ describe('KnowledgeProcessingService', () => {
     expect(result.evidenceSegmentCount).toBe(1)
     expect(result.sourceRef).toBe('session:codex:one@revision')
     expect(result.todos.every((todo) => todo.status === 'completed')).toBe(true)
-    expect(result.debugTrace.run.modelCalls).toHaveLength(1)
+    expect(result.agentRunId).toBe(agent.calls[0].runId)
+    expect(service.snapshot().debugTraces[0]?.run.modelCalls).toHaveLength(1)
   })
 
   it('rejects malformed Raw Evidence before starting the Agent', async () => {

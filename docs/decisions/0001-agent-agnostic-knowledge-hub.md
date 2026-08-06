@@ -1,6 +1,6 @@
 # ADR-0001：将 Oyster 定位为 Agent-Agnostic Knowledge Hub
 
-- 状态：Accepted
+- 状态：Accepted；Knowledge/Artifact 物理存储、Contribution Draft 和 Git 协作相关部分已由 ADR-0002 取代
 - 日期：2026-07-22
 - 修订：2026-07-24，明确知识维护 Agent、共享 Attention 与投影的边界
 - 修订：2026-07-26，明确 Knowledge Maintenance Agent、Knowledge Contribution 与 Knowledge Statement 的定义
@@ -19,7 +19,8 @@
 - 修订：2026-07-31，为通用管理 Agent 增加 `spawn_agent`：它创建独立上下文的临时通用 Agent 运行，不建立新的用户 Session、固定子 Agent 角色或专用工作流
 - 修订：2026-08-05，所有内置工具使用 Agent 复用通用 Todo 与结束检查能力；初始 Todo 作为 Host 运行状态绑定，不做每轮 Context 注入，pending Todo 只是阻止自然结束的一种通用原因
 - 修订：2026-08-05，知识加工直接由 Host 将完整 Raw Evidence 组织为粗粒度 Evidence Segment initial Todo；Harness 保留 Skill 激活探测，Maintainer 负责回到证据核查
-- 关联文档：[Product Brief](../product/product-brief.md)、[本地 Agent 发现与外部证据访问](../product/local-agent-discovery-mvp.md)、[AI Backend MVP](../product/ai-backends-mvp.md)、[知识加工验证 MVP](../product/knowledge-processing-mvp.md)、[Artifact Repository MVP](../product/artifact-repository-mvp.md)、[知识加工、Projection 与 Artifact](../architecture/knowledge-model-and-projection.md)
+- 修订：2026-08-06，ADR-0002 取代分离 Knowledge Store、Contribution Draft 提交协议和“Git 不承担 Agent 修订工作流”的相关决定
+- 关联文档：[ADR-0002](0002-unified-git-agent-collaboration.md)、[Product Brief](../product/product-brief.md)、[本地 Agent 发现与外部证据访问](../product/local-agent-discovery-mvp.md)、[AI Backend MVP](../product/ai-backends-mvp.md)、[知识加工验证 MVP](../product/knowledge-processing-mvp.md)、[Artifact Repository MVP](../product/artifact-repository-mvp.md)、[知识加工、Projection 与 Artifact](../architecture/knowledge-model-and-projection.md)
 
 ## Context
 
@@ -30,6 +31,8 @@
 ## Decision
 
 Oyster 的主要产品身份是：本地优先、跨 Agent、跨项目的知识库维护中心。
+
+> 历史边界：本节保留 ADR-0001 被接受时的原始决定。凡涉及 Knowledge/Artifact 物理存储、Contribution Draft 提交协议和 Git 协作的内容均已由 ADR-0002 取代，不再作为当前目标。
 
 系统保留三个相互区分的状态与权威域：
 

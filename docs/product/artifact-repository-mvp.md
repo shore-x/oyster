@@ -1,10 +1,12 @@
 # Artifact Repository MVP
 
-> 状态：当前验证实现
+> 状态：当前生产实现记录；独立 Artifact Repository 将迁移为统一 Repository 的 `artifacts/` 层
 >
 > 日期：2026-08-01
 >
 > 领域边界：[知识加工、Projection 与 Artifact](../architecture/knowledge-model-and-projection.md)
+>
+> 迁移说明：本文描述现有 `userData/artifacts/` 实现。已确认目标架构让 Knowledge 与 Artifact 共用一个 Git Repository，并使用 collaboration branch、Agent commit 和 Reviewer merge；见[《统一 Git Repository 与 Agent 协作》](../architecture/unified-git-agent-collaboration.md)。以下“当前不自动编排 Git”只表示生产代码现状，不再是目标设计。
 
 ## 1. 目标
 
