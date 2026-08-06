@@ -1,6 +1,6 @@
 import type { JSX } from 'solid-js'
 
-export type IconName = 'archive' | 'layers' | 'skill' | 'agent' | 'chat' | 'spark' | 'refresh' | 'folder' | 'download' | 'stop' | 'check' | 'warning' | 'link' | 'play' | 'plus' | 'trash' | 'search' | 'back' | 'forward'
+export type IconName = 'archive' | 'layers' | 'skill' | 'agent' | 'chat' | 'spark' | 'refresh' | 'folder' | 'download' | 'stop' | 'check' | 'warning' | 'link' | 'play' | 'plus' | 'trash' | 'search' | 'back' | 'forward' | 'close'
 
 const paths: Record<IconName, () => JSX.Element> = {
   archive: () => <><path d="M3.5 5.5h13"/><path d="M5 5.5v10h10v-10"/><path d="M7.5 9h5"/><path d="M4 2.5h12v3H4z"/></>,
@@ -21,7 +21,8 @@ const paths: Record<IconName, () => JSX.Element> = {
   trash: () => <><path d="M4.5 5.5h10"/><path d="m6 5.5.5 10h6l.5-10"/><path d="M7.5 5.5v-2h4v2"/></>,
   search: () => <><circle cx="8.5" cy="8.5" r="4.5"/><path d="m12 12 4 4"/></>,
   back: () => <><path d="m8 4-5 5 5 5"/><path d="M3 9h13"/></>,
-  forward: () => <><path d="m11 4 5 5-5 5"/><path d="M16 9H3"/></>
+  forward: () => <><path d="m11 4 5 5-5 5"/><path d="M16 9H3"/></>,
+  close: () => <><path d="m4.5 4.5 10 10"/><path d="m14.5 4.5-10 10"/></>
 }
 
 export function Icon(props: { name: IconName }): JSX.Element {

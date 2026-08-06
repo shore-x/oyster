@@ -225,6 +225,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const primaryBounds = primaryButton.getBoundingClientRect()
     const labelBounds = primaryLabel.getBoundingClientRect()
     const headingStyle = getComputedStyle(page.querySelector('h1'))
+    const pageHeaderStyle = getComputedStyle(page.querySelector('.page-header'))
     const bodyStyle = getComputedStyle(document.body)
     const mutedTextStyle = getComputedStyle(page.querySelector('.source-card .path'))
     const sourceDetails = Array.from(page.querySelectorAll('.source-card__details'))
@@ -236,6 +237,10 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       title: page.querySelector('h1')?.textContent,
       sourceCards: page.querySelectorAll('[data-testid="source-card"]').length,
       dragRegion: getComputedStyle(document.querySelector('[data-testid="window-drag-region"]')).getPropertyValue('-webkit-app-region'),
+      headerDragRegion: pageHeaderStyle.getPropertyValue('-webkit-app-region'),
+      headerPosition: pageHeaderStyle.position,
+      headerTop: pageHeaderStyle.top,
+      headerActionRegion: getComputedStyle(primaryButton).getPropertyValue('-webkit-app-region'),
       primaryButtonColor: getComputedStyle(primaryButton).backgroundColor,
       secondaryButtonColor: getComputedStyle(page.querySelector('.ui-button--secondary')).color,
       headingFontSize: headingStyle.fontSize,
@@ -944,8 +949,14 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     }
     const activityDetailExists = Boolean(page.querySelector('[data-testid="history-run-activity-detail"]'))
     const traceEventCount = page.querySelectorAll('[data-testid="history-run-activity-detail"] .agent-trace-message, [data-testid="history-run-activity-detail"] .agent-trace-tool, [data-testid="history-run-activity-detail"] .agent-trace-model-activity').length
+    const activityDetail = page.querySelector('[data-testid="history-run-activity-detail"]')
+    const activityHeightBeforeInspector = activityDetail?.getBoundingClientRect().height
     page.querySelector('[data-testid="history-run-activity-detail"] .agent-trace-message--assistant button')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
+    const activityInspector = page.querySelector('[data-testid="history-run-activity-detail"] [data-testid="agent-run-inspector"]')
+    const activityInspectorBounds = activityInspector?.getBoundingClientRect()
+    const activityInspectorPosition = activityInspector ? getComputedStyle(activityInspector).position : undefined
+    const activityHeightStable = Math.abs((activityDetail?.getBoundingClientRect().height ?? 0) - (activityHeightBeforeInspector ?? 0)) <= 1
     const traceText = page.querySelector('[data-testid="history-run-activity-detail"]')?.textContent
     const contextText = page.querySelector('[data-testid="history-run-activity-detail"] [data-testid="agent-model-call-context"]')?.textContent
     page.querySelector('[data-testid="history-run-activity-back"]')?.click()
@@ -962,6 +973,12 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       traceEventCount,
       traceText,
       contextText,
+      inspectorPosition: activityInspectorPosition,
+      inspectorWithinViewport: Boolean(activityInspectorBounds
+        && activityInspectorBounds.top >= 52
+        && activityInspectorBounds.right <= window.innerWidth
+        && activityInspectorBounds.bottom <= window.innerHeight),
+      activityHeightStable,
       returnedToHistory: Boolean(page.querySelector('.processing-history__list'))
     }
   })()`)
@@ -1273,9 +1290,15 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       && Date.now() < deadline
     ) await new Promise((resolve) => setTimeout(resolve, 25))
     const modelCallButton = page.querySelector('.agent-trace-message--assistant button')
+    const messages = page.querySelector('.chat-messages')
+    const messageScrollHeightBeforeInspector = messages?.scrollHeight
     modelCallButton?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
     const modelCallInspector = page.querySelector('[data-testid="agent-model-call-inspector"]')
+    const inspectorPanel = page.querySelector('[data-testid="agent-run-inspector"]')
+    const inspectorBounds = inspectorPanel?.getBoundingClientRect()
+    const inspectorPosition = inspectorPanel ? getComputedStyle(inspectorPanel).position : undefined
+    const messageHeightStable = messages?.scrollHeight === messageScrollHeightBeforeInspector
     const modelCallContext = page.querySelector('[data-testid="agent-model-call-context"]')?.textContent
     const overflowWithInspector = document.documentElement.scrollWidth > document.documentElement.clientWidth
     page.querySelector('.agent-run-view__close')?.click()
@@ -1294,6 +1317,12 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       modelCallAction: Boolean(modelCallButton),
       modelCallInspector: Boolean(modelCallInspector),
       modelCallContext,
+      inspectorPosition,
+      inspectorWithinViewport: Boolean(inspectorBounds
+        && inspectorBounds.top >= 52
+        && inspectorBounds.right <= window.innerWidth
+        && inspectorBounds.bottom <= window.innerHeight),
+      messageHeightStable,
       overflowWithInspector,
       composerVisible: Boolean(composer),
       pageError: page.querySelector('.page-error')?.textContent?.trim(),

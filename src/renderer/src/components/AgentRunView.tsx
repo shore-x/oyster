@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
+import { For, Show, createEffect, createMemo, createSignal, createUniqueId, onCleanup } from 'solid-js'
 import type {
   AgentMessageRecord,
   AgentModelCallRecord,
@@ -7,7 +7,7 @@ import type {
   AgentToolCallRecord,
   SerializableJsonValue
 } from '../../../shared/agent-runtime'
-import { Markdown } from '../ui'
+import { Icon, Markdown } from '../ui'
 
 type JsonObject = { [key: string]: SerializableJsonValue }
 
@@ -251,6 +251,7 @@ export function AgentModelCallInspector(props: {
 
 export function AgentRunExplorer(props: AgentRunViewProps & { compact?: boolean }) {
   const [selectedCallId, setSelectedCallId] = createSignal<string>()
+  const inspectorTitleId = `agent-run-inspector-${createUniqueId()}`
   const selectedCall = createMemo(() => props.run.modelCalls.find(
     (call) => call.id === selectedCallId()
   ))
@@ -258,6 +259,14 @@ export function AgentRunExplorer(props: AgentRunViewProps & { compact?: boolean 
     if (selectedCallId() && selectedCall()) return
     const failed = props.run.modelCalls.find((call) => call.status === 'failed')
     setSelectedCallId(failed?.id)
+  })
+  createEffect(() => {
+    if (!selectedCall()) return
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setSelectedCallId(undefined)
+    }
+    document.addEventListener('keydown', closeOnEscape)
+    onCleanup(() => document.removeEventListener('keydown', closeOnEscape))
   })
   return (
     <section class={`agent-run-view agent-run-view--${props.run.status}${props.compact ? ' agent-run-view--compact' : ''}`} data-testid="agent-run-view">
@@ -273,10 +282,30 @@ export function AgentRunExplorer(props: AgentRunViewProps & { compact?: boolean 
       <div class={`agent-run-view__workspace${selectedCall() ? ' agent-run-view__workspace--inspecting' : ''}`}>
         <AgentRunTimeline {...props} onSelectModelCall={setSelectedCallId} />
         <Show when={selectedCall()}>{(call) => (
-          <div class="agent-run-view__inspector">
-            <button class="agent-run-view__close" type="button" onClick={() => setSelectedCallId(undefined)}>关闭调用详情</button>
-            <AgentModelCallInspector call={call()} index={props.run.modelCalls.findIndex((item) => item.id === call().id)} />
-          </div>
+          <>
+            <button
+              class="agent-run-view__backdrop"
+              type="button"
+              aria-label="关闭模型调用详情"
+              onClick={() => setSelectedCallId(undefined)}
+            />
+            <aside
+              class="agent-run-view__inspector"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={inspectorTitleId}
+              data-testid="agent-run-inspector"
+            >
+              <div class="agent-run-view__inspector-toolbar">
+                <strong id={inspectorTitleId}>模型调用详情</strong>
+                <button class="agent-run-view__close" type="button" onClick={() => setSelectedCallId(undefined)}>
+                  <Icon name="close" />
+                  <span>关闭</span>
+                </button>
+              </div>
+              <AgentModelCallInspector call={call()} index={props.run.modelCalls.findIndex((item) => item.id === call().id)} />
+            </aside>
+          </>
         )}</Show>
       </div>
     </section>

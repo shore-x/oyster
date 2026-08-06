@@ -26,6 +26,14 @@ const semantics = JSON.parse(await readFile(`${capturePath}.json`, 'utf8'))
 if (semantics.title !== 'Agent 数据来源') throw new Error('Expected page title was not rendered')
 if (semantics.sourceCards !== 3) throw new Error(`Expected 3 source cards, got ${semantics.sourceCards}`)
 if (semantics.dragRegion !== 'drag') throw new Error('Right-side window drag region is missing')
+if (
+  semantics.headerDragRegion !== 'drag'
+  || semantics.headerPosition !== 'sticky'
+  || semantics.headerTop !== '52px'
+  || semantics.headerActionRegion !== 'no-drag'
+) {
+  throw new Error('Page Header does not provide a sticky drag surface with interactive controls')
+}
 if (!semantics.primaryButtonColor.includes('82, 121, 165')) throw new Error('Primary action does not use the muted blue token')
 if (!semantics.secondaryButtonColor.includes('39, 39, 42')) throw new Error('Secondary action is not high-contrast neutral gray')
 if (semantics.headingFontSize !== '27px' || semantics.headingFontWeight !== '500') {
@@ -404,6 +412,13 @@ if (
 if (chat.overflowWithInspector) {
   throw new Error('The conversational Model Call inspector causes horizontal overflow')
 }
+if (
+  chat.inspectorPosition !== 'fixed'
+  || !chat.inspectorWithinViewport
+  || !chat.messageHeightStable
+) {
+  throw new Error('The conversational Model Call inspector is not a viewport-contained overlay')
+}
 
 const processing = semantics.processing
 if (processing.title !== '加工测试') throw new Error('Knowledge processing page was not rendered')
@@ -533,6 +548,13 @@ if (
   || !processing.history.contextText?.includes('Fixture knowledge maintenance task')
 ) {
   throw new Error('Historical run details do not expose the persisted Agent Run')
+}
+if (
+  processing.history.inspectorPosition !== 'fixed'
+  || !processing.history.inspectorWithinViewport
+  || !processing.history.activityHeightStable
+) {
+  throw new Error('Historical Agent details are not displayed in a viewport-contained overlay')
 }
 if (!processing.history.returnedToHistory) {
   throw new Error('Historical secondary pages do not return to the history list')
