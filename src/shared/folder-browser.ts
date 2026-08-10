@@ -46,6 +46,7 @@ export interface FolderFile {
 
 export interface FolderBrowserApi {
   getDesignDocumentsPath(): Promise<string>
+  openFolder(folderPath: string): Promise<void>
   browseFolder(folderPath: string): Promise<FolderSnapshot>
   readFile(filePath: string): Promise<FolderFile>
 }

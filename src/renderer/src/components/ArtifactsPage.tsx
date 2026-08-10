@@ -1,4 +1,4 @@
-import { For, Show, createSignal } from 'solid-js'
+import { For, Show, createSignal, type JSX } from 'solid-js'
 import type { ArtifactSummary } from '../../../shared/artifacts'
 import { createArtifactsController } from '../artifacts-controller'
 import { Button, Icon, Markdown } from '../ui'
@@ -21,6 +21,62 @@ function attentionSummary(value: string): string {
   return compact.length > 110 ? `${compact.slice(0, 109).trimEnd()}…` : compact
 }
 
+function FolderCard(props: {
+  testId: string
+  title: string
+  description: string
+  badge?: {
+    class: string
+    label: string
+    testId?: string
+  }
+  browseTestId: string
+  openTestId: string
+  disabled?: boolean
+  opening?: boolean
+  onBrowse(): void
+  onOpen(): void
+  children?: JSX.Element
+}) {
+  return (
+    <article class="folder-card" data-testid={props.testId}>
+      <header class="folder-card__header">
+        <span class="folder-card__mark"><Icon name="folder" /></span>
+        <div class="folder-card__identity">
+          <div class="folder-card__identity-heading">
+            <h2>{props.title}</h2>
+            <Show when={props.badge}>
+              {(badge) => (
+                <span class={`folder-card__badge ${badge().class}`} data-testid={badge().testId}>
+                  {badge().label}
+                </span>
+              )}
+            </Show>
+          </div>
+          <span>{props.description}</span>
+        </div>
+        <div class="folder-card__actions">
+          <Button
+            variant="secondary"
+            icon="skill"
+            data-testid={props.browseTestId}
+            disabled={props.disabled}
+            onClick={props.onBrowse}
+          >浏览</Button>
+          <Button
+            variant="ghost"
+            icon="folder"
+            data-testid={props.openTestId}
+            disabled={props.disabled}
+            onClick={props.onOpen}
+          >{props.opening ? '正在打开…' : '打开文件夹'}</Button>
+        </div>
+      </header>
+      {props.children}
+    </article>
+  )
+}
+
 function ArtifactCard(props: {
   artifact: ArtifactSummary
   busy?: string
@@ -29,35 +85,22 @@ function ArtifactCard(props: {
   onManageSkill(): void
 }) {
   return (
-    <article class="artifact-card" data-testid="artifact-card">
-      <header class="artifact-card__header">
-        <span class="artifact-card__mark"><Icon name="folder" /></span>
-        <div class="artifact-card__identity">
-          <div class="artifact-card__identity-heading">
-            <h2>{props.artifact.directoryName}</h2>
-            <Show when={props.artifact.skill}>
-              <span class="artifact-skill-badge" data-testid="artifact-skill-badge">Skill</span>
-            </Show>
-          </div>
-          <span>AGENTS.md 更新于 {modifiedAtLabel(props.artifact.modifiedAt)}</span>
-        </div>
-        <div class="artifact-card__actions">
-          <Button
-            variant="secondary"
-            icon="skill"
-            data-testid="browse-artifact"
-            disabled={Boolean(props.busy)}
-            onClick={props.onBrowse}
-          >浏览</Button>
-          <Button
-            variant="ghost"
-            icon="folder"
-            data-testid="open-artifact"
-            disabled={Boolean(props.busy)}
-            onClick={props.onOpen}
-          >{props.busy === `open:${props.artifact.directoryName}` ? '正在打开…' : '打开文件夹'}</Button>
-        </div>
-      </header>
+    <FolderCard
+      testId="artifact-card"
+      title={props.artifact.directoryName}
+      description={`AGENTS.md 更新于 ${modifiedAtLabel(props.artifact.modifiedAt)}`}
+      badge={props.artifact.skill ? {
+        class: 'artifact-skill-badge',
+        label: 'Skill',
+        testId: 'artifact-skill-badge'
+      } : undefined}
+      browseTestId="browse-artifact"
+      openTestId="open-artifact"
+      disabled={Boolean(props.busy)}
+      opening={props.busy === `open:${props.artifact.directoryName}`}
+      onBrowse={props.onBrowse}
+      onOpen={props.onOpen}
+    >
       <details class="artifact-card__details ui-disclosure">
         <summary>
           <span class="artifact-card__details-summary">
@@ -101,43 +144,41 @@ function ArtifactCard(props: {
           />
         </div>
       </details>
-    </article>
+    </FolderCard>
   )
 }
 
-function DesignDocumentsCard(props: { onBrowse(): void }) {
+function DesignDocumentsCard(props: {
+  opening: boolean
+  onBrowse(): void
+  onOpen(): void
+}) {
   return (
-    <article class="artifact-card" data-testid="design-documents-card">
-      <header class="artifact-card__header">
-        <span class="artifact-card__mark"><Icon name="folder" /></span>
-        <div class="artifact-card__identity">
-          <div class="artifact-card__identity-heading">
-            <h2>Oyster 设计文档</h2>
-            <span class="artifact-built-in-badge">内置</span>
-          </div>
-          <span>随 Oyster 发布的产品、架构与决策文档</span>
-        </div>
-        <div class="artifact-card__actions">
-          <Button
-            variant="secondary"
-            icon="skill"
-            data-testid="browse-design-documents"
-            onClick={props.onBrowse}
-          >浏览</Button>
-        </div>
-      </header>
-    </article>
+    <FolderCard
+      testId="design-documents-card"
+      title="Oyster 设计文档"
+      description="随 Oyster 发布的产品、架构与决策文档"
+      badge={{ class: 'artifact-built-in-badge', label: '内置' }}
+      browseTestId="browse-design-documents"
+      openTestId="open-design-documents"
+      disabled={props.opening}
+      opening={props.opening}
+      onBrowse={props.onBrowse}
+      onOpen={props.onOpen}
+    />
   )
 }
 
 export function ArtifactsPage(props: {
   onBrowseDesignDocuments(): void
+  onOpenDesignDocuments(): Promise<void>
   onBrowseArtifact(artifact: ArtifactSummary): void
   onManageSkill(artifactDirectoryName: string): void
 }) {
   const controller = createArtifactsController()
   const [directoryName, setDirectoryName] = createSignal('')
   const [attention, setAttention] = createSignal('')
+  const [openingDesignDocuments, setOpeningDesignDocuments] = createSignal(false)
 
   async function createArtifact(event: SubmitEvent): Promise<void> {
     event.preventDefault()
@@ -149,6 +190,15 @@ export function ArtifactsPage(props: {
     if (await controller.createArtifact(input)) {
       setDirectoryName('')
       setAttention('')
+    }
+  }
+
+  async function openDesignDocuments(): Promise<void> {
+    setOpeningDesignDocuments(true)
+    try {
+      await props.onOpenDesignDocuments()
+    } finally {
+      setOpeningDesignDocuments(false)
     }
   }
 
@@ -264,7 +314,11 @@ export function ArtifactsPage(props: {
       </Show>
 
       <section class="artifact-list" aria-label="产物">
-        <DesignDocumentsCard onBrowse={props.onBrowseDesignDocuments} />
+        <DesignDocumentsCard
+          opening={openingDesignDocuments()}
+          onBrowse={props.onBrowseDesignDocuments}
+          onOpen={() => void openDesignDocuments()}
+        />
         <Show
           when={controller.snapshot()}
           fallback={(
@@ -292,7 +346,10 @@ export function ArtifactsPage(props: {
                     artifact={artifact}
                     busy={controller.busy()}
                     onBrowse={() => props.onBrowseArtifact(artifact)}
-                    onOpen={() => void controller.openArtifact(artifact.directoryName)}
+                    onOpen={() => void controller.openFolder(
+                      artifact.directoryPath,
+                      artifact.directoryName
+                    )}
                     onManageSkill={() => props.onManageSkill(artifact.directoryName)}
                   />
                 )}

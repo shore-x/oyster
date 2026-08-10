@@ -56,6 +56,16 @@ export function App() {
     }
   }
 
+  const openDesignDocuments = async (): Promise<void> => {
+    try {
+      setNavigationError(undefined)
+      const folderPath = await window.oyster.folderBrowser.getDesignDocumentsPath()
+      await window.oyster.folderBrowser.openFolder(folderPath)
+    } catch (error) {
+      setNavigationError(error instanceof Error ? error.message : String(error))
+    }
+  }
+
   return (
     <div class="app-shell">
       <aside class="sidebar">
@@ -174,6 +184,7 @@ export function App() {
         <div data-testid="page-artifacts" hidden={page() !== 'artifacts'}>
           <ArtifactsPage
             onBrowseDesignDocuments={() => void browseDesignDocuments()}
+            onOpenDesignDocuments={openDesignDocuments}
             onBrowseArtifact={(artifact) => browseFolder({
               folderPath: artifact.directoryPath,
               label: artifact.directoryName,

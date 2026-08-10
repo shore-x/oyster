@@ -26,7 +26,7 @@ Oyster 是一个独立于外部 Agent Harness 的本地知识与产物中心。�
 - 使用随 APP 捆绑的私有标准 Git Runtime 自动初始化固定的 `userData/repository/`，不依赖系统 Git 或用户 `PATH`；
 - 按“带根 `AGENTS.md` 的一级目录”发现、刷新和创建 Artifact，并显示持久 Attention 与无效目录；
 - 在系统文件管理器中打开 Artifact Repository 或单个 Artifact；Artifact 内部结构任意，通用管理 Agent 可以直接维护其普通文件；
-- 在“产物”页面同层展示用户 Artifact 与内置的 Oyster 设计文档，点击任一项目都进入同一个通用文件夹浏览器；完整列出所有文件，Markdown 支持相对链接和 `[[...]]` 预览跳转，其他 UTF-8 文件按纯文本展示；设计文档的 UI 位置不改变其非 Artifact 的领域语义；
+- 在“产物”页面中，用户 Artifact 与内置的 Oyster 设计文档都按同一种文件夹卡片展示；两者都可以进入同一个通用文件夹浏览器，或在系统文件管理器中打开对应文件夹；浏览器完整列出所有文件，Markdown 支持相对链接和 `[[...]]` 预览跳转，其他 UTF-8 文件按纯文本展示；设计文档的 UI 位置不改变其非 Artifact 的领域语义，也不会使其进入用户 Artifact Repository；
 - 在专门的 Skills 页面分开展示 Oyster 管理的 Skill Artifact 与其他 Agent 的外部注册事实，并预览各自入口文档；
 - 将有效 Skill Artifact 的 `output/` 通过安全、可撤销的目录 symlink 绑定到 Claude Code、Pi 或 Codex 的用户级 Skill 注册位置；
 - 提供 Maintainer → Reviewer 完整加工测试，并保留高级阶段调试；
@@ -85,7 +85,7 @@ src/main/chat
 src/main/artifacts
   全局 Artifact 目录扫描与创建，以及 Skill Artifact 派生识别
 src/main/folder-browser
-  任意绝对文件夹的只读树发现与原始文件读取
+  任意绝对文件夹的只读树发现、原始文件读取与系统打开
 src/main/repository
   统一 Repository 初始化与 Git Runtime 边界
 src/main/skills

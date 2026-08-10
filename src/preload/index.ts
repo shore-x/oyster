@@ -129,16 +129,16 @@ const artifacts: ArtifactApi = {
   getSnapshot: () => ipcRenderer.invoke(artifactChannels.getSnapshot),
   refresh: () => ipcRenderer.invoke(artifactChannels.refresh),
   createArtifact: (input) => ipcRenderer.invoke(artifactChannels.createArtifact, input),
-  openRepository: () => ipcRenderer.invoke(artifactChannels.openRepository),
-  openArtifact: (directoryName) => ipcRenderer.invoke(
-    artifactChannels.openArtifact,
-    directoryName
-  )
+  openRepository: () => ipcRenderer.invoke(artifactChannels.openRepository)
 }
 
 const folderBrowser: FolderBrowserApi = {
   getDesignDocumentsPath: () => ipcRenderer.invoke(
     folderBrowserChannels.getDesignDocumentsPath
+  ),
+  openFolder: (folderPath) => ipcRenderer.invoke(
+    folderBrowserChannels.openFolder,
+    folderPath
   ),
   browseFolder: (folderPath) => ipcRenderer.invoke(
     folderBrowserChannels.browseFolder,

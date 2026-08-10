@@ -72,7 +72,7 @@ async function readDirectoryEntries(directoryPath: string): Promise<FolderEntry[
 
 /** Read-only browser over an explicitly supplied absolute filesystem path. */
 export class FolderBrowserService {
-  async browseFolder(folderPath: string): Promise<FolderSnapshot> {
+  async resolveFolderPath(folderPath: string): Promise<string> {
     const path = requiredAbsolutePath(folderPath, 'folderPath')
     let details
     try {
@@ -82,6 +82,11 @@ export class FolderBrowserService {
       throw new Error(`无法读取 Folder ${path}：${errorMessage(error)}`, { cause: error })
     }
     if (!details.isDirectory()) throw new Error(`Folder 路径不是目录：${path}`)
+    return path
+  }
+
+  async browseFolder(folderPath: string): Promise<FolderSnapshot> {
+    const path = await this.resolveFolderPath(folderPath)
 
     return {
       path,

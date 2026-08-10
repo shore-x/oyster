@@ -59,12 +59,12 @@ export const artifactChannels = {
   getSnapshot: 'artifacts:get-snapshot',
   refresh: 'artifacts:refresh',
   createArtifact: 'artifacts:create',
-  openRepository: 'artifacts:open-repository',
-  openArtifact: 'artifacts:open-artifact'
+  openRepository: 'artifacts:open-repository'
 } as const
 
 export const folderBrowserChannels = {
   getDesignDocumentsPath: 'folder-browser:get-design-documents-path',
+  openFolder: 'folder-browser:open-folder',
   browseFolder: 'folder-browser:browse-folder',
   readFile: 'folder-browser:read-file'
 } as const

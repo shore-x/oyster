@@ -1,5 +1,6 @@
 import {
   ipcMain,
+  shell,
   type BrowserWindow,
   type IpcMainInvokeEvent
 } from 'electron'
@@ -26,6 +27,12 @@ export function registerFolderBrowserIpc(
   ipcMain.handle(folderBrowserChannels.getDesignDocumentsPath, (event) => {
     assertTrustedSender(event)
     return designDocumentsPath
+  })
+  ipcMain.handle(folderBrowserChannels.openFolder, async (event, folderPath: string) => {
+    assertTrustedSender(event)
+    const path = await browser.resolveFolderPath(folderPath)
+    const errorMessage = await shell.openPath(path)
+    if (errorMessage) throw new Error(`无法打开文件夹：${errorMessage}`)
   })
   ipcMain.handle(folderBrowserChannels.browseFolder, (event, folderPath: string) => {
     assertTrustedSender(event)

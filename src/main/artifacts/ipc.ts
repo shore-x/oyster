@@ -1,5 +1,3 @@
-import { lstat } from 'node:fs/promises'
-import { join } from 'node:path'
 import {
   ipcMain,
   shell,
@@ -8,10 +6,7 @@ import {
 } from 'electron'
 import { artifactChannels } from '../../shared/channels'
 import type { CreateArtifactInput } from '../../shared/artifacts'
-import {
-  ArtifactService,
-  resolveArtifactDirectoryPath
-} from './artifact-repository'
+import { ArtifactService } from './artifact-repository'
 
 async function openPath(path: string, label: string): Promise<void> {
   const errorMessage = await shell.openPath(path)
@@ -52,17 +47,5 @@ export function registerArtifactIpc(
   ipcMain.handle(artifactChannels.openRepository, async (event) => {
     assertTrustedSender(event)
     await openPath(repository.repositoryPath, ' Oyster Repository')
-  })
-  ipcMain.handle(artifactChannels.openArtifact, async (event, directoryName: string) => {
-    assertTrustedSender(event)
-    const artifactPath = resolveArtifactDirectoryPath(repository.artifactsPath, directoryName)
-    const [directoryDetails, attentionDetails] = await Promise.all([
-      lstat(artifactPath),
-      lstat(join(artifactPath, 'AGENTS.md'))
-    ])
-    if (!directoryDetails.isDirectory() || !attentionDetails.isFile()) {
-      throw new Error('Artifact 文件夹无效')
-    }
-    await openPath(artifactPath, ' Artifact')
   })
 }

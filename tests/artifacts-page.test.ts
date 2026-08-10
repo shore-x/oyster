@@ -9,7 +9,7 @@ const controller = vi.hoisted(() => ({
   refresh: vi.fn(),
   createArtifact: vi.fn(),
   openRepository: vi.fn(),
-  openArtifact: vi.fn()
+  openFolder: vi.fn()
 }))
 
 vi.mock('../src/renderer/src/artifacts-controller', () => ({
@@ -31,6 +31,7 @@ describe('ArtifactsPage', () => {
 
     const html = renderToString(() => ArtifactsPage({
       onBrowseDesignDocuments: vi.fn(),
+      onOpenDesignDocuments: vi.fn(async () => undefined),
       onBrowseArtifact: vi.fn(),
       onManageSkill: vi.fn()
     }))
@@ -40,6 +41,7 @@ describe('ArtifactsPage', () => {
     expect(html).toMatch(/data-testid="create-artifact"[^>]*disabled/)
     expect(html).toContain('data-testid="design-documents-card"')
     expect(html).toContain('data-testid="browse-design-documents"')
+    expect(html).toContain('data-testid="open-design-documents"')
   })
 
   it('labels the AGENTS.md modification time and renders its Markdown', () => {
@@ -57,6 +59,7 @@ describe('ArtifactsPage', () => {
 
     const html = renderToString(() => ArtifactsPage({
       onBrowseDesignDocuments: vi.fn(),
+      onOpenDesignDocuments: vi.fn(async () => undefined),
       onBrowseArtifact: vi.fn(),
       onManageSkill: vi.fn()
     }))
@@ -66,11 +69,13 @@ describe('ArtifactsPage', () => {
     expect(html).toContain('<h2>Oyster 设计文档</h2>')
     expect(html).toContain('>内置</span>')
     expect(html).toContain('data-testid="browse-design-documents"')
+    expect(html).toContain('data-testid="open-design-documents"')
     expect(html).toContain('agent-memory-tracking')
     expect(html).toContain('AGENTS.md 更新于')
     expect(html).toContain('<h1>Attention</h1>')
     expect(html).toContain('Track agent memory research.')
     expect(html).toContain('data-testid="browse-artifact"')
+    expect(html).toContain('data-testid="open-artifact"')
     expect(html.match(/data-testid="artifact-card"/g)).toHaveLength(1)
     expect(html).not.toContain('data-testid="artifact-skill-badge"')
     expect(html).not.toContain('data-testid="manage-artifact-skill"')
@@ -99,6 +104,7 @@ describe('ArtifactsPage', () => {
 
     const html = renderToString(() => ArtifactsPage({
       onBrowseDesignDocuments: vi.fn(),
+      onOpenDesignDocuments: vi.fn(async () => undefined),
       onBrowseArtifact: vi.fn(),
       onManageSkill
     }))
@@ -133,6 +139,7 @@ describe('ArtifactsPage', () => {
 
     const html = renderToString(() => ArtifactsPage({
       onBrowseDesignDocuments: vi.fn(),
+      onOpenDesignDocuments: vi.fn(async () => undefined),
       onBrowseArtifact: vi.fn(),
       onManageSkill: vi.fn()
     }))

@@ -38,6 +38,7 @@ function folderFile(path: string, content: Uint8Array): FolderFile {
 function installApi(overrides: Partial<FolderBrowserApi> = {}): FolderBrowserApi {
   const api: FolderBrowserApi = {
     getDesignDocumentsPath: async () => '/app/resources/design-documents',
+    openFolder: async () => undefined,
     browseFolder: async () => snapshot(),
     readFile: async (path) => folderFile(path, encoder.encode(
       path.endsWith('.md') ? '# Design\n\nReadable Markdown.' : 'plain text\n'

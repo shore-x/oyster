@@ -53,9 +53,9 @@ export function createArtifactsController() {
       () => window.oyster.artifacts.createArtifact(input)
     ),
     openRepository: () => open('open-repository', () => window.oyster.artifacts.openRepository()),
-    openArtifact: (directoryName: string) => open(
-      `open:${directoryName}`,
-      () => window.oyster.artifacts.openArtifact(directoryName)
+    openFolder: (folderPath: string, key: string) => open(
+      `open:${key}`,
+      () => window.oyster.folderBrowser.openFolder(folderPath)
     )
   }
 }

@@ -113,8 +113,9 @@ if (
   || artifacts.designDocumentsTitle !== 'Oyster 设计文档'
   || artifacts.designDocumentsBuiltIn !== '内置'
   || artifacts.designDocumentsBrowseDisabled !== false
+  || artifacts.designDocumentsOpenDisabled !== false
 ) {
-  throw new Error('Bundled design documents are not presented as a browsable built-in product entry')
+  throw new Error('Bundled design documents are not presented as an accessible built-in folder card')
 }
 if (artifacts.repositoryPath !== expectedRepositoryPath) {
   throw new Error(`Oyster Repository is not fixed under userData: ${artifacts.repositoryPath}`)
@@ -129,8 +130,12 @@ if (
 if (artifacts.attentionHeading !== 'Attention' || artifacts.attentionStrong !== 'Attention 测试') {
   throw new Error('Artifact AGENTS.md Markdown was not rendered')
 }
-if (artifacts.repositoryOpenDisabled !== false || artifacts.artifactOpenDisabled !== false) {
-  throw new Error('Artifact folder open actions are unavailable')
+if (
+  artifacts.repositoryOpenDisabled !== false
+  || artifacts.artifactBrowseDisabled !== false
+  || artifacts.artifactOpenDisabled !== false
+) {
+  throw new Error('Artifact browse or folder open actions are unavailable')
 }
 if (!artifacts.createWasCollapsed || !artifacts.cardDetailsCollapsed) {
   throw new Error('Artifact creation or Attention details are not progressively disclosed')

@@ -1,6 +1,7 @@
 import { createRoot } from 'solid-js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ArtifactApi, ArtifactSnapshot, CreateArtifactInput } from '../src/shared/artifacts'
+import type { FolderBrowserApi } from '../src/shared/folder-browser'
 import { createArtifactsController } from '../src/renderer/src/artifacts-controller'
 
 vi.mock('solid-js', async () => vi.importActual('solid-js/dist/solid.js'))
@@ -11,16 +12,18 @@ const EMPTY_SNAPSHOT: ArtifactSnapshot = {
   invalidDirectories: []
 }
 
-function installApi(overrides: Partial<ArtifactApi> = {}): ArtifactApi {
+function installApi(
+  overrides: Partial<ArtifactApi> = {},
+  openFolder: FolderBrowserApi['openFolder'] = async () => undefined
+): ArtifactApi {
   const api: ArtifactApi = {
     getSnapshot: async () => EMPTY_SNAPSHOT,
     refresh: async () => EMPTY_SNAPSHOT,
     createArtifact: async () => EMPTY_SNAPSHOT,
     openRepository: async () => undefined,
-    openArtifact: async () => undefined,
     ...overrides
   }
-  vi.stubGlobal('window', { oyster: { artifacts: api } })
+  vi.stubGlobal('window', { oyster: { artifacts: api, folderBrowser: { openFolder } } })
   return api
 }
 
@@ -80,6 +83,25 @@ describe('artifacts controller', () => {
         await expect(controller.refresh()).resolves.toBe(true)
         expect(refresh).toHaveBeenCalledOnce()
         expect(controller.snapshot()).toEqual(EMPTY_SNAPSHOT)
+        expect(controller.error()).toBeUndefined()
+      } finally {
+        dispose()
+      }
+    })
+  })
+
+  it('opens an Artifact directory through the generic folder API', async () => {
+    const openFolder = vi.fn<FolderBrowserApi['openFolder']>(async () => undefined)
+    installApi({}, openFolder)
+
+    await createRoot(async (dispose) => {
+      try {
+        const controller = createArtifactsController()
+        await vi.waitFor(() => expect(controller.snapshot()).toEqual(EMPTY_SNAPSHOT))
+
+        await controller.openFolder('/app-data/artifacts/research', 'research')
+
+        expect(openFolder).toHaveBeenCalledWith('/app-data/artifacts/research')
         expect(controller.error()).toBeUndefined()
       } finally {
         dispose()

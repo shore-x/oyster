@@ -39,5 +39,4 @@ export interface ArtifactApi {
   refresh(): Promise<ArtifactSnapshot>
   createArtifact(input: CreateArtifactInput): Promise<ArtifactSnapshot>
   openRepository(): Promise<void>
-  openArtifact(directoryName: string): Promise<void>
 }

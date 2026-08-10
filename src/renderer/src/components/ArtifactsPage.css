@@ -3,7 +3,7 @@
 .artifact-repository,
 .artifact-create,
 .artifact-invalid,
-.artifact-card {
+.folder-card {
   background: var(--surface-card);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-surface);
@@ -125,16 +125,16 @@
 
 .artifact-list { display: grid; gap: 10px; margin-top: 18px; }
 
-.artifact-card { min-width: 0; overflow: hidden; }
+.folder-card { min-width: 0; overflow: hidden; }
 
-.artifact-card__header {
+.folder-card__header {
   display: flex;
   align-items: center;
   gap: 11px;
   padding: 18px 20px;
 }
 
-.artifact-card__mark {
+.folder-card__mark {
   display: grid;
   flex: 0 0 auto;
   place-items: center;
@@ -146,13 +146,12 @@
   border-radius: var(--radius-control);
 }
 
-.artifact-card__identity { min-width: 0; flex: 1; }
-.artifact-card__actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
-.artifact-card__identity-heading { display: flex; align-items: center; gap: 7px; min-width: 0; }
-.artifact-card__identity h2 { min-width: 0; margin: 0; overflow: hidden; color: var(--text-primary); font-size: var(--font-size-body-sm); font-weight: var(--font-weight-semibold); text-overflow: ellipsis; white-space: nowrap; }
-.artifact-card__identity span { display: block; margin-top: 4px; color: var(--text-muted); font-size: var(--font-size-caption); }
-.artifact-card__identity-heading .artifact-skill-badge,
-.artifact-card__identity-heading .artifact-built-in-badge {
+.folder-card__identity { min-width: 0; flex: 1; }
+.folder-card__actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
+.folder-card__identity-heading { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.folder-card__identity h2 { min-width: 0; margin: 0; overflow: hidden; color: var(--text-primary); font-size: var(--font-size-body-sm); font-weight: var(--font-weight-semibold); text-overflow: ellipsis; white-space: nowrap; }
+.folder-card__identity > span { display: block; margin-top: 4px; color: var(--text-muted); font-size: var(--font-size-caption); }
+.folder-card__badge {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
@@ -167,7 +166,7 @@
   line-height: 1;
 }
 
-.artifact-card__identity-heading .artifact-built-in-badge {
+.folder-card__badge.artifact-built-in-badge {
   color: #735d31;
   background: #faf6ed;
   border-color: #eee1c7;
