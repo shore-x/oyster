@@ -94,6 +94,21 @@ export interface RunKnowledgeMaintenanceInput {
 
 export type RunKnowledgeFullChainInput = RunKnowledgeMaintenanceInput
 
+export type SessionSelectionFailureReason = 'unavailable' | 'changed' | 'unreadable'
+
+export interface SessionRunRejected {
+  status: 'session_rejected'
+  reason: SessionSelectionFailureReason
+  message: string
+}
+
+export interface SessionRunCompleted<Result> {
+  status: 'completed'
+  result: Result
+}
+
+export type SessionRunResponse<Result> = SessionRunCompleted<Result> | SessionRunRejected
+
 export interface ProcessingExecutionSummary {
   connectionId: string
   connectionName: string
@@ -207,8 +222,10 @@ export interface KnowledgeProcessingApi {
   ): Promise<KnowledgeProcessingSnapshot>
   runKnowledgeMaintenance(
     input: RunKnowledgeMaintenanceInput
-  ): Promise<KnowledgeMaintenanceResult | undefined>
-  runFullChain(input: RunKnowledgeFullChainInput): Promise<KnowledgeFullChainResult | undefined>
+  ): Promise<SessionRunResponse<KnowledgeMaintenanceResult>>
+  runFullChain(
+    input: RunKnowledgeFullChainInput
+  ): Promise<SessionRunResponse<KnowledgeFullChainResult>>
   listFullChainRuns(): Promise<KnowledgeFullChainRunSummary[]>
   readFullChainRun(runId: string): Promise<KnowledgeFullChainRunRecord | undefined>
   cancelFullChain(): Promise<void>

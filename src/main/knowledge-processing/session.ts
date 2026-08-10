@@ -1,9 +1,17 @@
 import type { AvailableSessionSummary } from '../../shared/discovery'
-import type { RunKnowledgeMaintenanceInput } from '../../shared/knowledge-processing'
+import type {
+  RunKnowledgeMaintenanceInput,
+  SessionSelectionFailureReason
+} from '../../shared/knowledge-processing'
 import type {
   AvailableSessionEvidence,
   DiscoveryService
 } from '../discovery/discovery-service'
+import {
+  SourceSessionRevisionChangedError,
+  SourceSessionUnavailableError,
+  SourceSessionUnreadableError
+} from '../discovery/source-evidence-reader'
 
 type SessionSelection = Pick<
   RunKnowledgeMaintenanceInput,
@@ -14,6 +22,37 @@ export interface SessionMaterial {
   session: AvailableSessionSummary
   evidence: AvailableSessionEvidence
   sourceRef: string
+}
+
+export class SessionSelectionRejectedError extends Error {
+  constructor(
+    readonly reason: SessionSelectionFailureReason,
+    message: string
+  ) {
+    super(message)
+    this.name = 'SessionSelectionRejectedError'
+  }
+}
+
+function selectionRejected(
+  reason: SessionSelectionFailureReason
+): SessionSelectionRejectedError {
+  if (reason === 'changed') {
+    return new SessionSelectionRejectedError(
+      reason,
+      '所选 Session 已更新，请从刷新后的列表重新选择'
+    )
+  }
+  if (reason === 'unreadable') {
+    return new SessionSelectionRejectedError(
+      reason,
+      '当前无法读取所选 Session，请检查来源权限后刷新本机 Session'
+    )
+  }
+  return new SessionSelectionRejectedError(
+    reason,
+    '所选 Session 已不可用，请刷新本机 Session 后重新选择'
+  )
 }
 
 export function validateSessionSelection(input: SessionSelection): void {
@@ -42,14 +81,22 @@ export async function loadSessionMaterial(
   validateSessionSelection(input)
   const session = discovery.listAvailableSessions().find(
     (candidate) => candidate.sourceRecordId === input.sourceRecordId
-      && candidate.revision === input.expectedRevision
   )
-  if (!session) throw new Error('所选 Session 已失效或版本已变化，请重新扫描并选择')
+  if (!session) throw selectionRejected('unavailable')
+  if (session.revision !== input.expectedRevision) throw selectionRejected('changed')
 
-  const evidence = await discovery.readAvailableSession({
-    sourceRecordId: input.sourceRecordId,
-    expectedRevision: input.expectedRevision
-  })
+  let evidence: AvailableSessionEvidence
+  try {
+    evidence = await discovery.readAvailableSession({
+      sourceRecordId: input.sourceRecordId,
+      expectedRevision: input.expectedRevision
+    })
+  } catch (error) {
+    if (error instanceof SourceSessionUnavailableError) throw selectionRejected('unavailable')
+    if (error instanceof SourceSessionRevisionChangedError) throw selectionRejected('changed')
+    if (error instanceof SourceSessionUnreadableError) throw selectionRejected('unreadable')
+    throw error
+  }
   if (
     !evidence.rawEvidence.lines.some((line) => line.trim())
   ) {

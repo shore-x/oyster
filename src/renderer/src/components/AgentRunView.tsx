@@ -90,26 +90,6 @@ function modelCallTitle(call: AgentModelCallRecord, index: number): string {
   return call.purpose === 'context_compaction' ? `上下文压缩 ${index + 1}` : `模型调用 ${index + 1}`
 }
 
-function updateWithoutMovingScroll(element: HTMLElement, update: () => void): void {
-  const positions: Array<{ element: HTMLElement; top: number; left: number }> = []
-  let ancestor = element.parentElement
-  while (ancestor) {
-    positions.push({ element: ancestor, top: ancestor.scrollTop, left: ancestor.scrollLeft })
-    ancestor = ancestor.parentElement
-  }
-  const viewport = { top: window.scrollY, left: window.scrollX }
-  const restore = (): void => {
-    for (const position of positions) {
-      position.element.scrollTop = position.top
-      position.element.scrollLeft = position.left
-    }
-    window.scrollTo(viewport.left, viewport.top)
-  }
-  update()
-  restore()
-  requestAnimationFrame(restore)
-}
-
 type TimelineItem =
   | { kind: 'message'; sequence: number; message: AgentMessageRecord }
   | { kind: 'tool'; sequence: number; call: AgentToolCallRecord }
@@ -128,6 +108,12 @@ function timelineItems(run: AgentRunRecord): TimelineItem[] {
   return items.sort((left, right) => left.sequence - right.sequence)
 }
 
+function timelineItemKey(item: TimelineItem): string {
+  if (item.kind === 'message') return `message:${item.message.id}`
+  if (item.kind === 'tool') return `tool:${item.call.id}`
+  return `model:${item.call.id}`
+}
+
 function ToolCall(props: { call: AgentToolCallRecord; label?: string }) {
   const status = () => props.call.status
   const [expanded, setExpanded] = createSignal(false)
@@ -142,7 +128,7 @@ function ToolCall(props: { call: AgentToolCallRecord; label?: string }) {
         class="agent-trace-tool__toggle"
         aria-expanded={expanded()}
         aria-controls={payloadId}
-        onClick={(event) => updateWithoutMovingScroll(event.currentTarget, () => setExpanded((value) => !value))}
+        onClick={() => setExpanded((value) => !value)}
       >
         <span class="agent-trace-marker" aria-hidden="true" />
         <span class="agent-trace-tool__identity">
@@ -196,44 +182,63 @@ function Message(props: {
   )
 }
 
-export function AgentRunTimeline(props: AgentRunViewProps & {
+function TimelineEntry(props: AgentRunViewProps & {
+  item: TimelineItem
   onSelectModelCall?(id: string): void
 }) {
-  const items = createMemo(() => timelineItems(props.run))
   const modelCallForMessage = (messageId: string) => props.run.modelCalls.find(
     (call) => call.outputMessageId === messageId
   )
   return (
+    <>
+      <Show when={props.item.kind === 'message' ? props.item.message : undefined}>
+        {(message) => <Message
+          message={message()}
+          assistantName={props.agentDisplayName ?? 'Oyster'}
+          modelCall={modelCallForMessage(message().id)}
+          onSelectModelCall={props.onSelectModelCall}
+          onOpenKnowledge={props.onOpenKnowledge}
+        />}
+      </Show>
+      <Show when={props.item.kind === 'tool' ? props.item.call : undefined}>
+        {(call) => <ToolCall call={call()} label={props.toolLabel?.(call().name)} />}
+      </Show>
+      <Show when={props.item.kind === 'model' ? props.item.call : undefined}>
+        {(call) => (
+          <button
+            type="button"
+            class={`agent-trace-model-activity agent-trace-status--${call().status}`}
+            onClick={() => props.onSelectModelCall?.(call().id)}
+          >
+            <span class="agent-trace-marker" aria-hidden="true" />
+            <span><strong>{call().purpose === 'context_compaction' ? '压缩上下文' : '请求模型'}</strong><small>{call().model.id}</small></span>
+            <span>{agentRunStatusLabel(call().status)} · {formatDuration(call().durationMs)}</span>
+          </button>
+        )}
+      </Show>
+    </>
+  )
+}
+
+export function AgentRunTimeline(props: AgentRunViewProps & {
+  onSelectModelCall?(id: string): void
+}) {
+  const items = createMemo(() => timelineItems(props.run))
+  // Run snapshots are cloned on every update. Stable primitive keys keep existing
+  // disclosure components and their scroll anchors alive while records evolve.
+  const itemsByKey = createMemo(() => new Map(
+    items().map((item) => [timelineItemKey(item), item])
+  ))
+  const itemKeys = createMemo(() => items().map(timelineItemKey))
+  return (
     <div class="agent-trace-timeline" data-testid="agent-run-timeline">
-      <Show when={items().length} fallback={<div class="agent-trace-empty">Agent 启动后，执行轨迹会显示在这里。</div>}>
-        <For each={items()}>{(item) => (
-          <>
-            <Show when={item.kind === 'message' ? item.message : undefined}>
-              {(message) => <Message
-                message={message()}
-                assistantName={props.agentDisplayName ?? 'Oyster'}
-                modelCall={modelCallForMessage(message().id)}
-                onSelectModelCall={props.onSelectModelCall}
-                onOpenKnowledge={props.onOpenKnowledge}
-              />}
-            </Show>
-            <Show when={item.kind === 'tool' ? item.call : undefined}>
-              {(call) => <ToolCall call={call()} label={props.toolLabel?.(call().name)} />}
-            </Show>
-            <Show when={item.kind === 'model' ? item.call : undefined}>
-              {(call) => (
-                <button
-                  type="button"
-                  class={`agent-trace-model-activity agent-trace-status--${call().status}`}
-                  onClick={() => props.onSelectModelCall?.(call().id)}
-                >
-                  <span class="agent-trace-marker" aria-hidden="true" />
-                  <span><strong>{call().purpose === 'context_compaction' ? '压缩上下文' : '请求模型'}</strong><small>{call().model.id}</small></span>
-                  <span>{agentRunStatusLabel(call().status)} · {formatDuration(call().durationMs)}</span>
-                </button>
-              )}
-            </Show>
-          </>
+      <Show when={itemKeys().length} fallback={<div class="agent-trace-empty">Agent 启动后，执行轨迹会显示在这里。</div>}>
+        <For each={itemKeys()}>{(key) => (
+          <TimelineEntry
+            {...props}
+            item={itemsByKey().get(key)!}
+            onSelectModelCall={props.onSelectModelCall}
+          />
         )}</For>
       </Show>
     </div>

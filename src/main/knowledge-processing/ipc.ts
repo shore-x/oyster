@@ -5,13 +5,34 @@ import type {
   RunKnowledgeFullChainInput,
   RunKnowledgeMaintenanceInput,
   SaveProcessingDefaultInstructionsInput,
-  SaveProcessingStageInput
+  SaveProcessingStageInput,
+  SessionRunResponse
 } from '../../shared/knowledge-processing'
 import type { DiscoveryService } from '../discovery/discovery-service'
 import type { KnowledgeProcessingService } from './knowledge-processing-service'
 import type { ProcessingStageRunBinding } from './knowledge-processing-service'
 import type { KnowledgeFullChainService } from './full-chain-service'
-import { loadSessionMaterial } from './session'
+import {
+  loadSessionMaterial,
+  SessionSelectionRejectedError
+} from './session'
+
+async function sessionRunResponse<Result>(
+  operation: () => Promise<Result>
+): Promise<SessionRunResponse<Result>> {
+  try {
+    return { status: 'completed', result: await operation() }
+  } catch (error) {
+    if (error instanceof SessionSelectionRejectedError) {
+      return {
+        status: 'session_rejected',
+        reason: error.reason,
+        message: error.message
+      }
+    }
+    throw error
+  }
+}
 
 export function registerKnowledgeProcessingIpc(
   discovery: DiscoveryService,
@@ -58,26 +79,28 @@ export function registerKnowledgeProcessingIpc(
     knowledgeProcessingChannels.runKnowledgeMaintenance,
     async (event, input: RunKnowledgeMaintenanceInput) => {
       assertTrustedSender(event)
-      const material = await loadSessionMaterial(discovery, input)
-      return service.runKnowledgeMaintenance(
-        {
-          rawEvidence: material.evidence.rawEvidence,
-          canonicalActivity: material.evidence.canonicalActivity
-        },
-        material.sourceRef,
-        input.attention,
-        { binding: resolveBinding('knowledge_maintenance_agent') }
-      )
+      return sessionRunResponse(async () => {
+        const material = await loadSessionMaterial(discovery, input)
+        return service.runKnowledgeMaintenance(
+          {
+            rawEvidence: material.evidence.rawEvidence,
+            canonicalActivity: material.evidence.canonicalActivity
+          },
+          material.sourceRef,
+          input.attention,
+          { binding: resolveBinding('knowledge_maintenance_agent') }
+        )
+      })
     }
   )
   ipcMain.handle(
     knowledgeProcessingChannels.runFullChain,
     async (event, input: RunKnowledgeFullChainInput) => {
       assertTrustedSender(event)
-      return fullChain.run(input, {
+      return sessionRunResponse(() => fullChain.run(input, {
         maintainer: resolveBinding('knowledge_maintenance_agent'),
         reviewer: resolveBinding('knowledge_reviewer_agent')
-      })
+      }))
     }
   )
   ipcMain.handle(knowledgeProcessingChannels.listFullChainRuns, (event) => {

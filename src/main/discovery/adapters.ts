@@ -13,7 +13,8 @@ import type { AgentObservation } from '../observation/model'
 import {
   createClaudeObservation,
   createCodexObservation,
-  createPiObservation
+  createPiObservation,
+  isCodexRuntimeInjectedMessage
 } from './agent-observation-views'
 
 const HEAD_LIMIT_BYTES = 96 * 1024
@@ -77,6 +78,7 @@ function codexUserTitle(records: Record<string, unknown>[]): string | undefined 
     if (record.type !== 'response_item') continue
     const payload = asRecord(record.payload)
     if (payload?.role !== 'user') continue
+    if (isCodexRuntimeInjectedMessage(payload.content)) continue
     const title = titlePreview(payload.content)
     if (title) return title
   }

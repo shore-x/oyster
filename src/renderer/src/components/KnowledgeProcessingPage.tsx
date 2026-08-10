@@ -1,4 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
+import type { AvailableSessionSummary } from '../../../shared/discovery'
 import type {
   KnowledgeMaintenanceResult,
   ProcessingStageView
@@ -18,7 +19,8 @@ import { FullChainWorkspace } from './FullChainWorkspace'
 import { fullChainResultView } from './FullChainRunDetails'
 import { ProcessingDebugTracePanel } from './ProcessingDebugTracePanel'
 import { ProcessingRunHistoryWorkspace } from './ProcessingRunHistoryWorkspace'
-import { SessionMetadata, sessionOptionLabel } from './SessionMetadata'
+import { SessionMetadata } from './SessionMetadata'
+import { SessionPicker } from './SessionPicker'
 
 function formatDuration(durationMs: number): string {
   if (durationMs < 1_000) return `${durationMs} ms`
@@ -61,7 +63,10 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
 export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }) {
   const controller = createKnowledgeProcessingController()
   const [view, setView] = createSignal<'full_chain' | 'history' | 'stage_debug'>('full_chain')
-  const [selectedSessionId, setSelectedSessionId] = createSignal<string>()
+  const [selectedSessionReference, setSelectedSessionReference] = createSignal<{
+    sourceRecordId: string
+    revision: string
+  }>()
   const [fullChainAttention, setFullChainAttention] = createSignal('')
   const [attention, setAttention] = createSignal('')
   const [instructions, setInstructions] = createSignal('')
@@ -80,9 +85,14 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
   const selectedConnection = createMemo(() => controller.snapshot().connections.find(
     (connection) => connection.id === defaultLlm()?.connectionId
   ))
-  const selectedSession = createMemo(() => controller.availableSessions().find(
-    (session) => session.sourceRecordId === selectedSessionId()
-  ))
+  const selectedSession = createMemo(() => {
+    const selected = selectedSessionReference()
+    if (!selected) return undefined
+    return controller.availableSessions().find((session) => (
+      session.sourceRecordId === selected.sourceRecordId
+      && session.revision === selected.revision
+    ))
+  })
   const maintenanceTrace = createMemo(() => controller.debugTrace('stage_debug'))
   const fullChainTraces = createMemo(() => {
     return controller.debugTraces('full_chain')
@@ -109,6 +119,15 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
     if (value !== undefined && value !== previousInstructions) {
       previousInstructions = value
       setInstructions(value)
+    }
+  })
+
+  createEffect(() => {
+    if (controller.sessionsLoading()) return
+    if (selectedSessionReference() && !selectedSession()) {
+      setSelectedSessionReference(undefined)
+      controller.invalidateInputResults()
+      controller.resetFullChainResult()
     }
   })
 
@@ -142,9 +161,12 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
     return undefined
   })
 
-  function updateSelectedSession(value: string): void {
-    setSelectedSessionId(value || undefined)
+  function updateSelectedSession(session?: AvailableSessionSummary): void {
+    setSelectedSessionReference(session
+      ? { sourceRecordId: session.sourceRecordId, revision: session.revision }
+      : undefined)
     controller.invalidateInputResults()
+    controller.resetFullChainResult()
   }
 
   return (
@@ -172,7 +194,8 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
         <FullChainWorkspace
           sessions={controller.availableSessions()}
           sessionsLoading={controller.sessionsLoading()}
-          selectedSessionId={selectedSessionId()}
+          sessionCatalogError={controller.sessionCatalogError()}
+          selectedSession={selectedSession()}
           attention={fullChainAttention()}
           maintainer={maintainer()}
           reviewer={reviewer()}
@@ -184,6 +207,7 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
           locked={anyRunning()}
           result={controller.fullChainResult() ? fullChainResultView(controller.fullChainResult()!) : undefined}
           onSelectSession={updateSelectedSession}
+          onRefreshSessions={() => void controller.refreshAvailableSessions()}
           onAttentionInput={setFullChainAttention}
           onRun={() => {
             const session = selectedSession()
@@ -259,13 +283,18 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
                   <div class="processing-workspace-panel stage-debug__input" aria-label="运行输入">
                     <section class="processing-input" aria-label="知识维护输入">
                       <div class="processing-input__heading"><h3>{stage().inputDescription}</h3><span>不会自动运行</span></div>
-                      <label class="ai-field ai-field--wide">
-                        <span>可用 Session</span>
-                        <select data-testid="processing-maintainer-session" value={selectedSessionId() || ''} disabled={anyRunning() || controller.sessionsLoading() || controller.availableSessions().length === 0} onChange={(event) => updateSelectedSession(event.currentTarget.value)}>
-                          <option value="">{controller.sessionsLoading() ? '正在读取可用 Session…' : controller.availableSessions().length ? '选择一个 Session' : '暂无可用 Session'}</option>
-                          <For each={controller.availableSessions()}>{(session) => <option value={session.sourceRecordId}>{sessionOptionLabel(session)}</option>}</For>
-                        </select>
-                      </label>
+                      <SessionPicker
+                        sessions={controller.availableSessions()}
+                        selected={selectedSession()}
+                        loading={controller.sessionsLoading()}
+                        disabled={anyRunning()}
+                        label="可用 Session"
+                        selectTestId="processing-maintainer-session"
+                        refreshTestId="refresh-maintainer-sessions"
+                        error={controller.sessionCatalogError()}
+                        onSelect={updateSelectedSession}
+                        onRefresh={() => void controller.refreshAvailableSessions()}
+                      />
                       <Show when={selectedSession()}>{(session) => <SessionMetadata session={session()} class="processing-session-summary" testId="maintainer-session-meta" />}</Show>
                       <label class="ai-field ai-field--wide">
                         <span>Attention（可选）</span>

@@ -1,5 +1,5 @@
 import { createSignal, onCleanup } from 'solid-js'
-import type { AvailableSessionSummary, DiscoverySnapshot } from '../../shared/discovery'
+import type { SessionCatalogSnapshot } from '../../shared/discovery'
 import type {
   KnowledgeFullChainResult,
   KnowledgeFullChainRunRecord,
@@ -21,17 +21,9 @@ const EMPTY_SNAPSHOT: KnowledgeProcessingSnapshot = {
   debugTraces: []
 }
 
-function sessionCatalogRevision(snapshot: DiscoverySnapshot): string {
-  const sources = [...snapshot.sources]
-    .sort((left, right) => left.id.localeCompare(right.id))
-    .map((source) => [
-      source.id,
-      source.rootPath,
-      source.discoveryState,
-      source.sessionCount,
-      source.lastScannedAt
-    ])
-  return JSON.stringify([snapshot.sessionCatalogVersion, sources])
+const EMPTY_SESSION_CATALOG: SessionCatalogSnapshot = {
+  sessions: [],
+  state: 'idle'
 }
 
 export function createKnowledgeProcessingController() {
@@ -40,8 +32,9 @@ export function createKnowledgeProcessingController() {
   const [savingStageIds, setSavingStageIds] = createSignal<ProcessingStageId[]>([])
   const [error, setError] = createSignal<string>()
   const [maintenanceResult, setMaintenanceResult] = createSignal<KnowledgeMaintenanceResult>()
-  const [availableSessions, setAvailableSessions] = createSignal<AvailableSessionSummary[]>([])
-  const [sessionsLoading, setSessionsLoading] = createSignal(true)
+  const [sessionCatalog, setSessionCatalog] = createSignal(EMPTY_SESSION_CATALOG)
+  const [sessionCatalogLoading, setSessionCatalogLoading] = createSignal(true)
+  const [sessionCatalogRefreshing, setSessionCatalogRefreshing] = createSignal(false)
   const [fullChainPending, setFullChainPending] = createSignal(false)
   const [fullChainResult, setFullChainResult] = createSignal<KnowledgeFullChainResult>()
   const [fullChainRuns, setFullChainRuns] = createSignal<KnowledgeFullChainRunSummary[]>([])
@@ -49,7 +42,6 @@ export function createKnowledgeProcessingController() {
   const [selectedFullChainRun, setSelectedFullChainRun] = createSignal<KnowledgeFullChainRunRecord>()
   const [loadingFullChainRunId, setLoadingFullChainRunId] = createSignal<string>()
   const [hiddenStageDebugTraceId, setHiddenStageDebugTraceId] = createSignal<string>()
-  let sessionLoadRevision = 0
   let fullChainRunReadGeneration = 0
 
   function errorMessage(cause: unknown): string {
@@ -112,41 +104,36 @@ export function createKnowledgeProcessingController() {
     })
     .catch((cause) => setError(errorMessage(cause)))
 
-  let receivedDiscoverySnapshot = false
-  let catalogRevision: string | undefined
-  const updateAvailableSessions = (discoverySnapshot: DiscoverySnapshot): void => {
-    const nextRevision = sessionCatalogRevision(discoverySnapshot)
-    if (nextRevision === catalogRevision) return
-    catalogRevision = nextRevision
-    void loadAvailableSessions()
-  }
-  const unsubscribeDiscovery = window.oyster.discovery.subscribe((discoverySnapshot) => {
-    receivedDiscoverySnapshot = true
-    updateAvailableSessions(discoverySnapshot)
+  let receivedSessionCatalog = false
+  const unsubscribeSessionCatalog = window.oyster.discovery.subscribeSessionCatalog((nextCatalog) => {
+    receivedSessionCatalog = true
+    setSessionCatalog(nextCatalog)
+    setSessionCatalogLoading(false)
   })
-  void loadAvailableSessions()
   void loadFullChainRuns()
-  void window.oyster.discovery.getSnapshot()
-    .then((discoverySnapshot) => {
-      if (!receivedDiscoverySnapshot) updateAvailableSessions(discoverySnapshot)
+  void window.oyster.discovery.getSessionCatalog()
+    .then((initialCatalog) => {
+      if (!receivedSessionCatalog) setSessionCatalog(initialCatalog)
     })
     .catch((cause) => setError(errorMessage(cause)))
+    .finally(() => setSessionCatalogLoading(false))
 
   onCleanup(() => {
     unsubscribe()
-    unsubscribeDiscovery()
+    unsubscribeSessionCatalog()
   })
 
-  async function loadAvailableSessions(): Promise<void> {
-    const revision = ++sessionLoadRevision
+  async function refreshAvailableSessions(): Promise<boolean> {
     try {
-      setSessionsLoading(true)
-      const sessions = await window.oyster.discovery.listAvailableSessions()
-      if (revision === sessionLoadRevision) setAvailableSessions(sessions)
+      setSessionCatalogRefreshing(true)
+      setError(undefined)
+      setSessionCatalog(await window.oyster.discovery.refreshSessionCatalog())
+      return true
     } catch (cause) {
-      if (revision === sessionLoadRevision) setError(errorMessage(cause))
+      setError(errorMessage(cause))
+      return false
     } finally {
-      if (revision === sessionLoadRevision) setSessionsLoading(false)
+      setSessionCatalogRefreshing(false)
     }
   }
 
@@ -198,8 +185,9 @@ export function createKnowledgeProcessingController() {
     try {
       markPending(stageId, true)
       setError(undefined)
-      const result = await window.oyster.knowledgeProcessing.runKnowledgeMaintenance(input)
-      if (result) setMaintenanceResult(result)
+      const response = await window.oyster.knowledgeProcessing.runKnowledgeMaintenance(input)
+      if (response.status === 'session_rejected') setError(response.message)
+      else setMaintenanceResult(response.result)
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {
@@ -220,9 +208,11 @@ export function createKnowledgeProcessingController() {
     try {
       setFullChainPending(true)
       setError(undefined)
-      const result = await window.oyster.knowledgeProcessing.runFullChain(input)
-      if (result) {
-        setFullChainResult(result)
+      const response = await window.oyster.knowledgeProcessing.runFullChain(input)
+      if (response.status === 'session_rejected') {
+        setError(response.message)
+      } else {
+        setFullChainResult(response.result)
         await loadFullChainRuns()
       }
     } catch (cause) {
@@ -246,8 +236,13 @@ export function createKnowledgeProcessingController() {
     isSaving: (stageId: ProcessingStageId) => savingStageIds().includes(stageId),
     error,
     maintenanceResult,
-    availableSessions,
-    sessionsLoading,
+    availableSessions: () => sessionCatalog().sessions,
+    sessionsLoading: () => (
+      sessionCatalogLoading()
+      || sessionCatalogRefreshing()
+      || sessionCatalog().state === 'refreshing'
+    ),
+    sessionCatalogError: () => sessionCatalog().errorMessage,
     fullChainResult,
     fullChainRuns,
     fullChainRunsLoading,
@@ -262,7 +257,7 @@ export function createKnowledgeProcessingController() {
     saveStage,
     runKnowledgeMaintenance,
     cancelRun,
-    loadAvailableSessions,
+    refreshAvailableSessions,
     loadFullChainRuns,
     readFullChainRun,
     runFullChain,

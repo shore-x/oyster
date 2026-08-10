@@ -81,9 +81,9 @@ export class KnowledgeFullChainService {
     const controller = new AbortController()
     const active: ActiveFullChainRun = { runId, controller }
     this.active = active
-    this.processing.clearDebugTraces('full_chain')
-    const startedAt = Date.now()
-    const startedAtIso = new Date(startedAt).toISOString()
+    let startedAt = Date.now()
+    let startedAtIso = new Date(startedAt).toISOString()
+    let runStarted = false
     let session: AvailableSessionSummary | undefined
     const agentRuns: AgentRunRecord[] = []
     let historySaveAttempted = false
@@ -126,6 +126,10 @@ export class KnowledgeFullChainService {
       const material = await loadSessionMaterial(this.discovery, input)
       session = material.session
       controller.signal.throwIfAborted()
+      startedAt = Date.now()
+      startedAtIso = new Date(startedAt).toISOString()
+      runStarted = true
+      this.processing.clearDebugTraces('full_chain')
       const maintenanceRuns: KnowledgeMaintenanceResult[] = []
       const reviewRuns: KnowledgeReviewResult[] = []
 
@@ -212,11 +216,13 @@ export class KnowledgeFullChainService {
       return result
     } catch (error) {
       const status = terminalStatus(controller.signal)
-      for (const trace of this.processing.snapshot().debugTraces) {
-        if (trace.origin !== 'full_chain') continue
-        recordAgentRun({ id: trace.run.id, origin: trace.origin })
+      if (runStarted) {
+        for (const trace of this.processing.snapshot().debugTraces) {
+          if (trace.origin !== 'full_chain') continue
+          recordAgentRun({ id: trace.run.id, origin: trace.origin })
+        }
       }
-      if (!historySaveAttempted) {
+      if (runStarted && !historySaveAttempted) {
         const completedAt = new Date().toISOString()
         saveHistory(
           status,

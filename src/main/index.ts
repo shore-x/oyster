@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { discoveryChannels } from '../shared/channels'
-import type { DiscoverySnapshot } from '../shared/discovery'
+import type { DiscoverySnapshot, SessionCatalogSnapshot } from '../shared/discovery'
 import { AiBackendService } from './ai-backends/ai-backend-service'
 import { CodexAgentAdapter } from './ai-backends/codex-adapter'
 import { KeychainCredentialStore } from './ai-backends/credential-store'
@@ -232,7 +232,14 @@ function createKnowledgeProcessingService(
 
 function registerIpc(service: DiscoveryService): void {
   ipcMain.handle(discoveryChannels.getSnapshot, () => service.snapshot())
-  ipcMain.handle(discoveryChannels.listAvailableSessions, () => service.listAvailableSessions())
+  ipcMain.handle(
+    discoveryChannels.getSessionCatalog,
+    () => service.sessionCatalogSnapshot()
+  )
+  ipcMain.handle(
+    discoveryChannels.refreshSessionCatalog,
+    () => service.refreshSessionCatalog()
+  )
   ipcMain.handle(discoveryChannels.detectAgents, () => service.detectAgents())
   ipcMain.handle(discoveryChannels.scanSource, (_event, sourceId: string) => service.scanSource(sourceId))
   ipcMain.handle(discoveryChannels.cancelRun, (_event, runId: string) => service.cancelRun(runId))
@@ -252,6 +259,11 @@ function registerIpc(service: DiscoveryService): void {
   service.subscribe((snapshot: DiscoverySnapshot) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send(discoveryChannels.snapshot, snapshot)
+    }
+  })
+  service.subscribeSessionCatalog((snapshot: SessionCatalogSnapshot) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(discoveryChannels.sessionCatalogSnapshot, snapshot)
     }
   })
 }
@@ -825,6 +837,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       fullChainSelected: page.querySelector('[data-testid="processing-view-full-chain"]')?.getAttribute('aria-selected'),
       workspaceExists: Boolean(page.querySelector('[data-testid="full-chain-workspace"]')),
       sessionOptionCount: select?.options.length,
+      refreshSessionsButtonExists: Boolean(page.querySelector('[data-testid="refresh-full-chain-sessions"]')),
       fullChainButtonExists: Boolean(initialButton),
       fullChainButtonDisabled: initialButton?.disabled,
       initialDisabledReason: page.querySelector('[data-testid="full-chain-disabled-reason"]')?.textContent?.trim(),
@@ -852,8 +865,44 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   const fullChainRunSemantics = await window.webContents.executeJavaScript(`(async () => {
     const page = document.querySelector('[data-testid="page-knowledge-processing"]')
     page.querySelector('[data-testid="run-full-chain"]')?.click()
+    let liveUpdatePreservesTool = false
+    let liveUpdateKeepsScroll = false
+    let liveToolPayloadVisible = false
+    let liveDeadline = Date.now() + 2_000
+    while (!page.querySelector('[data-testid="open-full-chain-activity"]') && Date.now() < liveDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    page.querySelector('[data-testid="open-full-chain-activity"]')?.click()
+    liveDeadline = Date.now() + 2_000
+    while (!page.querySelector('[data-testid="full-chain-activity-detail"] .agent-trace-tool') && Date.now() < liveDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    const liveDetail = page.querySelector('[data-testid="full-chain-activity-detail"]')
+    const liveTool = liveDetail?.querySelector('.agent-trace-tool')
+    const initialLiveToolCount = liveDetail?.querySelectorAll('.agent-trace-tool').length ?? 0
+    const liveSpacer = document.createElement('div')
+    liveSpacer.style.height = '900px'
+    liveDetail?.prepend(liveSpacer)
+    liveTool?.scrollIntoView({ block: 'center' })
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    liveTool?.querySelector('.agent-trace-tool__toggle')?.click()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    const liveScrollBefore = window.scrollY
+    liveDeadline = Date.now() + 2_000
+    while (
+      (liveDetail?.querySelectorAll('.agent-trace-tool').length ?? 0) <= initialLiveToolCount
+      && Date.now() < liveDeadline
+    ) await new Promise((resolve) => setTimeout(resolve, 10))
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    const currentLiveTool = liveDetail?.querySelector('[data-tool-call-id="' + liveTool?.dataset.toolCallId + '"]')
+    liveUpdatePreservesTool = Boolean(liveTool && currentLiveTool === liveTool)
+    liveUpdateKeepsScroll = liveScrollBefore > 0 && Math.abs(window.scrollY - liveScrollBefore) < 1
+    liveToolPayloadVisible = currentLiveTool?.querySelector('.agent-trace-tool__payloads')?.hidden === false
+    liveSpacer.remove()
+    page.querySelector('[data-testid="full-chain-detail-back"]')?.click()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
     const deadline = Date.now() + 5_000
-    let runningStateVisible = false
+    let runningStateVisible = true
     while (Date.now() < deadline) {
       runningStateVisible ||= !page.querySelector('[data-testid="run-full-chain"]')
       const completed = Boolean(page.querySelector('[data-testid="full-chain-run-result"]'))
@@ -913,6 +962,9 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
         return {
           completed,
           runningStateVisible,
+          liveUpdatePreservesTool,
+          liveUpdateKeepsScroll,
+          liveToolPayloadVisible,
           overviewHasTraceExplorer,
           summaryStatementCount,
           traceExplorerExists,

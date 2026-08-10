@@ -5,6 +5,7 @@ import type {
   AgentType,
   AvailableSessionSummary,
   DiscoverySnapshot,
+  SessionCatalogSnapshot,
   ScanRun,
   SourceRecord,
   SourceRecordKind
@@ -27,6 +28,7 @@ import {
 import type { CanonicalActivity, RawEvidence } from '../observation/model'
 
 type SnapshotListener = (snapshot: DiscoverySnapshot) => void
+type SessionCatalogListener = (snapshot: SessionCatalogSnapshot) => void
 
 interface ActiveOperation {
   runId: string
@@ -146,10 +148,10 @@ function assertSessionReference(input: { sourceRecordId: string; expectedRevisio
 export class DiscoveryService {
   private state: DiscoveryStateData = { sources: [], records: [], runs: [] }
   private readonly listeners = new Set<SnapshotListener>()
+  private readonly sessionCatalogListeners = new Set<SessionCatalogListener>()
   private readonly activeOperations = new Map<string, ActiveOperation>()
   private readonly adapterByType = new Map<AgentType, AgentHistoryAdapter>()
   private detectionContext: DetectionContext
-  private sessionCatalogVersion = 0
 
   constructor(
     private readonly repository: DiscoveryRepository,
@@ -209,8 +211,33 @@ export class DiscoveryService {
       ),
       runs: [...this.state.runs]
         .sort((left, right) => (right.startedAt || '').localeCompare(left.startedAt || ''))
-        .slice(0, 30),
-      sessionCatalogVersion: this.sessionCatalogVersion
+        .slice(0, 30)
+    })
+  }
+
+  sessionCatalogSnapshot(): SessionCatalogSnapshot {
+    const failedSources = this.state.sources.filter((source) => (
+      source.discoveryState === 'error' || source.scanState === 'error'
+    ))
+    const refreshedAt = this.state.sources
+      .flatMap((source) => source.lastScannedAt ? [source.lastScannedAt] : [])
+      .sort()
+      .at(-1)
+    return clone({
+      sessions: this.listAvailableSessions(),
+      state: this.activeOperations.size > 0
+        ? 'refreshing'
+        : failedSources.length > 0
+          ? 'error'
+          : 'idle',
+      ...(refreshedAt ? { refreshedAt } : {}),
+      ...(failedSources.length > 0
+        ? {
+            errorMessage: failedSources
+              .map((source) => `${source.displayName}: ${source.errorMessage || 'Session 扫描失败'}`)
+              .join('\n')
+          }
+        : {})
     })
   }
 
@@ -219,7 +246,11 @@ export class DiscoveryService {
       .filter((record) => record.kind === 'conversation')
       .flatMap<AvailableSessionSummary>((record) => {
         const source = this.state.sources.find((candidate) => candidate.id === record.sourceId)
-        if (!source || source.discoveryState !== 'found') return []
+        if (
+          !source
+          || source.discoveryState !== 'found'
+          || source.scanState === 'error'
+        ) return []
         return [sessionSummary(record, source)]
       })
       .sort((left, right) => {
@@ -310,8 +341,8 @@ export class DiscoveryService {
     if (!candidate) {
       this.state.records = this.state.records.filter((record) => record.id !== previous.id)
       this.updateSourceRecordSummary(source)
-      this.sessionCatalogVersion++
       await this.persistAndEmit()
+      this.emitSessionCatalog()
       return { grew: false }
     }
     if (candidate.kind !== 'conversation' || candidate.externalId !== previous.externalId) {
@@ -326,8 +357,8 @@ export class DiscoveryService {
     if (current) Object.assign(current, next)
     else this.state.records.push(next)
     this.updateSourceRecordSummary(source)
-    this.sessionCatalogVersion++
     await this.persistAndEmit()
+    this.emitSessionCatalog()
     return {
       record: current ?? next,
       grew: next.sizeBytes > previousSizeBytes
@@ -353,6 +384,17 @@ export class DiscoveryService {
     return () => this.listeners.delete(listener)
   }
 
+  subscribeSessionCatalog(listener: SessionCatalogListener): () => void {
+    this.sessionCatalogListeners.add(listener)
+    return () => this.sessionCatalogListeners.delete(listener)
+  }
+
+  async refreshSessionCatalog(): Promise<SessionCatalogSnapshot> {
+    await this.detectAgents()
+    await this.waitForIdle()
+    return this.sessionCatalogSnapshot()
+  }
+
   async detectAgents(): Promise<DiscoverySnapshot> {
     await Promise.all(
       this.state.sources.map(async (source) => {
@@ -374,6 +416,7 @@ export class DiscoveryService {
       })
     )
     await this.persistAndEmit()
+    this.emitSessionCatalog()
 
     for (const source of this.state.sources) {
       if (source.discoveryState === 'found' && !this.activeOperations.has(source.id)) {
@@ -397,9 +440,7 @@ export class DiscoveryService {
     source.oldestSessionAt = undefined
     source.latestSessionAt = undefined
     source.lastScannedAt = undefined
-    const previousRecordCount = this.state.records.length
     this.state.records = this.state.records.filter((record) => record.sourceId !== sourceId)
-    if (this.state.records.length !== previousRecordCount) this.sessionCatalogVersion++
 
     const detection = await adapter.detect(this.detectionContext, rootPath)
     source.executablePath = detection.executablePath
@@ -413,6 +454,7 @@ export class DiscoveryService {
           ? 'found'
           : 'not_found'
     await this.persistAndEmit()
+    this.emitSessionCatalog()
     return this.snapshot()
   }
 
@@ -436,8 +478,12 @@ export class DiscoveryService {
     this.addRun(run)
     const operation: ActiveOperation = { runId: run.id, controller: new AbortController() }
     this.activeOperations.set(sourceId, operation)
-    await this.persistAndEmit()
-    operation.task = this.performScan(source, run, operation.controller.signal)
+    const started = this.persistAndEmit()
+    operation.task = started.then(async () => {
+      this.emitSessionCatalog()
+      await this.performScan(source, run, operation.controller.signal)
+    })
+    await started
     return this.snapshot()
   }
 
@@ -462,7 +508,8 @@ export class DiscoveryService {
 
   private async performScan(source: AgentSource, run: ScanRun, signal: AbortSignal): Promise<void> {
     const adapter = this.requireAdapter(source.agentType)
-    const observed = new Set<string>()
+    const previousRecords = this.currentRecords(source.id)
+    const scannedRecords: SourceRecord[] = []
     let oldest: string | undefined
     let latest: string | undefined
 
@@ -479,11 +526,9 @@ export class DiscoveryService {
         } else {
           const candidate = entry.candidate
           const id = sourceRecordId(source.id, candidate.kind, candidate.externalId)
-          observed.add(id)
-          const existing = this.state.records.find((record) => record.id === id)
+          const existing = previousRecords.find((record) => record.id === id)
           const record = sourceRecord(source.id, candidate, existing)
-          if (existing) Object.assign(existing, record)
-          else this.state.records.push(record)
+          scannedRecords.push(record)
 
           if (candidate.kind === 'conversation') {
             const sessionDate = candidate.startedAt || candidate.modifiedAt
@@ -494,10 +539,11 @@ export class DiscoveryService {
         if (run.processedFiles % 25 === 0) this.emit()
       }
 
-      this.state.records = this.state.records.filter(
-        (record) => record.sourceId !== source.id || observed.has(record.id)
-      )
-      const currentRecords = this.currentRecords(source.id)
+      this.state.records = [
+        ...this.state.records.filter((record) => record.sourceId !== source.id),
+        ...scannedRecords
+      ]
+      const currentRecords = scannedRecords
       source.fileCount = run.totalFiles
       source.sessionCount = currentRecords.filter((record) => record.kind === 'conversation').length
       source.instructionFileCount = currentRecords.filter(
@@ -512,7 +558,6 @@ export class DiscoveryService {
       source.errorMessage = undefined
       run.state = 'completed'
       run.finishedAt = now()
-      this.sessionCatalogVersion++
     } catch (error) {
       const cancelled = signal.aborted || isAbortError(error)
       run.state = cancelled ? 'cancelled' : 'failed'
@@ -525,6 +570,7 @@ export class DiscoveryService {
     } finally {
       this.activeOperations.delete(source.id)
       await this.persistAndEmit()
+      this.emitSessionCatalog()
     }
   }
 
@@ -561,5 +607,10 @@ export class DiscoveryService {
   private emit(): void {
     const snapshot = this.snapshot()
     for (const listener of this.listeners) listener(snapshot)
+  }
+
+  private emitSessionCatalog(): void {
+    const snapshot = this.sessionCatalogSnapshot()
+    for (const listener of this.sessionCatalogListeners) listener(snapshot)
   }
 }

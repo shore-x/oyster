@@ -321,4 +321,18 @@ describe('KnowledgeFullChainService', () => {
     expect(await collaborations.currentRevision()).toBe(baseRevision)
     await expect(readFile(result.run.workPath, 'utf8')).resolves.toContain('Reviewer approved revision')
   })
+
+  it('rejects a stale Session before creating a full-chain history record', async () => {
+    const { service, processing, discovery, records } = await harness()
+    discovery.service.listAvailableSessions = () => []
+
+    await expect(service.run({
+      sourceRecordId: discovery.session.sourceRecordId,
+      expectedRevision: discovery.session.revision
+    }, BINDINGS)).rejects.toThrow('Session 已不可用')
+
+    expect(records).toEqual([])
+    expect(processing.snapshot().debugTraces).toEqual([])
+    expect(service.isRunning()).toBe(false)
+  })
 })

@@ -38,4 +38,4 @@ Run 文件不是候选内容 revision 的一部分，因此工作历史能够跨
 
 ## 5. Observation
 
-Raw Evidence 是 Source Adapter 从外部 Harness 原始位置读取的确定版本。Canonical Activity 是其确定性、可定位的可读投影。Maintainer 默认扫描 Canonical Activity，只在需要精确核查时通过 locator 回到 Raw Evidence；两者都不因被读取而成为 Knowledge，也不复制进 Run。
+Raw Evidence 是 Source Adapter 从外部 Harness 原始位置读取的确定版本。Canonical Activity 是其确定性、可定位的对话优先语义投影：用户与 Assistant 消息以及上下文压缩形成的语义摘要保留完整正文；工具只保留操作身份并绑定调用与结果的 Raw locator，参数、结果、模型内部 reasoning、压缩记录中的 replacement history、重复传输事件、上下文快照和协议包装不进入默认正文。Codex 以 user role 记录的 AGENTS、环境、权限和运行模式信封同样不是用户对话。图片等附件从工具结果中独立提取，未进入投影的精确内容始终可由 locator 回查 Raw Evidence。Maintainer 默认扫描 Canonical Activity，只在需要精确核查时回到 Raw Evidence；两者都不因被读取而成为 Knowledge，也不复制进 Run。

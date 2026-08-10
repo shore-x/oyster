@@ -2,7 +2,7 @@
 
 > 状态：当前实现
 >
-> 日期：2026-08-06
+> 日期：2026-08-09
 
 ## 目标
 
@@ -25,7 +25,7 @@ Knowledge 与 Artifact 全局唯一，不从属于测试或 Run。Harness 从 `m
 
 ## 输入读取
 
-Source Adapter 从选定 Session revision 生成可定位的 Canonical Activity，并保留 Raw Evidence locator。Harness 沿 Activity 边界生成 `WORK.md` 清单。Maintainer 使用 `read_activity` 完整扫描活动，以 `read_activity_attachment` 检查图片，只在精确核查时调用 `read_evidence`。原始证据不复制进 Repository 或 Run。
+Source Adapter 从选定 Session revision 生成可定位的 Canonical Activity，并保留 Raw Evidence locator。该投影完整保留对话正文和上下文压缩的语义摘要；工具活动只保留操作身份以及调用和结果的 locator，参数、结果、Codex 运行时 user-role 信封、模型内部 reasoning、压缩 replacement history、运行状态与重复协议快照不进入正文，图片等附件独立提取。Harness 沿 Activity 边界生成 `WORK.md` 清单。Maintainer 使用 `read_activity` 完整扫描这份语义活动，以 `read_activity_attachment` 检查图片，只在精确核查时调用返回原始上游格式的 `read_evidence`。原始证据不复制进 Repository 或 Run。
 
 ## Maintainer
 
@@ -40,7 +40,7 @@ Reviewer 从同一个 Repository 根工作，但没有 Raw Evidence 或 Observat
 
 ## UI 与历史
 
-运行视图在一个窗口中按 handoff 顺序展示所有 Agent Runs，并使用 `Maintainer`、`Reviewer` 名称区分。历史列表读取各 `runs/<run-id>/run.json`；成功记录包含输入、Session、两种角色配置、全部轨迹、candidate revision、变更路径及 revision 对应的 Knowledge/Artifact 视图。
+运行视图在一个窗口中按 handoff 顺序展示所有 Agent Runs，并使用 `Maintainer`、`Reviewer` 名称区分。Session 选择器直接消费 Discovery 提供的 catalog snapshot，并可显式刷新所有本机来源；选择绑定稳定身份和精确 revision，刷新后版本变化或记录消失都会撤销选择。运行开始前的 Session 不可用、版本变化或权限问题以结构化输入拒绝返回，不作为 Agent Run 或失败的完整链路历史。历史列表读取各 `runs/<run-id>/run.json`；成功记录包含输入、Session、两种角色配置、全部轨迹、candidate revision、变更路径及 revision 对应的 Knowledge/Artifact 视图。
 
 ## 当前边界
 

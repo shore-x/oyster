@@ -2,7 +2,7 @@
 
 > 状态：当前已落地的第一阶段产品与实现规格
 >
-> 日期：2026-07-30
+> 日期：2026-08-09
 >
 > 范围：发现本机 Claude Code、Pi、Codex，登记会话 transcript 与人类指令，并由 Source Adapter 在需要时从原始位置只读访问。Canonical Activity、知识加工、实时 Connector 和 MCP 不属于本页所述的发现切片。
 
@@ -29,6 +29,7 @@ Discovery catalog 中的单个外部来源条目称为 **Source Record**。它�
 - 手工选择自定义历史根目录；
 - 在用户触发扫描后，有界读取 JSONL header，统计文件、会话、人类指令、字节数、时间范围和异常文件；
 - Session 列表使用标题、项目、时间和原始记录大小帮助识别，不为展示消息条数额外读取正文；只有实际运行所选 Session 时才从原始位置读取其内容；
+- Session 选择器可以显式刷新所有已配置的本机来源；刷新状态和可选列表由同一个 Session catalog snapshot 表达；
 - 按三个 Agent 各自规则发现人类编写的指令，并明确排除 Agent 自动 memory；
 - 为外部记录登记稳定身份、来源定位信息和轻量版本指纹，不复制聊天正文；
 - 对 Codex `sessions` / `archived_sessions` 中的同一 thread 去重；
@@ -60,19 +61,19 @@ Discovery catalog 中的单个外部来源条目称为 **Source Record**。它�
 
 损坏尾行不会使整个来源失败；无法识别关键 header 的文件计入 invalid，一个坏文件不阻塞其他文件。指令发现只使用允许的文件名、Session header 中的项目路径和少量受信配置，不递归搜索整个 Home。
 
-catalog 保存稳定的 Source Record 身份、来源定位信息、文件大小和修改时间等轻量版本指纹。重新扫描会刷新当前 catalog：记录变化时形成新的当前版本，已经消失的记录不再出现在可选列表中。扫描能力属于各 Agent Adapter，因为只有 Adapter 理解对应 Harness 的身份与保存位置规则。扫描不会复制文件，也不会静默改变已经完成的加工所依据的 Observation revision。
+catalog 保存稳定的 Source Record 身份、来源定位信息、文件大小和修改时间等轻量版本指纹。重新扫描在来源内构建完整结果后原子替换当前 catalog：记录变化时形成新的当前版本，已经消失的记录不再出现在可选列表中；扫描失败不会发布半完成列表。扫描能力属于各 Agent Adapter，因为只有 Adapter 理解对应 Harness 的身份与保存位置规则。扫描不会复制文件，也不会静默改变已经完成的加工所依据的 Observation revision。
 
 ### 4.3 按需读取
 
 Renderer 只提交 catalog 中的稳定身份和用户所选择的版本标识，不提交绝对文件路径。主进程通过对应 Source Adapter 解析内部 locator，只读取被选择的记录，并确认它没有静默变化。成功读取后，系统才计算内容哈希，固定本次加工所依据的确定版本。
 
-正常选择 Session 不触发全量重新扫描。当已登记的 locator 无法读取或版本不一致时，Discovery Service 才要求对应 Adapter 按稳定身份重新发现该 Session，并同步刷新 catalog：
+打开或切换 Session 不触发全量重新扫描。用户可以在选择器中显式刷新 Session catalog；该操作由 Discovery Service 重新探测并扫描所有已配置来源，等待扫描完成后发布一个完整 snapshot，Renderer 不编排逐来源扫描。当已登记的 locator 无法读取或版本不一致时，Discovery Service 仍只要求对应 Adapter 按稳定身份重新发现该 Session，并同步刷新 catalog：
 
 - 如果只是保存位置迁移而版本未变，继续读取同一条证据；
 - 如果 Session 比所选版本增长或发生其他内容变化，保留新的 catalog 版本，但拒绝用它替换用户已经选择的旧版本；
 - 如果无法重新发现，视为来源已失效，并从当前可选 catalog 中移除。
 
-这是读取失败后的单次恢复，不要求每次选择都重新扫描，也不要求统一服务理解 Codex、Claude Code 或 Pi 的目录结构。单次处理的内容上限由消费方决定；发现层不为绕过该限制而预先加载全部历史。
+这是读取失败后的单次恢复，不要求每次选择都重新扫描，也不要求统一服务理解 Codex、Claude Code 或 Pi 的目录结构。Renderer 保存稳定身份与精确 revision 的选择；catalog 刷新后仅在两者都未变化时保留选择，版本变化或记录消失都要求用户重新确认。单次处理的内容上限由消费方决定；发现层不为绕过该限制而预先加载全部历史。
 
 ## 5. 数据与安全边界
 
@@ -82,7 +83,7 @@ Renderer 只提交 catalog 中的稳定身份和用户所选择的版本标识�
 - conversation 或 human instruction 的稳定身份、内部 locator 和版本指纹；
 - 必要的脱敏错误与运行状态。
 
-Source Adapter 负责各 Harness 的默认路径、有限 header 解析、Source Record 定位、版本检查和原地读取。统一 Discovery Service 负责 catalog、统计、状态和访问协调。Renderer 只通过 typed preload API 使用这些能力，不包含路径规则，也不获得原始绝对路径。
+Source Adapter 负责各 Harness 的默认路径、有限 header 解析、Source Record 定位、版本检查和原地读取。统一 Discovery Service 负责 catalog、统计、状态和访问协调。Renderer 只通过 typed preload API 使用这些能力，不包含路径规则，也不获得原始绝对路径。Session 消费使用独立的 `get / refresh / subscribe` catalog 契约；来源管理 snapshot 不再通过版本号和第二次列表请求间接驱动选择器。
 
 Raw Evidence 表示具有明确来源身份和版本身份、可由 Source Adapter 按需读取的上游材料。它保持上游格式，不在发现时统一 Schema，也不把人类指令拼入 transcript；它不是 Oyster 内部的文件副本。异构记录的确定性标准化将在 Canonical Activity 阶段完成。
 
@@ -121,7 +122,7 @@ Raw Evidence 表示具有明确来源身份和版本身份、可由 Source Adapt
 
 ## 9. 验证
 
-当前测试使用脱敏 Fixture 覆盖三个 Adapter、指令优先级、Codex active/archive 去重、损坏文件隔离、单条记录的确定版本读取，以及 Session 迁移、增长或消失后的恢复与拒绝行为。测试与正式链路通过同一个 Source Adapter 访问外部记录，不建立 Raw Evidence 副本。
+当前测试使用脱敏 Fixture 覆盖三个 Adapter、指令优先级、Codex active/archive 去重、损坏文件隔离、Session catalog 原子刷新、单条记录的确定版本读取，以及 Session 迁移、增长或消失后的恢复与拒绝行为。测试与正式链路通过同一个 Source Adapter 访问外部记录，不建立 Raw Evidence 副本。
 
 仓库验证命令：
 

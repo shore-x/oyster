@@ -61,8 +61,6 @@ export interface ScanRun {
 export interface DiscoverySnapshot {
   sources: AgentSource[]
   runs: ScanRun[]
-  /** In-memory generation for material changes to the visible Session catalog. */
-  sessionCatalogVersion: number
 }
 
 /** A path-free reference to one discovered conversation revision. */
@@ -81,12 +79,24 @@ export interface AvailableSessionSummary {
   revision: string
 }
 
+export type SessionCatalogState = 'idle' | 'refreshing' | 'error'
+
+/** The authoritative renderer-facing catalog used when selecting an external Session. */
+export interface SessionCatalogSnapshot {
+  sessions: AvailableSessionSummary[]
+  state: SessionCatalogState
+  refreshedAt?: string
+  errorMessage?: string
+}
+
 export interface DiscoveryApi {
   getSnapshot(): Promise<DiscoverySnapshot>
-  listAvailableSessions(): Promise<AvailableSessionSummary[]>
+  getSessionCatalog(): Promise<SessionCatalogSnapshot>
+  refreshSessionCatalog(): Promise<SessionCatalogSnapshot>
   detectAgents(): Promise<DiscoverySnapshot>
   scanSource(sourceId: string): Promise<DiscoverySnapshot>
   cancelRun(runId: string): Promise<DiscoverySnapshot>
   chooseSourceRoot(sourceId: string): Promise<DiscoverySnapshot>
   subscribe(listener: (snapshot: DiscoverySnapshot) => void): () => void
+  subscribeSessionCatalog(listener: (snapshot: SessionCatalogSnapshot) => void): () => void
 }

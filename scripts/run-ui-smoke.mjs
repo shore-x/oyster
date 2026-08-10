@@ -437,6 +437,9 @@ if (processing.fullChain.fullChainSelected !== 'true' || !processing.fullChain.w
 if (processing.fullChain.sessionOptionCount !== 2) {
   throw new Error(`Expected one available fixture Session, got ${processing.fullChain.sessionOptionCount - 1}`)
 }
+if (!processing.fullChain.refreshSessionsButtonExists) {
+  throw new Error('The Session selector does not expose local catalog refresh')
+}
 if (!processing.fullChain.fullChainButtonExists || processing.fullChain.fullChainButtonDisabled !== true) {
   throw new Error('Full-chain action must wait for an explicit Session selection')
 }
@@ -478,6 +481,13 @@ if (
 }
 if (!processing.fullChainRun?.runningStateVisible || !processing.fullChainRun?.completed) {
   throw new Error(`Full-chain run did not complete without a native confirmation dialog: ${processing.fullChainRun?.error || 'unknown error'}`)
+}
+if (
+  !processing.fullChainRun.liveUpdatePreservesTool
+  || !processing.fullChainRun.liveUpdateKeepsScroll
+  || !processing.fullChainRun.liveToolPayloadVisible
+) {
+  throw new Error('A live Agent Run update replaced the expanded Tool Call or moved its viewport')
 }
 if (processing.fullChainRun.overviewHasTraceExplorer) {
   throw new Error('The full-chain overview still renders the unbounded detailed trace')

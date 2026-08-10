@@ -83,7 +83,7 @@ Oyster 必须区分领域事实与工作过程，避免把模型总结覆盖到�
 
 本文将 `Artifact` 作为第三个权威域中单个协作产物的正式英文名称；观察中的来源侧对象使用 Activity Artifact 等限定名称，Discovery catalog 中的外部来源记录称为 Source Record。
 
-Source Adapter 从完整 Raw Evidence 确定性生成可回查的 Canonical Activity。Harness 沿 Activity 边界生成读取计划，并写入当前 `runs/<run-id>/WORK.md`。Agent 用 `read_activity` 完整扫描消息、工具和状态，用独立附件工具检查图片，并仅在需要精确核查时以 Raw locator 调用 `read_evidence`。`WORK.md` 同时承担单 Agent 工作状态和 Maintainer/Reviewer 交接，并在批准后保留。Maintainer/Reviewer 不安装通用 Todo 工具，但 Todo 实现保留供 Chat Agent 使用。
+Source Adapter 从完整 Raw Evidence 确定性生成可回查、对话优先的 Canonical Activity。它完整保留对话正文和上下文压缩的语义摘要；工具只保留操作身份以及调用和结果的 Raw locator，参数、结果、Codex 运行时 user-role 信封、模型内部 reasoning、压缩 replacement history、运行状态和重复上下文快照不进入默认语义正文，图片等附件独立提取。Harness 沿 Activity 边界生成读取计划，并写入当前 `runs/<run-id>/WORK.md`。Agent 用 `read_activity` 完整扫描这份语义活动，用独立附件工具检查图片，并仅在需要精确核查时以 Raw locator 调用 `read_evidence`。`WORK.md` 同时承担单 Agent 工作状态和 Maintainer/Reviewer 交接，并在批准后保留。Maintainer/Reviewer 不安装通用 Todo 工具，但 Todo 实现保留供 Chat Agent 使用。
 
 三个域在状态和所有权上分离，但知识加工、Projection 和 Artifact 维护通过共享 Attention 耦合。Projection 是从知识、Attention 和必要的当前状态形成按需消费输出，或初始化、修订 Artifact 的活动，不是第三个持久状态域本身。同一个 Attention 可以指导 Knowledge Maintenance Agent 和通用管理 Agent；不同 Attention 产生的知识进入共享知识层并可以重叠、复用或相互修订，不按 Artifact 复制成独立真相。
 
@@ -119,7 +119,7 @@ Oyster 启动后执行本地发现，并分别报告：
 3. Source Adapter 扫描并登记稳定身份、内部 locator 和轻量版本指纹，不复制正文；
 4. 用户按 Agent、项目、时间或 Session 选择需要查看或加工的记录；
 5. 主进程从原始位置读取该记录并固定本次使用的确定版本；
-6. 如果来源已经变化或失效，系统拒绝本次读取并要求重新扫描 catalog，不回退到 Oyster 内部副本。
+6. 如果来源已经变化或失效，系统以结构化输入错误拒绝本次读取；用户可以直接在 Session 选择器刷新本机 catalog 并重新选择，系统不回退到 Oyster 内部副本。
 
 ### 6.3 实时增量采集
 

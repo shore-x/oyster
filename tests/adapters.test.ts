@@ -23,6 +23,7 @@ describe('Agent observation adapters', () => {
 
     expect(evidence.lines).toEqual(content.split('\n'))
     expect(evidence.formatVersion).toBe('claude-jsonl-raw-v1')
+    expect(observation.canonicalActivity.formatVersion).toBe('claude-canonical-activity-v2')
     expect(evidence.skillHints).toEqual([
       expect.objectContaining({ name: 'deep-research', tool: 'Skill', source: 'tool_call', location: expect.objectContaining({ line: 2 }) }),
       expect.objectContaining({ name: 'imagegen', tool: 'Read', source: 'tool_call', location: expect.objectContaining({ line: 3 }) }),
@@ -45,6 +46,7 @@ describe('Agent observation adapters', () => {
 
     expect(evidence.lines).toEqual(content.split('\n'))
     expect(evidence.formatVersion).toBe('pi-jsonl-raw-v1')
+    expect(observation.canonicalActivity.formatVersion).toBe('pi-canonical-activity-v2')
     expect(evidence.skillHints).toEqual([
       expect.objectContaining({ name: 'skill-creator', tool: 'Skill', source: 'tool_call', location: expect.objectContaining({ line: 1 }) }),
       expect.objectContaining({ name: 'local-review', source: 'runtime_injection', location: expect.objectContaining({ line: 3 }) })
@@ -75,7 +77,7 @@ describe('Agent observation adapters', () => {
     ])
   })
 
-  it('deduplicates Codex mirror events and exposes Base64 images as typed attachments', () => {
+  it('omits model reasoning traces and exposes Base64 images as typed attachments', () => {
     const data = Buffer.from('image bytes').toString('base64')
     const content = jsonl(
       { type: 'event_msg', payload: { type: 'agent_reasoning', text: 'Inspect layout.' } },
@@ -87,7 +89,8 @@ describe('Agent observation adapters', () => {
     const observation = new CodexHistoryAdapter().createObservation(content)
 
     expect(observation.rawEvidence.lines).toEqual(content.split('\n'))
-    expect(observation.canonicalActivity.items.filter((item) => item.kind === 'reasoning')).toHaveLength(1)
+    expect(observation.canonicalActivity.items.filter((item) => item.kind === 'reasoning')).toHaveLength(0)
+    expect(observation.rawEvidence.lines.join('\n')).toContain('Inspect layout.')
     expect(observation.canonicalActivity.items.map((item) => item.content).join('\n')).not.toContain(data)
     expect(observation.canonicalActivity.attachments).toEqual([
       expect.objectContaining({ id: 'ATT000001', mimeType: 'image/png', byteLength: 11 })
@@ -95,6 +98,128 @@ describe('Agent observation adapters', () => {
     expect(observation.canonicalActivity.items).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'attachment', attachmentId: 'ATT000001' })
     ]))
+  })
+
+  it('keeps Codex dialogue readable while reducing protocol snapshots and wrapped tool payloads', () => {
+    const runtimeInstructions = `runtime-only:${'i'.repeat(8_000)}`
+    const compactedSummary = `model-summary:${'s'.repeat(8_000)}`
+    const toolOutput = `useful beginning\n${'x'.repeat(8_000)}\nuseful ending`
+    const userMessage = `User request remains complete. ${'u'.repeat(3_000)}`
+    const content = jsonl(
+      {
+        type: 'session_meta',
+        payload: { cwd: '/work/project', base_instructions: runtimeInstructions }
+      },
+      {
+        type: 'compacted',
+        payload: {
+          message: compactedSummary,
+          replacement_history: [
+            { type: 'message', role: 'developer', content: runtimeInstructions },
+            { type: 'message', role: 'user', content: 'Earlier user message.' }
+          ],
+          window_number: 2
+        }
+      },
+      { type: 'event_msg', payload: { type: 'context_compacted' } },
+      {
+        type: 'response_item',
+        payload: {
+          type: 'custom_tool_call_output',
+          call_id: 'call-1',
+          output: JSON.stringify({
+            content: [{ type: 'text', text: toolOutput }],
+            details: { internal_chat_message_metadata_passthrough: 'transport-only' }
+          })
+        }
+      },
+      {
+        type: 'response_item',
+        payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: userMessage }] }
+      },
+      {
+        type: 'response_item',
+        payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Readable answer.' }] }
+      }
+    )
+
+    const observation = new CodexHistoryAdapter().createObservation(content)
+    const activityText = observation.canonicalActivity.items.map((item) => item.content).join('\n')
+    const userActivity = observation.canonicalActivity.items.find((item) => item.kind === 'user_message')
+
+    expect(observation.canonicalActivity.formatVersion).toBe('codex-canonical-activity-v3')
+    expect(observation.rawEvidence.lines.join('\n')).toContain(runtimeInstructions)
+    expect(userActivity?.content).toBe(userMessage)
+    expect(activityText).toContain('Codex context compaction summary:')
+    expect(activityText).not.toContain('useful beginning')
+    expect(activityText).not.toContain('useful ending')
+    expect(activityText).toContain('Tool result recorded without a matching visible call')
+    expect(activityText).toContain('Readable answer.')
+    expect(activityText).not.toContain(runtimeInstructions)
+    expect(activityText).toContain(compactedSummary)
+    expect(activityText).not.toContain('internal_chat_message_metadata_passthrough')
+    expect(observation.canonicalActivity.items.some((item) => item.kind === 'unknown')).toBe(false)
+  })
+
+  it('keeps Codex runtime envelopes and detailed tool protocol out of the dialogue projection', () => {
+    const hugeArguments = { command: `rg ${'internal-format '.repeat(2_000)}` }
+    const content = jsonl(
+      { type: 'session_meta', payload: { cwd: '/work/oyster', dynamic_tools: [{ name: 'exec' }] } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '# AGENTS.md instructions for /work/oyster\n\n<INSTRUCTIONS>runtime only</INSTRUCTIONS>' }] } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '<environment_context>runtime only</environment_context>' }] } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Investigate the real user problem.' }] } },
+      { type: 'response_item', payload: { type: 'function_call', name: 'exec', call_id: 'call-1', arguments: JSON.stringify(hugeArguments) } },
+      { type: 'response_item', payload: { type: 'function_call_output', call_id: 'call-1', output: JSON.stringify({ content: [{ type: 'text', text: 'protocol output '.repeat(2_000) }] }) } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Readable final answer.' }] } },
+      { type: 'turn_context', payload: { cwd: '/work/oyster', approval_policy: 'never', sandbox_policy: { type: 'unrestricted' } } }
+    )
+
+    const observation = new CodexHistoryAdapter().createObservation(content)
+    const activityText = observation.canonicalActivity.items.map((item) => item.content).join('\n')
+
+    expect(observation.canonicalActivity.formatVersion).toBe('codex-canonical-activity-v3')
+    expect(observation.canonicalActivity.items.map((item) => item.kind)).toEqual([
+      'session', 'user_message', 'tool_call', 'assistant_message'
+    ])
+    expect(activityText).toContain('Investigate the real user problem.')
+    expect(activityText).toContain('Readable final answer.')
+    expect(activityText).toContain('Tool used: exec.')
+    expect(activityText).not.toContain('AGENTS.md instructions')
+    expect(activityText).not.toContain('environment_context')
+    expect(activityText).not.toContain('internal-format')
+    expect(activityText).not.toContain('protocol output')
+    expect(activityText).not.toContain('approval_policy')
+  })
+
+  it('unwraps successful Codex subagent payloads and omits internal communication failures', () => {
+    const content = jsonl(
+      { type: 'inter_agent_communication_metadata', payload: { trigger_turn: false } },
+      {
+        type: 'response_item',
+        payload: {
+          type: 'agent_message',
+          author: '/root/research',
+          recipient: '/root',
+          content: [{ type: 'input_text', text: 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/research\nPayload:\nReusable research result.' }]
+        }
+      },
+      { type: 'inter_agent_communication_metadata', payload: { trigger_turn: false } },
+      {
+        type: 'response_item',
+        payload: {
+          type: 'agent_message',
+          author: '/root/failed',
+          recipient: '/root',
+          content: [{ type: 'input_text', text: 'Message Type: FINAL_ANSWER\nTask name: /root\nSender: /root/failed\nPayload:\nAgent errored: transport failure.\n\nThis agent\'s turn failed.' }]
+        }
+      }
+    )
+
+    const observation = new CodexHistoryAdapter().createObservation(content)
+
+    expect(observation.canonicalActivity.items).toEqual([
+      expect.objectContaining({ kind: 'assistant_message', content: 'Reusable research result.' })
+    ])
   })
 
   it.each([

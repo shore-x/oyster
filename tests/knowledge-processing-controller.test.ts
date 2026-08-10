@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   AvailableSessionSummary,
   DiscoveryApi,
-  DiscoverySnapshot
+  DiscoverySnapshot,
+  SessionCatalogSnapshot
 } from '../src/shared/discovery'
 import type {
   KnowledgeMaintenanceResult,
@@ -37,9 +38,12 @@ const SNAPSHOT: KnowledgeProcessingSnapshot = {
 function discoverySnapshot(): DiscoverySnapshot {
   return {
     sources: [],
-    runs: [],
-    sessionCatalogVersion: 1
+    runs: []
   }
+}
+
+function sessionCatalog(sessions = [SESSION]): SessionCatalogSnapshot {
+  return { sessions, state: 'idle', refreshedAt: '2026-08-09T00:00:00.000Z' }
 }
 
 function maintenanceResult(): KnowledgeMaintenanceResult {
@@ -76,14 +80,24 @@ function maintenanceResult(): KnowledgeMaintenanceResult {
   }
 }
 
-function installApis(overrides: Partial<KnowledgeProcessingApi> = {}) {
-  const runKnowledgeMaintenance = vi.fn(async (_input: RunKnowledgeMaintenanceInput) => maintenanceResult())
+function installApis(
+  overrides: Partial<KnowledgeProcessingApi> = {},
+  discoveryOverrides: Partial<DiscoveryApi> = {}
+) {
+  const runKnowledgeMaintenance = vi.fn(async (_input: RunKnowledgeMaintenanceInput) => ({
+    status: 'completed' as const,
+    result: maintenanceResult()
+  }))
   const knowledgeProcessing: KnowledgeProcessingApi = {
     getSnapshot: async () => SNAPSHOT,
     saveStage: async () => SNAPSHOT,
     saveDefaultInstructions: async () => SNAPSHOT,
     runKnowledgeMaintenance,
-    runFullChain: async () => undefined,
+    runFullChain: async () => ({
+      status: 'session_rejected',
+      reason: 'unavailable',
+      message: 'Session unavailable'
+    }),
     listFullChainRuns: async () => [],
     readFullChainRun: async () => undefined,
     cancelFullChain: async () => undefined,
@@ -93,12 +107,15 @@ function installApis(overrides: Partial<KnowledgeProcessingApi> = {}) {
   }
   const discovery: DiscoveryApi = {
     getSnapshot: async () => discoverySnapshot(),
-    listAvailableSessions: async () => [SESSION],
+    getSessionCatalog: async () => sessionCatalog(),
+    refreshSessionCatalog: async () => sessionCatalog(),
     detectAgents: async () => discoverySnapshot(),
     scanSource: async () => discoverySnapshot(),
     cancelRun: async () => discoverySnapshot(),
     chooseSourceRoot: async () => discoverySnapshot(),
-    subscribe: () => () => undefined
+    subscribe: () => () => undefined,
+    subscribeSessionCatalog: () => () => undefined,
+    ...discoveryOverrides
   }
   vi.stubGlobal('window', { oyster: { knowledgeProcessing, discovery } })
   return { runKnowledgeMaintenance }
@@ -136,7 +153,10 @@ describe('knowledge processing controller', () => {
 
   it('keeps stage pending state local until the API call settles', async () => {
     let resolve!: (value: KnowledgeMaintenanceResult) => void
-    const pending = new Promise<KnowledgeMaintenanceResult>((done) => { resolve = done })
+    const pending = new Promise<{
+      status: 'completed'
+      result: KnowledgeMaintenanceResult
+    }>((done) => { resolve = (result) => done({ status: 'completed', result }) })
     installApis({ runKnowledgeMaintenance: async () => pending })
     await createRoot(async (dispose) => {
       try {
@@ -149,6 +169,49 @@ describe('knowledge processing controller', () => {
         resolve(maintenanceResult())
         await run
         expect(controller.isRunning('knowledge_maintenance_agent')).toBe(false)
+      } finally {
+        dispose()
+      }
+    })
+  })
+
+  it('refreshes the authoritative Session catalog through one discovery operation', async () => {
+    const refreshedSession = { ...SESSION, title: 'Refreshed Session' }
+    const refreshSessionCatalog = vi.fn(async () => sessionCatalog([refreshedSession]))
+    installApis({}, { refreshSessionCatalog })
+    await createRoot(async (dispose) => {
+      try {
+        const controller = createKnowledgeProcessingController()
+        await vi.waitFor(() => expect(controller.sessionsLoading()).toBe(false))
+
+        await expect(controller.refreshAvailableSessions()).resolves.toBe(true)
+
+        expect(refreshSessionCatalog).toHaveBeenCalledOnce()
+        expect(controller.availableSessions()).toEqual([refreshedSession])
+      } finally {
+        dispose()
+      }
+    })
+  })
+
+  it('shows a structured Session rejection without exposing an IPC exception', async () => {
+    installApis({
+      runKnowledgeMaintenance: async () => ({
+        status: 'session_rejected',
+        reason: 'changed',
+        message: '所选 Session 已更新，请重新选择'
+      })
+    })
+    await createRoot(async (dispose) => {
+      try {
+        const controller = createKnowledgeProcessingController()
+        await controller.runKnowledgeMaintenance({
+          sourceRecordId: SESSION.sourceRecordId,
+          expectedRevision: SESSION.revision
+        })
+
+        expect(controller.error()).toBe('所选 Session 已更新，请重新选择')
+        expect(controller.maintenanceResult()).toBeUndefined()
       } finally {
         dispose()
       }

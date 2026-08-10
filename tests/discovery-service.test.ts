@@ -178,7 +178,10 @@ describe('DiscoveryService', () => {
     await service.detectAgents()
     await service.waitForIdle()
     const selected = service.listAvailableSessions()[0]
-    const catalogVersion = service.snapshot().sessionCatalogVersion
+    const catalogSnapshots: string[][] = []
+    const unsubscribe = service.subscribeSessionCatalog((catalog) => {
+      catalogSnapshots.push(catalog.sessions.map((session) => session.sourceRecordId))
+    })
 
     await rename(originalPath, archivedPath)
     const evidence = await service.readAvailableSession({
@@ -188,7 +191,81 @@ describe('DiscoveryService', () => {
 
     expect(evidence.revision).toBe(selected.revision)
     expect(service.listAvailableSessions()).toEqual([selected])
-    expect(service.snapshot().sessionCatalogVersion).toBeGreaterThan(catalogVersion)
+    expect(catalogSnapshots).toContainEqual([selected.sourceRecordId])
+    unsubscribe()
+  })
+
+  it('uses the first authored Codex request instead of runtime envelopes as the Session title', async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), 'oyster-codex-title-'))
+    temporaryDirectories.push(homeDirectory)
+    const sessionsRoot = join(homeDirectory, '.codex', 'sessions', '2026', '08', '10')
+    await mkdir(sessionsRoot, { recursive: true })
+    await writeFile(join(sessionsRoot, 'rollout-title.jsonl'), [
+      JSON.stringify({
+        type: 'session_meta',
+        timestamp: '2026-08-10T00:00:00.000Z',
+        payload: { id: 'session-title', cwd: '/work/oyster' }
+      }),
+      JSON.stringify({
+        type: 'response_item',
+        payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '# AGENTS.md instructions for /work/oyster\n\n<INSTRUCTIONS>runtime</INSTRUCTIONS>' }] }
+      }),
+      JSON.stringify({
+        type: 'response_item',
+        payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Investigate readable evidence.' }] }
+      })
+    ].join('\n'))
+
+    const service = new DiscoveryService(
+      new InMemoryDiscoveryRepository(),
+      new FileSourceEvidenceReader(),
+      [new CodexHistoryAdapter()],
+      { homeDirectory, environment: {}, pathEntries: [] }
+    )
+    await service.initialize()
+    await service.detectAgents()
+    await service.waitForIdle()
+
+    expect(service.listAvailableSessions()[0]?.title).toBe('Investigate readable evidence.')
+  })
+
+  it('refreshes the complete Session catalog and publishes only the committed source scan', async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), 'oyster-catalog-refresh-'))
+    temporaryDirectories.push(homeDirectory)
+    const historyRoot = join(homeDirectory, '.claude', 'projects', 'demo')
+    const firstPath = join(historyRoot, 'one.jsonl')
+    const secondPath = join(historyRoot, 'two.jsonl')
+    await mkdir(historyRoot, { recursive: true })
+    await writeFile(firstPath, '{"sessionId":"one","timestamp":"2026-07-01T00:00:00.000Z"}\n')
+
+    const service = new DiscoveryService(
+      new InMemoryDiscoveryRepository(),
+      new FileSourceEvidenceReader(),
+      [new ClaudeHistoryAdapter()],
+      { homeDirectory, environment: {}, pathEntries: [] }
+    )
+    await service.initialize()
+    await service.detectAgents()
+    await service.waitForIdle()
+    expect(service.sessionCatalogSnapshot().sessions.map((session) => session.externalId)).toEqual(['one'])
+
+    await rm(firstPath)
+    await writeFile(secondPath, '{"sessionId":"two","timestamp":"2026-07-02T00:00:00.000Z"}\n')
+    const snapshots: Array<{ state: string; sessions: string[] }> = []
+    const unsubscribe = service.subscribeSessionCatalog((catalog) => {
+      snapshots.push({
+        state: catalog.state,
+        sessions: catalog.sessions.map((session) => session.externalId)
+      })
+    })
+
+    const refreshed = await service.refreshSessionCatalog()
+
+    expect(refreshed.state).toBe('idle')
+    expect(refreshed.sessions.map((session) => session.externalId)).toEqual(['two'])
+    expect(snapshots).toContainEqual({ state: 'refreshing', sessions: ['one'] })
+    expect(snapshots.at(-1)).toEqual({ state: 'idle', sessions: ['two'] })
+    unsubscribe()
   })
 
   it('resets indexed sessions when the user selects a different root', async () => {

@@ -70,6 +70,7 @@ describe('Pi collaboration Agents', () => {
         ])
         expect(contextText(context)).toContain(run.repositoryPath)
         expect(contextText(context)).toContain(run.workPath)
+        expect(contextText(context)).toContain('never force-add or commit any path under runs/')
         expect(contextText(context)).not.toContain('list_todos')
         return fauxAssistantMessage(
           fauxToolCall('read_activity', { activity: 1, offset: 0, limit: 100 }),
@@ -104,6 +105,7 @@ describe('Pi collaboration Agents', () => {
         ])
         expect(contextText(context)).toContain(run.repositoryPath)
         expect(contextText(context)).toContain('Exact revision to review')
+        expect(contextText(context)).toContain('never force-add or commit any path under runs/')
         expect(contextText(context)).not.toContain('read_evidence')
         expect(contextText(context)).not.toContain('list_todos')
         return fauxAssistantMessage('Reviewer approved the exact revision.')

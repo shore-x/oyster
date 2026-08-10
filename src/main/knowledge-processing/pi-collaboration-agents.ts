@@ -318,7 +318,7 @@ function maintainerTaskPrompt(input: KnowledgeMaintainerRunInput): string {
     `Raw Evidence sourceRef: ${input.sourceRef}`,
     `Canonical Activity format: ${canonicalActivity.formatVersion}. Range: A000001-A${String(canonicalActivity.items.length).padStart(6, '0')}. Maximum read limit: ${MAX_ACTIVITY_READ_LIMIT}.`,
     `Raw Evidence format: ${rawEvidence.formatVersion}. Range: ${observationLineAddress(1)}-${observationLineAddress(lastLine)}. Maximum read limit: ${MAX_EVIDENCE_READ_LIMIT}.`,
-    'Begin by reading the work order. It is the authoritative checklist for this run. Complete its work, mark every checkbox complete, update Knowledge and Artifact files directly, and commit one clean Maintainer handoff.'
+    'Begin by reading the work order. It is the authoritative checklist for this run. Complete its work, mark every checkbox complete, update Knowledge and Artifact files directly, and commit one clean Maintainer handoff. The runs/ tree is ignored Harness state: never force-add or commit any path under runs/.'
   ].join('\n\n')
 }
 
@@ -330,7 +330,7 @@ function reviewerTaskPrompt(input: KnowledgeReviewerRunInput): string {
     `Base revision: ${input.run.baseRevision}`,
     `Exact revision to review: ${input.reviewedRevision}`,
     `Run work state: ${input.run.workPath}`,
-    'Review only if HEAD still equals the exact revision above. If changes are required, add REVIEW blocks to the affected files, append at least one unchecked item to WORK.md, and commit the Knowledge/Artifact corrections. If the tree is acceptable, finish without creating another commit. The Harness records the validated Reviewer handoff in WORK.md. Never merge the target branch.'
+    'Review only if HEAD still equals the exact revision above. If changes are required, add REVIEW blocks to the affected files, append at least one unchecked item to WORK.md, and commit the Knowledge/Artifact corrections. The runs/ tree is ignored Harness state: never force-add or commit any path under runs/. If the tree is acceptable, finish without creating another commit. The Harness records the validated Reviewer handoff in WORK.md. Never merge the target branch.'
   ].join('\n\n')
 }
 

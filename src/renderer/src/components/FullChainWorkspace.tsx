@@ -18,7 +18,8 @@ import {
 import { processingAgentDisplayName } from '../processing-agent-presentation'
 import { Button } from '../ui'
 import { FullChainActivityDetail, FullChainResultDetail } from './FullChainRunDetails'
-import { SessionMetadata, sessionOptionLabel } from './SessionMetadata'
+import { SessionMetadata } from './SessionMetadata'
+import { SessionPicker } from './SessionPicker'
 
 export type FullChainStepState = 'pending' | 'running' | 'completed' | 'failed'
 
@@ -46,7 +47,8 @@ export interface FullChainResultView {
 export interface FullChainWorkspaceProps {
   sessions: AvailableSessionSummary[]
   sessionsLoading: boolean
-  selectedSessionId?: string
+  sessionCatalogError?: string
+  selectedSession?: AvailableSessionSummary
   attention: string
   maintainer?: ProcessingStageView
   reviewer?: ProcessingStageView
@@ -57,7 +59,8 @@ export interface FullChainWorkspaceProps {
   debugTraces: KnowledgeProcessingDebugTrace[]
   locked: boolean
   result?: FullChainResultView
-  onSelectSession(id: string): void
+  onSelectSession(session?: AvailableSessionSummary): void
+  onRefreshSessions(): void
   onAttentionInput(value: string): void
   onRun(): void
   onCancel(): void
@@ -101,9 +104,7 @@ function stageSummary(
 
 export function FullChainWorkspace(props: FullChainWorkspaceProps) {
   const [page, setPage] = createSignal<'overview' | 'activity' | 'result'>('overview')
-  const selectedSession = createMemo(() => props.sessions.find(
-    (session) => session.sourceRecordId === props.selectedSessionId
-  ))
+  const selectedSession = () => props.selectedSession
   const maintainer = createMemo(() => stageSummary(
     props.maintainer,
     props.defaultLlm,
@@ -116,6 +117,7 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
   ))
   const disabledReason = createMemo(() => {
     if (props.locked) return '已有知识加工任务正在运行。'
+    if (props.sessionsLoading) return '正在刷新本机 Session。'
     if (!selectedSession()) return '请选择一个 Session。'
     if (!maintainer().runnable) return `${maintainer().name} 尚未完成可用的模型配置。`
     if (!reviewer().runnable) return `${reviewer().name} 尚未完成可用的模型配置。`
@@ -159,22 +161,18 @@ export function FullChainWorkspace(props: FullChainWorkspaceProps) {
               </div>
             </div>
 
-            <label class="ai-field ai-field--wide">
-              <span>Session</span>
-              <select
-                data-testid="full-chain-session-select"
-                value={props.selectedSessionId || ''}
-                disabled={props.sessionsLoading || props.locked || props.sessions.length === 0}
-                onChange={(event) => props.onSelectSession(event.currentTarget.value)}
-              >
-                <option value="">
-                  {props.sessionsLoading ? '正在读取 Session…' : props.sessions.length ? '选择一个 Session' : '暂无可用 Session'}
-                </option>
-                <For each={props.sessions}>{(session) => (
-                  <option value={session.sourceRecordId}>{sessionOptionLabel(session)}</option>
-                )}</For>
-              </select>
-            </label>
+            <SessionPicker
+              sessions={props.sessions}
+              selected={props.selectedSession}
+              loading={props.sessionsLoading}
+              disabled={props.locked}
+              label="Session"
+              selectTestId="full-chain-session-select"
+              refreshTestId="refresh-full-chain-sessions"
+              error={props.sessionCatalogError}
+              onSelect={props.onSelectSession}
+              onRefresh={props.onRefreshSessions}
+            />
 
             <Show when={selectedSession()}>
               {(session) => (

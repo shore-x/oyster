@@ -52,6 +52,31 @@ function fixtureRun(
   }
 }
 
+function runningFixtureRun(
+  input: KnowledgeMaintainerRunInput,
+  toolCalls: string[],
+  visibleToolCount: number
+): AgentRunRecord {
+  const run = fixtureRun(input, 'knowledge_maintenance_agent', toolCalls)
+  run.status = 'running'
+  delete run.completedAt
+  delete run.durationMs
+  run.toolCalls = run.toolCalls.slice(0, visibleToolCount)
+  const activeCall = run.toolCalls.at(-1)
+  if (activeCall) {
+    activeCall.status = 'running'
+    delete activeCall.completedAt
+    delete activeCall.durationMs
+    delete activeCall.result
+    delete activeCall.isError
+  }
+  return run
+}
+
+async function emitFixtureFrame(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 180))
+}
+
 async function commit(repositoryPath: string, message: string): Promise<void> {
   await runArtifactGit(['add', '--', 'knowledge', 'artifacts'], repositoryPath)
   await runArtifactGit(['commit', '--quiet', '--no-gpg-sign', '-m', message], repositoryPath)
@@ -59,6 +84,10 @@ async function commit(repositoryPath: string, message: string): Promise<void> {
 
 export class FixtureKnowledgeMaintainerRuntime implements KnowledgeMaintainerRuntime {
   async run(input: KnowledgeMaintainerRunInput): Promise<RepositoryAgentRunResult> {
+    input.signal.throwIfAborted()
+    const toolCalls = ['read', 'read_activity', 'write', 'bash']
+    input.onRunUpdate?.(runningFixtureRun(input, toolCalls, 2))
+    await emitFixtureFrame()
     input.signal.throwIfAborted()
     const workPath = input.run.workPath
     await writeFile(
@@ -84,13 +113,12 @@ export class FixtureKnowledgeMaintainerRuntime implements KnowledgeMaintainerRun
       )
     ])
     await commit(input.run.repositoryPath, 'maintain: fixture repository knowledge')
-    const run = fixtureRun(input, 'knowledge_maintenance_agent', [
-      'read',
-      'read_activity',
-      'write',
-      'bash'
-    ])
+    input.onRunUpdate?.(runningFixtureRun(input, toolCalls, 3))
+    await emitFixtureFrame()
+    input.signal.throwIfAborted()
+    const run = fixtureRun(input, 'knowledge_maintenance_agent', toolCalls)
     input.onRunUpdate?.(run)
+    await emitFixtureFrame()
     return { run, modelCallCount: 0, toolCalls: run.toolCalls.map((call) => call.name) }
   }
 }

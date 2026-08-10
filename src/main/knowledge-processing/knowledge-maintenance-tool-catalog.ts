@@ -22,7 +22,7 @@ export const KNOWLEDGE_MAINTENANCE_TOOL_CATALOG = [
   {
     name: 'read_activity',
     label: '读取规范活动',
-    description: '从工作清单指定的 Canonical Activity 与行内 offset 开始读取确定性、可回查的有界活动视图。',
+    description: '从工作清单指定的 Canonical Activity 与行内 offset 开始读取确定性、可回查的简洁语义活动；对话正文完整，超长工具和状态载荷为有界摘录。',
     parameters: readActivityParameters
   },
   {
@@ -34,7 +34,7 @@ export const KNOWLEDGE_MAINTENANCE_TOOL_CATALOG = [
   {
     name: 'read_evidence',
     label: '读取原始观察证据',
-    description: '按 Canonical Activity 给出的 Raw source locator 回查有界原始 Observation。',
+    description: '按 Canonical Activity 给出的 Raw source locator 回查有界、未经清洗的上游原始 Observation；仅用于精确核查。',
     parameters: readEvidenceParameters
   }
 ] as const

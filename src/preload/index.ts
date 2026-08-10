@@ -9,7 +9,11 @@ import {
   skillChannels
 } from '../shared/channels'
 import type { AiBackendApi, AiBackendSnapshot } from '../shared/ai-backends'
-import type { DiscoveryApi, DiscoverySnapshot } from '../shared/discovery'
+import type {
+  DiscoveryApi,
+  DiscoverySnapshot,
+  SessionCatalogSnapshot
+} from '../shared/discovery'
 import type {
   KnowledgeProcessingApi,
   KnowledgeProcessingSnapshot
@@ -21,7 +25,8 @@ import type { SkillApi } from '../shared/skills'
 
 const api: DiscoveryApi = {
   getSnapshot: () => ipcRenderer.invoke(discoveryChannels.getSnapshot),
-  listAvailableSessions: () => ipcRenderer.invoke(discoveryChannels.listAvailableSessions),
+  getSessionCatalog: () => ipcRenderer.invoke(discoveryChannels.getSessionCatalog),
+  refreshSessionCatalog: () => ipcRenderer.invoke(discoveryChannels.refreshSessionCatalog),
   detectAgents: () => ipcRenderer.invoke(discoveryChannels.detectAgents),
   scanSource: (sourceId) => ipcRenderer.invoke(discoveryChannels.scanSource, sourceId),
   cancelRun: (runId) => ipcRenderer.invoke(discoveryChannels.cancelRun, runId),
@@ -30,6 +35,14 @@ const api: DiscoveryApi = {
     const handler = (_event: Electron.IpcRendererEvent, snapshot: DiscoverySnapshot): void => listener(snapshot)
     ipcRenderer.on(discoveryChannels.snapshot, handler)
     return () => ipcRenderer.removeListener(discoveryChannels.snapshot, handler)
+  },
+  subscribeSessionCatalog: (listener) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      snapshot: SessionCatalogSnapshot
+    ): void => listener(snapshot)
+    ipcRenderer.on(discoveryChannels.sessionCatalogSnapshot, handler)
+    return () => ipcRenderer.removeListener(discoveryChannels.sessionCatalogSnapshot, handler)
   }
 }
 

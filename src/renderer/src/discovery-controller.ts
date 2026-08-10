@@ -1,7 +1,7 @@
 import { createSignal, onCleanup, onMount } from 'solid-js'
 import type { DiscoverySnapshot } from '../../shared/discovery'
 
-const EMPTY_SNAPSHOT: DiscoverySnapshot = { sources: [], runs: [], sessionCatalogVersion: 0 }
+const EMPTY_SNAPSHOT: DiscoverySnapshot = { sources: [], runs: [] }
 
 export function createDiscoveryController() {
   const [snapshot, setSnapshot] = createSignal(EMPTY_SNAPSHOT)

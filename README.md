@@ -10,6 +10,7 @@ Oyster 是一个独立于外部 Agent Harness 的本地知识与协作产物中�
 - 按各 Agent 的官方层级发现 `CLAUDE.md`、`AGENTS.md`、rules 和 system prompt files，明确排除 Agent 自动 memory；
 - 登记外部记录的稳定身份、内部 locator 和轻量版本指纹，不复制聊天正文；
 - 由 Source Adapter 从原始位置按需读取用户选中的单条记录，并拒绝已经变化或失效的版本；
+- Session 选择器可显式刷新所有已配置的本机来源，并以单一 catalog snapshot 同步刷新状态与可选列表；
 - 展示扫描状态、来源统计和异常文件数；
 - Codex `sessions` / `archived_sessions` 去重；
 - 配置 Codex Coding Plan、OpenAI API 或自定义 OpenAI-compatible Connection，发现其可用模型，OAuth 与 API Key 凭据保存在系统 Keychain；
