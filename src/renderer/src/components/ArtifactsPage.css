@@ -151,7 +151,8 @@
 .artifact-card__identity-heading { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .artifact-card__identity h2 { min-width: 0; margin: 0; overflow: hidden; color: var(--text-primary); font-size: var(--font-size-body-sm); font-weight: var(--font-weight-semibold); text-overflow: ellipsis; white-space: nowrap; }
 .artifact-card__identity span { display: block; margin-top: 4px; color: var(--text-muted); font-size: var(--font-size-caption); }
-.artifact-card__identity-heading .artifact-skill-badge {
+.artifact-card__identity-heading .artifact-skill-badge,
+.artifact-card__identity-heading .artifact-built-in-badge {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
@@ -164,6 +165,12 @@
   font-size: var(--font-size-caption);
   font-weight: var(--font-weight-semibold);
   line-height: 1;
+}
+
+.artifact-card__identity-heading .artifact-built-in-badge {
+  color: #735d31;
+  background: #faf6ed;
+  border-color: #eee1c7;
 }
 
 .artifact-card__details > summary { padding: 16px 20px; }

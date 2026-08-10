@@ -105,7 +105,33 @@ function ArtifactCard(props: {
   )
 }
 
+function DesignDocumentsCard(props: { onBrowse(): void }) {
+  return (
+    <article class="artifact-card" data-testid="design-documents-card">
+      <header class="artifact-card__header">
+        <span class="artifact-card__mark"><Icon name="folder" /></span>
+        <div class="artifact-card__identity">
+          <div class="artifact-card__identity-heading">
+            <h2>Oyster 设计文档</h2>
+            <span class="artifact-built-in-badge">内置</span>
+          </div>
+          <span>随 Oyster 发布的产品、架构与决策文档</span>
+        </div>
+        <div class="artifact-card__actions">
+          <Button
+            variant="secondary"
+            icon="skill"
+            data-testid="browse-design-documents"
+            onClick={props.onBrowse}
+          >浏览</Button>
+        </div>
+      </header>
+    </article>
+  )
+}
+
 export function ArtifactsPage(props: {
+  onBrowseDesignDocuments(): void
   onBrowseArtifact(artifact: ArtifactSummary): void
   onManageSkill(artifactDirectoryName: string): void
 }) {
@@ -130,11 +156,11 @@ export function ArtifactsPage(props: {
     <div class="artifacts-page" data-testid="artifacts-page">
       <header class="page-header">
         <div>
-          <h1>协作产物</h1>
+          <h1>产物</h1>
           <div class="page-summary">
-            <span><strong>{controller.snapshot()?.artifacts.length ?? '—'}</strong> 个 Artifact</span>
+            <span><strong>1</strong> 组设计文档</span>
             <span class="page-summary__separator">·</span>
-            <span>由本地文件夹直接承载</span>
+            <span><strong>{controller.snapshot()?.artifacts.length ?? '—'}</strong> 个 Artifact</span>
           </div>
         </div>
         <div class="page-header__actions">
@@ -237,7 +263,8 @@ export function ArtifactsPage(props: {
         </section>
       </Show>
 
-      <section class="artifact-list" aria-label="Artifacts">
+      <section class="artifact-list" aria-label="产物">
+        <DesignDocumentsCard onBrowse={props.onBrowseDesignDocuments} />
         <Show
           when={controller.snapshot()}
           fallback={(

@@ -16,7 +16,6 @@ type PageId = 'sources' | 'skills' | 'knowledge' | 'artifacts' | 'folder-browser
 interface FolderBrowserNavigation {
   folderPath: string
   label: string
-  source: 'artifact' | 'design-documents'
   returnPage: PageId
 }
 
@@ -50,10 +49,7 @@ export function App() {
       browseFolder({
         folderPath: await window.oyster.folderBrowser.getDesignDocumentsPath(),
         label: 'Oyster 设计文档',
-        source: 'design-documents',
-        returnPage: page() === 'folder-browser'
-          ? folderBrowserNavigation()?.returnPage ?? 'sources'
-          : page()
+        returnPage: 'artifacts'
       })
     } catch (error) {
       setNavigationError(error instanceof Error ? error.message : String(error))
@@ -85,15 +81,9 @@ export function App() {
           <a
             href="#artifacts"
             data-testid="nav-artifacts"
-            class={`nav-item${page() === 'artifacts' || (page() === 'folder-browser' && folderBrowserNavigation()?.source === 'artifact') ? ' nav-item--active' : ''}`}
+            class={`nav-item${page() === 'artifacts' || (page() === 'folder-browser' && folderBrowserNavigation()?.returnPage === 'artifacts') ? ' nav-item--active' : ''}`}
             onClick={(event) => { event.preventDefault(); navigateTo('artifacts') }}
-          ><Icon name="folder" /><span>协作产物</span></a>
-          <a
-            href="#design-documents"
-            data-testid="nav-design-documents"
-            class={`nav-item${page() === 'folder-browser' && folderBrowserNavigation()?.source === 'design-documents' ? ' nav-item--active' : ''}`}
-            onClick={(event) => { event.preventDefault(); void browseDesignDocuments() }}
-          ><Icon name="skill" /><span>设计文档</span></a>
+          ><Icon name="folder" /><span>产物</span></a>
           <a
             href="#chat"
             data-testid="nav-chat"
@@ -183,10 +173,10 @@ export function App() {
         </div>
         <div data-testid="page-artifacts" hidden={page() !== 'artifacts'}>
           <ArtifactsPage
+            onBrowseDesignDocuments={() => void browseDesignDocuments()}
             onBrowseArtifact={(artifact) => browseFolder({
               folderPath: artifact.directoryPath,
               label: artifact.directoryName,
-              source: 'artifact',
               returnPage: 'artifacts'
             })}
             onManageSkill={(artifactDirectoryName) => {

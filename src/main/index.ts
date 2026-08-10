@@ -1481,10 +1481,17 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
 
     return {
       title: page.querySelector('h1')?.textContent?.trim(),
+      hasIndependentDesignDocumentsNavigation: Boolean(
+        document.querySelector('[data-testid="nav-design-documents"]')
+      ),
+      designDocumentsCard: Boolean(page.querySelector('[data-testid="design-documents-card"]')),
+      designDocumentsTitle: page.querySelector('[data-testid="design-documents-card"] h2')?.textContent?.trim(),
+      designDocumentsBuiltIn: page.querySelector('[data-testid="design-documents-card"] .artifact-built-in-badge')?.textContent?.trim(),
+      designDocumentsBrowseDisabled: page.querySelector('[data-testid="browse-design-documents"]')?.disabled,
       repositoryPath: path?.textContent?.trim(),
       cardCountAfterCreate,
       cardCountAfterRefresh: page.querySelectorAll('[data-testid="artifact-card"]').length,
-      directoryName: page.querySelector('.artifact-card__identity h2')?.textContent?.trim(),
+      directoryName: page.querySelector('[data-testid="artifact-card"] .artifact-card__identity h2')?.textContent?.trim(),
       attentionHeading: page.querySelector('.artifact-card__attention h1')?.textContent?.trim(),
       attentionStrong: page.querySelector('.artifact-card__attention strong')?.textContent?.trim(),
       repositoryOpenDisabled: page.querySelector('[data-testid="open-artifact-repository"]')?.disabled,
@@ -1532,7 +1539,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   await writeFile(join(dirname(capturePath), 'artifact-browser.png'), artifactBrowserImage.toPNG())
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="folder-browser-close"]')?.click()`)
 
-  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-design-documents"]')?.click()`)
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="browse-design-documents"]')?.click()`)
   const designDocumentsBrowserSemantics = await window.webContents.executeJavaScript(`(async () => {
     const deadline = Date.now() + 2_000
     let page
@@ -1683,7 +1690,7 @@ app.whenReady().then(async () => {
     knowledgeFullChainRunRepository
   )
   const artifactInitialization = artifactService.initialize().catch((error: unknown) => {
-    console.error('Artifact 层初始化失败；可在协作产物页面重试。', error)
+    console.error('Artifact 层初始化失败；可在产物页面重试。', error)
   })
   await Promise.all([
     service.initialize(),

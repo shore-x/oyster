@@ -133,7 +133,7 @@ export function ChatPage(props: ChatPageProps) {
           <div class="page-summary">
             <span><strong>{controller.snapshot().sessions.length}</strong> 个会话</span>
             <span class="page-summary__separator">·</span>
-            <span>管理知识与协作产物</span>
+            <span>管理知识与产物</span>
           </div>
         </div>
         <Button variant="primary" icon="plus" onClick={startNew}>新对话</Button>

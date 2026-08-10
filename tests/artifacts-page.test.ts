@@ -30,6 +30,7 @@ describe('ArtifactsPage', () => {
     controller.error.mockReturnValue('无法读取 Artifact Repository')
 
     const html = renderToString(() => ArtifactsPage({
+      onBrowseDesignDocuments: vi.fn(),
       onBrowseArtifact: vi.fn(),
       onManageSkill: vi.fn()
     }))
@@ -37,6 +38,8 @@ describe('ArtifactsPage', () => {
     expect(html).toContain('无法读取 Artifact')
     expect(html).not.toContain('还没有 Artifact')
     expect(html).toMatch(/data-testid="create-artifact"[^>]*disabled/)
+    expect(html).toContain('data-testid="design-documents-card"')
+    expect(html).toContain('data-testid="browse-design-documents"')
   })
 
   it('labels the AGENTS.md modification time and renders its Markdown', () => {
@@ -53,15 +56,22 @@ describe('ArtifactsPage', () => {
     controller.snapshot.mockReturnValue(snapshot)
 
     const html = renderToString(() => ArtifactsPage({
+      onBrowseDesignDocuments: vi.fn(),
       onBrowseArtifact: vi.fn(),
       onManageSkill: vi.fn()
     }))
 
+    expect(html).toContain('<h1>产物</h1>')
+    expect(html).toContain('data-testid="design-documents-card"')
+    expect(html).toContain('<h2>Oyster 设计文档</h2>')
+    expect(html).toContain('>内置</span>')
+    expect(html).toContain('data-testid="browse-design-documents"')
     expect(html).toContain('agent-memory-tracking')
     expect(html).toContain('AGENTS.md 更新于')
     expect(html).toContain('<h1>Attention</h1>')
     expect(html).toContain('Track agent memory research.')
     expect(html).toContain('data-testid="browse-artifact"')
+    expect(html.match(/data-testid="artifact-card"/g)).toHaveLength(1)
     expect(html).not.toContain('data-testid="artifact-skill-badge"')
     expect(html).not.toContain('data-testid="manage-artifact-skill"')
   })
@@ -88,6 +98,7 @@ describe('ArtifactsPage', () => {
     controller.snapshot.mockReturnValue(snapshot)
 
     const html = renderToString(() => ArtifactsPage({
+      onBrowseDesignDocuments: vi.fn(),
       onBrowseArtifact: vi.fn(),
       onManageSkill
     }))
@@ -121,6 +132,7 @@ describe('ArtifactsPage', () => {
     controller.snapshot.mockReturnValue(snapshot)
 
     const html = renderToString(() => ArtifactsPage({
+      onBrowseDesignDocuments: vi.fn(),
       onBrowseArtifact: vi.fn(),
       onManageSkill: vi.fn()
     }))

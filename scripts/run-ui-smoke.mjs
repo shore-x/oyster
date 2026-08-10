@@ -106,7 +106,16 @@ if (skills.openFolderDisabled !== false || skills.pageError || skills.overflowX)
 const artifacts = semantics.artifacts
 const expectedRepositoryPath = join(userDataPath, 'repository')
 const expectedArtifactPath = join(expectedRepositoryPath, 'artifacts')
-if (artifacts?.title !== '协作产物') throw new Error('Artifact page was not rendered')
+if (artifacts?.title !== '产物') throw new Error('Artifact page was not rendered')
+if (
+  artifacts.hasIndependentDesignDocumentsNavigation
+  || !artifacts.designDocumentsCard
+  || artifacts.designDocumentsTitle !== 'Oyster 设计文档'
+  || artifacts.designDocumentsBuiltIn !== '内置'
+  || artifacts.designDocumentsBrowseDisabled !== false
+) {
+  throw new Error('Bundled design documents are not presented as a browsable built-in product entry')
+}
 if (artifacts.repositoryPath !== expectedRepositoryPath) {
   throw new Error(`Oyster Repository is not fixed under userData: ${artifacts.repositoryPath}`)
 }
