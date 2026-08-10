@@ -19,7 +19,7 @@ Discovery catalog 中的单个外部来源条目称为 **Source Record**。它�
          -> Source Adapter 定位并校验所选版本 -> 原地读取 -> 后续消费
 ```
 
-正式知识加工与测试使用同一观察读取路径，不为测试复制另一份 Observation。后续如何持久化知识或隔离测试写入，不由发现层定义。
+正式知识加工与测试使用同一观察读取路径，发现层不为测试建立另一套来源副本。用户选定确定 revision 后，知识加工 Core 会在自己的 `runs/<run-id>/` 中物化该次运行所需的固定文件输入视图；这属于 Run 工作空间，不属于 Discovery catalog 或 Source Adapter 的存储职责。后续如何持久化知识或隔离测试写入，不由发现层定义。
 
 ## 2. 当前能力
 
@@ -98,7 +98,7 @@ Raw Evidence 表示具有明确来源身份和版本身份、可由 Source Adapt
 
 ## 6. 可用性与出处
 
-外部 Agent 拥有原始记录的生命周期。它可以修改、移动或删除记录，用户也可以撤回 Oyster 的读取权限。Oyster 不承诺外部 Raw Evidence 永久可展开。
+外部 Agent 拥有原始记录的生命周期。它可以修改、移动或删除记录，用户也可以撤回 Oyster 的读取权限。Oyster 不承诺外部 Raw Evidence 永久可展开，已创建 Run 中的固定输入工作副本也不能被当作发现新运行可用来源的替代品。
 
 当前知识加工验证会记录所使用的来源和版本，外部记录失效后尝试展开必须明确返回不可用，不能声称仍能核查原文，也不能改用当前相似记录。重新发现且版本一致的来源可以恢复读取；不同版本仍是不同证据。正式 Knowledge Statement 应可追溯到原始观察或输入知识，但长期追溯结构和 MVP 覆盖范围不由发现层决定。
 
@@ -122,7 +122,7 @@ Raw Evidence 表示具有明确来源身份和版本身份、可由 Source Adapt
 
 ## 9. 验证
 
-当前测试使用脱敏 Fixture 覆盖三个 Adapter、指令优先级、Codex active/archive 去重、损坏文件隔离、Session catalog 原子刷新、单条记录的确定版本读取，以及 Session 迁移、增长或消失后的恢复与拒绝行为。测试与正式链路通过同一个 Source Adapter 访问外部记录，不建立 Raw Evidence 副本。
+当前测试使用脱敏 Fixture 覆盖三个 Adapter、指令优先级、Codex active/archive 去重、损坏文件隔离、Session catalog 原子刷新、单条记录的确定版本读取，以及 Session 迁移、增长或消失后的恢复与拒绝行为。测试与正式链路通过同一个 Source Adapter 访问外部记录；Discovery 自身不建立 Raw Evidence 副本，知识加工 Run 的文件化输入由上层 Core 另行负责。
 
 仓库验证命令：
 

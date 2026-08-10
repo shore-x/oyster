@@ -14,13 +14,16 @@ function record(runId = 'run-history'): KnowledgeFullChainRunRecord {
     id: runId,
     repositoryPath: '/tmp/oyster/repository',
     runPath: `/tmp/oyster/repository/runs/${runId}`,
+    taskPath: `/tmp/oyster/repository/runs/${runId}/TASK.md`,
     workPath: `/tmp/oyster/repository/runs/${runId}/WORK.md`,
+    inputPath: `/tmp/oyster/repository/runs/${runId}/inputs`,
+    workspaceRevision: 'c'.repeat(64),
     targetBranch: 'main',
     branchName: `processing/${runId}`,
     baseRevision: 'a'.repeat(40)
   }
   return {
-    formatVersion: 7,
+    formatVersion: 8,
     runId,
     status: 'completed',
     startedAt: '2026-08-06T00:00:00.000Z',

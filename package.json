@@ -11,7 +11,8 @@
   "scripts": {
     "dev": "node scripts/ensure-electron.mjs && electron-vite dev",
     "electron:ensure": "node scripts/ensure-electron.mjs",
-    "build": "electron-vite build",
+    "build": "electron-vite build && npm run prepare:design-docs",
+    "prepare:design-docs": "node scripts/prepare-design-docs.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:ui": "node scripts/ensure-electron.mjs && npm run build && node scripts/run-ui-smoke.mjs"

@@ -85,7 +85,7 @@ async function commit(repositoryPath: string, message: string): Promise<void> {
 export class FixtureKnowledgeMaintainerRuntime implements KnowledgeMaintainerRuntime {
   async run(input: KnowledgeMaintainerRunInput): Promise<RepositoryAgentRunResult> {
     input.signal.throwIfAborted()
-    const toolCalls = ['read', 'read_activity', 'write', 'bash']
+    const toolCalls = ['read', 'read', 'write', 'bash']
     input.onRunUpdate?.(runningFixtureRun(input, toolCalls, 2))
     await emitFixtureFrame()
     input.signal.throwIfAborted()
@@ -103,7 +103,7 @@ export class FixtureKnowledgeMaintainerRuntime implements KnowledgeMaintainerRun
       ),
       writeFile(
         join(input.run.repositoryPath, 'knowledge', 'knowledge-maintainer.md'),
-        '# Knowledge Maintenance Agent\n\nKnowledge Maintenance Agent 读取文件工作清单与 Canonical Activity，并直接维护 [[知识加工链路]] 的 Repository tree。\n',
+        '# Knowledge Maintenance Agent\n\nKnowledge Maintenance Agent 从独立 Run 工作空间读取任务、工作清单与文件化 Canonical Activity，并直接维护 [[知识加工链路]] 的 Repository tree。\n',
         'utf8'
       ),
       writeFile(

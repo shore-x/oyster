@@ -42,6 +42,9 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
       <dl class="processing-run-details">
         <div><dt>Repository</dt><dd>{props.result.run.repositoryPath}</dd></div>
         <div><dt>Run</dt><dd>{props.result.run.runPath}</dd></div>
+        <div><dt>TASK.md</dt><dd>{props.result.run.taskPath}</dd></div>
+        <div><dt>WORK.md</dt><dd>{props.result.run.workPath}</dd></div>
+        <div><dt>Inputs</dt><dd>{props.result.run.inputPath}</dd></div>
         <div><dt>处理分支</dt><dd>{props.result.run.branchName}</dd></div>
         <div><dt>前一 revision</dt><dd>{props.result.previousRevision}</dd></div>
         <div><dt>当前 revision</dt><dd>{props.result.revision}</dd></div>

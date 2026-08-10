@@ -1,4 +1,6 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { writeFileSync } from 'node:fs'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -8,6 +10,7 @@ import type {
   AiBackendPort,
   KnowledgeMaintainerRunInput,
   KnowledgeMaintainerRuntime,
+  KnowledgeReviewerRuntime,
   RepositoryAgentRunResult
 } from '../src/main/knowledge-processing/model'
 import { KnowledgeProcessingService } from '../src/main/knowledge-processing/knowledge-processing-service'
@@ -159,8 +162,7 @@ describe('KnowledgeProcessingService', () => {
       builtInInstructions: KNOWLEDGE_REVIEWER_AGENT_PROMPT
     })
     expect(snapshot.stages[0].tools.map((tool) => tool.name)).toEqual([
-      'read', 'bash', 'edit', 'write',
-      'read_activity', 'read_activity_attachment', 'read_evidence'
+      'read', 'bash', 'edit', 'write'
     ])
     expect(snapshot.stages[1].tools.map((tool) => tool.name)).toEqual([
       'read', 'bash', 'edit', 'write'
@@ -169,7 +171,7 @@ describe('KnowledgeProcessingService', () => {
       .not.toEqual(expect.arrayContaining(['list_todos', 'add_todos', 'complete_todos']))
   })
 
-  it('creates a Run in the real repository, supplies observation tools, and validates the Maintainer commit', async () => {
+  it('creates a file-backed Run workspace and validates the Maintainer commit', async () => {
     const { service, maintainer, collaborations } = await harness()
     const baseRevision = await collaborations.currentRevision()
     const result = await service.runKnowledgeMaintenance(
@@ -179,9 +181,19 @@ describe('KnowledgeProcessingService', () => {
     )
 
     expect(maintainer.calls).toHaveLength(1)
-    expect(maintainer.calls[0].sourceRef).toBe('session:codex:one@revision')
     expect(maintainer.calls[0].systemPrompt).toBe(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT)
-    expect(await readFile(result.run.workPath, 'utf8')).toContain('Inspect the repository model.')
+    expect(await readFile(result.run.taskPath, 'utf8')).toContain('session:codex:one@revision')
+    expect(await readFile(result.run.taskPath, 'utf8')).toContain('Inspect the repository model.')
+    expect(await readFile(join(result.run.inputPath, 'README.md'), 'utf8'))
+      .toContain('fixed, Host-materialized input view')
+    expect(await readdir(join(result.run.inputPath, 'activity'))).toEqual([
+      'segment-000001-page-000001.md'
+    ])
+    expect(await readdir(join(result.run.inputPath, 'evidence'))).toEqual([
+      'INDEX.md', 'page-000001.txt'
+    ])
+    await expect(collaborations.assertRunWorkspace(maintainer.calls[0].run))
+      .resolves.toBeUndefined()
     expect(result.activitySegmentCount).toBe(1)
     expect(result.previousRevision).toBe(result.run.baseRevision)
     expect(result.revision).not.toBe(result.previousRevision)
@@ -189,8 +201,29 @@ describe('KnowledgeProcessingService', () => {
       'knowledge/knowledge-processing.md'
     ]))
     expect(result.run.repositoryPath).toBe(maintainer.calls[0].run.repositoryPath)
+    expect(await readdir(result.run.runPath)).not.toContain('run.json')
     expect(await collaborations.currentRevision()).toBe(baseRevision)
     expect(service.snapshot().debugTraces[0]?.run.id).toBe(result.agentRunId)
+  })
+
+  it('rejects Knowledge or Artifact drift between Run creation and initial Agent start', async () => {
+    const { service, maintainer } = await harness()
+
+    await expect(service.runKnowledgeMaintenance(
+      observation(['first line']),
+      'session:test',
+      undefined,
+      {
+        onRunCreated: (run) => {
+          writeFileSync(
+            join(run.repositoryPath, 'knowledge', 'late-edit.md'),
+            '# Late edit\n\nCreated after the Run snapshot.\n'
+          )
+        }
+      }
+    )).rejects.toThrow('Run 初始 Knowledge/Artifact working tree 已发生变化')
+
+    expect(maintainer.calls).toHaveLength(0)
   })
 
   it('rejects malformed Canonical Activity before starting the Agent', async () => {
@@ -222,7 +255,7 @@ describe('KnowledgeProcessingService', () => {
       mimeType: 'image/png',
       data: 'aW1hZ2U=',
       byteLength: 5,
-      sha256: '0'.repeat(64),
+      sha256: createHash('sha256').update('image').digest('hex'),
       rawRange: {
         start: { line: 1, offset: 0 },
         end: { line: 1, offset: 10 }
@@ -232,5 +265,87 @@ describe('KnowledgeProcessingService', () => {
     await expect(service.runKnowledgeMaintenance(input, 'session:test'))
       .rejects.toThrow('不支持图片输入')
     expect(maintainer.calls).toHaveLength(0)
+  })
+
+  it('does not reuse a Run with a different source or Observation', async () => {
+    const { service, maintainer } = await harness()
+    const first = await service.runKnowledgeMaintenance(
+      observation(['first']),
+      'session:first'
+    )
+
+    await expect(service.runKnowledgeMaintenance(
+      observation(['different']),
+      'session:different',
+      undefined,
+      { run: first.run, previousRevision: first.revision }
+    )).rejects.toThrow('固定工作空间不一致')
+    expect(maintainer.calls).toHaveLength(1)
+  })
+
+  it('does not reuse a Run with a different initial work checklist', async () => {
+    const { service, maintainer } = await harness()
+    const firstInput = observation(['first'])
+    const first = await service.runKnowledgeMaintenance(firstInput, 'session:first')
+    const changedHints = observation(['first'])
+    changedHints.rawEvidence.skillHints.push({
+      location: { line: 1, offset: 0 },
+      name: 'example-skill',
+      source: 'runtime_injection'
+    })
+
+    await expect(service.runKnowledgeMaintenance(
+      changedHints,
+      'session:first',
+      undefined,
+      { run: first.run, previousRevision: first.revision }
+    )).rejects.toThrow('固定工作空间不一致')
+    expect(maintainer.calls).toHaveLength(1)
+  })
+
+  it('validates fixed inputs before starting the Reviewer', async () => {
+    const { service } = await harness()
+    const maintained = await service.runKnowledgeMaintenance(
+      observation(['first']),
+      'session:first'
+    )
+    await writeFile(join(maintained.run.inputPath, 'unlisted.txt'), 'changed evidence\n')
+    let reviewerCalls = 0
+    const reviewer: KnowledgeReviewerRuntime = {
+      run: async (input) => {
+        reviewerCalls += 1
+        return new FixtureKnowledgeReviewerRuntime().run(input)
+      }
+    }
+
+    await expect(service.runKnowledgeReview(maintained.run, maintained.revision, { agent: reviewer }))
+      .rejects.toThrow('固定输入文件树已被修改')
+    expect(reviewerCalls).toBe(0)
+  })
+
+  it('does not run Maintainer and Reviewer concurrently on the shared working tree', async () => {
+    const { service } = await harness()
+    const maintained = await service.runKnowledgeMaintenance(
+      observation(['first']),
+      'session:first'
+    )
+    let releaseReviewer!: () => void
+    let reviewerStarted!: () => void
+    const release = new Promise<void>((resolve) => { releaseReviewer = resolve })
+    const started = new Promise<void>((resolve) => { reviewerStarted = resolve })
+    const reviewer: KnowledgeReviewerRuntime = {
+      run: async (input) => {
+        reviewerStarted()
+        await release
+        return new FixtureKnowledgeReviewerRuntime().run(input)
+      }
+    }
+    const review = service.runKnowledgeReview(maintained.run, maintained.revision, { agent: reviewer })
+    await started
+
+    await expect(service.runKnowledgeMaintenance(observation(['second']), 'session:second'))
+      .rejects.toThrow('另一个知识加工角色正在运行')
+    releaseReviewer()
+    await expect(review).resolves.toMatchObject({ outcome: 'approved' })
   })
 })

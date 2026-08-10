@@ -33,13 +33,6 @@ export function formatEvidenceLocation(location: EvidenceLocation): string {
   return `${observationLineAddress(location.line)}:C${location.offset}`
 }
 
-export function evidenceReadCallHint(
-  location: EvidenceLocation,
-  limit = DEFAULT_EVIDENCE_READ_LIMIT
-): string {
-  return `read_evidence({"line":${location.line},"offset":${location.offset},"limit":${limit}})`
-}
-
 export function compareEvidenceLocations(left: EvidenceLocation, right: EvidenceLocation): number {
   if (left.line !== right.line) return left.line - right.line
   return left.offset - right.offset
@@ -79,7 +72,7 @@ export function readEvidencePage(
   if (!lines.length) throw new Error('Observation 没有可读取的原始证据')
   assertLocation(lines, requestedStart)
   if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 2) {
-    throw new Error('read_evidence limit 必须是大于等于 2 的整数')
+    throw new Error('Raw Evidence page limit 必须是大于等于 2 的整数')
   }
 
   const start = { ...requestedStart }

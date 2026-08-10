@@ -5,6 +5,7 @@ import type { KnowledgeApi } from '../../shared/knowledge'
 import type { ChatApi } from '../../shared/chat'
 import type { ArtifactApi } from '../../shared/artifacts'
 import type { SkillApi } from '../../shared/skills'
+import type { FolderBrowserApi } from '../../shared/folder-browser'
 
 declare global {
   interface Window {
@@ -14,6 +15,7 @@ declare global {
       aiBackends: AiBackendApi
       knowledge: KnowledgeApi
       artifacts: ArtifactApi
+      folderBrowser: FolderBrowserApi
       knowledgeProcessing: KnowledgeProcessingApi
       chat: ChatApi
     }

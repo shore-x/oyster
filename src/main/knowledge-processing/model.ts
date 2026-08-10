@@ -6,7 +6,6 @@ import type {
   ProcessingStageId
 } from '../../shared/knowledge-processing'
 import type { AgentRunRecord } from '../../shared/agent-runtime'
-import type { AgentObservation } from '../observation/model'
 import type { ProcessingRun } from './processing-repository'
 
 export interface StoredProcessingStage {
@@ -57,8 +56,6 @@ interface RepositoryAgentRunInput {
 }
 
 export interface KnowledgeMaintainerRunInput extends RepositoryAgentRunInput {
-  observation: AgentObservation
-  sourceRef: string
   previousRevision: string
 }
 

@@ -56,7 +56,10 @@ function maintenanceResult(): KnowledgeMaintenanceResult {
       id: 'workspace-1',
       repositoryPath: '/tmp/oyster-repository',
       runPath: '/tmp/oyster-repository/runs/workspace-1',
+      taskPath: '/tmp/oyster-repository/runs/workspace-1/TASK.md',
       workPath: '/tmp/oyster-repository/runs/workspace-1/WORK.md',
+      inputPath: '/tmp/oyster-repository/runs/workspace-1/inputs',
+      workspaceRevision: 'd'.repeat(64),
       branchName: 'processing/workspace-1',
       targetBranch: 'main',
       baseRevision: 'b'.repeat(40)
@@ -75,7 +78,7 @@ function maintenanceResult(): KnowledgeMaintenanceResult {
       model: 'fixture-model',
       runtime: 'pi_agent_core',
       modelCallCount: 1,
-      toolCalls: ['read_activity']
+      toolCalls: ['read']
     }
   }
 }

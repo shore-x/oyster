@@ -244,10 +244,12 @@ describe('ArtifactService', () => {
     expect(snapshot.artifacts).toEqual([
       expect.objectContaining({
         directoryName: ' externally-named ',
+        directoryPath: externallyNamedPath,
         attention: '# External name\n'
       }),
       {
         directoryName: 'a-valid-artifact',
+        directoryPath: validPath,
         attention,
         modifiedAt: agentsDetails.mtime.toISOString()
       }

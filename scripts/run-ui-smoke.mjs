@@ -138,6 +138,32 @@ if (
   throw new Error('Artifact AGENTS.md was not persisted with the expected content')
 }
 
+const artifactBrowser = semantics.folderBrowser?.artifact
+if (
+  artifactBrowser?.title !== 'attention-tracking'
+  || artifactBrowser.path !== join(expectedArtifactPath, 'attention-tracking')
+  || !artifactBrowser.selectedPath?.endsWith(join('attention-tracking', 'AGENTS.md'))
+  || !artifactBrowser.fileNames?.includes('AGENTS.md')
+  || artifactBrowser.markdownHeading !== 'Attention'
+  || artifactBrowser.pageError
+  || artifactBrowser.overflowX
+) {
+  throw new Error(`Artifact generic folder browser is unavailable: ${JSON.stringify(artifactBrowser)}`)
+}
+
+const designDocumentsBrowser = semantics.folderBrowser?.designDocuments
+if (
+  designDocumentsBrowser?.title !== 'Oyster 设计文档'
+  || designDocumentsBrowser.path !== join(root, 'docs')
+  || !designDocumentsBrowser.selectedPath?.startsWith(join(root, 'docs'))
+  || !designDocumentsBrowser.fileNames?.includes('folder-browser-mvp.md')
+  || !designDocumentsBrowser.markdownRendered
+  || designDocumentsBrowser.pageError
+  || designDocumentsBrowser.overflowX
+) {
+  throw new Error(`Bundled design document browser is unavailable: ${JSON.stringify(designDocumentsBrowser)}`)
+}
+
 const knowledge = semantics.knowledge
 if (knowledge.browse.title !== '知识库') throw new Error('Knowledge browser page was not rendered')
 if (knowledge.browse.statementCount !== 4) {
@@ -155,7 +181,7 @@ if (
 if (
   knowledge.browse.linkLabel !== '知识维护 Agent'
   || knowledge.browse.linkPreviewTitle !== 'Knowledge Maintenance Agent'
-  || !knowledge.browse.linkPreview?.includes('Run 工作清单')
+  || !knowledge.browse.linkPreview?.includes('TASK.md、WORK.md')
 ) {
   throw new Error('Knowledge browser did not render the wikilink alias and hover preview')
 }
@@ -315,34 +341,23 @@ if (agentConfiguration?.title !== 'Agent 配置' || agentConfiguration.roleCount
 }
 if (
   agentConfiguration.maintenanceToolNames?.join(',')
-    !== 'read,bash,edit,write,read_activity,read_activity_attachment,read_evidence'
+    !== 'read,bash,edit,write'
 ) {
   throw new Error('The Agent tool catalog does not match the Knowledge Maintenance runtime')
 }
 if (!agentConfiguration.toolsReadOnlyCopy?.includes('只读展示')) {
   throw new Error('The Agent configuration page does not explain that tools are code-owned')
 }
-if (agentConfiguration.schemaPanelCount !== 7 || agentConfiguration.expandedSchemaCount !== 2) {
+if (agentConfiguration.schemaPanelCount !== 4 || agentConfiguration.expandedSchemaCount !== 1) {
   throw new Error('The Agent tool parameter schemas are not available through expandable panels')
 }
-const activityToolSchema = agentConfiguration.activityToolSchema
+const readToolSchema = agentConfiguration.readToolSchema
 if (
-  activityToolSchema?.type !== 'object'
-  || activityToolSchema.additionalProperties !== false
-  || !activityToolSchema.required?.includes('activity')
-  || !activityToolSchema.required?.includes('offset')
-  || activityToolSchema.properties?.activity?.minimum !== 1
-  || activityToolSchema.properties?.offset?.minimum !== 0
-  || activityToolSchema.properties?.limit?.minimum !== 1
+  readToolSchema?.type !== 'object'
+  || !readToolSchema.required?.includes('path')
+  || readToolSchema.properties?.path?.type !== 'string'
 ) {
-  throw new Error('The read_activity developer schema lost required fields or constraints')
-}
-if (
-  !agentConfiguration.evidenceToolSchema?.required?.includes('line')
-  || agentConfiguration.evidenceToolSchema?.properties?.line?.minimum !== 1
-  || agentConfiguration.evidenceToolSchema?.properties?.limit?.minimum !== 2
-) {
-  throw new Error('The read_evidence developer schema lost required fields or constraints')
+  throw new Error('The ordinary read developer schema lost required fields or constraints')
 }
 if (
   agentConfiguration.reviewerToolNames?.join(',') !== 'read,bash,edit,write'
@@ -574,7 +589,7 @@ if (processing.history.overflowAfterStatementBack) {
 if (
   !processing.history.activityDetailExists
   || processing.history.traceEventCount !== 4
-  || !processing.history.traceText?.includes('Fixture read_activity completed')
+  || !processing.history.traceText?.includes('Fixture read completed')
   || !processing.history.runSelectorText?.includes('Maintainer')
   || !processing.history.runSelectorText?.includes('Reviewer')
   || processing.history.runSelectorText?.includes('knowledge_maintenance_agent')
@@ -602,7 +617,7 @@ if (processing.promptValues.some((prompt) => typeof prompt !== 'string' || !prom
   throw new Error('A processing default prompt is empty')
 }
 const [maintainerPrompt] = processing.promptValues
-for (const requiredCopy of ['Knowledge Maintainer', 'runs/<run-id>/WORK.md', 'Canonical Activity', 'read_evidence', '[[canonical title]]', 'create one ordinary Git commit', 'Do not delete WORK.md']) {
+for (const requiredCopy of ['Knowledge Maintainer', 'TASK.md', 'inputs/README.md', 'Canonical Activity', 'ordinary evidence file', '[[canonical title]]', 'create one ordinary Git commit', 'Do not delete WORK.md']) {
   if (!maintainerPrompt.includes(requiredCopy)) {
     throw new Error(`Knowledge Maintenance Agent prompt is missing its responsibility: ${requiredCopy}`)
   }
@@ -658,7 +673,7 @@ if (processing.trace.maintenanceEventCount !== 4) {
 if (processing.trace.modelCallAction) {
   throw new Error('The deterministic fixture unexpectedly fabricated a Model Call')
 }
-for (const requiredCopy of ['read_activity', 'write', 'bash']) {
+for (const requiredCopy of ['read', 'write', 'bash']) {
   if (!processing.trace.bodyText.includes(requiredCopy)) {
     throw new Error(`Knowledge processing trace is missing: ${requiredCopy}`)
   }

@@ -240,7 +240,8 @@ describe('Agent observation adapters', () => {
       }]
     })
     expect(item.content).toContain('JSONL record (opaque)')
-    expect(item.content).toContain('read_evidence')
+    expect(item.content).toContain('Raw source locator in the Run input')
+    expect(item.content).not.toContain('read_evidence')
     expect(item.content).not.toContain(content)
   })
 })

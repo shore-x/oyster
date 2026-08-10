@@ -42,13 +42,6 @@ export function formatActivityLocation(location: ActivityLocation): string {
   return `A${String(location.activity).padStart(6, '0')}:C${location.offset}`
 }
 
-export function activityReadCallHint(
-  location: ActivityLocation,
-  limit = DEFAULT_ACTIVITY_READ_LIMIT
-): string {
-  return `read_activity({"activity":${location.activity},"offset":${location.offset},"limit":${limit}})`
-}
-
 export function compareActivityLocations(left: ActivityLocation, right: ActivityLocation): number {
   if (left.activity !== right.activity) return left.activity - right.activity
   return left.offset - right.offset
@@ -86,7 +79,7 @@ export function readActivityPage(
   if (!activity.items.length) throw new Error('Canonical Activity 没有可读取内容')
   assertLocation(activity, requestedStart)
   if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1) {
-    throw new Error('read_activity limit 必须是正整数')
+    throw new Error('Canonical Activity page limit 必须是正整数')
   }
 
   const start = { ...requestedStart }

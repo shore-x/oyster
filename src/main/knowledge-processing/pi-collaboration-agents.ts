@@ -26,19 +26,6 @@ import {
   createPiAgentRuntime
 } from '../agent-runtime/pi-agent-runtime'
 import { createArtifactGitEnvironment } from '../artifacts/git-runtime'
-import {
-  formatActivityLocation,
-  formatActivityReadPage,
-  MAX_ACTIVITY_READ_LIMIT,
-  readActivityPage
-} from '../observation/activity-location'
-import {
-  formatEvidenceLocation,
-  formatEvidenceReadPage,
-  MAX_EVIDENCE_READ_LIMIT,
-  observationLineAddress,
-  readEvidencePage
-} from '../observation/evidence-location'
 import { REASONING_EFFORTS } from '../../shared/ai-backends'
 import type { AgentRunRecord } from '../../shared/agent-runtime'
 import {
@@ -47,12 +34,6 @@ import {
   REVIEW_MARKER_START,
   type ProcessingRun
 } from './processing-repository'
-import {
-  knowledgeMaintenanceToolDefinition,
-  readActivityAttachmentParameters,
-  readActivityParameters,
-  readEvidenceParameters
-} from './knowledge-maintenance-tool-catalog'
 import type {
   KnowledgeMaintainerRunInput,
   KnowledgeMaintainerRuntime,
@@ -60,8 +41,6 @@ import type {
   KnowledgeReviewerRuntime,
   RepositoryAgentRunResult
 } from './model'
-
-const MAX_TOOL_OUTPUT_CHARACTERS = 64 * 1_024
 
 function emptyUsage(): Usage {
   return {
@@ -103,14 +82,24 @@ function validateBaseInput(input: KnowledgeMaintainerRunInput | KnowledgeReviewe
   if (input.reasoningEffort && !REASONING_EFFORTS.includes(input.reasoningEffort)) {
     throw new Error('思考强度无效')
   }
-  if (!input.run?.repositoryPath || !input.run.workPath || !input.run.branchName) {
+  if (
+    !input.run?.repositoryPath
+    || !input.run.runPath
+    || !input.run.taskPath
+    || !input.run.workPath
+    || !input.run.inputPath
+    || !input.run.branchName
+  ) {
     throw new Error('Processing Run 无效')
   }
   input.signal.throwIfAborted()
 }
 
 function codingTools(run: ProcessingRun): AgentTool[] {
-  return createCodingTools(run.repositoryPath, {
+  return createCodingTools(run.runPath, {
+    read: {
+      autoResizeImages: false
+    },
     bash: {
       spawnHook: (context) => ({
         ...context,
@@ -118,103 +107,6 @@ function codingTools(run: ProcessingRun): AgentTool[] {
       })
     }
   })
-}
-
-function observationTools(input: KnowledgeMaintainerRunInput): AgentTool[] {
-  const { rawEvidence, canonicalActivity } = input.observation
-  const runtime = input.runtime
-  return [
-    {
-      ...knowledgeMaintenanceToolDefinition('read_activity'),
-      executionMode: 'sequential',
-      execute: async (_toolCallId, parameters, signal) => {
-        signal?.throwIfAborted()
-        const page = readActivityPage(
-          canonicalActivity,
-          { activity: parameters.activity, offset: parameters.offset },
-          parameters.limit
-        )
-        const output = formatActivityReadPage(page)
-        if (output.length > MAX_TOOL_OUTPUT_CHARACTERS) {
-          throw new Error('read_activity 内部输出超过安全上限')
-        }
-        return {
-          content: [{ type: 'text', text: output }],
-          details: {
-            start: formatActivityLocation(page.start),
-            end: formatActivityLocation(page.end),
-            next: page.next ? formatActivityLocation(page.next) : null,
-            eof: page.eof,
-            returnedCharacters: page.returnedCharacters,
-            returnedActivities: page.returnedActivities
-          }
-        }
-      }
-    } as AgentTool<typeof readActivityParameters>,
-    {
-      ...knowledgeMaintenanceToolDefinition('read_activity_attachment'),
-      executionMode: 'sequential',
-      execute: async (_toolCallId, parameters, signal) => {
-        signal?.throwIfAborted()
-        const attachment = canonicalActivity.attachments.find((item) => item.id === parameters.id)
-        if (!attachment) throw new Error(`Canonical Activity Attachment 不存在：${parameters.id}`)
-        if (!attachment.mimeType.startsWith('image/')) {
-          throw new Error(`当前不支持读取 ${attachment.mimeType} 附件`)
-        }
-        if (!runtime.model.input?.includes('image')) {
-          throw new Error(`当前 Maintainer Model 不支持图片输入，无法检查 ${parameters.id}`)
-        }
-        return {
-          content: [
-            {
-              type: 'text',
-              text: [
-                `Attachment: ${attachment.id}`,
-                `Media type: ${attachment.mimeType}`,
-                `Bytes: ${attachment.byteLength}`,
-                `SHA-256: ${attachment.sha256}`,
-                `Raw source: ${formatEvidenceLocation(attachment.rawRange.start)}`
-              ].join('\n')
-            },
-            { type: 'image', data: attachment.data, mimeType: attachment.mimeType }
-          ],
-          details: {
-            id: attachment.id,
-            mimeType: attachment.mimeType,
-            byteLength: attachment.byteLength,
-            sha256: attachment.sha256
-          }
-        }
-      }
-    } as AgentTool<typeof readActivityAttachmentParameters>,
-    {
-      ...knowledgeMaintenanceToolDefinition('read_evidence'),
-      executionMode: 'sequential',
-      execute: async (_toolCallId, parameters, signal) => {
-        signal?.throwIfAborted()
-        const page = readEvidencePage(
-          rawEvidence.lines,
-          { line: parameters.line, offset: parameters.offset },
-          parameters.limit
-        )
-        const output = formatEvidenceReadPage(page)
-        if (output.length > MAX_TOOL_OUTPUT_CHARACTERS) {
-          throw new Error('read_evidence 内部输出超过安全上限')
-        }
-        return {
-          content: [{ type: 'text', text: output }],
-          details: {
-            start: formatEvidenceLocation(page.start),
-            end: formatEvidenceLocation(page.end),
-            next: page.next ? formatEvidenceLocation(page.next) : null,
-            eof: page.eof,
-            returnedCharacters: page.returnedCharacters,
-            returnedLines: page.returnedLines
-          }
-        }
-      }
-    } as AgentTool<typeof readEvidenceParameters>
-  ]
 }
 
 interface RunRepositoryAgentInput {
@@ -305,39 +197,23 @@ async function runRepositoryAgent(input: RunRepositoryAgentInput): Promise<Repos
   }
 }
 
-function maintainerTaskPrompt(input: KnowledgeMaintainerRunInput): string {
-  const { rawEvidence, canonicalActivity } = input.observation
-  const lastLine = rawEvidence.lines.length
+function maintainerTaskPrompt(_input: KnowledgeMaintainerRunInput): string {
   return [
-    `Repository root: ${input.run.repositoryPath}`,
-    `Run directory: ${input.run.runPath}`,
-    `Processing branch: ${input.run.branchName}`,
-    `Previous handoff revision: ${input.previousRevision}`,
-    `Base revision: ${input.run.baseRevision}`,
-    `Work state: ${input.run.workPath}`,
-    `Raw Evidence sourceRef: ${input.sourceRef}`,
-    `Canonical Activity format: ${canonicalActivity.formatVersion}. Range: A000001-A${String(canonicalActivity.items.length).padStart(6, '0')}. Maximum read limit: ${MAX_ACTIVITY_READ_LIMIT}.`,
-    `Raw Evidence format: ${rawEvidence.formatVersion}. Range: ${observationLineAddress(1)}-${observationLineAddress(lastLine)}. Maximum read limit: ${MAX_EVIDENCE_READ_LIMIT}.`,
-    'Begin by reading the work order. It is the authoritative checklist for this run. Complete its work, mark every checkbox complete, update Knowledge and Artifact files directly, and commit one clean Maintainer handoff. The runs/ tree is ignored Harness state: never force-add or commit any path under runs/.'
+    'The current working directory is this Knowledge Processing Run workspace.',
+    'Read TASK.md and WORK.md with the ordinary read tool, then carry out the Maintainer responsibility described by your System Prompt. All task-specific input is available as files in this workspace.'
   ].join('\n\n')
 }
 
-function reviewerTaskPrompt(input: KnowledgeReviewerRunInput): string {
+function reviewerTaskPrompt(_input: KnowledgeReviewerRunInput): string {
   return [
-    `Repository root: ${input.run.repositoryPath}`,
-    `Run directory: ${input.run.runPath}`,
-    `Processing branch: ${input.run.branchName}`,
-    `Base revision: ${input.run.baseRevision}`,
-    `Exact revision to review: ${input.reviewedRevision}`,
-    `Run work state: ${input.run.workPath}`,
-    'Review only if HEAD still equals the exact revision above. If changes are required, add REVIEW blocks to the affected files, append at least one unchecked item to WORK.md, and commit the Knowledge/Artifact corrections. The runs/ tree is ignored Harness state: never force-add or commit any path under runs/. If the tree is acceptable, finish without creating another commit. The Harness records the validated Reviewer handoff in WORK.md. Never merge the target branch.'
+    'The current working directory is this Knowledge Processing Run workspace.',
+    'Read TASK.md and WORK.md with the ordinary read tool, then carry out the Reviewer responsibility described by your System Prompt. The latest Maintainer handoff in WORK.md identifies the exact candidate revision.'
   ].join('\n\n')
 }
 
 export class PiKnowledgeMaintainerAgent implements KnowledgeMaintainerRuntime {
   async run(input: KnowledgeMaintainerRunInput): Promise<RepositoryAgentRunResult> {
     validateBaseInput(input)
-    if (!input.sourceRef.trim()) throw new Error('Raw Evidence sourceRef 无效')
     return runRepositoryAgent({
       agentId: 'knowledge_maintenance_agent',
       runtime: input.runtime,
@@ -347,7 +223,7 @@ export class PiKnowledgeMaintainerAgent implements KnowledgeMaintainerRuntime {
       runId: input.runId,
       onRunUpdate: input.onRunUpdate,
       signal: input.signal,
-      tools: [...codingTools(input.run), ...observationTools(input)]
+      tools: codingTools(input.run)
     })
   }
 }

@@ -63,6 +63,12 @@ export const artifactChannels = {
   openArtifact: 'artifacts:open-artifact'
 } as const
 
+export const folderBrowserChannels = {
+  getDesignDocumentsPath: 'folder-browser:get-design-documents-path',
+  browseFolder: 'folder-browser:browse-folder',
+  readFile: 'folder-browser:read-file'
+} as const
+
 export const chatChannels = {
   event: 'chat:event',
   getSnapshot: 'chat:get-snapshot',

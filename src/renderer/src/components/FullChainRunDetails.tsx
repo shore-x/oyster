@@ -177,7 +177,9 @@ export function FullChainResultDetail(props: {
       <dl class="processing-run-details" data-testid="full-chain-git-result">
         <div><dt>Repository</dt><dd>{props.result.run.repositoryPath}</dd></div>
         <div><dt>Run</dt><dd>{props.result.run.runPath}</dd></div>
+        <div><dt>TASK.md</dt><dd>{props.result.run.taskPath}</dd></div>
         <div><dt>WORK.md</dt><dd>{props.result.run.workPath}</dd></div>
+        <div><dt>Inputs</dt><dd>{props.result.run.inputPath}</dd></div>
         <div><dt>处理分支</dt><dd>{props.result.run.branchName}</dd></div>
         <div><dt>目标分支</dt><dd>{props.result.run.targetBranch}（未合并）</dd></div>
         <div><dt>Base revision</dt><dd>{props.result.run.baseRevision}</dd></div>

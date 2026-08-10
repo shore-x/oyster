@@ -8,9 +8,17 @@ import { KnowledgeProcessingPage } from './components/KnowledgeProcessingPage'
 import { KnowledgeBrowserPage } from './components/KnowledgeBrowserPage'
 import { SkillsPage, type SkillsNavigationRequest } from './components/SkillsPage'
 import { SourceCard } from './components/SourceCard'
+import { FolderBrowserPage } from './components/FolderBrowserPage'
 import { Button, Icon } from './ui'
 
-type PageId = 'sources' | 'skills' | 'knowledge' | 'artifacts' | 'chat' | 'knowledge-processing' | 'agent-configuration' | 'ai-backends'
+type PageId = 'sources' | 'skills' | 'knowledge' | 'artifacts' | 'folder-browser' | 'chat' | 'knowledge-processing' | 'agent-configuration' | 'ai-backends'
+
+interface FolderBrowserNavigation {
+  folderPath: string
+  label: string
+  source: 'artifact' | 'design-documents'
+  returnPage: PageId
+}
 
 export function App() {
   const controller = createDiscoveryController()
@@ -18,6 +26,8 @@ export function App() {
   const [knowledgeResetVersion, setKnowledgeResetVersion] = createSignal(0)
   const [knowledgeNavigation, setKnowledgeNavigation] = createSignal<{ title: string; version: number }>()
   const [skillsNavigation, setSkillsNavigation] = createSignal<SkillsNavigationRequest>()
+  const [folderBrowserNavigation, setFolderBrowserNavigation] = createSignal<FolderBrowserNavigation>()
+  const [navigationError, setNavigationError] = createSignal<string>()
   const foundCount = createMemo(
     () => controller.snapshot().sources.filter((source) => source.discoveryState === 'found').length
   )
@@ -25,8 +35,29 @@ export function App() {
     controller.snapshot().sources.reduce((total, source) => total + source.sessionCount, 0)
   )
   const navigateTo = (nextPage: PageId): void => {
+    setNavigationError(undefined)
     setPage(nextPage)
     requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0 }))
+  }
+
+  const browseFolder = (navigation: FolderBrowserNavigation): void => {
+    setFolderBrowserNavigation(navigation)
+    navigateTo('folder-browser')
+  }
+
+  const browseDesignDocuments = async (): Promise<void> => {
+    try {
+      browseFolder({
+        folderPath: await window.oyster.folderBrowser.getDesignDocumentsPath(),
+        label: 'Oyster 设计文档',
+        source: 'design-documents',
+        returnPage: page() === 'folder-browser'
+          ? folderBrowserNavigation()?.returnPage ?? 'sources'
+          : page()
+      })
+    } catch (error) {
+      setNavigationError(error instanceof Error ? error.message : String(error))
+    }
   }
 
   return (
@@ -54,9 +85,15 @@ export function App() {
           <a
             href="#artifacts"
             data-testid="nav-artifacts"
-            class={`nav-item${page() === 'artifacts' ? ' nav-item--active' : ''}`}
+            class={`nav-item${page() === 'artifacts' || (page() === 'folder-browser' && folderBrowserNavigation()?.source === 'artifact') ? ' nav-item--active' : ''}`}
             onClick={(event) => { event.preventDefault(); navigateTo('artifacts') }}
           ><Icon name="folder" /><span>协作产物</span></a>
+          <a
+            href="#design-documents"
+            data-testid="nav-design-documents"
+            class={`nav-item${page() === 'folder-browser' && folderBrowserNavigation()?.source === 'design-documents' ? ' nav-item--active' : ''}`}
+            onClick={(event) => { event.preventDefault(); void browseDesignDocuments() }}
+          ><Icon name="skill" /><span>设计文档</span></a>
           <a
             href="#chat"
             data-testid="nav-chat"
@@ -84,8 +121,11 @@ export function App() {
         </nav>
       </aside>
 
-      <main class={`content${page() === 'skills' || page() === 'knowledge-processing' || page() === 'knowledge' || page() === 'chat' || page() === 'agent-configuration' ? ' content--wide' : ''}`}>
+      <main class={`content${page() === 'skills' || page() === 'knowledge-processing' || page() === 'knowledge' || page() === 'chat' || page() === 'agent-configuration' || page() === 'folder-browser' ? ' content--wide' : ''}`}>
         <div class="window-drag-region" data-testid="window-drag-region" aria-hidden="true" />
+        <Show when={navigationError()}>
+          {(message) => <div class="page-error" role="alert"><Icon name="warning" />{message()}</div>}
+        </Show>
         {/* Navigation changes visibility; mounted page state and active runs remain intact. */}
         <div data-testid="page-sources" hidden={page() !== 'sources'}>
           <header class="page-header">
@@ -142,14 +182,33 @@ export function App() {
           />
         </div>
         <div data-testid="page-artifacts" hidden={page() !== 'artifacts'}>
-          <ArtifactsPage onManageSkill={(artifactDirectoryName) => {
-            setSkillsNavigation((current) => ({
-              artifactDirectoryName,
-              version: (current?.version ?? 0) + 1
-            }))
-            navigateTo('skills')
-          }} />
+          <ArtifactsPage
+            onBrowseArtifact={(artifact) => browseFolder({
+              folderPath: artifact.directoryPath,
+              label: artifact.directoryName,
+              source: 'artifact',
+              returnPage: 'artifacts'
+            })}
+            onManageSkill={(artifactDirectoryName) => {
+              setSkillsNavigation((current) => ({
+                artifactDirectoryName,
+                version: (current?.version ?? 0) + 1
+              }))
+              navigateTo('skills')
+            }}
+          />
         </div>
+        <Show when={folderBrowserNavigation()}>
+          {(navigation) => (
+            <div data-testid="page-folder-browser" hidden={page() !== 'folder-browser'}>
+              <FolderBrowserPage
+                folderPath={navigation().folderPath}
+                label={navigation().label}
+                onBack={() => navigateTo(navigation().returnPage)}
+              />
+            </div>
+          )}
+        </Show>
         <div data-testid="page-chat" hidden={page() !== 'chat'}>
           <ChatPage onOpenKnowledge={(title) => {
             setKnowledgeNavigation((current) => ({ title, version: (current?.version ?? 0) + 1 }))

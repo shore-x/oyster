@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { discoveryChannels } from '../shared/channels'
@@ -54,6 +54,8 @@ import { registerSkillIpc } from './skills/ipc'
 import { ManagedSkillService } from './skills/managed-skill-service'
 import { SkillDiscoveryService } from './skills/skill-discovery-service'
 import { OysterRepository } from './repository/oyster-repository'
+import { FolderBrowserService } from './folder-browser/folder-browser-service'
+import { registerFolderBrowserIpc } from './folder-browser/ipc'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 let mainWindow: BrowserWindow | undefined
@@ -163,17 +165,17 @@ async function initializeFixtureKnowledge(store: FileKnowledgeStore): Promise<vo
     {
       path: 'oyster-processing.md',
       title: 'Oyster 知识加工链路',
-      content: 'Harness 在统一 Repository 中创建 processing branch，让 [[Knowledge Maintenance Agent|知识维护 Agent]] 和 Reviewer 通过 Run 工作状态与 commit 交替工作；[[Raw Evidence|原始证据]] 保留在 Repository 之外，测试结果保持未合并。'
+      content: 'Harness 在统一 Repository 中创建 processing branch 与独立 Run 工作空间，让 [[Knowledge Maintenance Agent|知识维护 Agent]] 和 Reviewer 通过文件工作状态与 commit 交替工作；固定的 [[Raw Evidence|原始证据]] 输入视图保存在该 Run 中，测试结果保持未合并。'
     },
     {
       path: 'knowledge-maintainer.md',
       title: 'Knowledge Maintenance Agent',
-      content: '读取 Run 工作清单与 Canonical Activity，按需回溯[[Raw Evidence|原始证据]]，直接维护 Knowledge/Artifact 文件并创建普通 Git commit。'
+      content: '从独立 Run 工作空间读取 TASK.md、WORK.md 与文件化 Canonical Activity，按需回溯[[Raw Evidence|原始证据]]，直接维护 Knowledge/Artifact 文件并创建普通 Git commit。'
     },
     {
       path: 'raw-evidence.md',
       title: 'Raw Evidence',
-      content: '外部 Agent Session 的不可变原始材料；它不进入 Oyster Repository。Host 生成确定性 Canonical Activity 与 Run 工作清单，供 [[Knowledge Maintenance Agent]] 有界读取和精确回查。'
+      content: '外部 Agent Session 的确定版本材料。Host 为一次知识加工 Run 生成固定的文件输入视图与 Canonical Activity，供 [[Knowledge Maintenance Agent]] 用普通文件工具有界读取和精确回查。'
     },
     {
       path: 'skill-activation.md',
@@ -1238,13 +1240,10 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       .map((node) => node.textContent?.trim())
     const toolsReadOnlyCopy = page.querySelector('[data-testid="agent-config-tools-panel"]')?.textContent?.trim()
     const schemaPanelCount = page.querySelectorAll('.agent-config-tool__schema').length
-    const activitySchemaDetails = page.querySelector('[data-testid="agent-tool-schema-read_activity"]')
-    const evidenceSchemaDetails = page.querySelector('[data-testid="agent-tool-schema-read_evidence"]')
-    if (activitySchemaDetails) activitySchemaDetails.open = true
-    if (evidenceSchemaDetails) evidenceSchemaDetails.open = true
+    const readSchemaDetails = page.querySelector('[data-testid="agent-tool-schema-read"]')
+    if (readSchemaDetails) readSchemaDetails.open = true
     await new Promise((resolve) => requestAnimationFrame(resolve))
-    const activityToolSchema = JSON.parse(activitySchemaDetails?.querySelector('pre')?.textContent || '{}')
-    const evidenceToolSchema = JSON.parse(evidenceSchemaDetails?.querySelector('pre')?.textContent || '{}')
+    const readToolSchema = JSON.parse(readSchemaDetails?.querySelector('pre')?.textContent || '{}')
     const expandedSchemaCount = page.querySelectorAll('.agent-config-tool__schema[open]').length
 
     page.querySelector('[data-testid="agent-config-tab-prompt"]')?.click()
@@ -1340,8 +1339,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       toolsReadOnlyCopy,
       schemaPanelCount,
       expandedSchemaCount,
-      activityToolSchema,
-      evidenceToolSchema,
+      readToolSchema,
       builtInPrompt,
       configuredBadge,
       saveNotice,
@@ -1363,7 +1361,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const page = document.querySelector('[data-testid="page-agent-configuration"]')
     page.querySelector('[data-testid="agent-config-tab-tools"]')?.click()
     requestAnimationFrame(() => {
-      const schema = page.querySelector('[data-testid="agent-tool-schema-read_activity"]')
+      const schema = page.querySelector('[data-testid="agent-tool-schema-read"]')
       if (schema) schema.open = true
       window.scrollTo(0, 0)
       requestAnimationFrame(resolve)
@@ -1510,6 +1508,53 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   const artifactImage = await window.webContents.capturePage()
   await writeFile(join(dirname(capturePath), 'artifacts.png'), artifactImage.toPNG())
 
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="browse-artifact"]')?.click()`)
+  const artifactBrowserSemantics = await window.webContents.executeJavaScript(`(async () => {
+    const deadline = Date.now() + 2_000
+    let page
+    while (Date.now() < deadline) {
+      page = document.querySelector('[data-testid="page-folder-browser"]')
+      if (page && !page.hidden && page.querySelector('[data-testid="folder-browser-markdown"]')) break
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    return {
+      title: page?.querySelector('h1')?.textContent?.trim(),
+      path: page?.querySelector('.folder-browser-page__path')?.textContent?.trim(),
+      selectedPath: page?.querySelector('.folder-browser__navigation > span')?.textContent?.trim(),
+      fileNames: Array.from(page?.querySelectorAll('[data-testid="folder-browser-entry"] span') || [])
+        .map((element) => element.textContent?.trim()),
+      markdownHeading: page?.querySelector('[data-testid="folder-browser-markdown"] h1')?.textContent?.trim(),
+      pageError: page?.querySelector('.page-error')?.textContent?.trim(),
+      overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
+    }
+  })()`)
+  const artifactBrowserImage = await window.webContents.capturePage()
+  await writeFile(join(dirname(capturePath), 'artifact-browser.png'), artifactBrowserImage.toPNG())
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="folder-browser-close"]')?.click()`)
+
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-design-documents"]')?.click()`)
+  const designDocumentsBrowserSemantics = await window.webContents.executeJavaScript(`(async () => {
+    const deadline = Date.now() + 2_000
+    let page
+    while (Date.now() < deadline) {
+      page = document.querySelector('[data-testid="page-folder-browser"]')
+      if (page && !page.hidden && page.querySelector('[data-testid="folder-browser-markdown"]')) break
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    return {
+      title: page?.querySelector('h1')?.textContent?.trim(),
+      path: page?.querySelector('.folder-browser-page__path')?.textContent?.trim(),
+      selectedPath: page?.querySelector('.folder-browser__navigation > span')?.textContent?.trim(),
+      fileNames: Array.from(page?.querySelectorAll('[data-testid="folder-browser-entry"] span') || [])
+        .map((element) => element.textContent?.trim()),
+      markdownRendered: Boolean(page?.querySelector('[data-testid="folder-browser-markdown"]')),
+      pageError: page?.querySelector('.page-error')?.textContent?.trim(),
+      overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
+    }
+  })()`)
+  const designDocumentsBrowserImage = await window.webContents.capturePage()
+  await writeFile(join(dirname(capturePath), 'design-documents-browser.png'), designDocumentsBrowserImage.toPNG())
+
   window.setSize(1160, 780)
   await new Promise((resolve) => setTimeout(resolve, 80))
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-knowledge-processing"]').click()`)
@@ -1529,6 +1574,10 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       ai: { ...aiSemantics, directTest: aiDirectTestSemantics },
       agentConfiguration: agentConfigurationSemantics,
       artifacts: artifactSemantics,
+      folderBrowser: {
+        artifact: artifactBrowserSemantics,
+        designDocuments: designDocumentsBrowserSemantics
+      },
       chat: chatSemantics,
       knowledge: {
         browse: knowledgeBrowseSemantics,
@@ -1605,6 +1654,10 @@ app.whenReady().then(async () => {
   const repository = new OysterRepository(join(app.getPath('userData'), 'repository'))
   await repository.initialize()
   const artifactService = new ArtifactService(repository)
+  const folderBrowser = new FolderBrowserService()
+  const designDocumentsPath = app.isPackaged
+    ? resolve(currentDirectory, '..', 'oyster-design-docs', 'docs')
+    : resolve(currentDirectory, '..', '..', 'docs')
   const managedSkillService = createManagedSkillService(artifactService)
   aiBackendService = createBackendService()
   knowledgeStore = new FileKnowledgeStore(repository.knowledgePath)
@@ -1643,6 +1696,7 @@ app.whenReady().then(async () => {
   registerIpc(service)
   registerSkillIpc(skillDiscoveryService, managedSkillService, () => mainWindow)
   registerArtifactIpc(artifactService, () => mainWindow)
+  registerFolderBrowserIpc(folderBrowser, designDocumentsPath, () => mainWindow)
   registerAiBackendIpc(aiBackendService, () => mainWindow)
   registerKnowledgeProcessingIpc(
     service,

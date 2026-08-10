@@ -24,6 +24,7 @@ function attentionSummary(value: string): string {
 function ArtifactCard(props: {
   artifact: ArtifactSummary
   busy?: string
+  onBrowse(): void
   onOpen(): void
   onManageSkill(): void
 }) {
@@ -40,13 +41,22 @@ function ArtifactCard(props: {
           </div>
           <span>AGENTS.md 更新于 {modifiedAtLabel(props.artifact.modifiedAt)}</span>
         </div>
-        <Button
-          variant="ghost"
-          icon="folder"
-          data-testid="open-artifact"
-          disabled={Boolean(props.busy)}
-          onClick={props.onOpen}
-        >{props.busy === `open:${props.artifact.directoryName}` ? '正在打开…' : '打开文件夹'}</Button>
+        <div class="artifact-card__actions">
+          <Button
+            variant="secondary"
+            icon="skill"
+            data-testid="browse-artifact"
+            disabled={Boolean(props.busy)}
+            onClick={props.onBrowse}
+          >浏览</Button>
+          <Button
+            variant="ghost"
+            icon="folder"
+            data-testid="open-artifact"
+            disabled={Boolean(props.busy)}
+            onClick={props.onOpen}
+          >{props.busy === `open:${props.artifact.directoryName}` ? '正在打开…' : '打开文件夹'}</Button>
+        </div>
       </header>
       <details class="artifact-card__details ui-disclosure">
         <summary>
@@ -95,7 +105,10 @@ function ArtifactCard(props: {
   )
 }
 
-export function ArtifactsPage(props: { onManageSkill(artifactDirectoryName: string): void }) {
+export function ArtifactsPage(props: {
+  onBrowseArtifact(artifact: ArtifactSummary): void
+  onManageSkill(artifactDirectoryName: string): void
+}) {
   const controller = createArtifactsController()
   const [directoryName, setDirectoryName] = createSignal('')
   const [attention, setAttention] = createSignal('')
@@ -251,6 +264,7 @@ export function ArtifactsPage(props: { onManageSkill(artifactDirectoryName: stri
                   <ArtifactCard
                     artifact={artifact}
                     busy={controller.busy()}
+                    onBrowse={() => props.onBrowseArtifact(artifact)}
                     onOpen={() => void controller.openArtifact(artifact.directoryName)}
                     onManageSkill={() => props.onManageSkill(artifact.directoryName)}
                   />

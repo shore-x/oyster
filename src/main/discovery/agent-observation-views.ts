@@ -254,7 +254,7 @@ function compactActivityPayload(value: string): string {
   const omitted = value.length - headLength - tailLength
   return [
     value.slice(0, headLength),
-    `[Canonical Activity omitted ${omitted} of ${value.length} payload characters. Full normalized payload SHA-256: ${createHash('sha256').update(value).digest('hex')}. Use the Raw source locator with read_evidence for exact content.]`,
+    `[Canonical Activity omitted ${omitted} of ${value.length} payload characters. Full normalized payload SHA-256: ${createHash('sha256').update(value).digest('hex')}. Use the Raw source locator in the Run input for exact content.]`,
     value.slice(-tailLength)
   ].join('\n')
 }
@@ -280,7 +280,7 @@ function attachmentDescriptor(capture: AttachmentCapture): string {
     `SHA-256: ${capture.sha256}`,
     `Source field: ${capture.field}`,
     capture.mimeType.startsWith('image/')
-      ? `Inspect with read_activity_attachment({"id":"${capture.id}"}).`
+      ? `Inspect the ${capture.id} file materialized in the Run input with the ordinary read tool.`
       : 'This attachment type is opaque to the current Maintainer runtime; use the Raw source locator for provenance.'
   ].join('\n')
 }
@@ -423,7 +423,7 @@ function addUnparseableRecord(
     `Characters: ${line.length}`,
     `UTF-8 bytes: ${Buffer.byteLength(line, 'utf8')}`,
     `SHA-256: ${createHash('sha256').update(line).digest('hex')}`,
-    'Use this activity\'s Raw source locator with read_evidence to inspect the exact content.'
+    'Use this activity\'s Raw source locator in the Run input to inspect the exact content.'
   ].join('\n'), range)
 }
 

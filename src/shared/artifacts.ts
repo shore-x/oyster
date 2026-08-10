@@ -11,6 +11,8 @@ export interface ArtifactSkillSummary {
 export interface ArtifactSummary {
   /** The first-level directory name and the Artifact identity in the MVP. */
   directoryName: string
+  /** Absolute path supplied to the generic folder browser. */
+  directoryPath: string
   /** Complete Markdown content of the Artifact's root AGENTS.md. */
   attention: string
   /** Last modification time of the root AGENTS.md. */

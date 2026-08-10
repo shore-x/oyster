@@ -18,9 +18,11 @@
 - 修订：2026-07-31，确定通用 Agent 的高信任 MVP：Coding 工具从固定 Artifact Repository 根开始，但不设置路径边界、Shell Sandbox、逐次审批、selector/router/lock；System Prompt 只提供必要环境事实
 - 修订：2026-07-31，为通用管理 Agent 增加 `spawn_agent`：它创建独立上下文的临时通用 Agent 运行，不建立新的用户 Session、固定子 Agent 角色或专用工作流
 - 修订：2026-08-05，引入可选的通用 Todo 与结束检查能力；ADR-0002 后 Maintainer/Reviewer 改用文件工作清单且不安装 Todo，Chat Agent 继续使用
-- 修订：2026-08-10，Source Adapter 从完整 Raw Evidence 确定性生成对话优先的 Canonical Activity；对话正文和上下文压缩语义摘要完整保留，工具只保留操作身份与 Raw locator，Codex 的运行时 user-role 信封、参数、结果、模型内部 reasoning、压缩 replacement history、协议包装和重复运行时快照不进入默认正文；Maintainer 完整扫描活动与附件，并按 locator 回查原文
 - 修订：2026-08-06，ADR-0002 取代分离 Knowledge Store、Contribution Draft 提交协议和“Git 不承担 Agent 修订工作流”的相关决定
 - 修订：2026-08-06，ADR-0002 进一步确定文件工作清单与“批准但不 merge”的知识加工 MVP
+- 修订：2026-08-10，Source Adapter 从完整 Raw Evidence 确定性生成对话优先的 Canonical Activity；对话正文和上下文压缩语义摘要完整保留，工具只保留操作身份与 Raw locator，Codex 的运行时 user-role 信封、参数、结果、模型内部 reasoning、压缩 replacement history、协议包装和重复运行时快照不进入默认正文；Maintainer 完整扫描活动与附件，并按 locator 回查由固定 Raw Evidence 行模型生成的 Evidence page
+- 修订：2026-08-10，明确 Artifact Domain 不定义全局 Maintainer、Reviewer 或 Critic；Artifact 说明表达维护目标、证据边界、质量义务和完成条件，当前通用管理 Agent 只是已实现入口，不排除未来其他维护方式
+- 修订：2026-08-10，依据 ADR-0002，结构化知识加工的每个 Processing Run 使用独立 `runs/<run-id>/` 文件工作空间；任务、输入和工作状态由文件表达，Maintainer/Reviewer 不再使用 Observation 专用读取工具
 - 关联文档：[ADR-0002](0002-unified-git-agent-collaboration.md)、[Product Brief](../product/product-brief.md)、[本地 Agent 发现与外部证据访问](../product/local-agent-discovery-mvp.md)、[AI Backend MVP](../product/ai-backends-mvp.md)、[知识加工验证 MVP](../product/knowledge-processing-mvp.md)、[Artifact Repository MVP](../product/artifact-repository-mvp.md)、[知识加工、Projection 与 Artifact](../architecture/knowledge-model-and-projection.md)
 
 ## Context
@@ -33,7 +35,7 @@
 
 Oyster 的主要产品身份是：本地优先、跨 Agent、跨项目的知识库维护中心。
 
-> 历史边界：本节保留 ADR-0001 被接受时的原始决定。凡涉及 Knowledge/Artifact 物理存储、Contribution Draft 提交协议和 Git 协作的内容均已由 ADR-0002 取代，不再作为当前目标。
+> 决策演进：本 ADR 保留仍有效的产品定位和领域边界；Knowledge/Artifact 物理存储、Contribution Draft、专用 Knowledge CRUD 与 Git 协作的早期方案已由 ADR-0002 取代。下文按当前决定修订，不再把被取代的机制与现行架构并列陈述。
 
 系统保留三个相互区分的状态与权威域：
 
@@ -41,19 +43,21 @@ Oyster 的主要产品身份是：本地优先、跨 Agent、跨项目的知识�
 2. 知识层：受控 Knowledge Maintenance Agent、经授权的知识生产 Pipeline 和用户从观察或已有知识形成可引用、可修订的 Knowledge Statement；Statement 以语义丰富的自然语言正文及其中对 canonical title 的显式引用表达对象、概念与任意多元关系，不建立独立的领域 Relation 实体；
 3. Artifact Domain（协作产物域）：保存用户与 Agent 围绕 Attention 持续维护的 Artifact。Artifact 具有独立身份、当前状态和修订生命周期，不限定为 Markdown 或单一文件，可以是文档、配置、模板、代码、脚本、资产或它们的组合，并接纳用户编辑。
 
+Artifact Domain 只定义产物及其局部维护契约，不定义全局 Maintainer、Reviewer 或 Critic。Artifact 的说明文档以自然语言表达维护目标、证据边界、质量义务和完成条件；具体维护可以由用户、一个或多个通用 Agent、临时 subagent、面向特定任务的流程或未来其他机制完成。任务内为了独立建模或相互校验而形成的角色不进入 Artifact 的身份与本体；若需要可强制的独立审批或 promotion，应由采用它的具体工作流另行定义。
+
 Projection 是从知识、Attention 和必要的当前状态形成可消费输出的活动，而不是第三个持久状态域本身。它可以形成按需消费输出，也可以初始化 Artifact，或基于当前 Artifact 形成下一次修订。Context Packet 是当前临时消费输出的候选形式，其与持久 Artifact 之间的转换关系不由本 ADR 决定。
 
-三个域保持不同的数据所有权，但知识加工、Projection 和 Artifact 维护通过共享 Attention 耦合。Source Adapter 保留完整 Raw Evidence，从同一 revision 确定性生成 Canonical Activity，并按 Harness 原始格式标记疑似 Skill 激活位置；Activity 与 hint 都只是可重建导航。Canonical Activity 完整保留对话正文和上下文压缩的语义摘要，省略 Codex 运行时 user-role 信封、模型内部 reasoning、压缩 replacement history 和重复表示；工具活动只保留操作身份以及调用和结果的 Raw locator，参数与结果仍属于 Raw Evidence，Base64 二进制则变成可独立读取的 Attachment。这类结构化收敛不判断内容的重要性、因果或真假。Host 在启动 Knowledge Maintenance Agent 时沿 Activity 边界生成粗粒度 Segment initial Todo，段内有界分页只承担单次工具 I/O 边界。Agent 逐段扫描活动与附件，按需回查 Raw Evidence，自行识别需要调查的名称、指代和背景问题，必要时增加 Todo，并独立维护 Contribution Draft；当所有 Todo 完成且 Agent 自然结束时，Host 冻结整份 Draft。Todo 与 Contribution Draft 都是可丢弃的运行期工作材料（Run-local Working Material），不是第四个状态域。Oyster Core 统一执行该知识加工 Pipeline 的来源、冻结与提交边界。无论知识由 Agent、Pipeline 还是用户产生，都进入同一个知识层，不按处理器或 Artifact 建立不同的真相存储。
+三个域保持不同的数据所有权，但知识加工、Projection 和 Artifact 维护通过共享 Attention 耦合。Source Adapter 保留完整 Raw Evidence，从同一 revision 确定性生成 Canonical Activity，并按 Harness 原始格式标记疑似 Skill 激活位置；Activity 与 hint 都只是可重建导航。Canonical Activity 完整保留对话正文和上下文压缩的语义摘要，省略 Codex 运行时 user-role 信封、模型内部 reasoning、压缩 replacement history 和重复表示；工具活动只保留操作身份以及调用和结果的 Raw locator，参数与结果仍属于 Raw Evidence，Base64 二进制则变成可独立读取的 Attachment。这类结构化收敛不判断内容的重要性、因果或真假。Oyster Core 为每个 Processing Run 创建独立 `runs/<run-id>/`：`TASK.md` 表达任务，`inputs/` 保存有界 Activity、Evidence page 与附件，`WORK.md` 保存可变工作状态，`workspace.json` 固定任务、输入与创建时的 Knowledge/Artifact working-tree 指纹。Maintainer 只用普通文件和 Shell 工具扫描这些材料、按需回查 Evidence，并直接维护统一 Repository 中的 Knowledge/Artifact；Reviewer 使用相同普通工具，但不把 `inputs/` 纳入证据范围。无论知识由 Agent、Pipeline 还是用户产生，都进入同一个知识层，不按处理器或 Artifact 建立不同的真相存储。
 
 Attention 可以让 Artifact 自然形成分组，但是否正式引入 Project，以及这种分组的身份和生命周期，仍是未决定事项。任何 Artifact 分组都不得把共享知识划分为彼此隔离的真相。
 
-当前 Artifact Repository MVP 使用 Oyster 管理的固定本地目录 `app.getPath('userData')/artifacts/`，并将其初始化为一个标准 Git Repository。Repository 中每个带有可读取的普通根 `AGENTS.md` 的一级目录是一个 Artifact；`AGENTS.md` 以无固定 Schema 的 Markdown 表达该 Artifact 的持久 Attention，其余内部结构任意。APP 直接扫描文件系统，使用一级目录的 Repository 相对路径作为当前身份，不建立 manifest、稳定 `artifactId`、Artifact 类型或数据库镜像。缺少或无法读取根 `AGENTS.md` 的可见一级目录不是 Artifact，并在 UI 中明确显示为无效目录。初始化失败只影响 Artifact 功能并可重试，不阻止 APP 的其他功能启动。
+当前统一 Repository 位于 `app.getPath('userData')/repository/`。其中 `artifacts/` 下每个带有可读取普通根 `AGENTS.md` 的一级目录是一个 Artifact；`AGENTS.md` 以无固定 Schema 的 Markdown 表达该 Artifact 的持久 Attention，并作为维护目标、证据边界、质量义务和完成条件的表达载体，其余内部结构任意。四项内容是否表达充分属于内容质量，不进入当前 Artifact 有效性检查。APP 直接扫描文件系统，使用 `artifacts/` 下一级目录的 Repository 相对路径作为当前身份，不建立 manifest、稳定 `artifactId`、Artifact 类型或数据库镜像。缺少或无法读取根 `AGENTS.md` 的可见一级目录不是 Artifact，并在 UI 中明确显示为无效目录。
 
 Git 在这一 MVP 中只是文件历史基础。Oyster 随 APP 捆绑并始终使用私有的标准 Git Runtime；APP 发起 Git 操作时直接调用包内 Git 可执行文件的绝对路径，不通过进程 `PATH` 查找，也不以系统 Git 作为前置条件。私有 Runtime 仍产生可由普通 Git CLI 读取的标准 Repository，不形成 Oyster 专有格式或 Git 方言。
 
-APP 自身不自动 commit，不创建 branch 或 worktree，也不实现 diff 审核、merge 或冲突处理。当前通用管理 Agent 可以在普通对话中完成 Artifact 初始化、修订和知识选择，不建立独立 Artifact Agent 或固定 Projection Pipeline。其 `bash` 局部 `PATH` 暴露同一个标准 Git CLI，让 Agent 使用普通 `git` 命令，不增加专用 Git Tool 或替代协议。Harness 不自动编排 Git 工作流，也不限制 Agent 根据当前任务使用普通 Git。外部终端和其他外部进程默认不获得这一 PATH 注入。该实现不把 Git、目录或 `AGENTS.md` 提升为 Artifact Domain 的长期本体。
+当前通用管理 Agent 可以在普通对话中完成 Artifact 初始化、修订和知识选择，不建立 Artifact Domain 级的固定 Agent 角色或固定 Projection Pipeline；这是当前实现入口，不是对未来维护方式的排他决定。其 `bash` 局部 `PATH` 暴露同一个标准 Git CLI，让 Agent 使用普通 `git` 命令，不增加专用 Git Tool 或替代协议。普通 Artifact 维护不自动继承结构化知识加工的 branch、Reviewer 或 approval；采用何种 Git 与审核流程由具体维护方式决定。结构化知识加工当前由 ADR-0002 定义 processing branch、commit handoff 和“批准但不 merge”，仍不创建 worktree。该实现不把 Git、目录或 `AGENTS.md` 提升为 Artifact Domain 的长期本体。
 
-面向用户的现有对话 Agent 扩展为一个通用管理 Agent。每个 Session 始终拥有 `read`、`edit`、`write`、`bash`、`search_knowledge`、`read_knowledge`、`upsert_knowledge`、`spawn_agent`、`add_todos`、`complete_todos` 和 `list_todos`；Session 只保存对话与模型配置，不绑定 Artifact、Project、Workspace 或 `cwd`。`spawn_agent` 使用父 Agent 给出的完整任务启动空 transcript 的临时通用 Agent 运行，复用同一模型、System Prompt 和工具能力，并把最终回答作为 Tool Result 返回父 Agent。子运行不是新的用户 Session，也不按 Artifact 或 Project 绑定；Harness 不预设 reviewer、planner 等固定角色或专用编排模式。四个 Coding 工具以固定 Artifact Repository 根作为初始坐标，但工具按 APP 当前 OS 用户权限运行，该坐标不是访问或安全边界。Harness 不建立 Artifact selector、router、锁、路径限制、命令白名单、Shell Sandbox 或 Bash 逐次审批。
+面向用户的现有对话 Agent 扩展为一个通用管理 Agent。每个 Session 使用普通 `read`、`edit`、`write`、`bash`、`spawn_agent` 和通用 Todo；Knowledge 与 Artifact 都通过统一 Repository 的文件表达，不另设平行 Knowledge CRUD。Session 只保存对话与模型配置，不绑定 Artifact、Project 或 Workspace。`spawn_agent` 使用父 Agent 给出的完整任务启动空 transcript 的临时通用 Agent 运行，复用同一模型、System Prompt 和工具能力，并把最终回答作为 Tool Result 返回父 Agent。子运行不是新的用户 Session，也不按 Artifact 或 Project 绑定；Harness 不预设 reviewer、planner 等全局角色或专用编排模式，当前 Agent 可以根据任务、上下文和 Artifact 说明选择是否用这一通用能力形成临时分工。四个 Coding 工具以统一 Repository 根作为初始坐标，但工具按 APP 当前 OS 用户权限运行，该坐标不是访问或安全边界。Harness 不建立 Artifact selector、router、锁、路径限制、命令白名单、Shell Sandbox 或 Bash 逐次审批。
 
 Todo 是每个 Agent 运行由 Host 持有的通用工作状态，不属于 Knowledge、Artifact 或新的权威域。启动 Agent 时可以把初始 Todo 直接绑定到 Runtime Store，但不把它们转换为 Prompt 或 transcript 消息，也不在每次模型调用前注入清单；Agent 通过三项通用工具主动读取和更新。当 Agent 正常自然结束时，Runtime 聚合所有“当前不能结束”的原因，pending Todo 是其中一种；存在原因时通过内部 Follow-up 再次唤起同一 Agent。业务 Agent 可以提供自己的结束原因，但通用 Runtime 不理解其领域含义，也不设置固定续跑次数、工具次数或总时长。
 
@@ -65,14 +69,14 @@ Knowledge Statement 是知识层领域语义的 Source of Truth。canonical titl
 
 Knowledge Maintenance Agent 是普通、可替换的工具使用 Agent，其角色由 System Prompt、Workspace、工具权限和 Host 对自然结束的解释定义，不引入专用状态机或任意的总轮次、工具次数和时长配额。具体 Runtime、上下文管理和工具协议属于可替换实现。
 
-Artifact 不是新的世界事实，也不是可由知识层覆盖式重建的纯派生物。用户可以直接创建或编辑 Artifact；Agent 的后续更新以当前 Artifact 状态为输入，并延续已经接纳的编辑。通用管理 Agent 同时拥有 Knowledge 与文件工具，但文件修改不会自动回流为知识；调用 `upsert_knowledge` 是对知识层作出的另一项明确修改。是否为需要深入核查的反馈建立 `Knowledge Need` 或其他异步协议尚未决定。
+Artifact 不是新的世界事实，也不是可由知识层覆盖式重建的纯派生物。用户可以直接创建或编辑 Artifact；Agent 的后续更新以当前 Artifact 状态为输入，并延续已经接纳的编辑。Artifact 文件修改不会自动回流为知识；对 `knowledge/` 的修改是另一项明确的领域修改，即使两者可以位于同一个 commit。是否为需要深入核查的反馈建立 `Knowledge Need` 或其他异步协议尚未决定。
 
 本地历史和未来实时来源进入同一观察处理边界。输出侧优先通过 MCP 和本地 API 提供 Pull-based Search/Context。通用管理 Agent 已作为内置协作界面；自动上下文注入、浏览器和其他专用执行产品能力仍延后。
 
 当前对具有稳定原始位置的本地历史采用以下访问策略；它不预先决定未来其他来源是否由 Oyster 托管正文：
 
 - Conversation transcript 与人类编写的 Agent 指令是当前支持的两类外部 Raw Evidence；
-- Oyster 只保存稳定来源身份、内部 locator 和轻量版本指纹，不复制每个 Harness 的 JSONL、Markdown 或其他原始正文；
+- Discovery catalog 只保存稳定来源身份、内部 locator 和轻量版本指纹，不复制每个 Harness 的 JSONL、Markdown 或其他原始正文；当用户选择确定版本启动加工后，Core 才在该次 Run 中保存由固定行模型物化的 Evidence page 与附件工作视图，这不改变外部来源的权威位置；
 - 轻量 header/metadata 解析只用于 catalog、统计和变化判断。使用证据时，Source Adapter 校验并读取用户选择的确定版本；完整标准化与 LLM 理解发生在后续可重建层；
 - 外部记录可以变化或消失。当前加工运行记录所使用的来源与版本；再次展开失败必须明确暴露，不能静默改用另一个版本。正式知识采用何种追溯结构留给治理设计；
 - Agent 自动生成的 memory 不作为来源。它属于外部 Agent 的派生结果，而且扫描时的当前版本不能证明某个历史 turn 实际看到的版本。
@@ -81,7 +85,7 @@ Artifact 不是新的世界事实，也不是可由知识层覆盖式重建的�
 
 以下内容仍是可探讨方向，不属于本 ADR 已接受的决定：
 
-- 当前目录式 Artifact 是否成为长期载体，以及何时需要稳定 ID、其他 Artifact 类型或验证契约；
+- 当前目录式 Artifact 是否成为长期载体，以及何时需要稳定 ID、其他 Artifact 类型或可强制的通用验证与审批协议；
 - Context Packet 等临时消费输出能否提升为 Artifact，以及提升语义；
 - 是否正式引入 Project、Collection、Workspace 等分组类型；
 - Artifact 之间的引用、依赖、组合和构建语义；
@@ -97,11 +101,11 @@ Artifact 不是新的世界事实，也不是可由知识层覆盖式重建的�
 - 产品价值不依赖单个 Agent、模型、浏览器或 Harness；
 - 大型历史可以按 Session 使用，无需维护第二份完整数据；
 - 原始证据和 LLM/Agent 推断分离，知识可审查、重建和删除；
-- Raw Evidence、通用 Todo、Contribution Draft、Knowledge Contribution 与 Knowledge Statement 的边界清晰，正式知识生产者复用统一的贡献和治理契约；
+- Raw Evidence、Run-local 工作文件、Knowledge Statement 与 Artifact 的边界清晰，正式领域修改汇入统一 Repository 和可检查 revision；
 - Artifact 可以采用适合交付目标的异构形式，而不与共享知识或临时消费视图混为一种状态；
 - 固定 Repository、一级目录和根 `AGENTS.md` 提供了无需额外 Schema 或专用编辑器的最小可验证载体；
 - 捆绑的标准 Git Runtime 消除了系统 Git 和用户 `PATH` 差异，同时保留普通 Git 工具的互操作性；
-- 单一通用管理 Agent 可以在同一对话中跨 Knowledge 与多个 Artifact 工作，不需要用户先选择 Project 或 Workspace；
+- 当前通用管理 Agent 可以在同一对话中跨 Knowledge 与多个 Artifact 工作，不需要用户先选择 Project 或 Workspace，同时不限制未来采用其他 Artifact 维护方式；
 - 临时子 Agent 运行提供独立上下文委派，而不要求新增面向用户的 Agent 身份、Session 类型或固定工作流；
 - 最小 Harness 把语义相关性判断留给 Agent，避免 Artifact router、Session 类型和权限策略提前固化产品模型；
 - 跨项目关系和跨 Agent 检索成为一等能力；
@@ -113,9 +117,9 @@ Artifact 不是新的世界事实，也不是可由知识层覆盖式重建的�
 - Oyster 对外部目录及格式保持运行时依赖，记录变化或消失后可能无法再次核查原文；
 - 三个状态域、共享 Attention 与 Agent 维护边界比“消息 + 向量库”复杂；
 - 异构 Artifact 不能被简化为随时覆盖重建的物化视图，未来需要处理自己的编辑与生命周期问题；
-- 路径暂作身份且 APP 不管理 Git 修订，因此移动连续性、自动历史和并发冲突当前没有产品保证；
+- Artifact 路径暂作身份，因此移动连续性仍没有稳定 ID 保证；并发冲突治理也尚未定义；
 - Oyster 需要随 APP 维护、验证和更新捆绑的 Git Runtime；
-- 文件与 Shell 工具以当前 OS 用户权限运行，Artifact Repository 根不是安全边界；模型误判或不可信内容导致的命令后果由当前高信任模型直接承担；
+- 文件与 Shell 工具以当前 OS 用户权限运行，Repository 根和 Run 目录都不是安全边界；模型误判或不可信内容导致的命令后果由当前高信任模型直接承担；
 - 不建立 Artifact 锁或自动冲突处理时，多个 Session 可能同时修改同一共享 working tree；
 - 知识质量需要真实评测与人工治理，不能只靠模型能力；
 - 相邻产品已提供跨 Agent Memory/MCP，必须持续证明 Oyster 在历史访问、异构保真和治理上的差异。

@@ -44,6 +44,12 @@ function terminalError(error: unknown, status: 'failed' | 'cancelled'): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+function terminalRecordFailure(primary: unknown, secondary: unknown): AggregateError {
+  const primaryError = primary instanceof Error ? primary : new Error(String(primary))
+  const secondaryError = secondary instanceof Error ? secondary : new Error(String(secondary))
+  return new AggregateError([primaryError, secondaryError], primaryError.message)
+}
+
 function validateInput(input: RunKnowledgeFullChainInput): void {
   validateSessionSelection(input)
   if (input.attention !== undefined && typeof input.attention !== 'string') {
@@ -84,6 +90,7 @@ export class KnowledgeFullChainService {
     let startedAt = Date.now()
     let startedAtIso = new Date(startedAt).toISOString()
     let runStarted = false
+    let runWorkspace: ProcessingRun | undefined
     let session: AvailableSessionSummary | undefined
     const agentRuns: AgentRunRecord[] = []
     let historySaveAttempted = false
@@ -104,7 +111,7 @@ export class KnowledgeFullChainService {
       if (!this.history) return
       historySaveAttempted = true
       this.history.save({
-        formatVersion: 7,
+        formatVersion: 8,
         runId,
         status,
         startedAt: startedAtIso,
@@ -128,7 +135,6 @@ export class KnowledgeFullChainService {
       controller.signal.throwIfAborted()
       startedAt = Date.now()
       startedAtIso = new Date(startedAt).toISOString()
-      runStarted = true
       this.processing.clearDebugTraces('full_chain')
       const maintenanceRuns: KnowledgeMaintenanceResult[] = []
       const reviewRuns: KnowledgeReviewResult[] = []
@@ -147,7 +153,11 @@ export class KnowledgeFullChainService {
         {
           binding: structuredClone(bindings.maintainer),
           processingRunId: runId,
-          debugTrace: firstContext
+          debugTrace: firstContext,
+          onRunCreated: (run) => {
+            runStarted = true
+            runWorkspace = run
+          }
         }
       )
       maintenanceRuns.push(firstMaintenance)
@@ -215,6 +225,7 @@ export class KnowledgeFullChainService {
       saveHistory('completed', result.completedAt, result.durationMs, result)
       return result
     } catch (error) {
+      let reportedError = error
       const status = terminalStatus(controller.signal)
       if (runStarted) {
         for (const trace of this.processing.snapshot().debugTraces) {
@@ -223,16 +234,23 @@ export class KnowledgeFullChainService {
         }
       }
       if (runStarted && !historySaveAttempted) {
-        const completedAt = new Date().toISOString()
-        saveHistory(
-          status,
-          completedAt,
-          Math.max(0, new Date(completedAt).getTime() - new Date(startedAtIso).getTime()),
-          undefined,
-          terminalError(error, status)
-        )
+        try {
+          if (runWorkspace) {
+            await this.processingRepository.removeReservedRunRecord(runWorkspace)
+          }
+          const completedAt = new Date().toISOString()
+          saveHistory(
+            status,
+            completedAt,
+            Math.max(0, new Date(completedAt).getTime() - new Date(startedAtIso).getTime()),
+            undefined,
+            terminalError(error, status)
+          )
+        } catch (recordError) {
+          reportedError = terminalRecordFailure(error, recordError)
+        }
       }
-      throw error
+      throw reportedError
     } finally {
       if (this.active === active) this.active = undefined
     }

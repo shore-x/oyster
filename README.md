@@ -26,6 +26,7 @@ Oyster 是一个独立于外部 Agent Harness 的本地知识与协作产物中�
 - 使用随 APP 捆绑的私有标准 Git Runtime 自动初始化固定的 `userData/repository/`，不依赖系统 Git 或用户 `PATH`；
 - 按“带根 `AGENTS.md` 的一级目录”发现、刷新和创建 Artifact，并显示持久 Attention 与无效目录；
 - 在系统文件管理器中打开 Artifact Repository 或单个 Artifact；Artifact 内部结构任意，通用管理 Agent 可以直接维护其普通文件；
+- 在应用内用同一个通用文件夹浏览器查看 Artifact 与 Oyster 设计文档；完整列出所有文件，Markdown 支持相对链接和 `[[...]]` 预览跳转，其他 UTF-8 文件按纯文本展示；
 - 在专门的 Skills 页面分开展示 Oyster 管理的 Skill Artifact 与其他 Agent 的外部注册事实，并预览各自入口文档；
 - 将有效 Skill Artifact 的 `output/` 通过安全、可撤销的目录 symlink 绑定到 Claude Code、Pi 或 Codex 的用户级 Skill 注册位置；
 - 提供 Maintainer → Reviewer 完整加工测试，并保留高级阶段调试；
@@ -83,6 +84,8 @@ src/main/chat
   基于 Pi Agent Core 的通用管理 Agent、文件/Coding 工具、JSONL 会话与默认 Prompt 配置
 src/main/artifacts
   全局 Artifact 目录扫描与创建，以及 Skill Artifact 派生识别
+src/main/folder-browser
+  任意绝对文件夹的只读树发现与原始文件读取
 src/main/repository
   统一 Repository 初始化与 Git Runtime 边界
 src/main/skills
@@ -102,4 +105,4 @@ Oyster 随 APP 捆绑私有的标准 Git Runtime，APP 内部始终按绝对可�
 
 所有通用 Chat Agent Session 常驻 `read`、`edit`、`write`、`bash`、通用 Todo 和 `spawn_agent`。工具以统一 Repository 根作为初始 `cwd`；Knowledge 搜索、读取和写入使用普通文件工具，不再维护平行的专用 Knowledge CRUD 协议。Harness 不绑定或预选 Artifact，也不设置路径 Sandbox、Shell 命令限制或逐次审批；工具按 APP 当前 OS 用户权限运行。Agent 根据对话和文件系统自行发现相关 Knowledge 与 Artifact，并读取各 Artifact 根 `AGENTS.md`。
 
-当前产品范围与设计边界见 [Product Brief](docs/product/product-brief.md)、[本地 Agent 发现与外部证据访问](docs/product/local-agent-discovery-mvp.md)、[外部 Agent Skill 发现与浏览 MVP](docs/product/skill-discovery-mvp.md)、[Skill Symlink 注入 MVP](docs/product/skill-symlink-injection-mvp.md)、[AI Backend MVP](docs/product/ai-backends-mvp.md)、[知识加工验证 MVP](docs/product/knowledge-processing-mvp.md)、[通用管理 Agent MVP](docs/product/chat-agent-mvp.md)、[Artifact Repository MVP](docs/product/artifact-repository-mvp.md)和[知识加工、Projection 与 Artifact](docs/architecture/knowledge-model-and-projection.md)。
+当前产品范围与设计边界见 [Product Brief](docs/product/product-brief.md)、[通用文件夹浏览器 MVP](docs/product/folder-browser-mvp.md)、[本地 Agent 发现与外部证据访问](docs/product/local-agent-discovery-mvp.md)、[外部 Agent Skill 发现与浏览 MVP](docs/product/skill-discovery-mvp.md)、[Skill Symlink 注入 MVP](docs/product/skill-symlink-injection-mvp.md)、[AI Backend MVP](docs/product/ai-backends-mvp.md)、[知识加工验证 MVP](docs/product/knowledge-processing-mvp.md)、[通用管理 Agent MVP](docs/product/chat-agent-mvp.md)、[Artifact Repository MVP](docs/product/artifact-repository-mvp.md)和[知识加工、Projection 与 Artifact](docs/architecture/knowledge-model-and-projection.md)。

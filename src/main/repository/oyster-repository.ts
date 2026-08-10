@@ -34,6 +34,13 @@ export class OysterRepository {
     }
   }
 
+  private async assertManagedDirectory(path: string, label: string): Promise<void> {
+    const details = await lstat(path)
+    if (!details.isDirectory() || details.isSymbolicLink()) {
+      throw new Error(`Oyster Repository 的 ${label} 必须是 APP 管理的真实目录`)
+    }
+  }
+
   private async hasGitDirectory(): Promise<boolean> {
     try {
       const details = await lstat(join(this.rootPath, '.git'))
@@ -70,6 +77,11 @@ export class OysterRepository {
       mkdir(this.knowledgePath, { recursive: true }),
       mkdir(this.artifactsPath, { recursive: true }),
       mkdir(this.runsPath, { recursive: true })
+    ])
+    await Promise.all([
+      this.assertManagedDirectory(this.knowledgePath, KNOWLEDGE_DIRECTORY),
+      this.assertManagedDirectory(this.artifactsPath, ARTIFACTS_DIRECTORY),
+      this.assertManagedDirectory(this.runsPath, RUNS_DIRECTORY)
     ])
 
     if (!await this.hasHead()) {

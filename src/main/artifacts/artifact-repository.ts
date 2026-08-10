@@ -77,6 +77,7 @@ async function readArtifact(
     const skill = await inspectArtifactSkill(artifactPath)
     return {
       directoryName,
+      directoryPath: artifactPath,
       attention: await readFile(agentsPath, 'utf8'),
       modifiedAt: details.mtime.toISOString(),
       ...(skill ? { skill } : {})

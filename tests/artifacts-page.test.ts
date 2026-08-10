@@ -29,7 +29,10 @@ describe('ArtifactsPage', () => {
   it('does not present a failed initial load as an empty Repository', () => {
     controller.error.mockReturnValue('无法读取 Artifact Repository')
 
-    const html = renderToString(() => ArtifactsPage({ onManageSkill: vi.fn() }))
+    const html = renderToString(() => ArtifactsPage({
+      onBrowseArtifact: vi.fn(),
+      onManageSkill: vi.fn()
+    }))
 
     expect(html).toContain('无法读取 Artifact')
     expect(html).not.toContain('还没有 Artifact')
@@ -41,6 +44,7 @@ describe('ArtifactsPage', () => {
       repositoryPath: '/app-data/artifacts',
       artifacts: [{
         directoryName: 'agent-memory-tracking',
+        directoryPath: '/app-data/artifacts/agent-memory-tracking',
         attention: '# Attention\n\nTrack agent memory research.',
         modifiedAt: '2026-07-30T09:00:00.000Z'
       }],
@@ -48,12 +52,16 @@ describe('ArtifactsPage', () => {
     }
     controller.snapshot.mockReturnValue(snapshot)
 
-    const html = renderToString(() => ArtifactsPage({ onManageSkill: vi.fn() }))
+    const html = renderToString(() => ArtifactsPage({
+      onBrowseArtifact: vi.fn(),
+      onManageSkill: vi.fn()
+    }))
 
     expect(html).toContain('agent-memory-tracking')
     expect(html).toContain('AGENTS.md 更新于')
     expect(html).toContain('<h1>Attention</h1>')
     expect(html).toContain('Track agent memory research.')
+    expect(html).toContain('data-testid="browse-artifact"')
     expect(html).not.toContain('data-testid="artifact-skill-badge"')
     expect(html).not.toContain('data-testid="manage-artifact-skill"')
   })
@@ -64,6 +72,7 @@ describe('ArtifactsPage', () => {
       repositoryPath: '/app-data/artifacts',
       artifacts: [{
         directoryName: 'review-skill',
+        directoryPath: '/app-data/artifacts/review-skill',
         attention: '# Attention\n\nMaintain review guidance.',
         modifiedAt: '2026-07-30T09:00:00.000Z',
         skill: {
@@ -78,7 +87,10 @@ describe('ArtifactsPage', () => {
     }
     controller.snapshot.mockReturnValue(snapshot)
 
-    const html = renderToString(() => ArtifactsPage({ onManageSkill }))
+    const html = renderToString(() => ArtifactsPage({
+      onBrowseArtifact: vi.fn(),
+      onManageSkill
+    }))
 
     expect(html).toContain('data-testid="artifact-skill-badge"')
     expect(html).toContain('data-testid="artifact-skill-summary"')
@@ -95,6 +107,7 @@ describe('ArtifactsPage', () => {
       repositoryPath: '/app-data/artifacts',
       artifacts: [{
         directoryName: 'broken-skill',
+        directoryPath: '/app-data/artifacts/broken-skill',
         attention: '# Attention\n\nRepair this output.',
         modifiedAt: '2026-07-30T09:00:00.000Z',
         skill: {
@@ -107,7 +120,10 @@ describe('ArtifactsPage', () => {
     }
     controller.snapshot.mockReturnValue(snapshot)
 
-    const html = renderToString(() => ArtifactsPage({ onManageSkill: vi.fn() }))
+    const html = renderToString(() => ArtifactsPage({
+      onBrowseArtifact: vi.fn(),
+      onManageSkill: vi.fn()
+    }))
 
     expect(html).toContain('Skill')
     expect(html).toContain('输出无效')

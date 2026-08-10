@@ -28,8 +28,8 @@ import type {
 import { PROCESSING_STAGE_DEFINITIONS, stageDefinition } from './prompts'
 import {
   activitySegmentCharacterLimit,
-  planActivityWork
-} from './activity-work-plan'
+  planKnowledgeRunWorkspace
+} from './run-workspace'
 import {
   ProcessingRepository,
   type ProcessingRun
@@ -57,6 +57,7 @@ export interface KnowledgeMaintenanceRunOptions {
   processingRunId?: string
   previousRevision?: string
   debugTrace?: ProcessingDebugTraceContext
+  onRunCreated?: (run: ProcessingRun) => void
 }
 
 export interface KnowledgeReviewRunOptions {
@@ -190,7 +191,10 @@ function runView(run: ProcessingRun) {
     id: run.id,
     repositoryPath: run.repositoryPath,
     runPath: run.runPath,
+    taskPath: run.taskPath,
     workPath: run.workPath,
+    inputPath: run.inputPath,
+    workspaceRevision: run.workspaceRevision,
     branchName: run.branchName,
     targetBranch: run.targetBranch,
     baseRevision: run.baseRevision
@@ -366,7 +370,7 @@ export class KnowledgeProcessingService {
   }
 
   private beginRun(stageId: ProcessingStageId): AbortController {
-    if (this.activeRuns.has(stageId)) throw new Error('该知识加工阶段正在运行')
+    if (this.activeRuns.size) throw new Error('另一个知识加工角色正在运行')
     const controller = new AbortController()
     this.activeRuns.set(stageId, controller)
     this.emit()
@@ -446,24 +450,32 @@ export class KnowledgeProcessingService {
             canonicalActivity.attachments.some((attachment) => attachment.mimeType.startsWith('image/'))
             && !runtime.model.input?.includes('image')
           ) throw new Error('所选 Maintainer Model 不支持图片输入')
-          const plan = planActivityWork(
-            canonicalActivity,
-            rawEvidence.skillHints,
+          const processingRunId = options.run?.id ?? options.processingRunId ?? debugTrace.id
+          const workspace = planKnowledgeRunWorkspace(
+            observation,
+            sourceRef,
             activitySegmentCharacterLimit(runtime.model.contextWindow)
           )
-          const processingRun = options.run ?? await this.processingRepository.createRun({
-            id: options.processingRunId ?? debugTrace.id,
+          const workOrder = {
+            id: processingRunId,
             sourceRef,
             attention: normalizedAttention,
-            items: plan.items
-          })
+            workspace
+          }
+          const processingRun = options.run
+            ?? await this.processingRepository.createRun(workOrder)
+          if (!options.run) options.onRunCreated?.(processingRun)
           const previousRevision = options.previousRevision ?? processingRun.baseRevision
+          await this.processingRepository.assertAgentStart(
+            processingRun,
+            previousRevision,
+            workOrder,
+            !options.run
+          )
           const result = await (options.agent ?? this.maintainer).run({
             runtime,
             systemPrompt: stage.instructions,
             run: processingRun,
-            observation,
-            sourceRef,
             previousRevision,
             reasoningEffort: stage.reasoningEffort,
             runId: debugTrace.id,
@@ -478,7 +490,7 @@ export class KnowledgeProcessingService {
           return {
             stageId: 'knowledge_maintenance_agent' as const,
             sourceRef,
-            activitySegmentCount: plan.segmentCount,
+            activitySegmentCount: workspace.activitySegmentCount,
             run: runView(processingRun),
             previousRevision,
             revision: handoff.revision,
@@ -522,9 +534,7 @@ export class KnowledgeProcessingService {
         stage.connectionId,
         stage.modelId,
         async (runtime) => {
-          if (await this.processingRepository.runRevision(run) !== reviewedRevision) {
-            throw new Error('Reviewer 输入 revision 已经过期')
-          }
+          await this.processingRepository.assertAgentStart(run, reviewedRevision)
           const result = await (options.agent ?? this.reviewer).run({
             runtime,
             systemPrompt: stage.instructions,

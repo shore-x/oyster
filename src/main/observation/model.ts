@@ -1,6 +1,6 @@
 /** A transient, model-facing position in one immutable Raw Evidence revision. */
 export interface EvidenceLocation {
-  /** One-based physical line in the unchanged source. */
+  /** One-based line in the Adapter's fixed Raw Evidence line model. */
   line: number
   /** Zero-based UTF-16 offset within that line. */
   offset: number
@@ -46,7 +46,7 @@ export interface CanonicalActivityItem {
   attachmentId?: string
 }
 
-/** Binary source content is kept out of text pages and exposed through a typed tool. */
+/** Binary source content is kept out of text pages and materialized as a Run input file. */
 export interface CanonicalActivityAttachment {
   id: string
   mimeType: string

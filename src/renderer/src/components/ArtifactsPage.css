@@ -147,6 +147,7 @@
 }
 
 .artifact-card__identity { min-width: 0; flex: 1; }
+.artifact-card__actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
 .artifact-card__identity-heading { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .artifact-card__identity h2 { min-width: 0; margin: 0; overflow: hidden; color: var(--text-primary); font-size: var(--font-size-body-sm); font-weight: var(--font-weight-semibold); text-overflow: ellipsis; white-space: nowrap; }
 .artifact-card__identity span { display: block; margin-top: 4px; color: var(--text-muted); font-size: var(--font-size-caption); }

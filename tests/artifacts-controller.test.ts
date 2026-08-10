@@ -32,6 +32,7 @@ describe('artifacts controller', () => {
       ...EMPTY_SNAPSHOT,
       artifacts: [{
         directoryName: 'agent-memory-tracking',
+        directoryPath: '/app-data/artifacts/agent-memory-tracking',
         attention: '# Attention\n\nTrack agent memory research.',
         modifiedAt: '2026-07-30T09:00:00.000Z'
       }]

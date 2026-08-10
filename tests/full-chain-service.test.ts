@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AiBackendSnapshot, AiConnection } from '../src/shared/ai-backends'
 import type { AvailableSessionSummary } from '../src/shared/discovery'
 import type { ModelGenerationRequest, ModelRuntime } from '../src/main/ai-backends/model'
@@ -12,9 +12,11 @@ import {
   type KnowledgeFullChainBindings
 } from '../src/main/knowledge-processing/full-chain-service'
 import type { KnowledgeFullChainRunHistory } from '../src/main/knowledge-processing/full-chain-run-repository'
+import { FileKnowledgeFullChainRunRepository } from '../src/main/knowledge-processing/full-chain-run-repository'
 import { KnowledgeProcessingService } from '../src/main/knowledge-processing/knowledge-processing-service'
 import type {
   AiBackendPort,
+  KnowledgeMaintainerRunInput,
   KnowledgeMaintainerRuntime,
   KnowledgeReviewerRunInput,
   KnowledgeReviewerRuntime,
@@ -27,7 +29,8 @@ import {
   ProcessingRepository,
   REVIEW_MARKER_COMMENT,
   REVIEW_MARKER_END,
-  REVIEW_MARKER_START
+  REVIEW_MARKER_START,
+  type ProcessingRun
 } from '../src/main/knowledge-processing/processing-repository'
 import {
   FixtureKnowledgeMaintainerRuntime,
@@ -173,7 +176,8 @@ const BINDINGS: KnowledgeFullChainBindings = {
 
 async function harness(
   maintainer: KnowledgeMaintainerRuntime = new FixtureKnowledgeMaintainerRuntime(),
-  reviewer: KnowledgeReviewerRuntime = new FixtureKnowledgeReviewerRuntime()
+  reviewer: KnowledgeReviewerRuntime = new FixtureKnowledgeReviewerRuntime(),
+  historyOverride: KnowledgeFullChainRunHistory | 'file' | undefined = undefined
 ) {
   const directory = await mkdtemp(join(tmpdir(), 'oyster-full-chain-'))
   temporaryDirectories.push(directory)
@@ -193,6 +197,9 @@ async function harness(
   await processing.initialize()
   const discovery = fakeDiscovery()
   const { history, records } = inMemoryHistory()
+  const selectedHistory = historyOverride === 'file'
+    ? new FileKnowledgeFullChainRunRepository(join(directory, 'repository', 'runs'))
+    : historyOverride ?? history
   return {
     processing,
     collaborations,
@@ -202,17 +209,39 @@ async function harness(
       discovery.service,
       processing,
       collaborations,
-      history
+      selectedHistory
     )
+  }
+}
+
+class CapturingMaintainer implements KnowledgeMaintainerRuntime {
+  readonly runs: ProcessingRun[] = []
+  private readonly delegate = new FixtureKnowledgeMaintainerRuntime()
+
+  async run(input: KnowledgeMaintainerRunInput): Promise<RepositoryAgentRunResult> {
+    this.runs.push(input.run)
+    return this.delegate.run(input)
+  }
+}
+
+class RunRecordSquattingMaintainer implements KnowledgeMaintainerRuntime {
+  workspace?: ProcessingRun
+
+  async run(input: KnowledgeMaintainerRunInput): Promise<RepositoryAgentRunResult> {
+    this.workspace = input.run
+    await writeFile(join(input.run.runPath, 'run.json'), '{"ownedBy":"agent"}\n')
+    throw new Error('Maintainer failed after creating reserved run.json')
   }
 }
 
 class RequestChangesOnceReviewer implements KnowledgeReviewerRuntime {
   calls = 0
+  readonly runs: ProcessingRun[] = []
   private readonly approval = new FixtureKnowledgeReviewerRuntime()
 
   async run(input: KnowledgeReviewerRunInput): Promise<RepositoryAgentRunResult> {
     this.calls += 1
+    this.runs.push(input.run)
     if (this.calls > 1) return this.approval.run(input)
 
     const statementPath = join(
@@ -253,7 +282,7 @@ afterEach(async () => {
 })
 
 describe('KnowledgeFullChainService', () => {
-  it('runs Maintainer then Reviewer on a real branch and stores a V7 unmerged result', async () => {
+  it('runs Maintainer then Reviewer on a real branch and stores a V8 unmerged result', async () => {
     const { service, processing, collaborations, discovery, records } = await harness()
     const baseRevision = await collaborations.currentRevision()
     const result = await service.run({
@@ -280,7 +309,7 @@ describe('KnowledgeFullChainService', () => {
     await expect(readFile(result.run.workPath, 'utf8')).resolves.toContain('Reviewer approved revision')
     expect(records).toHaveLength(1)
     expect(records[0]).toMatchObject({
-      formatVersion: 7,
+      formatVersion: 8,
       status: 'completed',
       result: { approvedRevision: result.approvedRevision }
     })
@@ -292,9 +321,10 @@ describe('KnowledgeFullChainService', () => {
   })
 
   it('alternates Reviewer feedback and Maintainer repair before approval', async () => {
+    const maintainer = new CapturingMaintainer()
     const reviewer = new RequestChangesOnceReviewer()
     const { service, processing, collaborations, discovery } = await harness(
-      new FixtureKnowledgeMaintainerRuntime(),
+      maintainer,
       reviewer
     )
     const baseRevision = await collaborations.currentRevision()
@@ -312,6 +342,24 @@ describe('KnowledgeFullChainService', () => {
     expect(result.reviewRuns[0].markerPaths).toEqual(['knowledge/knowledge-processing.md'])
     expect(result.maintenanceRuns[1].previousRevision).toBe(result.reviewRuns[0].revision)
     expect(result.reviewRuns[1].reviewedRevision).toBe(result.maintenanceRuns[1].revision)
+    const sharedWorkspace = {
+      runPath: result.run.runPath,
+      taskPath: result.run.taskPath,
+      inputPath: result.run.inputPath,
+      workspaceRevision: result.run.workspaceRevision
+    }
+    expect(result.maintenanceRuns.map((run) => run.run)).toEqual([
+      expect.objectContaining(sharedWorkspace),
+      expect.objectContaining(sharedWorkspace)
+    ])
+    expect(maintainer.runs).toEqual([
+      expect.objectContaining(sharedWorkspace),
+      expect.objectContaining(sharedWorkspace)
+    ])
+    expect(reviewer.runs).toEqual([
+      expect.objectContaining(sharedWorkspace),
+      expect.objectContaining(sharedWorkspace)
+    ])
     expect(processing.snapshot().debugTraces.map((trace) => trace.run.agentId)).toEqual([
       'knowledge_maintenance_agent',
       'knowledge_reviewer_agent',
@@ -320,6 +368,99 @@ describe('KnowledgeFullChainService', () => {
     ])
     expect(await collaborations.currentRevision()).toBe(baseRevision)
     await expect(readFile(result.run.workPath, 'utf8')).resolves.toContain('Reviewer approved revision')
+  })
+
+  it('stores terminal full-chain history beside the same Run workspace files', async () => {
+    const { service, discovery } = await harness(
+      new FixtureKnowledgeMaintainerRuntime(),
+      new FixtureKnowledgeReviewerRuntime(),
+      'file'
+    )
+    const result = await service.run({
+      sourceRecordId: discovery.session.sourceRecordId,
+      expectedRevision: discovery.session.revision
+    }, BINDINGS)
+
+    expect(await readdir(result.run.runPath)).toEqual(expect.arrayContaining([
+      'TASK.md',
+      'WORK.md',
+      'inputs',
+      'workspace.json',
+      'run.json'
+    ]))
+    await expect(readFile(join(result.run.runPath, 'run.json'), 'utf8'))
+      .resolves.toContain('"formatVersion": 8')
+  })
+
+  it('replaces an Agent-created reserved run.json with the failed terminal record', async () => {
+    const maintainer = new RunRecordSquattingMaintainer()
+    const { service, discovery } = await harness(
+      maintainer,
+      new FixtureKnowledgeReviewerRuntime(),
+      'file'
+    )
+
+    await expect(service.run({
+      sourceRecordId: discovery.session.sourceRecordId,
+      expectedRevision: discovery.session.revision
+    }, BINDINGS)).rejects.toThrow('Maintainer failed after creating reserved run.json')
+
+    expect(maintainer.workspace).toBeDefined()
+    const record = JSON.parse(await readFile(
+      join(maintainer.workspace!.runPath, 'run.json'),
+      'utf8'
+    ))
+    expect(record).toMatchObject({
+      formatVersion: 8,
+      status: 'failed',
+      error: 'Maintainer failed after creating reserved run.json'
+    })
+  })
+
+  it('preserves the Agent failure when reserved-file cleanup also fails', async () => {
+    const maintainer = new RunRecordSquattingMaintainer()
+    const { service, collaborations, discovery } = await harness(maintainer)
+    vi.spyOn(collaborations, 'removeReservedRunRecord')
+      .mockRejectedValueOnce(new Error('Reserved-file cleanup failed'))
+
+    const failure = await service.run({
+      sourceRecordId: discovery.session.sourceRecordId,
+      expectedRevision: discovery.session.revision
+    }, BINDINGS).catch((error: unknown) => error)
+
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect((failure as AggregateError).message)
+      .toBe('Maintainer failed after creating reserved run.json')
+    expect((failure as AggregateError).errors).toEqual([
+      expect.objectContaining({ message: 'Maintainer failed after creating reserved run.json' }),
+      expect.objectContaining({ message: 'Reserved-file cleanup failed' })
+    ])
+  })
+
+  it('preserves the Agent failure when terminal history cannot be saved', async () => {
+    const failingHistory: KnowledgeFullChainRunHistory = {
+      save: () => { throw new Error('Terminal history save failed') },
+      list: () => [],
+      read: () => undefined
+    }
+    const { service, discovery } = await harness(
+      new RunRecordSquattingMaintainer(),
+      new FixtureKnowledgeReviewerRuntime(),
+      failingHistory
+    )
+
+    const failure = await service.run({
+      sourceRecordId: discovery.session.sourceRecordId,
+      expectedRevision: discovery.session.revision
+    }, BINDINGS).catch((error: unknown) => error)
+
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect((failure as AggregateError).message)
+      .toBe('Maintainer failed after creating reserved run.json')
+    expect((failure as AggregateError).errors).toEqual([
+      expect.objectContaining({ message: 'Maintainer failed after creating reserved run.json' }),
+      expect.objectContaining({ message: 'Terminal history save failed' })
+    ])
   })
 
   it('rejects a stale Session before creating a full-chain history record', async () => {

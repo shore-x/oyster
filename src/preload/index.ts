@@ -4,6 +4,7 @@ import {
   artifactChannels,
   chatChannels,
   discoveryChannels,
+  folderBrowserChannels,
   knowledgeChannels,
   knowledgeProcessingChannels,
   skillChannels
@@ -22,6 +23,7 @@ import type { KnowledgeApi } from '../shared/knowledge'
 import type { ChatApi, ChatEvent } from '../shared/chat'
 import type { ArtifactApi } from '../shared/artifacts'
 import type { SkillApi } from '../shared/skills'
+import type { FolderBrowserApi } from '../shared/folder-browser'
 
 const api: DiscoveryApi = {
   getSnapshot: () => ipcRenderer.invoke(discoveryChannels.getSnapshot),
@@ -134,6 +136,17 @@ const artifacts: ArtifactApi = {
   )
 }
 
+const folderBrowser: FolderBrowserApi = {
+  getDesignDocumentsPath: () => ipcRenderer.invoke(
+    folderBrowserChannels.getDesignDocumentsPath
+  ),
+  browseFolder: (folderPath) => ipcRenderer.invoke(
+    folderBrowserChannels.browseFolder,
+    folderPath
+  ),
+  readFile: (filePath) => ipcRenderer.invoke(folderBrowserChannels.readFile, filePath)
+}
+
 const chat: ChatApi = {
   getSnapshot: () => ipcRenderer.invoke(chatChannels.getSnapshot),
   createSession: (input) => ipcRenderer.invoke(chatChannels.createSession, input),
@@ -158,6 +171,7 @@ contextBridge.exposeInMainWorld('oyster', {
   aiBackends,
   knowledge,
   artifacts,
+  folderBrowser,
   knowledgeProcessing,
   chat
 })

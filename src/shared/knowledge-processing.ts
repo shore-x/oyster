@@ -125,7 +125,10 @@ export interface ProcessingRunView {
   id: string
   repositoryPath: string
   runPath: string
+  taskPath: string
   workPath: string
+  inputPath: string
+  workspaceRevision: string
   branchName: string
   targetBranch: string
   baseRevision: string
@@ -181,7 +184,7 @@ export interface KnowledgeFullChainStageSnapshot {
 }
 
 export interface KnowledgeFullChainRunRecord {
-  formatVersion: 7
+  formatVersion: 8
   runId: string
   status: Exclude<AgentRunRecord['status'], 'running'>
   startedAt: string

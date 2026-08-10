@@ -33,7 +33,7 @@ function normalizedRunId(value: unknown): string {
 
 function parseRecord(payload: string, expectedRunId: string): KnowledgeFullChainRunRecord {
   const record = JSON.parse(payload) as KnowledgeFullChainRunRecord
-  if (!record || record.formatVersion !== 7 || record.runId !== expectedRunId) {
+  if (!record || record.formatVersion !== 8 || record.runId !== expectedRunId) {
     throw new Error(`加工测试历史记录格式无效：${expectedRunId}`)
   }
   if (!['completed', 'failed', 'cancelled'].includes(record.status)
