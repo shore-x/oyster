@@ -2,15 +2,14 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { ModelGenerationRequest, SelectedModelStream } from '../src/main/ai-backends/model'
-import { runArtifactGit } from '../src/main/artifacts/git-runtime'
 import type { DiscoveryService } from '../src/main/discovery/discovery-service'
 import {
   FixtureKnowledgeMaintainerRuntime,
   FixtureKnowledgeReviewerRuntime
 } from '../src/main/knowledge-processing/fixture'
-import { FileKnowledgeTaskHistory } from '../src/main/knowledge-processing/knowledge-task-history'
+import { GitKnowledgeTaskHistory } from '../src/main/knowledge-processing/knowledge-task-history'
 import type { KnowledgeTaskHistory } from '../src/main/knowledge-processing/knowledge-task-history'
 import {
   KnowledgeProcessingService
@@ -20,12 +19,12 @@ import {
   type KnowledgeTaskBindings
 } from '../src/main/knowledge-processing/knowledge-task-service'
 import {
-  KnowledgeTaskWorkspaceRepository,
+  KnowledgeTaskGitRepository,
   REVIEW_MARKER_COMMENT,
   REVIEW_MARKER_END,
   REVIEW_MARKER_START,
-  type KnowledgeTaskWorkspace
-} from '../src/main/knowledge-processing/knowledge-task-workspace-repository'
+  type KnowledgeTaskWorktree
+} from '../src/main/knowledge-processing/knowledge-task-git-repository'
 import type {
   AiBackendPort,
   KnowledgeMaintainerInvocationInput,
@@ -162,9 +161,9 @@ function inMemoryHistory(): {
   return {
     records,
     history: {
-      save: (record) => records.push(structuredClone(record)),
-      list: () => [],
-      read: (taskId) => records.find((record) => record.taskId === taskId)
+      save: async (record) => { records.push(structuredClone(record)) },
+      list: async () => [],
+      read: async (taskId) => records.find((record) => record.taskId === taskId)
     }
   }
 }
@@ -189,11 +188,11 @@ async function harness(
 ) {
   const directory = await mkdtemp(join(tmpdir(), 'oyster-knowledge-task-'))
   temporaryDirectories.push(directory)
-  const workspaces = new KnowledgeTaskWorkspaceRepository(join(directory, 'repository'))
+  const tasks = new KnowledgeTaskGitRepository(join(directory, 'repository'))
   const processing = new KnowledgeProcessingService(
     new InMemoryKnowledgeProcessingConfigurationRepository(),
     new FakeBackend(),
-    workspaces,
+    tasks,
     maintainer,
     reviewer
   )
@@ -201,60 +200,60 @@ async function harness(
   const discovery = fakeDiscovery()
   const { history, records } = inMemoryHistory()
   const selectedHistory = historyOverride === 'file'
-    ? new FileKnowledgeTaskHistory(join(directory, 'repository', 'tasks'))
+    ? new GitKnowledgeTaskHistory(join(directory, 'repository'), tasks)
     : historyOverride ?? history
   return {
     processing,
-    workspaces,
+    tasks,
     discovery,
     records,
     service: new KnowledgeTaskService(
       discovery.service,
       processing,
-      workspaces,
+      tasks,
       selectedHistory
     )
   }
 }
 
 class CapturingMaintainer implements KnowledgeMaintainerRuntime {
-  readonly workspaces: KnowledgeTaskWorkspace[] = []
+  readonly tasks: KnowledgeTaskWorktree[] = []
   private readonly delegate = new FixtureKnowledgeMaintainerRuntime()
 
   async invoke(
     input: KnowledgeMaintainerInvocationInput
   ): Promise<RepositoryAgentInvocationResult> {
-    this.workspaces.push(input.workspace)
+    this.tasks.push(input.worktree)
     return this.delegate.invoke(input)
   }
 }
 
 class TaskRecordSquattingMaintainer implements KnowledgeMaintainerRuntime {
-  workspace?: KnowledgeTaskWorkspace
+  worktree?: KnowledgeTaskWorktree
 
   async invoke(
     input: KnowledgeMaintainerInvocationInput
   ): Promise<RepositoryAgentInvocationResult> {
-    this.workspace = input.workspace
-    await writeFile(join(input.workspace.workspacePath, 'task.json'), '{"ownedBy":"agent"}\n')
+    this.worktree = input.worktree
+    await writeFile(join(input.worktree.taskPath, 'task.json'), '{"ownedBy":"agent"}\n')
     throw new Error('Maintainer failed after creating reserved task.json')
   }
 }
 
 class RequestChangesOnceReviewer implements KnowledgeReviewerRuntime {
   calls = 0
-  readonly workspaces: KnowledgeTaskWorkspace[] = []
+  readonly tasks: KnowledgeTaskWorktree[] = []
   private readonly approval = new FixtureKnowledgeReviewerRuntime()
 
   async invoke(
     input: KnowledgeReviewerInvocationInput
   ): Promise<RepositoryAgentInvocationResult> {
     this.calls += 1
-    this.workspaces.push(input.workspace)
+    this.tasks.push(input.worktree)
     if (this.calls > 1) return this.approval.invoke(input)
 
     const statementPath = join(
-      input.workspace.repositoryPath,
+      input.worktree.worktreePath,
       'knowledge',
       'knowledge-processing.md'
     )
@@ -268,14 +267,10 @@ class RequestChangesOnceReviewer implements KnowledgeReviewerRuntime {
     ].join('\n')
     await writeFile(statementPath, marker, 'utf8')
     await writeFile(
-      input.workspace.progressPath,
-      `${await readFile(input.workspace.progressPath, 'utf8')}\n- [ ] Resolve the Reviewer request.\n`,
+      input.worktree.progressPath,
+      `${await readFile(input.worktree.progressPath, 'utf8')}\n- [ ] Resolve the Reviewer request.\n`,
       'utf8'
     )
-    await runArtifactGit(['add', '--', 'knowledge', 'artifacts'], input.workspace.repositoryPath)
-    await runArtifactGit([
-      'commit', '--quiet', '--no-gpg-sign', '-m', 'review: request unmerged explanation'
-    ], input.workspace.repositoryPath)
     const invocation = completedAgentInvocation(
       input.invocationId,
       ['read', 'edit', 'bash'],
@@ -291,6 +286,42 @@ class RequestChangesOnceReviewer implements KnowledgeReviewerRuntime {
   }
 }
 
+class ConcurrentMaintainerFailure implements KnowledgeMaintainerRuntime {
+  readonly invocationIds: string[] = []
+  private readonly delegate = new FixtureKnowledgeMaintainerRuntime()
+  private firstStartedResolve!: () => void
+  private secondStartedResolve!: () => void
+  private releaseFirstResolve!: () => void
+  private releaseSecondResolve!: () => void
+  readonly firstStarted = new Promise<void>((resolve) => { this.firstStartedResolve = resolve })
+  readonly secondStarted = new Promise<void>((resolve) => { this.secondStartedResolve = resolve })
+  private readonly releaseFirst = new Promise<void>((resolve) => { this.releaseFirstResolve = resolve })
+  private readonly releaseSecond = new Promise<void>((resolve) => { this.releaseSecondResolve = resolve })
+
+  async invoke(
+    input: KnowledgeMaintainerInvocationInput
+  ): Promise<RepositoryAgentInvocationResult> {
+    const sequence = this.invocationIds.push(input.invocationId)
+    const result = await this.delegate.invoke(input)
+    if (sequence === 1) {
+      this.firstStartedResolve()
+      await this.releaseFirst
+      throw new Error('First concurrent Task failed')
+    }
+    this.secondStartedResolve()
+    await this.releaseSecond
+    return result
+  }
+
+  failFirst(): void {
+    this.releaseFirstResolve()
+  }
+
+  completeSecond(): void {
+    this.releaseSecondResolve()
+  }
+}
+
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map(
     (directory) => rm(directory, { recursive: true, force: true })
@@ -299,8 +330,8 @@ afterEach(async () => {
 
 describe('KnowledgeTaskService', () => {
   it('runs Maintainer then Reviewer on a real branch and stores an unmerged Task result', async () => {
-    const { service, processing, workspaces, discovery, records } = await harness()
-    const baseRepositoryRevision = await workspaces.currentRevision()
+    const { service, processing, tasks, discovery, records } = await harness()
+    const baseRepositoryRevision = await tasks.currentRevision()
     const result = await service.start({
       sourceConversationId: discovery.sourceConversation.sourceConversationId,
       sourceRevision: discovery.sourceConversation.sourceRevision
@@ -323,12 +354,12 @@ describe('KnowledgeTaskService', () => {
       'knowledge/knowledge-maintainer.md',
       'knowledge/knowledge-reviewer.md'
     ]))
-    expect(await workspaces.currentRevision()).toBe(baseRepositoryRevision)
-    await expect(readFile(result.workspace.progressPath, 'utf8'))
-      .resolves.toContain('Reviewer approved revision')
+    expect(await tasks.currentRevision()).toBe(baseRepositoryRevision)
+    await expect(readFile(result.worktree.progressPath, 'utf8'))
+      .resolves.toContain('approved the candidate')
     expect(records).toHaveLength(1)
     expect(records[0]).toMatchObject({
-      formatVersion: 1,
+      formatVersion: 2,
       status: 'completed',
       result: { approvedRepositoryRevision: result.approvedRepositoryRevision }
     })
@@ -342,8 +373,8 @@ describe('KnowledgeTaskService', () => {
   it('alternates Reviewer feedback and Maintainer repair before approval', async () => {
     const maintainer = new CapturingMaintainer()
     const reviewer = new RequestChangesOnceReviewer()
-    const { service, processing, workspaces, discovery } = await harness(maintainer, reviewer)
-    const baseRepositoryRevision = await workspaces.currentRevision()
+    const { service, processing, tasks, discovery } = await harness(maintainer, reviewer)
+    const baseRepositoryRevision = await tasks.currentRevision()
     const result = await service.start({
       sourceConversationId: discovery.sourceConversation.sourceConversationId,
       sourceRevision: discovery.sourceConversation.sourceRevision,
@@ -360,23 +391,23 @@ describe('KnowledgeTaskService', () => {
       .toBe(result.rounds[0].review.candidateRepositoryRevision)
     expect(result.rounds[1].review.reviewedRepositoryRevision)
       .toBe(result.rounds[1].maintenance.candidateRepositoryRevision)
-    const sharedWorkspace = {
-      workspacePath: result.workspace.workspacePath,
-      briefPath: result.workspace.briefPath,
-      inputPath: result.workspace.inputPath,
-      workspaceRevision: result.workspace.workspaceRevision
+    const sharedWorktree = {
+      taskPath: result.worktree.taskPath,
+      briefPath: result.worktree.briefPath,
+      inputPath: result.worktree.inputPath,
+      taskStartRepositoryRevision: result.worktree.taskStartRepositoryRevision
     }
-    expect(result.rounds.map((round) => round.maintenance.workspace)).toEqual([
-      expect.objectContaining(sharedWorkspace),
-      expect.objectContaining(sharedWorkspace)
+    expect(result.rounds.map((round) => round.maintenance.worktree)).toEqual([
+      expect.objectContaining(sharedWorktree),
+      expect.objectContaining(sharedWorktree)
     ])
-    expect(maintainer.workspaces).toEqual([
-      expect.objectContaining(sharedWorkspace),
-      expect.objectContaining(sharedWorkspace)
+    expect(maintainer.tasks).toEqual([
+      expect.objectContaining(sharedWorktree),
+      expect.objectContaining(sharedWorktree)
     ])
-    expect(reviewer.workspaces).toEqual([
-      expect.objectContaining(sharedWorkspace),
-      expect.objectContaining(sharedWorkspace)
+    expect(reviewer.tasks).toEqual([
+      expect.objectContaining(sharedWorktree),
+      expect.objectContaining(sharedWorktree)
     ])
     expect(processing.stateView().liveInvocations.map((view) => view.invocation.agentId)).toEqual([
       'knowledge_maintainer',
@@ -384,10 +415,10 @@ describe('KnowledgeTaskService', () => {
       'knowledge_maintainer',
       'knowledge_reviewer'
     ])
-    expect(await workspaces.currentRevision()).toBe(baseRepositoryRevision)
+    expect(await tasks.currentRevision()).toBe(baseRepositoryRevision)
   })
 
-  it('stores terminal Task history beside the Task workspace files', async () => {
+  it('stores completed Task state beside the tracked Task inputs and Pi sessions', async () => {
     const { service, discovery } = await harness(
       new FixtureKnowledgeMaintainerRuntime(),
       new FixtureKnowledgeReviewerRuntime(),
@@ -398,18 +429,17 @@ describe('KnowledgeTaskService', () => {
       sourceRevision: discovery.sourceConversation.sourceRevision
     }, BINDINGS)
 
-    expect(await readdir(result.workspace.workspacePath)).toEqual(expect.arrayContaining([
+    expect(await readdir(result.worktree.taskPath)).toEqual(expect.arrayContaining([
       'BRIEF.md',
       'PROGRESS.md',
       'inputs',
-      'manifest.json',
       'task.json'
     ]))
-    await expect(readFile(join(result.workspace.workspacePath, 'task.json'), 'utf8'))
-      .resolves.toContain('"formatVersion": 1')
+    await expect(readFile(join(result.worktree.taskPath, 'task.json'), 'utf8'))
+      .resolves.toContain('"formatVersion": 2')
   })
 
-  it('replaces an Agent-created reserved task.json with the failed terminal Task record', async () => {
+  it('checkpoints an Agent failure while keeping the Task open', async () => {
     const maintainer = new TaskRecordSquattingMaintainer()
     const { service, discovery } = await harness(
       maintainer,
@@ -422,43 +452,23 @@ describe('KnowledgeTaskService', () => {
       sourceRevision: discovery.sourceConversation.sourceRevision
     }, BINDINGS)).rejects.toThrow('Maintainer failed after creating reserved task.json')
 
-    expect(maintainer.workspace).toBeDefined()
+    expect(maintainer.worktree).toBeDefined()
     const record = JSON.parse(await readFile(
-      join(maintainer.workspace!.workspacePath, 'task.json'),
+      join(maintainer.worktree!.taskPath, 'task.json'),
       'utf8'
     ))
     expect(record).toMatchObject({
-      formatVersion: 1,
-      status: 'failed',
-      error: 'Maintainer failed after creating reserved task.json'
+      formatVersion: 2,
+      status: 'open',
+      lastError: 'Maintainer failed after creating reserved task.json'
     })
   })
 
-  it('preserves the Agent failure when reserved-file cleanup also fails', async () => {
-    const maintainer = new TaskRecordSquattingMaintainer()
-    const { service, workspaces, discovery } = await harness(maintainer)
-    vi.spyOn(workspaces, 'removeReservedTaskRecord')
-      .mockRejectedValueOnce(new Error('Reserved-file cleanup failed'))
-
-    const failure = await service.start({
-      sourceConversationId: discovery.sourceConversation.sourceConversationId,
-      sourceRevision: discovery.sourceConversation.sourceRevision
-    }, BINDINGS).catch((error: unknown) => error)
-
-    expect(failure).toBeInstanceOf(AggregateError)
-    expect((failure as AggregateError).message)
-      .toBe('Maintainer failed after creating reserved task.json')
-    expect((failure as AggregateError).errors).toEqual([
-      expect.objectContaining({ message: 'Maintainer failed after creating reserved task.json' }),
-      expect.objectContaining({ message: 'Reserved-file cleanup failed' })
-    ])
-  })
-
-  it('preserves the Agent failure when terminal history cannot be saved', async () => {
+  it('reports a checkpoint failure without deleting the Task worktree', async () => {
     const failingHistory: KnowledgeTaskHistory = {
-      save: () => { throw new Error('Terminal history save failed') },
-      list: () => [],
-      read: () => undefined
+      save: async () => { throw new Error('Task checkpoint failed') },
+      list: async () => [],
+      read: async () => undefined
     }
     const { service, discovery } = await harness(
       new TaskRecordSquattingMaintainer(),
@@ -476,8 +486,34 @@ describe('KnowledgeTaskService', () => {
       .toBe('Maintainer failed after creating reserved task.json')
     expect((failure as AggregateError).errors).toEqual([
       expect.objectContaining({ message: 'Maintainer failed after creating reserved task.json' }),
-      expect.objectContaining({ message: 'Terminal history save failed' })
+      expect.objectContaining({ message: 'Task checkpoint failed' })
     ])
+  })
+
+  it('records only the failing Task own Invocations while another Task is running', async () => {
+    const maintainer = new ConcurrentMaintainerFailure()
+    const { service, discovery, records } = await harness(
+      maintainer,
+      new FixtureKnowledgeReviewerRuntime()
+    )
+    const taskInput = {
+      sourceConversationId: discovery.sourceConversation.sourceConversationId,
+      sourceRevision: discovery.sourceConversation.sourceRevision
+    }
+
+    const first = service.start(taskInput, BINDINGS)
+    await maintainer.firstStarted
+    const second = service.start(taskInput, BINDINGS)
+    await maintainer.secondStarted
+    maintainer.failFirst()
+
+    await expect(first).rejects.toThrow('First concurrent Task failed')
+    const failedRecord = records.find((record) => record.lastError === 'First concurrent Task failed')
+    expect(failedRecord?.agentInvocations.map((invocation) => invocation.id))
+      .toEqual([maintainer.invocationIds[0]])
+
+    maintainer.completeSecond()
+    await expect(second).resolves.toMatchObject({ rounds: [{ review: { decision: 'approved' } }] })
   })
 
   it('rejects an unavailable Source Conversation before accepting a Task', async () => {

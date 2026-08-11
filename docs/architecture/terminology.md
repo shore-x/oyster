@@ -46,8 +46,8 @@ flowchart TD
 | 术语 | 精确定义 | ID / 所有者 | 生命周期与持久化 | 不是什么 |
 | --- | --- | --- | --- | --- |
 | Source Conversation | 外部 Agent Harness 拥有的一条逻辑对话。文件位置可以变化，逻辑身份不随位置变化。 | `sourceConversationId`；Discovery | Catalog 中持久化轻量摘要与当前位置线索；正文仍归外部来源所有。 | 不是 Chat Conversation，也不是一个本地文件的别名。 |
-| Source Snapshot | 用户接受的一条 Source Conversation 的精确不可变版本。 | `sourceConversationId + sourceRevision`；消费它的操作 | 被接受前必须重新校验；Task 把其物化输入固定在 workspace 中。 | 不是“最新对话”，也不是可变 Session。 |
-| Knowledge Processing Task | 从一个已接受 Source Snapshot 出发，经 Maintainer / Reviewer 协作形成批准候选 revision 的一次业务尝试。 | `taskId`；Knowledge Task Service | `in_progress → completed / failed / cancelled`。终态不可重开；重试必须创建新 `taskId`。终态写入 `tasks/<taskId>/task.json`。 | 不是一次 Agent Invocation，也不是 UI 操作。 |
+| Source Snapshot | 用户接受的一条 Source Conversation 的精确不可变版本。 | `sourceConversationId + sourceRevision`；消费它的操作 | 被接受前必须重新校验；Task start commit 固定其物化输入。 | 不是“最新对话”，也不是可变 Session。 |
+| Knowledge Processing Task | 从一个已接受 Source Snapshot 出发，经 Maintainer / Reviewer 协作形成批准候选 revision 的持续业务工作。 | `taskId`；Knowledge Task Service | `open → completed / abandoned`。Agent 执行失败后仍为 `open`。从创建起在 `task/<taskId>` 的 `tasks/<taskId>/task.json` 中保存。 | 不是一次 Agent Invocation，也不是 UI 操作。 |
 | Collaboration Round | Task 中一次 Maintainer 候选交接与紧随其后的 Reviewer 决策组成的业务配对。 | `roundId`、`sequence`；Knowledge Processing Task | 作为 Task 结果的一部分持久化。Reviewer 要求修改后，下一轮使用新的 Maintainer Invocation。 | 不是 Agent Turn，也不是泛化工作流 Step。 |
 | Knowledge Agent Definition | 一个稳定逻辑 Agent 的配置与能力定义，例如 Maintainer 或 Reviewer。 | `agentId`；Knowledge Processing Configuration | 配置可持久化；每次执行产生新的 Agent Invocation。 | 不是 Processing Stage，不表示执行顺序。 |
 | Agent Invocation | 对一个 Agent Definition 发起的一次独立执行请求；覆盖该 Agent 的模型—工具循环。 | `invocationId`、可选 `parentInvocationId`；发起它的 Task、Chat Conversation 或 Agent Preview | `in_progress → completed / failed / cancelled`。精简记录只保存生命周期、Pi Session 引用、计数与 Debug Record 引用。终态不可继续追加。 | 不是 Task、Pi Session、Model Call 或 Telemetry Span。 |
@@ -64,12 +64,12 @@ flowchart TD
 
 ## 4. 状态规则
 
-- Task 与 Agent Invocation 的活动态统一使用 `in_progress`，不混用 `running`。
-- `completed` 表示该实体自身的契约已成功完成；子实体成功不等于父实体成功。
-- `failed` 表示执行已终止且未满足契约；`cancelled` 表示取消请求已使执行终止。
-- Task 一旦终态化不可恢复或原地重试。用户再次尝试会得到新 `taskId`，从而保留两次独立事实。
+- Task 的活动态是 `open`；Agent Invocation 的活动态是 `in_progress`。
+- `completed` 表示 Task 或 Invocation 自身的契约已成功完成；子实体成功不等于父实体成功。
+- `failed` 和 `cancelled` 是 Agent Invocation 等执行实体的结果，不是 Task 状态。
+- `abandoned` 只表示用户明确放弃一个 Task；失败或取消的 Invocation 不会自动触发它。
 - Agent Invocation 一旦终态化不可继续执行；其 envelope 不再改变。Pi Session 和 Debug Record 保存已经发生的事实。
-- Source Snapshot 被拒绝发生在 Task 接受之前，因此不创建 Task workspace 或失败 Task 历史。
+- Source Snapshot 被拒绝发生在 Task 接受之前，因此不创建 Task branch 或记录。
 
 ## 5. 标识与字段命名
 
@@ -100,28 +100,29 @@ repository/
 └── tasks/<taskId>/
     ├── BRIEF.md
     ├── PROGRESS.md
-    ├── manifest.json
     ├── inputs/
     ├── pi-sessions/
     └── task.json
 ```
 
-- `BRIEF.md`：固定目标、Source Snapshot 引用、Repository 坐标和完成边界；
+- `BRIEF.md`：Task start commit 中的目标、Source Snapshot 引用、Repository 坐标和完成边界；
 - `PROGRESS.md`：Maintainer / Reviewer 共用的可变清单与 handoff；
-- `manifest.json`：Host 管理的固定输入与初始 Repository 状态指纹；
 - `pi-sessions/`：该 Task 内各 Knowledge Agent Invocation 的 Pi Session JSONL；
-- `task.json`：Host 管理的不可变终态 Knowledge Processing Task 记录，其中只嵌入精简 Invocation envelope；
-- processing branch 使用 `knowledge-task/<taskId>`。
+- `task.json`：Host 从 Task 创建起维护的生命周期记录，其中只嵌入精简 Invocation envelope；
+- Task branch 使用 `task/<taskId>`。
 
 应用数据目录中的其他执行存储：
 
 ```text
 <Electron userData>/
+├── repository/                     # 用户主 checkout
+├── worktrees/<taskId>/             # Task linked checkout
+├── agent-runtime/<taskId>/         # Pi runtime-only state
 ├── chat-conversations/             # Chat descriptor 与 Pi Session JSONL
 └── agent-debug/invocations/        # 每个 Invocation 一个 Debug Record JSON
 ```
 
-低于当前支持版本的 Task 历史目录在读取时删除；高于当前支持版本的记录必须保留并明确报错，避免新版本数据被旧应用破坏。
+Task 从 `task/*` refs 和 `main:tasks/` 读取。旧版 Git 外 Task 记录只读兼容，不再因版本较低而删除。
 
 ## 7. 明确允许的边界例外
 

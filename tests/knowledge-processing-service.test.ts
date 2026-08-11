@@ -20,7 +20,7 @@ import {
   KNOWLEDGE_REVIEWER_AGENT_PROMPT
 } from '../src/main/knowledge-processing/prompts'
 import type { AgentObservation } from '../src/main/observation/model'
-import { KnowledgeTaskWorkspaceRepository } from '../src/main/knowledge-processing/knowledge-task-workspace-repository'
+import { KnowledgeTaskGitRepository } from '../src/main/knowledge-processing/knowledge-task-git-repository'
 import {
   FixtureKnowledgeMaintainerRuntime,
   FixtureKnowledgeReviewerRuntime
@@ -121,7 +121,7 @@ class CapturingMaintainer implements KnowledgeMaintainerRuntime {
 async function harness() {
   const directory = await mkdtemp(join(tmpdir(), 'oyster-processing-service-'))
   temporaryDirectories.push(directory)
-  const collaborations = new KnowledgeTaskWorkspaceRepository(join(directory, 'repository'))
+  const collaborations = new KnowledgeTaskGitRepository(join(directory, 'repository'))
   const maintainer = new CapturingMaintainer()
   const backend = new FakeBackend()
   const service = new KnowledgeProcessingService(
@@ -171,7 +171,7 @@ describe('KnowledgeProcessingService', () => {
       .not.toEqual(expect.arrayContaining(['list_todos', 'add_todos', 'complete_todos']))
   })
 
-  it('creates a file-backed Task workspace and validates the Maintainer commit', async () => {
+  it('creates a file-backed Task worktree and validates the Maintainer commit', async () => {
     const { service, maintainer, collaborations } = await harness()
     const baseRepositoryRevision = await collaborations.currentRevision()
     const result = await service.executeMaintenance(
@@ -182,50 +182,54 @@ describe('KnowledgeProcessingService', () => {
 
     expect(maintainer.calls).toHaveLength(1)
     expect(maintainer.calls[0].systemPrompt).toBe(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT)
-    expect(await readFile(result.workspace.briefPath, 'utf8'))
+    expect(await readFile(result.worktree.briefPath, 'utf8'))
       .toContain('raw:source-conversation-one@sha256:revision')
-    expect(await readFile(result.workspace.briefPath, 'utf8'))
+    expect(await readFile(result.worktree.briefPath, 'utf8'))
       .toContain('Inspect the repository model.')
-    expect(await readFile(join(result.workspace.inputPath, 'README.md'), 'utf8'))
+    expect(await readFile(join(result.worktree.inputPath, 'README.md'), 'utf8'))
       .toContain('fixed, Host-materialized input view')
-    expect(await readdir(join(result.workspace.inputPath, 'activity'))).toEqual([
+    expect(await readdir(join(result.worktree.inputPath, 'activity'))).toEqual([
       'segment-000001-page-000001.md'
     ])
-    expect(await readdir(join(result.workspace.inputPath, 'evidence'))).toEqual([
+    expect(await readdir(join(result.worktree.inputPath, 'evidence'))).toEqual([
       'INDEX.md', 'page-000001.txt'
     ])
-    await expect(collaborations.assertWorkspaceIntegrity(maintainer.calls[0].workspace))
+    await expect(collaborations.assertWorktree(maintainer.calls[0].worktree))
       .resolves.toBeUndefined()
     expect(result.activitySegmentCount).toBe(1)
-    expect(result.previousRepositoryRevision).toBe(result.workspace.baseRepositoryRevision)
+    expect(result.previousRepositoryRevision).toBe(result.worktree.taskStartRepositoryRevision)
     expect(result.candidateRepositoryRevision).not.toBe(result.previousRepositoryRevision)
     expect(result.changedPaths).toEqual(expect.arrayContaining([
       'knowledge/knowledge-processing.md'
     ]))
-    expect(result.workspace.repositoryPath).toBe(maintainer.calls[0].workspace.repositoryPath)
-    expect(await readdir(result.workspace.workspacePath)).not.toContain('task.json')
+    expect(result.worktree.repositoryPath).toBe(maintainer.calls[0].worktree.repositoryPath)
+    expect(await readdir(result.worktree.taskPath)).not.toContain('task.json')
     expect(await collaborations.currentRevision()).toBe(baseRepositoryRevision)
     expect(service.stateView().liveInvocations[0]?.invocation.id).toBe(result.agentInvocationId)
   })
 
-  it('rejects Knowledge or Artifact drift between Task creation and initial Agent start', async () => {
+  it('does not absorb a late edit from the user main checkout', async () => {
     const { service, maintainer } = await harness()
 
-    await expect(service.executeMaintenance(
+    const result = await service.executeMaintenance(
       observation(['first line']),
       'session:test',
       undefined,
       {
-        onWorkspaceCreated: (workspace) => {
+        onWorktreeCreated: (worktree) => {
           writeFileSync(
-            join(workspace.repositoryPath, 'knowledge', 'late-edit.md'),
+            join(worktree.repositoryPath, 'knowledge', 'late-edit.md'),
             '# Late edit\n\nCreated after the Task snapshot.\n'
           )
         }
       }
-    )).rejects.toThrow('Task 初始 Knowledge/Artifact working tree 已发生变化')
+    )
 
-    expect(maintainer.calls).toHaveLength(0)
+    expect(maintainer.calls).toHaveLength(1)
+    await expect(readFile(join(result.worktree.worktreePath, 'knowledge', 'late-edit.md'), 'utf8'))
+      .rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(join(result.worktree.repositoryPath, 'knowledge', 'late-edit.md'), 'utf8'))
+      .resolves.toContain('Created after the Task snapshot')
   })
 
   it('rejects malformed Canonical Activity before starting the Agent', async () => {
@@ -269,7 +273,7 @@ describe('KnowledgeProcessingService', () => {
     expect(maintainer.calls).toHaveLength(0)
   })
 
-  it('does not reuse a Task workspace with a different source or Observation', async () => {
+  it('keeps the Task-start input when a later turn is called with different material', async () => {
     const { service, maintainer } = await harness()
     const first = await service.executeMaintenance(
       observation(['first']),
@@ -280,12 +284,14 @@ describe('KnowledgeProcessingService', () => {
       observation(['different']),
       'session:different',
       undefined,
-      { workspace: first.workspace, previousRepositoryRevision: first.candidateRepositoryRevision }
-    )).rejects.toThrow('固定工作空间不一致')
-    expect(maintainer.calls).toHaveLength(1)
+      { worktree: first.worktree, previousRepositoryRevision: first.candidateRepositoryRevision }
+    )).resolves.toMatchObject({ worktree: { taskId: first.worktree.taskId } })
+    expect(maintainer.calls).toHaveLength(2)
+    await expect(readFile(first.worktree.briefPath, 'utf8')).resolves.toContain('session:first')
+    await expect(readFile(first.worktree.briefPath, 'utf8')).resolves.not.toContain('session:different')
   })
 
-  it('does not reuse a Task workspace with a different initial checklist', async () => {
+  it('keeps the tracked Task-start checklist across later turns', async () => {
     const { service, maintainer } = await harness()
     const firstInput = observation(['first'])
     const first = await service.executeMaintenance(firstInput, 'session:first')
@@ -300,18 +306,18 @@ describe('KnowledgeProcessingService', () => {
       changedHints,
       'session:first',
       undefined,
-      { workspace: first.workspace, previousRepositoryRevision: first.candidateRepositoryRevision }
-    )).rejects.toThrow('固定工作空间不一致')
-    expect(maintainer.calls).toHaveLength(1)
+      { worktree: first.worktree, previousRepositoryRevision: first.candidateRepositoryRevision }
+    )).resolves.toMatchObject({ worktree: { taskId: first.worktree.taskId } })
+    expect(maintainer.calls).toHaveLength(2)
   })
 
-  it('validates fixed inputs before starting the Reviewer', async () => {
+  it('checkpoints a manual Task input edit before starting the Reviewer', async () => {
     const { service } = await harness()
     const maintained = await service.executeMaintenance(
       observation(['first']),
       'session:first'
     )
-    await writeFile(join(maintained.workspace.inputPath, 'unlisted.txt'), 'changed evidence\n')
+    await writeFile(join(maintained.worktree.inputPath, 'unlisted.txt'), 'changed evidence\n')
     let reviewerCalls = 0
     const reviewer: KnowledgeReviewerRuntime = {
       invoke: async (input) => {
@@ -320,12 +326,15 @@ describe('KnowledgeProcessingService', () => {
       }
     }
 
-    await expect(service.executeReview(maintained.workspace, maintained.candidateRepositoryRevision, { agent: reviewer }))
-      .rejects.toThrow('固定输入文件树已被修改')
-    expect(reviewerCalls).toBe(0)
+    await expect(service.executeReview(
+      maintained.worktree,
+      maintained.candidateRepositoryRevision,
+      { agent: reviewer }
+    )).resolves.toMatchObject({ decision: 'approved' })
+    expect(reviewerCalls).toBe(1)
   })
 
-  it('does not run Maintainer and Reviewer concurrently on the shared working tree', async () => {
+  it('runs Agents concurrently when they own different Task worktrees', async () => {
     const { service } = await harness()
     const maintained = await service.executeMaintenance(
       observation(['first']),
@@ -342,11 +351,49 @@ describe('KnowledgeProcessingService', () => {
         return new FixtureKnowledgeReviewerRuntime().invoke(input)
       }
     }
-    const review = service.executeReview(maintained.workspace, maintained.candidateRepositoryRevision, { agent: reviewer })
+    const review = service.executeReview(maintained.worktree, maintained.candidateRepositoryRevision, { agent: reviewer })
     await started
 
     await expect(service.executeMaintenance(observation(['second']), 'session:second'))
-      .rejects.toThrow('另一个知识 Agent 正在执行')
+      .resolves.toMatchObject({ agentId: 'knowledge_maintainer' })
+    releaseReviewer()
+    await expect(review).resolves.toMatchObject({ decision: 'approved' })
+  })
+
+  it('allows only one Agent to write a Task worktree at a time', async () => {
+    const { service } = await harness()
+    const maintained = await service.executeMaintenance(
+      observation(['first']),
+      'session:first'
+    )
+    let releaseReviewer!: () => void
+    let reviewerStarted!: () => void
+    const release = new Promise<void>((resolve) => { releaseReviewer = resolve })
+    const started = new Promise<void>((resolve) => { reviewerStarted = resolve })
+    const reviewer: KnowledgeReviewerRuntime = {
+      invoke: async (input) => {
+        reviewerStarted()
+        await release
+        return new FixtureKnowledgeReviewerRuntime().invoke(input)
+      }
+    }
+    const review = service.executeReview(
+      maintained.worktree,
+      maintained.candidateRepositoryRevision,
+      { agent: reviewer }
+    )
+    await started
+
+    await expect(service.executeMaintenance(
+      observation(['same worktree']),
+      'session:same-worktree',
+      undefined,
+      {
+        worktree: maintained.worktree,
+        previousRepositoryRevision: maintained.candidateRepositoryRevision
+      }
+    )).rejects.toThrow('这个 Task worktree 已有 Agent 正在执行')
+
     releaseReviewer()
     await expect(review).resolves.toMatchObject({ decision: 'approved' })
   })

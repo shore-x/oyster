@@ -1,4 +1,4 @@
-# 统一 Repository 与 Knowledge Processing Task
+# 统一 Repository 与 Agent Git 协作
 
 > 状态：当前架构
 >
@@ -8,97 +8,129 @@
 
 ## 1. 最小整体模型
 
-Oyster 管理一个标准 Git Repository 和一个物理工作树：
+Oyster 只有一个标准 Git Repository。Knowledge、Artifact 与 Task 记录由同一组 revision 表达；并行写入通过 Repository 外的 linked worktree 隔离。
 
 ```text
-<Electron userData>/repository/
-├── .git/
-├── knowledge/
-├── artifacts/
-└── tasks/
-    └── <taskId>/
-        ├── BRIEF.md
-        ├── PROGRESS.md
-        ├── manifest.json
-        ├── inputs/
-        │   ├── README.md
-        │   ├── activity/
-        │   ├── evidence/
-        │   └── attachments/
-        ├── pi-sessions/
-        └── task.json
+<Electron userData>/
+├── repository/                         # 用户主 checkout
+│   ├── .git/
+│   ├── knowledge/                      # tracked
+│   ├── artifacts/                      # tracked
+│   └── tasks/<taskId>/                 # tracked
+│       ├── BRIEF.md
+│       ├── PROGRESS.md
+│       ├── inputs/
+│       ├── pi-sessions/
+│       └── task.json
+├── worktrees/<taskId>/                 # linked checkout，不是业务数据
+├── agent-runtime/<taskId>/             # Pi runtime cache，不进 Git
+└── agent-debug/invocations/            # 完整本地 Debug Record，不进 Git
 ```
 
-- `knowledge/` 是全局唯一 Knowledge 事实层；
-- `artifacts/` 是全局唯一 Artifact 事实层；
-- `tasks/<taskId>/` 是一项 Knowledge Processing Task 的工作空间与终态记录。
+- `knowledge/` 是全局 Knowledge 层；
+- `artifacts/` 是全局 Artifact 层；
+- `tasks/<taskId>/` 是版本化 Task 记录，不是运行时垃圾目录；
+- Task branch 使用 `task/<taskId>`；Agent 的 `cwd` 是 `worktrees/<taskId>/` 根目录。
 
-Task 不拥有 Knowledge 或 Artifact，也不复制它们。正式内容状态由全局工作树的 Git revision 表达；Task workspace 是任务、固定输入、协作进度和历史的文件边界，不是 Git worktree 或候选内容目录。
+Task 不复制 Knowledge 或 Artifact，但 Task 过程与领域修改属于同一 Git 历史。`tasks/` 不再被 `.gitignore` 整体排除。
 
-## 2. 文件与版本边界
+## 2. Task 创建和版本边界
 
-Git commit 只表达 `knowledge/` 与 `artifacts/` 的一致内容 revision。`tasks/` 由根 `.gitignore` 排除，因此切换内容 revision 不删除 Task 历史，也不把过程文件混入候选 diff。
+Source Snapshot 被接受后，Host 从已提交的 `main` revision 创建 `task/<taskId>` 和外置 linked worktree，然后一次性写入 Task 定义、物化输入、初始进度和 `task.json`，形成 `task: start <taskId>` commit。
 
-- `BRIEF.md` 保存固定目标、Attention、Source Snapshot 引用、Repository 路径、`knowledge-task/<taskId>` 分支、base revision 和完成边界；
-- `inputs/` 保存 Host 从 Source Snapshot 物化的 Canonical Activity、Evidence page 和附件；
-- `PROGRESS.md` 保存 Maintainer / Reviewer 共用的可变检查清单与带角色 handoff；
-- `manifest.json` 固定 `BRIEF.md`、`inputs/`、初始 `PROGRESS.md` 定义和 Task 创建时 Knowledge/Artifact working tree 的状态与内容指纹；
-- `pi-sessions/` 保存该 Task 内各 Knowledge Agent Invocation 的 Pi Session JSONL；
-- `task.json` 仅由 Host 在 Task 进入 `completed`、`failed` 或 `cancelled` 后写入，保存输入、冻结配置、结果或错误，以及精简 Agent Invocation envelope。完整调试活动由应用级本地 Debug Store 按 `debugRecordId` 保存。
+Task start commit 直接固定 `BRIEF.md` 和 `inputs/` 的精确字节，因此不再需要 `manifest.json`、working-tree 指纹或自定义 `workspaceRevision`。上游 `sourceRef` 绑定外部来源版本，Task start commit 绑定本地物化视图，两者职责不同。
 
-上游 `sourceRef` 绑定外部 Raw Evidence 字节；`manifest.json` 绑定物化后的 workspace 文件。两者不是同一个 hash，也不共享身份。
+主 checkout 的未提交修改：
 
-## 3. Task 创建与输入接受
+- 不阻止 Task 创建；
+- 不会被复制或静默吸收到 Task；
+- 始终由用户拥有，Host 不执行 stash、reset、clean 或自动 commit。
 
-用户先选择 Source Conversation 的精确 `sourceRevision`。Discovery 验证并读取该 Source Snapshot；不可用、已变化或不可读会在 Task 接受前返回结构化拒绝，因此不创建 Task workspace 或失败历史。
+如果未来需要把用户未提交修改交给 Agent，应提供显式 Handoff，而不是根据路径猜测归属。
 
-Source Snapshot 被接受后，Knowledge Task Service 创建新 `taskId`、Task workspace 和 `knowledge-task/<taskId>` branch。Task 终态后不能原地重试；再次尝试必须创建新的 Task。
+## 3. Host 与 Agent 的契约
 
-新 Task 可以接收创建前已经存在的 Knowledge/Artifact working-tree 修改，但必须把它们记录为明确的初始输入：
+Host 负责结构性 Git 行为：
 
-- `manifest.json` 固定 working tree、index 和未跟踪普通文件或 symlink；
-- 首个 Maintainer Invocation 前重新采集并要求完全一致；
-- Knowledge/Artifact 之外的修改被拒绝；
-- clean gitlink 可由外层 revision 表达，nested working tree 中未提交且无法唯一固定的内容被拒绝。
+- 创建 branch 和 linked worktree；
+- 创建 Task start commit；
+- 在 Agent 自然结束、失败或取消后保存 Task/Pi Session 并 checkpoint；
+- 读取 branch 上的 `task.json`；
+- 将来负责整合 `main` 和 promotion。
 
-Reviewer 与后续 Maintainer Invocation 必须从干净 working tree 和精确 handoff revision 启动。
+Agent 负责语义工作：
 
-## 4. Maintainer / Reviewer 协作
+- 阅读 Task、Knowledge 和 Artifact；
+- 编辑内容、更新 `PROGRESS.md`、执行必要检查；
+- Maintainer 形成候选内容；Reviewer 留下反馈或批准。
 
-Maintainer：
+Prompt 要求 Agent 不创建或切换 branch/worktree，不 commit、stash、reset、clean、merge、rebase 或 push。这是协作策略，不是 OS 权限边界。Host 不使用精确根目录 allowlist；偏离约定的修改会随 Task checkpoint 被 Git 保留并交给 Review，而不是被静默删除。
 
-1. 读取 `BRIEF.md`、`PROGRESS.md`、完整 Canonical Activity、必要附件和 Evidence page；
-2. 评估 Task 创建时已有的 Knowledge/Artifact 修改；
-3. 修改全局 `knowledge/` 与 `artifacts/`，完成清单并解决所有 `REVIEW` marker；
-4. 创建一个普通单亲 commit；
-5. Harness 校验后向 `PROGRESS.md` 追加绑定 candidate revision 的 Maintainer handoff。
+若 Agent 自己创建了普通 commit，Host 接受其现有历史并继续 checkpoint，不要求“正好一个单亲非空 commit”。
 
-Reviewer 只审阅精确 candidate revision：
+## 4. Maintainer / Reviewer 历史
 
-- 要求修改时，在实际文件写入完整 `REVIEW` block，在 `PROGRESS.md` 增加未完成项，并创建一个反馈 commit；
-- 批准时不创建空 approval commit；Harness 验证后追加绑定精确 OID 的 Reviewer approval；
-- Reviewer 不删除 `PROGRESS.md`，也不 merge 目标分支。
+典型历史为：
 
-一次 Maintainer 交接与紧随其后的 Reviewer 决策组成一个 Collaboration Round。若 Reviewer 要求修改，下一轮创建新的 Maintainer 和 Reviewer Agent Invocations。所有 Rounds 共享同一个 Task、固定输入、`PROGRESS.md` 和 processing branch，但每次 Invocation 都有独立身份与记录。
+```text
+main@base
+└─ task: start <taskId>
+   └─ maintainer: checkpoint Task work
+      └─ reviewer: request changes
+         └─ maintainer: checkpoint Task work
+            └─ reviewer: approve Task candidate
+               └─ task: complete
+```
 
-## 5. 完整性与并发边界
+每个 commit 可以同时包含 `tasks/<taskId>/`、`knowledge/` 和 `artifacts/`。Reviewer approval 不是空提交：它至少保存 Reviewer Pi Session 与 `PROGRESS.md` handoff。
 
-Harness 在每次 Agent Invocation 前验证：
+Review marker 和未完成 checklist 用于 Agent 协作与决策解释，不再承担复杂的 Repository 完整性证明。Reviewer 要求修改时可以让中间 tree 暂时包含 marker；Maintainer 解决后再验证正式 Knowledge tree。
 
-- workspace 坐标、`manifest.json` 和固定输入文件树；
-- 当前 branch 与精确输入 revision；
-- 域外修改、working-tree 清洁度和初始状态不变量。
+## 5. 状态和恢复
 
-在 handoff 时再次验证 workspace、commit 父节点、变更路径、工作清单和 Review marker。Task workspace 文件不进入候选 revision。
+Task 只有三个生命周期状态：
 
-当前只有一个物理 working tree，因此进程内同时只允许一个结构化知识 Agent Invocation。这是最小数据完整性边界，不是队列或分布式锁协议。多进程写入、租约、自动 rebase、复杂冲突、远端同步、强文件权限隔离和 promotion 治理均不在当前范围。
+- `open`：仍可继续；
+- `completed`：Reviewer 已批准并保存最终结果；
+- `abandoned`：用户明确放弃。
 
-本工作流中的 Maintainer / Reviewer 是 Knowledge Processing Task 的业务角色，不是 Artifact Domain 的全局角色。其他 Artifact 维护可以使用不同角色、临时子 Agent、单 Agent 或非 Agent 机制。
+`failed` 和 `cancelled` 只属于某次 Agent Invocation。一次 Invocation 失败或取消时，Host 尽量保存当前 Pi Session、`task.json.lastError` 和 worktree 修改，Task 保持 `open`。Host 不 reset、clean、删除 branch 或删除 worktree。当前 UI 尚未提供继续/放弃操作，但 Git branch 和 worktree 已具备恢复基础。
 
-## 6. 历史兼容
+## 6. 并发和用户协作
 
-Task workspace 格式与终态 `task.json` 独立版本化。读取历史时：
+唯一通用规则是：
 
-- 低于当前支持版本的 Task 目录被删除，避免把不兼容开发期数据解释成当前事实；
-- 高于当前支持版本的记录保留原文件并明确报错，旧应用不得删除或覆盖新格式数据；
-- 已存在的 `task.json` 只允许 Host 在终态保存流程中管理，Agent 无权占用该保留路径。
+> 同一 Repository 可以有多个并行写入者，但同一个 worktree 同时只有一个写入者。
+
+- 用户拥有主 checkout，可以继续手工编辑；
+- 每个 Task 拥有独立 branch/worktree，不同 Task Agent 可以并行；
+- 同一 Task 内 Maintainer 与 Reviewer 串行复用一个 worktree；
+- 用户需要手工修改 Task worktree 时，应先暂停该 Task Agent；
+- Agent 启动前若 Task worktree 已经 dirty，Host 先创建可见的 pre-Agent checkpoint，不拒绝也不丢弃修改；
+- 执行期间若用户与 Agent 同时写同一 worktree，系统无法可靠判断逐行归属，因此这仍由单写入者契约解决。
+
+这里只使用进程内的每-worktree单写入者门禁，不引入 OS 锁、租约、权限系统或分布式协调。
+
+当前 Renderer 一次只启动一个前台 Knowledge Task，因此取消入口仍表示“取消当前前台 Knowledge Agent 执行”，并会中止进程内所有活动 Knowledge Task Invocation。底层不同 worktree 已可并行，但真正面向多个前台 Task 的独立取消需要 start 协议先返回 `taskId`，当前尚未实现。
+
+## 7. 历史读取
+
+未合并 Task 的 `tasks/<taskId>` 只存在于 Task branch。Task 列表因此不能只扫描主 checkout：
+
+- 通过 `refs/heads/task/*` 枚举活动或未合并 Task；
+- 通过 `git show task/<id>:tasks/<id>/task.json` 读取状态；
+- 已进入 `main` 的 Task 从 `main:tasks/` 读取；
+- 旧版被忽略的本地 `tasks/<id>/task.json` 只作为兼容回退读取，不再删除。
+
+Git Repository 是 Task 的权威索引，不建立第二个 Task 数据库。
+
+## 8. Integration 与 promotion
+
+当前产品仍停留在“批准但不 merge”的验证阶段，尚未暴露 promotion 操作。后续实现遵循以下契约：
+
+1. 把最新 `main` merge 进 Task branch；
+2. 在 Task worktree 解决冲突并重新 Review；
+3. 当 `main` 是最终 Task HEAD 的 ancestor 时 fast-forward promotion；
+4. 用户主 checkout dirty 时不自动 stash 或强行更新 `main`。
+
+不自动 rebase 已保存的 Task/Pi Session/Review 历史。所有 repo-writing Agent 最终都应采用相同的独立 worktree 契约；当前通用 Chat Agent 仍直接使用主 checkout，这是待迁移的已知边界。

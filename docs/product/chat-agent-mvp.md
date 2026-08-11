@@ -14,7 +14,7 @@ Agent 的初始 `cwd` 是 `<Electron userData>/repository/`。它通过普通 `r
 
 - `knowledge/**/*.md`：全局 Knowledge；
 - `artifacts/<artifact>/`：全局 Artifact；
-- `tasks/<taskId>/`：结构化知识加工的工作空间与历史。
+- `tasks/<taskId>/`：由 Task branch 跟踪的定义、输入、Pi Session 与协作历史。
 
 Chat 不连接平行 SQLite Knowledge Store，也不安装 `search_knowledge`、`read_knowledge`、`upsert_knowledge` 写入协议；普通文件搜索、读取和编辑就是唯一事实层的访问方式。Shell 使用 Oyster 捆绑的标准 Git CLI。
 

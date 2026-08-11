@@ -11,5 +11,5 @@ export function chatAgentSystemPrompt(
 Oyster's one Git Repository is located at:
 ${repositoryPath}
 
-Filesystem and shell relative paths start from this directory. knowledge/**/*.md is the global Knowledge layer. artifacts/<artifact>/ is the global Artifact layer; each Artifact root AGENTS.md contains its persistent Attention and local maintenance contract, while its other internal structure is arbitrary. tasks/<task-id>/ contains isolated Knowledge Processing Task workspaces and history, including task and input files, but never owns copies of Knowledge or Artifacts.`
+Filesystem and shell relative paths start from this directory. knowledge/**/*.md is the global Knowledge layer. artifacts/<artifact>/ is the global Artifact layer; each Artifact root AGENTS.md contains its persistent Attention and local maintenance contract, while its other internal structure is arbitrary. tasks/<task-id>/ contains versioned Knowledge Processing Task definitions, inputs, Pi Sessions and handoffs. Task records share Git history with related Knowledge and Artifact changes but do not copy those domain trees.`
 }

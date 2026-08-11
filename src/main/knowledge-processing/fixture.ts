@@ -12,7 +12,6 @@ import {
   InMemoryAgentDebugStore,
   type AgentDebugStore
 } from '../agent-runtime/agent-debug-store'
-import { runArtifactGit } from '../artifacts/git-runtime'
 import type {
   KnowledgeMaintainerInvocationInput,
   KnowledgeMaintainerRuntime,
@@ -22,7 +21,7 @@ import type {
 } from './model'
 import { InMemoryKnowledgeProcessingConfigurationRepository } from './repository'
 import { KnowledgeProcessingService } from './knowledge-processing-service'
-import { KnowledgeTaskWorkspaceRepository } from './knowledge-task-workspace-repository'
+import { KnowledgeTaskGitRepository } from './knowledge-task-git-repository'
 
 function fixtureInvocation(
   input: KnowledgeMaintainerInvocationInput | KnowledgeReviewerInvocationInput,
@@ -88,11 +87,6 @@ async function emitFixtureFrame(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 180))
 }
 
-async function commit(repositoryPath: string, message: string): Promise<void> {
-  await runArtifactGit(['add', '--', 'knowledge', 'artifacts'], repositoryPath)
-  await runArtifactGit(['commit', '--quiet', '--no-gpg-sign', '-m', message], repositoryPath)
-}
-
 export class FixtureKnowledgeMaintainerRuntime implements KnowledgeMaintainerRuntime {
   constructor(private readonly debugStore: AgentDebugStore = new InMemoryAgentDebugStore()) {}
 
@@ -104,7 +98,7 @@ export class FixtureKnowledgeMaintainerRuntime implements KnowledgeMaintainerRun
     input.onInvocationUpdate?.(inProgressFixtureInvocation(input, toolCalls, 2))
     await emitFixtureFrame()
     input.signal.throwIfAborted()
-    const progressPath = input.workspace.progressPath
+    const progressPath = input.worktree.progressPath
     await writeFile(
       progressPath,
       (await readFile(progressPath, 'utf8')).replaceAll('- [ ]', '- [x]'),
@@ -112,22 +106,21 @@ export class FixtureKnowledgeMaintainerRuntime implements KnowledgeMaintainerRun
     )
     await Promise.all([
       writeFile(
-        join(input.workspace.repositoryPath, 'knowledge', 'knowledge-processing.md'),
+        join(input.worktree.worktreePath, 'knowledge', 'knowledge-processing.md'),
         '# 知识加工链路\n\n知识加工链路在统一 Git Repository 中由 [[Knowledge Maintenance Agent|知识维护 Agent]] 与 [[Knowledge Reviewer|知识审阅 Agent]] 通过 Knowledge Processing Task 工作状态和 commit 协作。\n',
         'utf8'
       ),
       writeFile(
-        join(input.workspace.repositoryPath, 'knowledge', 'knowledge-maintainer.md'),
-        '# Knowledge Maintenance Agent\n\nKnowledge Maintenance Agent 从独立 Task 工作空间读取任务、工作清单与文件化 Canonical Activity，并直接维护 [[知识加工链路]] 的 Repository tree。\n',
+        join(input.worktree.worktreePath, 'knowledge', 'knowledge-maintainer.md'),
+        '# Knowledge Maintenance Agent\n\nKnowledge Maintenance Agent 从独立 Task worktree 读取任务、工作清单与文件化 Canonical Activity，并直接维护 [[知识加工链路]] 的 Repository tree。\n',
         'utf8'
       ),
       writeFile(
-        join(input.workspace.repositoryPath, 'knowledge', 'knowledge-reviewer.md'),
-        '# Knowledge Reviewer\n\nKnowledge Reviewer 在没有 Raw Evidence 的独立上下文中审阅 processing branch，并在 Task 工作区中记录反馈或批准。\n',
+        join(input.worktree.worktreePath, 'knowledge', 'knowledge-reviewer.md'),
+        '# Knowledge Reviewer\n\nKnowledge Reviewer 在没有 Raw Evidence 的独立上下文中审阅 Task branch，并在 Task 记录中留下反馈或批准。\n',
         'utf8'
       )
     ])
-    await commit(input.workspace.repositoryPath, 'maintain: fixture repository knowledge')
     input.onInvocationUpdate?.(inProgressFixtureInvocation(input, toolCalls, 3))
     await emitFixtureFrame()
     input.signal.throwIfAborted()
@@ -163,7 +156,7 @@ export class FixtureKnowledgeReviewerRuntime implements KnowledgeReviewerRuntime
 
 export function createFixtureKnowledgeProcessingService(
   aiBackendService: AiBackendService,
-  processingRepository: KnowledgeTaskWorkspaceRepository,
+  processingRepository: KnowledgeTaskGitRepository,
   debugStore: AgentDebugStore = new InMemoryAgentDebugStore()
 ): KnowledgeProcessingService {
   return new KnowledgeProcessingService(
@@ -175,6 +168,6 @@ export function createFixtureKnowledgeProcessingService(
   )
 }
 
-export function fixtureKnowledgeTaskWorkspaceId(): string {
+export function fixtureKnowledgeTaskWorktreeId(): string {
   return randomUUID()
 }

@@ -5,7 +5,7 @@ import { AgentInvocationCollectionExplorer } from './AgentInvocationView'
 import type {
   KnowledgeTaskResultView,
   UiMilestoneView
-} from './KnowledgeTaskWorkspace'
+} from './KnowledgeTaskWorktree'
 import type {
   KnowledgeTaskRecord,
   KnowledgeTaskResult,
@@ -36,7 +36,7 @@ export function knowledgeTaskResultView(result: KnowledgeTaskResult): KnowledgeT
     taskId: result.taskId,
     completedAt: result.completedAt,
     durationMs: result.durationMs,
-    workspace: result.workspace,
+    worktree: result.worktree,
     approvedRepositoryRevision: result.approvedRepositoryRevision,
     changedPaths: result.changedPaths,
     artifactPaths: result.artifactPaths,
@@ -49,9 +49,9 @@ export function knowledgeTaskResultView(result: KnowledgeTaskResult): KnowledgeT
         state: 'completed'
       },
       {
-        id: 'task_workspace',
-        label: '创建 Task Workspace',
-        detail: `${result.workspace.branchName} · ${result.workspace.workspacePath}`,
+        id: 'task_worktree',
+        label: '创建 Task worktree',
+        detail: `${result.worktree.branchName} · ${result.worktree.taskPath}`,
         state: 'completed'
       },
       {
@@ -63,7 +63,7 @@ export function knowledgeTaskResultView(result: KnowledgeTaskResult): KnowledgeT
       {
         id: 'reviewer_approval',
         label: 'Reviewer 批准',
-        detail: `${result.approvedRepositoryRevision.slice(0, 12)} · 未合并到 ${result.workspace.targetBranch}`,
+        detail: `${result.approvedRepositoryRevision.slice(0, 12)} · 未合并到 ${result.worktree.targetBranch}`,
         state: 'completed'
       }
     ],
@@ -76,8 +76,8 @@ export function knowledgeTaskResultView(result: KnowledgeTaskResult): KnowledgeT
 
 function terminalStatusLabel(status: KnowledgeTaskRecord['status']): string {
   if (status === 'completed') return '已完成'
-  if (status === 'cancelled') return '已取消'
-  return '失败'
+  if (status === 'abandoned') return '已放弃'
+  return 'Task 可继续'
 }
 
 export function KnowledgeTaskActivityDetail(props: {
@@ -184,14 +184,14 @@ export function KnowledgeTaskResultDetail(props: {
       </div>
 
       <dl class="knowledge-task-details" data-testid="knowledge-task-git-result">
-        <div><dt>Repository</dt><dd>{props.result.workspace.repositoryPath}</dd></div>
-        <div><dt>Task Workspace</dt><dd>{props.result.workspace.workspacePath}</dd></div>
-        <div><dt>BRIEF.md</dt><dd>{props.result.workspace.briefPath}</dd></div>
-        <div><dt>PROGRESS.md</dt><dd>{props.result.workspace.progressPath}</dd></div>
-        <div><dt>Inputs</dt><dd>{props.result.workspace.inputPath}</dd></div>
-        <div><dt>处理分支</dt><dd>{props.result.workspace.branchName}</dd></div>
-        <div><dt>目标分支</dt><dd>{props.result.workspace.targetBranch}（未合并）</dd></div>
-        <div><dt>Base revision</dt><dd>{props.result.workspace.baseRepositoryRevision}</dd></div>
+        <div><dt>Repository</dt><dd>{props.result.worktree.repositoryPath}</dd></div>
+        <div><dt>Task record</dt><dd>{props.result.worktree.taskPath}</dd></div>
+        <div><dt>BRIEF.md</dt><dd>{props.result.worktree.briefPath}</dd></div>
+        <div><dt>PROGRESS.md</dt><dd>{props.result.worktree.progressPath}</dd></div>
+        <div><dt>Inputs</dt><dd>{props.result.worktree.inputPath}</dd></div>
+        <div><dt>Task branch</dt><dd>{props.result.worktree.branchName}</dd></div>
+        <div><dt>目标分支</dt><dd>{props.result.worktree.targetBranch}（未合并）</dd></div>
+        <div><dt>Base revision</dt><dd>{props.result.worktree.baseRepositoryRevision}</dd></div>
         <div><dt>批准 revision</dt><dd>{props.result.approvedRepositoryRevision}</dd></div>
         <div><dt>Collaboration Rounds</dt><dd>{props.result.roundCount}</dd></div>
         <div><dt>变更文件</dt><dd>{props.result.changedPaths.length}</dd></div>

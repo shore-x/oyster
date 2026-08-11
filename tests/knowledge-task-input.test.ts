@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import {
   activitySegmentCharacterLimit,
-  planKnowledgeTaskWorkspace
-} from '../src/main/knowledge-processing/task-workspace'
+  planKnowledgeTaskInput
+} from '../src/main/knowledge-processing/task-input'
 import type { AgentObservation } from '../src/main/observation/model'
 
 function observation(contents: string[], attachmentAt?: number): AgentObservation {
@@ -46,14 +46,14 @@ function observation(contents: string[], attachmentAt?: number): AgentObservatio
 }
 
 function plan(contents: string[], limit: number, attachmentAt?: number) {
-  return planKnowledgeTaskWorkspace(
+  return planKnowledgeTaskInput(
     observation(contents, attachmentAt),
     'raw:test@sha256:fixture',
     limit
   )
 }
 
-describe('Knowledge Task workspace plan', () => {
+describe('Knowledge Task worktree plan', () => {
   it('writes bounded Activity files and keeps complete activities together', () => {
     const value = plan(['a'.repeat(7), 'b'.repeat(7)], 10)
 
@@ -104,7 +104,7 @@ describe('Knowledge Task workspace plan', () => {
     const input = observation(['attachment'], 0)
     input.canonicalActivity.attachments[0].sha256 = '0'.repeat(64)
 
-    expect(() => planKnowledgeTaskWorkspace(input, 'raw:test', 100))
+    expect(() => planKnowledgeTaskInput(input, 'raw:test', 100))
       .toThrow('内容与 metadata 不一致')
   })
 })

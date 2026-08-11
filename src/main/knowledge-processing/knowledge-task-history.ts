@@ -1,27 +1,33 @@
-import {
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync
-} from 'node:fs'
+import { execFile } from 'node:child_process'
+import { readFile, readdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { promisify } from 'node:util'
 import type {
+  KnowledgeMaintenanceResult,
   KnowledgeTaskRecord,
-  KnowledgeTaskSummary
+  KnowledgeTaskResult,
+  KnowledgeTaskSummary,
+  KnowledgeTaskWorktreeView
 } from '../../shared/knowledge-processing'
 import { parseTerminalAgentInvocationRecord } from '../agent-runtime/agent-invocation-record'
+import {
+  ARTIFACT_GIT_BINARY_PATH,
+  createArtifactGitEnvironment
+} from '../artifacts/git-runtime'
+import { OYSTER_TARGET_BRANCH, OysterRepository } from '../repository/oyster-repository'
+import type {
+  KnowledgeTaskWorktree,
+  KnowledgeTaskGitRepository
+} from './knowledge-task-git-repository'
 
+const execFileAsync = promisify(execFile)
 const TASK_RECORD_FILE = 'task.json'
-const TASK_RECORD_FORMAT_VERSION = 1
 const MAX_TASK_ID_LENGTH = 256
 
-class LegacyKnowledgeTaskRecordError extends Error {}
-
 export interface KnowledgeTaskHistory {
-  save(record: KnowledgeTaskRecord): void
-  list(): KnowledgeTaskSummary[]
-  read(taskId: string): KnowledgeTaskRecord | undefined
+  save(record: KnowledgeTaskRecord, worktree: KnowledgeTaskWorktree): Promise<void>
+  list(): Promise<KnowledgeTaskSummary[]>
+  read(taskId: string): Promise<KnowledgeTaskRecord | undefined>
 }
 
 function normalizedTaskId(value: unknown): string {
@@ -35,77 +41,120 @@ function normalizedTaskId(value: unknown): string {
   return taskId
 }
 
+interface LegacyKnowledgeTaskWorkspaceView {
+  taskId: string
+  repositoryPath: string
+  workspacePath: string
+  briefPath: string
+  progressPath: string
+  inputPath: string
+  branchName: string
+  targetBranch: string
+  baseRepositoryRevision: string
+}
+
+interface LegacyKnowledgeMaintenanceResult extends Omit<KnowledgeMaintenanceResult, 'worktree'> {
+  workspace: LegacyKnowledgeTaskWorkspaceView
+}
+
+interface LegacyKnowledgeTaskResult extends Omit<KnowledgeTaskResult, 'worktree' | 'rounds'> {
+  workspace: LegacyKnowledgeTaskWorkspaceView
+  rounds: Array<Omit<KnowledgeTaskResult['rounds'][number], 'maintenance'> & {
+    maintenance: LegacyKnowledgeMaintenanceResult
+  }>
+}
+
+interface LegacyKnowledgeTaskRecord extends Omit<KnowledgeTaskRecord,
+  'formatVersion' | 'status' | 'updatedAt' | 'lastError' | 'result'> {
+  formatVersion: 1
+  status: 'completed' | 'failed' | 'cancelled'
+  completedAt: string
+  result?: LegacyKnowledgeTaskResult
+  error?: string
+}
+
+function migrateLegacyWorktree(
+  workspace: LegacyKnowledgeTaskWorkspaceView
+): KnowledgeTaskWorktreeView {
+  return {
+    taskId: workspace.taskId,
+    repositoryPath: workspace.repositoryPath,
+    worktreePath: workspace.repositoryPath,
+    runtimePath: workspace.workspacePath,
+    taskPath: workspace.workspacePath,
+    briefPath: workspace.briefPath,
+    progressPath: workspace.progressPath,
+    inputPath: workspace.inputPath,
+    branchName: workspace.branchName,
+    targetBranch: workspace.targetBranch,
+    baseRepositoryRevision: workspace.baseRepositoryRevision,
+    taskStartRepositoryRevision: workspace.baseRepositoryRevision
+  }
+}
+
+function migrateLegacyResult(result: LegacyKnowledgeTaskResult): KnowledgeTaskResult {
+  const { workspace, rounds, ...rest } = result
+  return {
+    ...rest,
+    worktree: migrateLegacyWorktree(workspace),
+    rounds: rounds.map((round) => {
+      const { workspace: roundWorkspace, ...maintenance } = round.maintenance
+      return {
+        ...round,
+        maintenance: {
+          ...maintenance,
+          worktree: migrateLegacyWorktree(roundWorkspace)
+        }
+      }
+    })
+  }
+}
+
+function migrateLegacy(record: LegacyKnowledgeTaskRecord): KnowledgeTaskRecord {
+  const {
+    error,
+    result,
+    status,
+    completedAt,
+    ...rest
+  } = record
+  return {
+    ...rest,
+    formatVersion: 2,
+    status: status === 'completed' ? 'completed' : 'abandoned',
+    updatedAt: completedAt,
+    ...(status === 'completed' ? { completedAt } : {}),
+    ...(result ? { result: migrateLegacyResult(result) } : {}),
+    ...(error ? { lastError: error } : {})
+  }
+}
+
 function parseRecord(payload: string, expectedTaskId: string): KnowledgeTaskRecord {
-  const record = JSON.parse(payload) as KnowledgeTaskRecord
-  if (
-    record
-    && Number.isSafeInteger(record.formatVersion)
-    && record.formatVersion < TASK_RECORD_FORMAT_VERSION
-  ) throw new LegacyKnowledgeTaskRecordError()
+  const parsed = JSON.parse(payload) as KnowledgeTaskRecord | LegacyKnowledgeTaskRecord
+  const record = parsed?.formatVersion === 1
+    ? migrateLegacy(parsed as LegacyKnowledgeTaskRecord)
+    : parsed as KnowledgeTaskRecord
   if (
     !record
-    || record.formatVersion !== TASK_RECORD_FORMAT_VERSION
+    || record.formatVersion !== 2
     || record.taskId !== expectedTaskId
-  ) throw new Error(`Knowledge Task 历史记录格式无效：${expectedTaskId}`)
-  if (
-    !['completed', 'failed', 'cancelled'].includes(record.status)
+    || !['open', 'completed', 'abandoned'].includes(record.status)
     || typeof record.startedAt !== 'string'
-    || typeof record.completedAt !== 'string'
+    || typeof record.updatedAt !== 'string'
     || !Number.isSafeInteger(record.durationMs)
     || record.durationMs < 0
     || !record.input
     || !record.configuration?.maintainer
     || !record.configuration?.reviewer
     || !Array.isArray(record.agentInvocations)
-  ) throw new Error(`Knowledge Task 历史 Envelope 无效：${expectedTaskId}`)
+  ) throw new Error(`Knowledge Task 记录格式无效：${expectedTaskId}`)
 
   const agentInvocations = record.agentInvocations.map(parseTerminalAgentInvocationRecord)
-  if (new Set(agentInvocations.map((invocation) => invocation.id)).size !== agentInvocations.length) {
-    throw new Error(`Knowledge Task 历史包含重复 Agent Invocation：${expectedTaskId}`)
+  if (record.status === 'completed' && (!record.result || !record.completedAt)) {
+    throw new Error(`已完成 Knowledge Task 缺少结果：${expectedTaskId}`)
   }
-
-  if (record.status === 'completed') {
-    if (
-      !record.result
-      || record.result.taskId !== expectedTaskId
-      || record.result.workspace.taskId !== expectedTaskId
-      || record.error !== undefined
-      || !record.result.rounds.length
-    ) throw new Error(`成功 Knowledge Task 历史记录格式无效：${expectedTaskId}`)
-    if (record.result.rounds.some((round, index) => (
-      round.sequence !== index + 1
-      || !round.roundId
-      || round.maintenance.agentId !== 'knowledge_maintainer'
-      || round.review.agentId !== 'knowledge_reviewer'
-    ))) throw new Error(`Knowledge Task Round 顺序无效：${expectedTaskId}`)
-
-    const referencedInvocationIds = record.result.rounds.flatMap((round) => [
-      round.maintenance.agentInvocationId,
-      round.review.agentInvocationId
-    ])
-    if (
-      referencedInvocationIds.length !== agentInvocations.length
-      || new Set(referencedInvocationIds).size !== referencedInvocationIds.length
-      || referencedInvocationIds.some((id) => {
-        const invocation = agentInvocations.find((candidate) => candidate.id === id)
-        return !invocation || invocation.status !== 'completed'
-      })
-    ) {
-      throw new Error(`成功 Knowledge Task 未引用全部 Agent Invocation：${expectedTaskId}`)
-    }
-    const finalReview = record.result.rounds.at(-1)?.review
-    if (
-      !finalReview
-      || finalReview.decision !== 'approved'
-      || finalReview.candidateRepositoryRevision
-        !== record.result.approvedRepositoryRevision
-    ) throw new Error(`成功 Knowledge Task 缺少最终 Reviewer 批准：${expectedTaskId}`)
-  } else if (
-    record.result !== undefined
-    || typeof record.error !== 'string'
-    || !record.error
-  ) {
-    throw new Error(`未成功 Knowledge Task 历史记录格式无效：${expectedTaskId}`)
+  if (record.status !== 'completed' && record.result) {
+    throw new Error(`未完成 Knowledge Task 不应包含最终结果：${expectedTaskId}`)
   }
   return { ...record, agentInvocations }
 }
@@ -115,7 +164,7 @@ function summary(record: KnowledgeTaskRecord): KnowledgeTaskSummary {
   return {
     taskId: record.taskId,
     status: record.status,
-    completedAt: record.completedAt,
+    updatedAt: record.updatedAt,
     durationMs: record.durationMs,
     sourceConversationTitle: sourceConversation?.title,
     sourceDisplayName: sourceConversation?.sourceDisplayName,
@@ -127,60 +176,121 @@ function summary(record: KnowledgeTaskRecord): KnowledgeTaskSummary {
       (count, invocation) => count + invocation.modelCallCount,
       0
     ),
-    error: record.error
+    error: record.lastError
   }
 }
 
-/** Durable terminal Task records stored beside each Task workspace. */
-export class FileKnowledgeTaskHistory implements KnowledgeTaskHistory {
-  readonly tasksPath: string
+/** Reads Task state from task/* branches and writes it through the Task worktree. */
+export class GitKnowledgeTaskHistory implements KnowledgeTaskHistory {
+  readonly repositoryPath: string
+  private readonly repository: OysterRepository
 
-  constructor(tasksPath: string) {
-    this.tasksPath = resolve(tasksPath)
-    mkdirSync(this.tasksPath, { recursive: true })
+  constructor(
+    repository: OysterRepository | string,
+    private readonly tasks: KnowledgeTaskGitRepository
+  ) {
+    this.repository = typeof repository === 'string' ? new OysterRepository(repository) : repository
+    this.repositoryPath = resolve(this.repository.rootPath)
   }
 
-  private recordPath(taskId: string): string {
-    return join(this.tasksPath, normalizedTaskId(taskId), TASK_RECORD_FILE)
+  private async git(args: string[], trimOutput = true): Promise<string> {
+    try {
+      const { stdout } = await execFileAsync(ARTIFACT_GIT_BINARY_PATH, args, {
+        cwd: this.repositoryPath,
+        env: createArtifactGitEnvironment(),
+        maxBuffer: 16 * 1_024 * 1_024
+      })
+      return trimOutput ? stdout.trimEnd() : stdout
+    } catch (error) {
+      const details = error as Error & { stderr?: string }
+      throw new Error(`Git Task 历史读取失败：${details.stderr?.trim() || details.message}`, {
+        cause: error
+      })
+    }
   }
 
-  save(record: KnowledgeTaskRecord): void {
+  private async tryGit(args: string[], trimOutput = true): Promise<string | undefined> {
+    try {
+      return await this.git(args, trimOutput)
+    } catch {
+      return undefined
+    }
+  }
+
+  async save(record: KnowledgeTaskRecord, worktree: KnowledgeTaskWorktree): Promise<void> {
     const normalized = parseRecord(
       JSON.stringify(record),
       normalizedTaskId(record?.taskId)
     )
-    const path = this.recordPath(normalized.taskId)
-    mkdirSync(join(path, '..'), { recursive: true })
-    writeFileSync(path, `${JSON.stringify(normalized, null, 2)}\n`, {
-      encoding: 'utf8',
-      flag: 'wx'
-    })
+    await this.tasks.saveTaskRecord(
+      worktree,
+      normalized,
+      normalized.status === 'completed'
+        ? 'task: complete'
+        : normalized.status === 'abandoned'
+          ? 'task: abandon'
+          : 'task: checkpoint execution state'
+    )
   }
 
-  list(): KnowledgeTaskSummary[] {
-    return readdirSync(this.tasksPath, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .flatMap((entry) => {
-        const record = this.read(entry.name)
-        return record ? [summary(record)] : []
-      })
+  private async readFromBranch(taskId: string): Promise<KnowledgeTaskRecord | undefined> {
+    const payload = await this.tryGit([
+      'show', `task/${taskId}:tasks/${taskId}/${TASK_RECORD_FILE}`
+    ], false)
+    return payload === undefined ? undefined : parseRecord(payload, taskId)
+  }
+
+  private async readFromMain(taskId: string): Promise<KnowledgeTaskRecord | undefined> {
+    const payload = await this.tryGit([
+      'show', `${OYSTER_TARGET_BRANCH}:tasks/${taskId}/${TASK_RECORD_FILE}`
+    ], false)
+    return payload === undefined ? undefined : parseRecord(payload, taskId)
+  }
+
+  private async readLegacyFile(taskId: string): Promise<KnowledgeTaskRecord | undefined> {
+    try {
+      const payload = await readFile(
+        join(this.repository.tasksPath, taskId, TASK_RECORD_FILE),
+        'utf8'
+      )
+      return parseRecord(payload, taskId)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+      throw error
+    }
+  }
+
+  async list(): Promise<KnowledgeTaskSummary[]> {
+    await this.repository.initialize()
+    const branchIds = (await this.git([
+      'for-each-ref', '--format=%(refname:short)', 'refs/heads/task/'
+    ]))
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((branch) => branch.slice('task/'.length))
+      .map(normalizedTaskId)
+
+    const mainIds = (await this.tryGit([
+      'ls-tree', '-d', '--name-only', `${OYSTER_TARGET_BRANCH}:tasks`
+    ]))?.split(/\r?\n/).filter(Boolean).map(normalizedTaskId) ?? []
+    const legacyIds = (await readdir(this.repository.tasksPath, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory() && /^[a-zA-Z0-9_-]+$/.test(entry.name))
+      .map((entry) => entry.name)
+    const ids = [...new Set([...branchIds, ...mainIds, ...legacyIds])]
+    const records = (await Promise.all(ids.map((id) => this.read(id))))
+      .filter((record): record is KnowledgeTaskRecord => Boolean(record))
+    return records
+      .map(summary)
       .sort((left, right) => (
-        right.completedAt.localeCompare(left.completedAt)
+        right.updatedAt.localeCompare(left.updatedAt)
         || right.taskId.localeCompare(left.taskId)
       ))
   }
 
-  read(taskId: string): KnowledgeTaskRecord | undefined {
+  async read(taskId: string): Promise<KnowledgeTaskRecord | undefined> {
     const normalized = normalizedTaskId(taskId)
-    try {
-      return parseRecord(readFileSync(this.recordPath(normalized), 'utf8'), normalized)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
-      if (error instanceof LegacyKnowledgeTaskRecordError) {
-        rmSync(join(this.tasksPath, normalized), { recursive: true, force: true })
-        return undefined
-      }
-      throw error
-    }
+    return await this.readFromBranch(normalized)
+      ?? await this.readFromMain(normalized)
+      ?? await this.readLegacyFile(normalized)
   }
 }

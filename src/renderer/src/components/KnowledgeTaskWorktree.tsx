@@ -3,7 +3,7 @@ import type { SourceConversationSummary } from '../../../shared/discovery'
 import type { LlmBinding } from '../../../shared/ai-backends'
 import type { KnowledgeStatement } from '../../../shared/knowledge'
 import type {
-  KnowledgeTaskWorkspaceView,
+  KnowledgeTaskWorktreeView,
   LiveAgentInvocationView,
   AiConnectionView,
   KnowledgeAgentDefinitionView
@@ -37,7 +37,7 @@ export interface KnowledgeTaskResultView {
   taskId: string
   completedAt?: string
   durationMs?: number
-  workspace: KnowledgeTaskWorkspaceView
+  worktree: KnowledgeTaskWorktreeView
   approvedRepositoryRevision: string
   changedPaths: string[]
   artifactPaths: string[]
@@ -46,7 +46,7 @@ export interface KnowledgeTaskResultView {
   statements: KnowledgeStatement[]
 }
 
-export interface KnowledgeTaskWorkspaceProps {
+export interface KnowledgeTaskWorktreeProps {
   sourceConversations: SourceConversationSummary[]
   sourceConversationsLoading: boolean
   sourceConversationCatalogError?: string
@@ -104,7 +104,7 @@ function agentSummary(
   }
 }
 
-export function KnowledgeTaskWorkspace(props: KnowledgeTaskWorkspaceProps) {
+export function KnowledgeTaskWorktree(props: KnowledgeTaskWorktreeProps) {
   const [detail, setDetail] = createSignal<'activity' | 'result'>()
   const selectedSourceConversation = () => props.selectedSourceConversation
   const maintainer = createMemo(() => agentSummary(
@@ -160,13 +160,13 @@ export function KnowledgeTaskWorkspace(props: KnowledgeTaskWorkspaceProps) {
   })
 
   return (
-    <div class="knowledge-task" data-testid="knowledge-task-workspace">
+    <div class="knowledge-task" data-testid="knowledge-task-worktree">
       <div class="knowledge-task__boundary" data-testid="git-collaboration-boundary">
         <span class="git-collaboration-badge">Git 协作测试</span>
         <p>Host 在统一 Repository 中创建 Knowledge Processing Task 与真实 Task branch；Maintainer 和 Reviewer 共用 PROGRESS.md，最终结果不会合并到目标分支。</p>
       </div>
 
-        <div class="knowledge-task__workspace">
+        <div class="knowledge-task__worktree">
           <section class="knowledge-task__setup" aria-label="Knowledge Processing Task 输入">
             <div class="knowledge-task__section-heading">
               <div>

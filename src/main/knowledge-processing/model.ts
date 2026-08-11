@@ -8,7 +8,7 @@ import type {
   AgentInvocationDebugRecord,
   AgentInvocationRecord
 } from '../../shared/agent-runtime'
-import type { KnowledgeTaskWorkspace } from './knowledge-task-workspace-repository'
+import type { KnowledgeTaskWorktree } from './knowledge-task-git-repository'
 
 export interface StoredKnowledgeAgent {
   agentId: KnowledgeAgentId
@@ -50,7 +50,7 @@ export interface RepositoryAgentInvocationResult {
 interface RepositoryAgentInvocationInput {
   modelStream: SelectedModelStream
   systemPrompt: string
-  workspace: KnowledgeTaskWorkspace
+  worktree: KnowledgeTaskWorktree
   reasoningEffort?: ReasoningEffort
   invocationId: string
   onInvocationUpdate?: (record: AgentInvocationDebugRecord) => void

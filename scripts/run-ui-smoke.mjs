@@ -478,7 +478,7 @@ if (
 
 const processing = semantics.processing
 if (processing.title !== '加工测试') throw new Error('Knowledge processing page was not rendered')
-if (processing.knowledgeTask.knowledgeTaskSelected !== 'true' || !processing.knowledgeTask.workspaceExists) {
+if (processing.knowledgeTask.knowledgeTaskSelected !== 'true' || !processing.knowledgeTask.worktreeExists) {
   throw new Error('Knowledge Processing Task is not the default knowledge processing view')
 }
 if (processing.knowledgeTask.sourceConversationOptionCount !== 2) {
@@ -539,7 +539,7 @@ if (
 if (processing.knowledgeTaskActivity.overviewHasActivityExplorer) {
   throw new Error('The Knowledge Task overview still renders unbounded Agent activity details')
 }
-if (processing.knowledgeTaskActivity.summaryStatementCount !== '3') {
+if (processing.knowledgeTaskActivity.summaryStatementCount !== '6') {
   throw new Error('The knowledge-task overview does not expose compact result counts')
 }
 if (!processing.knowledgeTaskActivity.activityExplorerExists || processing.knowledgeTaskActivity.activityEventCount !== 2) {
@@ -560,8 +560,8 @@ if (!processing.knowledgeTaskActivity.toolText?.includes('read') || !processing.
 if (!processing.knowledgeTaskActivity.resultDetailExists || !processing.knowledgeTaskActivity.returnedToOverview) {
   throw new Error('The knowledge-task result detail is not a navigable secondary page')
 }
-if (processing.knowledgeTaskActivity.statementCount !== 3) {
-  throw new Error('Knowledge Task result does not expose the committed Knowledge Statement')
+if (processing.knowledgeTaskActivity.statementCount !== 6) {
+  throw new Error('Knowledge Task result does not expose the complete candidate Knowledge tree')
 }
 if (
   !processing.knowledgeTaskActivity.collaborationLinkLabel
@@ -582,12 +582,12 @@ if (
 if (
   !processing.knowledgeTaskActivity.gitResultText?.includes('Repository')
   || !processing.knowledgeTaskActivity.gitResultText?.includes('PROGRESS.md')
-  || !processing.knowledgeTaskActivity.gitResultText?.includes('处理分支')
+  || !processing.knowledgeTaskActivity.gitResultText?.includes('Task branch')
   || !processing.knowledgeTaskActivity.gitResultText?.includes('目标分支main（未合并）')
   || !processing.knowledgeTaskActivity.gitResultText?.includes('批准 revision')
-  || processing.knowledgeTaskActivity.changedPathCount !== 6
+  || processing.knowledgeTaskActivity.changedPathCount !== 10
 ) {
-  throw new Error('The Knowledge Task result does not expose its Repository, Task Workspace, revisions, and changed files')
+  throw new Error('The Knowledge Task result does not expose its Repository, Task worktree, revisions, and changed files')
 }
 if (/来源范围\s+L\d|Raw source|sourceRef|扫描版本/.test(processing.knowledgeTaskActivity.bodyText || '')) {
   throw new Error('The knowledge-task result exposes internal observation coordinates')
@@ -603,12 +603,9 @@ if (!processing.history.resultDetailExists || !processing.history.sharedBrowserE
 }
 if (
   processing.history.importButtonExists
-  || processing.history.productionTitles?.length !== 3
-  || !processing.history.productionTitles.includes('Knowledge Maintenance Agent')
-  || !processing.history.productionTitles.includes('Knowledge Reviewer')
-  || !processing.history.productionTitles.includes('知识加工链路')
+  || processing.history.productionTitles?.length !== 0
 ) {
-  throw new Error('The shared Knowledge layer does not reflect the current processing revision')
+  throw new Error('The unmerged Task branch leaked candidate Knowledge into the user main checkout')
 }
 if (
   !processing.history.historyInitialTitle
@@ -649,7 +646,7 @@ if (processing.promptValues.some((prompt) => typeof prompt !== 'string' || !prom
   throw new Error('A processing default prompt is empty')
 }
 const [maintainerPrompt] = processing.promptValues
-for (const requiredCopy of ['Knowledge Maintainer', 'BRIEF.md', 'inputs/README.md', 'Canonical Activity', 'ordinary evidence file', '[[canonical title]]', 'create one ordinary Git commit', 'Do not delete PROGRESS.md']) {
+for (const requiredCopy of ['Knowledge Maintainer', 'BRIEF.md', 'inputs/README.md', 'Canonical Activity', 'ordinary evidence file', '[[canonical title]]', 'the Host owns branch creation', 'Do not delete PROGRESS.md']) {
   if (!maintainerPrompt.includes(requiredCopy)) {
     throw new Error(`Knowledge Maintenance Agent prompt is missing its responsibility: ${requiredCopy}`)
   }
@@ -712,8 +709,8 @@ for (const requiredCopy of ['read', 'write', 'bash']) {
 }
 if (
   !processing.agentPreviewActivity.resultText?.includes('Repository')
-  || !processing.agentPreviewActivity.resultText?.includes('Task Workspace')
-  || !processing.agentPreviewActivity.resultText?.includes('处理分支')
+  || !processing.agentPreviewActivity.resultText?.includes('Task record')
+  || !processing.agentPreviewActivity.resultText?.includes('Task branch')
   || !processing.agentPreviewActivity.resultText?.includes('当前 revision')
   || !processing.agentPreviewActivity.resultText?.includes('未合并到 main')
 ) {

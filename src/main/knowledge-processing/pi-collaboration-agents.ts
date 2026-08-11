@@ -20,8 +20,8 @@ import {
   REVIEW_MARKER_COMMENT,
   REVIEW_MARKER_END,
   REVIEW_MARKER_START,
-  type KnowledgeTaskWorkspace
-} from './knowledge-task-workspace-repository'
+  type KnowledgeTaskWorktree
+} from './knowledge-task-git-repository'
 import type {
   KnowledgeMaintainerInvocationInput,
   KnowledgeMaintainerRuntime,
@@ -42,12 +42,14 @@ function validateBaseInput(input: KnowledgeMaintainerInvocationInput | Knowledge
     throw new Error('思考强度无效')
   }
   if (
-    !input.workspace?.repositoryPath
-    || !input.workspace.workspacePath
-    || !input.workspace.briefPath
-    || !input.workspace.progressPath
-    || !input.workspace.inputPath
-    || !input.workspace.branchName
+    !input.worktree?.repositoryPath
+    || !input.worktree.worktreePath
+    || !input.worktree.runtimePath
+    || !input.worktree.taskPath
+    || !input.worktree.briefPath
+    || !input.worktree.progressPath
+    || !input.worktree.inputPath
+    || !input.worktree.branchName
   ) {
     throw new Error('Processing Task 无效')
   }
@@ -59,7 +61,7 @@ interface InvokeRepositoryAgentInput {
   modelStream: SelectedModelStream
   systemPrompt: string
   taskPrompt: string
-  workspace: KnowledgeTaskWorkspace
+  worktree: KnowledgeTaskWorktree
   reasoningEffort?: KnowledgeMaintainerInvocationInput['reasoningEffort']
   invocationId: string
   onInvocationUpdate?: (record: AgentInvocationDebugRecord) => void
@@ -71,8 +73,8 @@ async function invokeRepositoryAgent(
   debugStore: AgentDebugStore
 ): Promise<RepositoryAgentInvocationResult> {
   const piSessionManager = SessionManager.create(
-    input.workspace.workspacePath,
-    join(input.workspace.workspacePath, 'pi-sessions'),
+    input.worktree.worktreePath,
+    join(input.worktree.taskPath, 'pi-sessions'),
     { id: input.invocationId }
   )
   const invocation = await createPiCodingAgentInvocation({
@@ -80,9 +82,9 @@ async function invokeRepositoryAgent(
     invocationId: input.invocationId,
     onInvocationUpdate: input.onInvocationUpdate,
     modelStream: input.modelStream,
-    cwd: input.workspace.workspacePath,
-    // Resources are disabled, but an explicit non-global directory keeps every Pi path bounded.
-    agentDir: join(input.workspace.workspacePath, '.pi-runtime'),
+    cwd: input.worktree.worktreePath,
+    // Resources are disabled; runtime-only Pi state remains outside the tracked Repository.
+    agentDir: input.worktree.runtimePath,
     systemPrompt: input.systemPrompt,
     reasoningEffort: input.reasoningEffort,
     piSessionManager,
@@ -126,15 +128,15 @@ async function invokeRepositoryAgent(
 
 function maintainerTaskPrompt(_input: KnowledgeMaintainerInvocationInput): string {
   return [
-    'The current working directory is this Knowledge Processing Task workspace.',
-    'Read BRIEF.md and PROGRESS.md with the ordinary read tool, then carry out the Maintainer responsibility described by your System Prompt. All task-specific input is available as files in this workspace.'
+    'The current working directory is the root of this Knowledge Processing Task checkout.',
+    `Read tasks/${_input.worktree.taskId}/BRIEF.md and tasks/${_input.worktree.taskId}/PROGRESS.md with the ordinary read tool, then carry out the Maintainer responsibility described by your System Prompt. All task-specific input is under tasks/${_input.worktree.taskId}/.`
   ].join('\n\n')
 }
 
 function reviewerTaskPrompt(_input: KnowledgeReviewerInvocationInput): string {
   return [
-    'The current working directory is this Knowledge Processing Task workspace.',
-    'Read BRIEF.md and PROGRESS.md with the ordinary read tool, then carry out the Reviewer responsibility described by your System Prompt. The latest Maintainer handoff in PROGRESS.md identifies the exact candidate revision.'
+    'The current working directory is the root of this Knowledge Processing Task checkout.',
+    `Read tasks/${_input.worktree.taskId}/BRIEF.md and tasks/${_input.worktree.taskId}/PROGRESS.md with the ordinary read tool, then carry out the Reviewer responsibility described by your System Prompt. Review the current Task branch checkout.`
   ].join('\n\n')
 }
 
@@ -148,7 +150,7 @@ export class PiKnowledgeMaintainerAgent implements KnowledgeMaintainerRuntime {
       modelStream: input.modelStream,
       systemPrompt: input.systemPrompt,
       taskPrompt: maintainerTaskPrompt(input),
-      workspace: input.workspace,
+      worktree: input.worktree,
       reasoningEffort: input.reasoningEffort,
       invocationId: input.invocationId,
       onInvocationUpdate: input.onInvocationUpdate,
@@ -170,7 +172,7 @@ export class PiKnowledgeReviewerAgent implements KnowledgeReviewerRuntime {
       modelStream: input.modelStream,
       systemPrompt: input.systemPrompt,
       taskPrompt: reviewerTaskPrompt(input),
-      workspace: input.workspace,
+      worktree: input.worktree,
       reasoningEffort: input.reasoningEffort,
       invocationId: input.invocationId,
       onInvocationUpdate: input.onInvocationUpdate,

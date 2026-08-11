@@ -19,7 +19,7 @@ Discovery catalog 中的单个外部来源条目称为 **Source Record**。它�
          -> Source Adapter 定位并校验所选版本 -> 原地读取 -> 后续消费
 ```
 
-正式知识加工与测试使用同一观察读取路径，发现层不为测试建立另一套来源副本。用户接受精确 `sourceRevision` 后形成 Source Snapshot，知识加工 Core 会在 `tasks/<taskId>/` 中物化该 Task 所需的固定输入视图；这属于 Task workspace，不属于 Discovery catalog 或 Source Adapter 的存储职责。后续如何持久化知识或隔离测试写入，不由发现层定义。
+正式知识加工与测试使用同一观察读取路径，发现层不为测试建立另一套来源副本。用户接受精确 `sourceRevision` 后形成 Source Snapshot，知识加工 Core 会在 tracked `tasks/<taskId>/` 中物化该 Task 所需的输入视图；它属于 Task 记录，不属于 Discovery catalog 或 Source Adapter 的存储职责。后续如何持久化知识或隔离测试写入，不由发现层定义。
 
 ## 2. 当前能力
 

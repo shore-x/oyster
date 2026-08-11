@@ -17,32 +17,34 @@ import {
   PiKnowledgeReviewerAgent
 } from '../src/main/knowledge-processing/pi-collaboration-agents'
 import {
-  KnowledgeTaskWorkspaceRepository,
-  type KnowledgeTaskWorkspace
-} from '../src/main/knowledge-processing/knowledge-task-workspace-repository'
-import { planKnowledgeTaskWorkspace } from '../src/main/knowledge-processing/task-workspace'
+  KnowledgeTaskGitRepository,
+  type KnowledgeTaskWorktree
+} from '../src/main/knowledge-processing/knowledge-task-git-repository'
+import { planKnowledgeTaskInput } from '../src/main/knowledge-processing/task-input'
 
 const temporaryDirectories: string[] = []
 
-async function taskWorkspace(): Promise<KnowledgeTaskWorkspace> {
+async function taskWorktree(): Promise<KnowledgeTaskWorktree> {
   const repositoryPath = await mkdtemp(join(tmpdir(), 'oyster-pi-collaboration-'))
   temporaryDirectories.push(repositoryPath)
-  const workspacePath = join(repositoryPath, 'tasks', 'workspace-test')
-  const inputPath = join(workspacePath, 'inputs')
+  const taskPath = join(repositoryPath, 'tasks', 'worktree-test')
+  const inputPath = join(taskPath, 'inputs')
   await mkdir(inputPath, { recursive: true })
-  await writeFile(join(workspacePath, 'BRIEF.md'), '# Brief\n\nWorkspace-specific instruction.\n')
-  await writeFile(join(workspacePath, 'PROGRESS.md'), '# Progress\n')
+  await writeFile(join(taskPath, 'BRIEF.md'), '# Brief\n\nWorktree-specific instruction.\n')
+  await writeFile(join(taskPath, 'PROGRESS.md'), '# Progress\n')
   return {
-    taskId: 'workspace-test',
+    taskId: 'worktree-test',
     repositoryPath,
-    workspacePath,
-    briefPath: join(workspacePath, 'BRIEF.md'),
-    progressPath: join(workspacePath, 'PROGRESS.md'),
+    worktreePath: repositoryPath,
+    runtimePath: join(repositoryPath, '.runtime'),
+    taskPath,
+    briefPath: join(taskPath, 'BRIEF.md'),
+    progressPath: join(taskPath, 'PROGRESS.md'),
     inputPath,
-    workspaceRevision: 'd'.repeat(64),
     targetBranch: 'main',
-    branchName: 'knowledge-task/workspace-test',
-    baseRepositoryRevision: 'a'.repeat(40)
+    branchName: 'task/worktree-test',
+    baseRepositoryRevision: 'a'.repeat(40),
+    taskStartRepositoryRevision: 'd'.repeat(40)
   }
 }
 
@@ -72,25 +74,25 @@ afterEach(async () => {
 })
 
 describe('Pi collaboration Agents', () => {
-  it('gives the Maintainer only ordinary tools rooted in its Task workspace', async () => {
-    const workspace = await taskWorkspace()
+  it('gives the Maintainer only ordinary tools rooted in its Task worktree', async () => {
+    const worktree = await taskWorktree()
     const modelStream = fauxModelStream([
       (context) => {
         expect(context.tools?.map((tool) => tool.name)).toEqual([
           'read', 'bash', 'edit', 'write'
         ])
         expect(contextText(context)).toContain('current working directory')
-        expect(contextText(context)).toContain('BRIEF.md and PROGRESS.md')
+        expect(contextText(context)).toContain('tasks/worktree-test/BRIEF.md')
         expect(contextText(context)).not.toContain('canonical activity')
         expect(contextText(context)).not.toContain('read_evidence')
         expect(contextText(context)).not.toContain('list_todos')
         return fauxAssistantMessage(
-          fauxToolCall('read', { path: 'BRIEF.md' }),
+          fauxToolCall('read', { path: 'tasks/worktree-test/BRIEF.md' }),
           { stopReason: 'toolUse' }
         )
       },
       (context) => {
-        expect(contextText(context)).toContain('Workspace-specific instruction.')
+        expect(contextText(context)).toContain('Worktree-specific instruction.')
         return fauxAssistantMessage('Maintainer handoff committed.')
       }
     ])
@@ -98,8 +100,8 @@ describe('Pi collaboration Agents', () => {
     const result = await new PiKnowledgeMaintainerAgent().invoke({
       modelStream,
       systemPrompt: 'Maintain the collaboration tree.',
-      workspace,
-      previousRepositoryRevision: workspace.baseRepositoryRevision,
+      worktree,
+      previousRepositoryRevision: worktree.baseRepositoryRevision,
       invocationId: 'maintainer-invocation',
       signal: new AbortController().signal
     })
@@ -108,13 +110,13 @@ describe('Pi collaboration Agents', () => {
   })
 
   it('gives the Reviewer the same ordinary tools without injecting Observation content', async () => {
-    const workspace = await taskWorkspace()
+    const worktree = await taskWorktree()
     const modelStream = fauxModelStream([
       (context) => {
         expect(context.tools?.map((tool) => tool.name)).toEqual([
           'read', 'bash', 'edit', 'write'
         ])
-        expect(contextText(context)).toContain('latest Maintainer handoff in PROGRESS.md')
+        expect(contextText(context)).toContain('Review the current Task branch checkout')
         expect(contextText(context)).not.toContain('read_evidence')
         expect(contextText(context)).not.toContain('Raw Evidence format')
         expect(contextText(context)).not.toContain('list_todos')
@@ -125,7 +127,7 @@ describe('Pi collaboration Agents', () => {
     const result = await new PiKnowledgeReviewerAgent().invoke({
       modelStream,
       systemPrompt: 'Review the collaboration tree without reading inputs/.',
-      workspace,
+      worktree,
       reviewedRepositoryRevision: 'c'.repeat(40),
       invocationId: 'reviewer-invocation',
       signal: new AbortController().signal
@@ -135,13 +137,14 @@ describe('Pi collaboration Agents', () => {
   })
 
   it('uses the ordinary read tool to send a materialized image to the model', async () => {
-    const repositoryPath = await mkdtemp(join(tmpdir(), 'oyster-pi-image-workspace-'))
-    temporaryDirectories.push(repositoryPath)
+    const rootPath = await mkdtemp(join(tmpdir(), 'oyster-pi-image-worktree-'))
+    temporaryDirectories.push(rootPath)
+    const repositoryPath = join(rootPath, 'repository')
     const png = Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z0Z8AAAAASUVORK5CYII=',
       'base64'
     )
-    const workspacePlan = planKnowledgeTaskWorkspace({
+    const inputPlan = planKnowledgeTaskInput({
       rawEvidence: {
         formatVersion: 'test-raw-v1',
         lines: ['image'],
@@ -165,14 +168,14 @@ describe('Pi collaboration Agents', () => {
         }]
       }
     }, 'raw:image@fixture', 100)
-    const workspace = await new KnowledgeTaskWorkspaceRepository(repositoryPath).createWorkspace({
-      taskId: 'image-workspace',
+    const worktree = await new KnowledgeTaskGitRepository(repositoryPath).createWorktree({
+      taskId: 'image-worktree',
       sourceRef: 'raw:image@fixture',
-      workspace: workspacePlan
+      plan: inputPlan
     })
     const modelStream = fauxModelStream([
       () => fauxAssistantMessage(
-        fauxToolCall('read', { path: 'inputs/attachments/ATT000001.png' }),
+        fauxToolCall('read', { path: 'tasks/image-worktree/inputs/attachments/ATT000001.png' }),
         { stopReason: 'toolUse' }
       ),
       (context) => {
@@ -187,8 +190,8 @@ describe('Pi collaboration Agents', () => {
     const result = await new PiKnowledgeMaintainerAgent().invoke({
       modelStream,
       systemPrompt: 'Maintain the collaboration tree.',
-      workspace,
-      previousRepositoryRevision: workspace.baseRepositoryRevision,
+      worktree,
+      previousRepositoryRevision: worktree.baseRepositoryRevision,
       invocationId: 'maintainer-image-invocation',
       signal: new AbortController().signal
     })

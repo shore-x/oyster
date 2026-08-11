@@ -56,7 +56,7 @@ Agent Invocation ──ref──> Local Agent Debug Record
 - Agent Debug Record 是本地调试投影，其中才包含 Agent Turn、Model Call 和 Tool Call；
 - Trace / Span 不作为这些实体的别名，只在未来遥测系统中使用。
 
-Task 与 Invocation 的活动态统一为 `in_progress`。终态实体不可继续追加或原地重试。
+Task 的活动态是 `open`；Invocation 的活动态是 `in_progress`。Invocation 终态不可继续追加，但失败或取消不会自动终结所属 Task。
 
 ## 4. 当前持久化结论
 
@@ -117,17 +117,17 @@ API Key、Authorization、Cookie 等 credential-bearing header 值不会写入�
 
 ### 4.4 Knowledge Processing Task 历史
 
-每个终态 Task 在 `tasks/<taskId>/task.json` 保存一个 `KnowledgeTaskRecord`：
+每个 Task 从创建起在 `task/<taskId>:tasks/<taskId>/task.json` 保存一个 `KnowledgeTaskRecord`：
 
-- `formatVersion: 1`；
-- `taskId`、输入、冻结配置、开始与完成时间；
-- `completed | failed | cancelled` 终态；
+- `formatVersion: 2`；
+- `taskId`、输入、冻结配置、开始与更新时间；
+- `open | completed | abandoned` 生命周期；
 - 按实际启动顺序保存的全部精简 `agentInvocations` envelope；
-- 成功时保存结果和 Collaboration Round，失败或取消时保存错误。
+- 成功时保存结果和 Collaboration Round；Invocation 失败或取消时保存 `lastError` 并保持 `open`。
 
-成功 Task 的每个 Round 必须引用一组完成的 Maintainer / Reviewer Invocation，最后一轮必须批准同一个候选 revision。终态记录使用独占创建，不能覆盖同 ID 历史。
+Task start commit 保存初始记录，后续 Host checkpoint 追加 Invocation、Review 和结果历史。Task/Pi Session/Knowledge/Artifact 由同一 branch 跟踪。
 
-Source Snapshot 在 Task 接受前被拒绝时不创建 Task workspace 或失败历史。Task 接受后的失败和取消则保存终态记录。低于当前支持版本的 Task 目录在读取时删除；高于当前版本的记录保留并报错，避免旧应用破坏新数据。
+Source Snapshot 在 Task 接受前被拒绝时不创建 Task branch。Task 接受后的失败和取消保存为可恢复 checkpoint。历史从 `task/*` 和 `main:tasks/` 读取；旧版 Git 外记录只读兼容，不再删除。
 
 ### 4.5 Chat Conversation 历史
 

@@ -26,13 +26,13 @@ import type {
 export const TASK_INPUTS_DIRECTORY_NAME = 'inputs'
 export const TASK_INPUT_GUIDE_PATH = `${TASK_INPUTS_DIRECTORY_NAME}/README.md`
 
-export interface TaskWorkspaceFile {
+export interface TaskInputFile {
   relativePath: string
   content: string | Buffer
 }
 
-export interface KnowledgeTaskWorkspacePlan {
-  files: TaskWorkspaceFile[]
+export interface KnowledgeTaskInputPlan {
+  files: TaskInputFile[]
   items: string[]
   activitySegmentCount: number
   activityPageCount: number
@@ -263,7 +263,7 @@ function inputGuide(
     '',
     '## Raw Evidence',
     '',
-    `The ${rawPageCount} bounded text pages under \`${TASK_INPUTS_DIRECTORY_NAME}/evidence/\` are deterministically materialized from the selected Raw Evidence line model. They preserve its line locators, not the external source's byte representation. The Source reference above binds the external source revision; manifest.json separately binds these materialized files. Use \`${TASK_INPUTS_DIRECTORY_NAME}/evidence/INDEX.md\` only when exact source verification is necessary.`,
+    `The ${rawPageCount} bounded text pages under \`${TASK_INPUTS_DIRECTORY_NAME}/evidence/\` are deterministically materialized from the selected Raw Evidence line model. They preserve its line locators, not the external source's byte representation. The Source reference above binds the external source revision; the Task-start Git commit binds these materialized files. Use \`${TASK_INPUTS_DIRECTORY_NAME}/evidence/INDEX.md\` only when exact source verification is necessary.`,
     '',
     '## Attachments',
     '',
@@ -282,13 +282,13 @@ function inputGuide(
 
 /**
  * Builds the complete, file-backed Observation view and the checklist that covers it.
- * All returned paths and checklist paths are relative to the Task workspace.
+ * All returned paths and checklist paths are relative to `tasks/<taskId>/`.
  */
-export function planKnowledgeTaskWorkspace(
+export function planKnowledgeTaskInput(
   observation: AgentObservation,
   sourceRef: string,
   segmentCharacterLimit: number
-): KnowledgeTaskWorkspacePlan {
+): KnowledgeTaskInputPlan {
   const { canonicalActivity: activity, rawEvidence } = observation
   if (!activity.items.length || activity.items.some((item) => !item.content.trim())) {
     throw new Error('Canonical Activity 没有可处理内容或包含空活动')
@@ -301,7 +301,7 @@ export function planKnowledgeTaskWorkspace(
   const segments = segmentRanges(activity, segmentCharacterLimit)
   const assignedHints = new Set<number>()
   const assignedAttachments = new Set<string>()
-  const files: TaskWorkspaceFile[] = []
+  const files: TaskInputFile[] = []
   let activityPageCount = 0
 
   const items = segments.map((segment, segmentIndex) => {

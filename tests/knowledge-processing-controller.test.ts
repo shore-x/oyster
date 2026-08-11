@@ -54,17 +54,19 @@ function maintenanceResult(): KnowledgeMaintenanceResult {
     agentId: 'knowledge_maintainer',
     sourceRef: 'raw:source-conversation-1@sha256:test',
     activitySegmentCount: 1,
-    workspace: {
+    worktree: {
       taskId: 'task-1',
       repositoryPath: '/tmp/oyster-repository',
-      workspacePath: '/tmp/oyster-repository/tasks/task-1',
-      briefPath: '/tmp/oyster-repository/tasks/task-1/BRIEF.md',
-      progressPath: '/tmp/oyster-repository/tasks/task-1/PROGRESS.md',
-      inputPath: '/tmp/oyster-repository/tasks/task-1/inputs',
-      workspaceRevision: 'd'.repeat(40),
-      branchName: 'knowledge-task/task-1',
+      worktreePath: '/tmp/oyster-worktrees/task-1',
+      runtimePath: '/tmp/oyster-agent-runtime/task-1',
+      taskPath: '/tmp/oyster-worktrees/task-1/tasks/task-1',
+      briefPath: '/tmp/oyster-worktrees/task-1/tasks/task-1/BRIEF.md',
+      progressPath: '/tmp/oyster-worktrees/task-1/tasks/task-1/PROGRESS.md',
+      inputPath: '/tmp/oyster-worktrees/task-1/tasks/task-1/inputs',
+      branchName: 'task/task-1',
       targetBranch: 'main',
-      baseRepositoryRevision: 'b'.repeat(40)
+      baseRepositoryRevision: 'b'.repeat(40),
+      taskStartRepositoryRevision: 'd'.repeat(40)
     },
     previousRepositoryRevision: 'b'.repeat(40),
     candidateRepositoryRevision: 'c'.repeat(40),

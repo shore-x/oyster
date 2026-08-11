@@ -1,4 +1,4 @@
-import { mkdir, lstat, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, lstat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { runArtifactGit } from '../artifacts/git-runtime'
 
@@ -6,8 +6,6 @@ export const OYSTER_TARGET_BRANCH = 'main'
 export const KNOWLEDGE_DIRECTORY = 'knowledge'
 export const ARTIFACTS_DIRECTORY = 'artifacts'
 export const TASKS_DIRECTORY = 'tasks'
-
-const INITIAL_GITIGNORE = `/${TASKS_DIRECTORY}/\n`
 
 async function isMissing(error: unknown): Promise<boolean> {
   return (error as NodeJS.ErrnoException).code === 'ENOENT'
@@ -88,26 +86,14 @@ export class OysterRepository {
       await Promise.all([
         writeFile(join(this.knowledgePath, '.gitkeep'), '', { flag: 'a' }),
         writeFile(join(this.artifactsPath, '.gitkeep'), '', { flag: 'a' }),
-        writeFile(join(this.rootPath, '.gitignore'), INITIAL_GITIGNORE, { flag: 'a' })
+        writeFile(join(this.tasksPath, '.gitkeep'), '', { flag: 'a' })
       ])
       await runArtifactGit([
-        'add', '--', '.gitignore', KNOWLEDGE_DIRECTORY, ARTIFACTS_DIRECTORY
+        'add', '--', KNOWLEDGE_DIRECTORY, ARTIFACTS_DIRECTORY, TASKS_DIRECTORY
       ], this.rootPath)
       await runArtifactGit([
         'commit', '--quiet', '--no-gpg-sign', '-m', 'Initialize Oyster repository'
       ], this.rootPath)
-      return
-    }
-
-    const gitignorePath = join(this.rootPath, '.gitignore')
-    try {
-      const current = await readFile(gitignorePath, 'utf8')
-      if (!current.split(/\r?\n/).includes(`/${TASKS_DIRECTORY}/`)) {
-        await writeFile(gitignorePath, `${current}${current.endsWith('\n') ? '' : '\n'}${INITIAL_GITIGNORE}`)
-      }
-    } catch (error) {
-      if (!await isMissing(error)) throw error
-      await writeFile(gitignorePath, INITIAL_GITIGNORE)
     }
   }
 }

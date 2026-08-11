@@ -43,10 +43,10 @@ Knowledge Maintainer 与 Reviewer 使用同一 `AgentSession` 基础，但资源
 ## 工作坐标
 
 - Chat Agent 从 Repository 根启动，可使用普通 Coding Tools、Headless Extension、子 Agent 和通用 Todo；
-- Knowledge Maintainer 与 Reviewer 从所属 `tasks/<taskId>/` 启动，只使用固定普通工具；
-- Maintainer 读取 `BRIEF.md`、`PROGRESS.md` 和 `inputs/`；Reviewer 读取 `BRIEF.md`、`PROGRESS.md` 与精确 candidate revision，不读取 `inputs/`。
+- Knowledge Maintainer 与 Reviewer 从 Repository 外的 `worktrees/<taskId>/` linked checkout 根启动，只使用固定普通工具；
+- Task 文件在该 checkout 的 `tasks/<taskId>/`；Maintainer 读取 BRIEF、PROGRESS 和 inputs，Reviewer 读取 BRIEF、PROGRESS 与当前 candidate tree，不读取 inputs。
 
-适配层不安装 `read_activity`、`read_activity_attachment` 或 `read_evidence` 等领域专用工具。`BRIEF.md`、`inputs/` 和 `manifest.json` 的固定性、`PROGRESS.md` 的可变性、Repository 初始指纹以及 Reviewer 的 source-blind 行为由 Knowledge Processing Harness 定义，不属于 SDK 适配层，也不代表 OS 文件系统沙箱。
+适配层不安装 `read_activity`、`read_activity_attachment` 或 `read_evidence` 等领域专用工具。Task start commit、Host checkpoint 和 Reviewer 的 source-blind 行为由 Knowledge Processing 业务层定义，不属于 SDK 适配层，也不代表 OS 文件系统沙箱。
 
 ## Pi Session
 
@@ -55,6 +55,8 @@ Pi Session 是执行历史的事实来源，保存 message、Tool Result、compa
 - Chat Conversation 使用 `SessionManager` 的 append-only JSONL，并用一个小型 Oyster descriptor 固定模型/System Prompt binding、标题及空 Conversation；一次根 Invocation 通过 `startEntryId` / `endEntryId` 引用它在共享 Session 中产生的范围；
 - Chat 子 Agent 创建独立的持久化 Pi Session，并通过 Pi `parentSession` 指向父 Session；父工具结果只保存最终文本以及子 `invocationId` / `sessionId`，不复制子 transcript；
 - Knowledge Maintainer 与 Reviewer 的每次 Invocation 都在 `tasks/<taskId>/pi-sessions/` 创建独立持久化 Pi Session。
+
+Knowledge Pi Session 随 Host checkpoint 进入 Task branch；对应 `agentDir` 位于 `<Electron userData>/agent-runtime/<taskId>/`，因此 `.pi-runtime`、缓存和临时资源不进入 Git。
 
 SDK 原生 persistent compaction 只改变下一次模型调用使用的活动上下文，不删除 JSONL 中被摘要的历史消息。溢出时由 `AgentSession` 执行“记录失败 Assistant message、生成 compaction、持久化边界、重试”；摘要调用在 Debug Record 中标记为 `purpose: context_compaction`。
 
@@ -81,4 +83,4 @@ Debug Store 是按 Invocation 组织的本地检查投影，不是第二份 Conv
 
 ## 边界
 
-适配层不提供 Repository 权限控制、业务并发状态机、分布式 Trace、Git 协作编排，也不增加固定模型轮次、工具次数或总时长配额。Headless Extension 与普通 Coding Tools 都按应用当前 OS 用户权限执行；当前安全边界是明确来源、显式配置和不加载项目 `.pi` 可执行资源，而不是能力沙箱。
+适配层不提供 Repository 权限控制、分布式 Trace 或 Git 拓扑编排，也不增加固定模型轮次、工具次数或总时长配额。Git branch/worktree/checkpoint 属于 Host；Runtime 只执行每-worktree单写入者门禁。Headless Extension 与普通 Coding Tools 都按应用当前 OS 用户权限执行；当前安全边界是明确来源、显式配置和不加载项目 `.pi` 可执行资源，而不是能力沙箱。

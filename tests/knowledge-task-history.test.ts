@@ -1,178 +1,200 @@
-import { mkdir, mkdtemp, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
-import { FileKnowledgeTaskHistory } from '../src/main/knowledge-processing/knowledge-task-history'
+import { afterEach, describe, expect, it } from 'vitest'
+import { GitKnowledgeTaskHistory } from '../src/main/knowledge-processing/knowledge-task-history'
+import {
+  KnowledgeTaskGitRepository,
+  type KnowledgeTaskWorktree
+} from '../src/main/knowledge-processing/knowledge-task-git-repository'
+import { OysterRepository } from '../src/main/repository/oyster-repository'
 import type { KnowledgeTaskRecord } from '../src/shared/knowledge-processing'
-import { completedAgentInvocation } from './agent-invocation-fixture'
-import { parseAgentInvocationRecord } from '../src/main/agent-runtime/agent-invocation-record'
 
-function record(taskId = 'task-history'): KnowledgeTaskRecord {
-  const maintainer = completedAgentInvocation(
-    'maintainer-invocation',
-    ['read'],
-    1,
-    'knowledge_maintainer'
-  )
-  const reviewer = completedAgentInvocation(
-    'reviewer-invocation',
-    ['read'],
-    1,
-    'knowledge_reviewer'
-  )
-  const baseRepositoryRevision = 'a'.repeat(40)
-  const approvedRepositoryRevision = 'b'.repeat(40)
-  const sourceConversation = {
-    sourceConversationId: 'source-conversation-1',
-    sourceId: 'source:codex',
-    agentType: 'codex' as const,
-    sourceDisplayName: 'Codex',
-    providerConversationId: 'provider-conversation-1',
-    title: 'History conversation',
-    sizeBytes: 100,
-    sourceRevision: 'source-revision-1'
-  }
-  const workspace = {
-    taskId,
-    repositoryPath: '/tmp/oyster/repository',
-    workspacePath: `/tmp/oyster/repository/tasks/${taskId}`,
-    briefPath: `/tmp/oyster/repository/tasks/${taskId}/BRIEF.md`,
-    progressPath: `/tmp/oyster/repository/tasks/${taskId}/PROGRESS.md`,
-    inputPath: `/tmp/oyster/repository/tasks/${taskId}/inputs`,
-    workspaceRevision: 'c'.repeat(64),
-    targetBranch: 'main',
-    branchName: `knowledge-task/${taskId}`,
-    baseRepositoryRevision
-  }
-  const invocation = {
-    connectionId: 'connection',
-    connectionName: 'Connection',
-    backendKind: 'api' as const,
-    providerId: 'openai_compatible' as const,
-    runtime: 'pi_coding_agent' as const,
-    modelCallCount: 1,
-    toolCalls: ['read']
-  }
+const temporaryDirectories: string[] = []
+
+function openRecord(taskId: string): KnowledgeTaskRecord {
   return {
-    formatVersion: 1,
+    formatVersion: 2,
     taskId,
-    status: 'completed',
-    startedAt: '2026-08-06T00:00:00.000Z',
-    completedAt: '2026-08-06T00:00:01.000Z',
-    durationMs: 1_000,
+    status: 'open',
+    startedAt: '2026-08-11T00:00:00.000Z',
+    updatedAt: '2026-08-11T00:00:00.000Z',
+    durationMs: 0,
     input: {
-      sourceConversationId: sourceConversation.sourceConversationId,
-      sourceRevision: sourceConversation.sourceRevision
+      sourceConversationId: 'source-conversation-1',
+      sourceRevision: 'source-revision-1'
     },
-    sourceConversation,
+    sourceConversation: {
+      sourceConversationId: 'source-conversation-1',
+      sourceId: 'source:codex',
+      agentType: 'codex',
+      sourceDisplayName: 'Codex',
+      providerConversationId: 'provider-conversation-1',
+      title: 'History conversation',
+      sizeBytes: 100,
+      sourceRevision: 'source-revision-1'
+    },
     configuration: {
       maintainer: { connectionId: 'connection', modelId: 'maintainer', instructions: 'Maintain.' },
       reviewer: { connectionId: 'connection', modelId: 'reviewer', instructions: 'Review.' }
     },
-    agentInvocations: [
-      parseAgentInvocationRecord(maintainer),
-      parseAgentInvocationRecord(reviewer)
-    ],
+    agentInvocations: []
+  }
+}
+
+async function fixture(taskId = 'task-history') {
+  const root = await mkdtemp(join(tmpdir(), 'oyster-task-history-'))
+  temporaryDirectories.push(root)
+  const repository = new OysterRepository(join(root, 'repository'))
+  const tasks = new KnowledgeTaskGitRepository(repository)
+  const initial = openRecord(taskId)
+  const worktree = await tasks.createWorktree({
+    taskId,
+    kind: 'task',
+    sourceRef: 'raw:test@revision',
+    taskRecord: initial,
+    plan: {
+      files: [{ relativePath: 'inputs/README.md', content: '# Inputs\n' }],
+      items: ['Inspect input.'],
+      activitySegmentCount: 1,
+      activityPageCount: 1,
+      evidencePageCount: 1,
+      attachmentCount: 0,
+      canonicalActivityFormat: 'test-activity-v1',
+      rawEvidenceFormat: 'test-raw-v1',
+      activityCount: 1,
+      rawEvidenceLineCount: 1
+    }
+  })
+  const history = new GitKnowledgeTaskHistory(repository, tasks)
+  return { root, repository, tasks, worktree, history, initial }
+}
+
+function completedRecord(
+  initial: KnowledgeTaskRecord,
+  worktree: KnowledgeTaskWorktree
+): KnowledgeTaskRecord {
+  const completedAt = '2026-08-11T00:00:01.000Z'
+  const worktreeView = {
+    taskId: worktree.taskId,
+    repositoryPath: worktree.repositoryPath,
+    worktreePath: worktree.worktreePath,
+    runtimePath: worktree.runtimePath,
+    taskPath: worktree.taskPath,
+    briefPath: worktree.briefPath,
+    progressPath: worktree.progressPath,
+    inputPath: worktree.inputPath,
+    targetBranch: worktree.targetBranch,
+    branchName: worktree.branchName,
+    baseRepositoryRevision: worktree.baseRepositoryRevision,
+    taskStartRepositoryRevision: worktree.taskStartRepositoryRevision
+  }
+  return {
+    ...initial,
+    status: 'completed',
+    updatedAt: completedAt,
+    completedAt,
+    durationMs: 1_000,
     result: {
-      taskId,
-      sourceConversation,
-      sourceSnapshot: {
-        sourceConversationId: sourceConversation.sourceConversationId,
-        sourceRevision: sourceConversation.sourceRevision
-      },
-      sourceRef: 'raw:source-conversation-1@source-revision-1',
-      workspace,
-      rounds: [{
-        roundId: 'round-1',
-        sequence: 1,
-        maintenance: {
-          agentId: 'knowledge_maintainer',
-          sourceRef: 'raw:source-conversation-1@source-revision-1',
-          activitySegmentCount: 1,
-          workspace,
-          previousRepositoryRevision: baseRepositoryRevision,
-          candidateRepositoryRevision: approvedRepositoryRevision,
-          changedPaths: ['knowledge/subject.md'],
-          agentInvocationId: maintainer.id,
-          durationMs: 500,
-          completedAt: '2026-08-06T00:00:00.500Z',
-          invocation: { ...invocation, model: 'maintainer' }
-        },
-        review: {
-          agentId: 'knowledge_reviewer',
-          decision: 'approved',
-          reviewedRepositoryRevision: approvedRepositoryRevision,
-          candidateRepositoryRevision: approvedRepositoryRevision,
-          changedPaths: [],
-          markerPaths: [],
-          agentInvocationId: reviewer.id,
-          durationMs: 500,
-          completedAt: '2026-08-06T00:00:01.000Z',
-          invocation: { ...invocation, model: 'reviewer' }
-        }
-      }],
-      approvedRepositoryRevision,
-      changedPaths: ['knowledge/subject.md'],
-      knowledge: [{ title: 'Subject', content: 'Body.' }],
+      taskId: initial.taskId,
+      sourceConversation: initial.sourceConversation!,
+      sourceSnapshot: initial.input,
+      sourceRef: 'raw:test@revision',
+      worktree: worktreeView,
+      rounds: [],
+      approvedRepositoryRevision: worktree.taskStartRepositoryRevision,
+      changedPaths: [`tasks/${initial.taskId}/task.json`],
+      knowledge: [],
       artifactPaths: [],
       durationMs: 1_000,
-      completedAt: '2026-08-06T00:00:01.000Z'
+      completedAt
     }
   }
 }
 
-describe('FileKnowledgeTaskHistory', () => {
-  it('stores terminal history in tasks/<task-id>/task.json', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'oyster-task-history-'))
-    const repository = new FileKnowledgeTaskHistory(join(root, 'tasks'))
-    const value = record()
-    repository.save(value)
-    expect(repository.read(value.taskId)).toEqual(value)
-    expect(repository.list()).toEqual([
+afterEach(async () => {
+  await Promise.all(temporaryDirectories.splice(0).map(
+    (directory) => rm(directory, { recursive: true, force: true })
+  ))
+})
+
+describe('GitKnowledgeTaskHistory', () => {
+  it('reads and updates Task state from its Task branch', async () => {
+    const { repository, worktree, history, initial } = await fixture()
+    const completed = completedRecord(initial, worktree)
+
+    await history.save(completed, worktree)
+
+    await expect(history.read(initial.taskId)).resolves.toEqual(completed)
+    await expect(history.list()).resolves.toEqual([
       expect.objectContaining({
-        taskId: value.taskId,
-        agentInvocationCount: 2,
-        statementCount: 1
+        taskId: initial.taskId,
+        status: 'completed',
+        statementCount: 0
       })
     ])
+    await expect(readFile(join(worktree.taskPath, 'task.json'), 'utf8'))
+      .resolves.toContain('"status": "completed"')
   })
 
-  it('does not overwrite an existing terminal Task record', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'oyster-task-history-'))
-    const repository = new FileKnowledgeTaskHistory(join(root, 'tasks'))
-    repository.save(record())
-    expect(() => repository.save(record())).toThrow()
+  it('keeps a failed Agent execution as an open Task checkpoint', async () => {
+    const { worktree, history, initial } = await fixture('recoverable-task')
+    const updated: KnowledgeTaskRecord = {
+      ...initial,
+      updatedAt: '2026-08-11T00:00:02.000Z',
+      durationMs: 2_000,
+      lastError: 'Provider disconnected'
+    }
+
+    await history.save(updated, worktree)
+
+    await expect(history.read(initial.taskId)).resolves.toMatchObject({
+      status: 'open',
+      lastError: 'Provider disconnected'
+    })
   })
 
-  it('deletes an older incompatible Task directory while listing history', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'oyster-task-history-'))
-    const tasksPath = join(root, 'tasks')
-    const repository = new FileKnowledgeTaskHistory(tasksPath)
-    const current = record('current-task')
-    repository.save(current)
-    const legacy = { ...record('legacy-task'), formatVersion: 0 }
-    const legacyPath = join(tasksPath, legacy.taskId)
-    await mkdir(legacyPath)
-    await writeFile(join(legacyPath, 'task.json'), JSON.stringify(legacy), 'utf8')
+  it('preserves and reads a legacy ignored Task record without deleting it', async () => {
+    const { repository, tasks, worktree, initial } = await fixture('current-task')
+    const legacyTaskId = 'legacy-task'
+    const legacyPath = join(repository.tasksPath, legacyTaskId, 'task.json')
+    await mkdir(join(legacyPath, '..'), { recursive: true })
+    const current = completedRecord({ ...initial, taskId: legacyTaskId }, worktree)
+    const { worktree: _worktree, ...legacyResult } = current.result!
+    const legacyWorkspace = {
+      taskId: legacyTaskId,
+      repositoryPath: worktree.repositoryPath,
+      workspacePath: join(repository.tasksPath, legacyTaskId),
+      briefPath: join(repository.tasksPath, legacyTaskId, 'BRIEF.md'),
+      progressPath: join(repository.tasksPath, legacyTaskId, 'PROGRESS.md'),
+      inputPath: join(repository.tasksPath, legacyTaskId, 'inputs'),
+      workspaceRevision: 'f'.repeat(64),
+      branchName: `knowledge-task/${legacyTaskId}`,
+      targetBranch: 'main',
+      baseRepositoryRevision: worktree.baseRepositoryRevision
+    }
+    const legacy: Record<string, unknown> = {
+      ...current,
+      formatVersion: 1,
+      result: { ...legacyResult, workspace: legacyWorkspace }
+    }
+    delete legacy.updatedAt
+    await writeFile(legacyPath, JSON.stringify(legacy), { flag: 'wx' })
+    const history = new GitKnowledgeTaskHistory(repository, tasks)
 
-    expect(repository.list()).toEqual([
-      expect.objectContaining({ taskId: current.taskId })
-    ])
-    expect(await readdir(tasksPath)).toEqual([current.taskId])
-  })
+    const migrated = await history.read(legacyTaskId)
 
-  it('preserves and reports unsupported future Task records', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'oyster-task-history-'))
-    const tasksPath = join(root, 'tasks')
-    const repository = new FileKnowledgeTaskHistory(tasksPath)
-    const future = { ...record('future-task'), formatVersion: 2 }
-    const futurePath = join(tasksPath, future.taskId)
-    await mkdir(futurePath)
-    await writeFile(join(futurePath, 'task.json'), JSON.stringify(future), 'utf8')
-
-    expect(() => repository.list()).toThrow(
-      `Knowledge Task 历史记录格式无效：${future.taskId}`
-    )
-    expect(await readdir(tasksPath)).toEqual([future.taskId])
+    expect(migrated).toMatchObject({
+      formatVersion: 2,
+      status: 'completed',
+      result: {
+        worktree: {
+          worktreePath: worktree.repositoryPath,
+          taskPath: legacyWorkspace.workspacePath,
+          branchName: `knowledge-task/${legacyTaskId}`
+        }
+      }
+    })
+    await expect(readFile(legacyPath, 'utf8')).resolves.toContain('"formatVersion":1')
   })
 })

@@ -32,14 +32,14 @@ import {
 import {
   KnowledgeTaskService
 } from './knowledge-processing/knowledge-task-service'
-import { FileKnowledgeTaskHistory } from './knowledge-processing/knowledge-task-history'
+import { GitKnowledgeTaskHistory } from './knowledge-processing/knowledge-task-history'
 import { registerKnowledgeProcessingIpc } from './knowledge-processing/ipc'
 import { KnowledgeProcessingService } from './knowledge-processing/knowledge-processing-service'
 import {
   PiKnowledgeMaintainerAgent,
   PiKnowledgeReviewerAgent
 } from './knowledge-processing/pi-collaboration-agents'
-import { KnowledgeTaskWorkspaceRepository } from './knowledge-processing/knowledge-task-workspace-repository'
+import { KnowledgeTaskGitRepository } from './knowledge-processing/knowledge-task-git-repository'
 import { JsonKnowledgeProcessingConfigurationRepository } from './knowledge-processing/repository'
 import { FileKnowledgeStore } from './knowledge-store/file-knowledge-store'
 import { registerKnowledgeIpc } from './knowledge-store/ipc'
@@ -66,7 +66,7 @@ let mainWindow: BrowserWindow | undefined
 let aiBackendService: AiBackendService | undefined
 let knowledgeProcessingService: KnowledgeProcessingService | undefined
 let knowledgeTaskService: KnowledgeTaskService | undefined
-let knowledgeTaskHistory: FileKnowledgeTaskHistory | undefined
+let knowledgeTaskHistory: GitKnowledgeTaskHistory | undefined
 let knowledgeStore: FileKnowledgeStore | undefined
 let chatAgentService: ChatAgentService | undefined
 let chatConversationRepository: PiChatConversationRepository | undefined
@@ -169,12 +169,12 @@ async function initializeFixtureKnowledge(store: FileKnowledgeStore): Promise<vo
     {
       path: 'oyster-processing.md',
       title: 'Oyster 知识加工链路',
-      content: 'Harness 在统一 Repository 中创建 Knowledge Processing Task 与独立 Task Workspace，让 [[Knowledge Maintenance Agent|知识维护 Agent]] 和 Reviewer 通过 PROGRESS.md 与 commit 交替工作；固定的 [[Raw Evidence|原始证据]] 输入视图保存在该 Task 中，测试结果保持未合并。'
+      content: 'Host 在统一 Repository 中创建 Knowledge Processing Task branch 与独立 linked worktree，让 [[Knowledge Maintenance Agent|知识维护 Agent]] 和 Reviewer 通过 PROGRESS.md 与 Host checkpoint 交替工作；固定的 [[Raw Evidence|原始证据]] 输入视图保存在该 Task 中，测试结果保持未合并。'
     },
     {
       path: 'knowledge-maintainer.md',
       title: 'Knowledge Maintenance Agent',
-      content: '从独立 Task Workspace 读取 BRIEF.md、PROGRESS.md 与文件化 Canonical Activity，按需回溯[[Raw Evidence|原始证据]]，直接维护 Knowledge/Artifact 文件并创建普通 Git commit。'
+      content: '从独立 Task worktree 读取 BRIEF.md、PROGRESS.md 与文件化 Canonical Activity，按需回溯[[Raw Evidence|原始证据]]并直接维护 Knowledge/Artifact 文件；Host 负责 checkpoint commit。'
     },
     {
       path: 'raw-evidence.md',
@@ -224,7 +224,7 @@ function createManagedSkillService(repository: ArtifactService): ManagedSkillSer
 
 function createKnowledgeProcessingService(
   aiBackend: AiBackendService,
-  processingRepository: KnowledgeTaskWorkspaceRepository,
+  processingRepository: KnowledgeTaskGitRepository,
   debugStore: AgentDebugStore
 ): KnowledgeProcessingService {
   if (fixtureMode()) {
@@ -855,7 +855,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const initialButton = page.querySelector('[data-testid="start-knowledge-task"]')
     const result = {
       knowledgeTaskSelected: page.querySelector('[data-testid="processing-view-knowledge-task"]')?.getAttribute('aria-selected'),
-      workspaceExists: Boolean(page.querySelector('[data-testid="knowledge-task-workspace"]')),
+      worktreeExists: Boolean(page.querySelector('[data-testid="knowledge-task-worktree"]')),
       sourceConversationOptionCount: select?.options.length,
       refreshSourceConversationsButtonExists: Boolean(page.querySelector('[data-testid="refresh-knowledge-task-source-conversations"]')),
       knowledgeTaskButtonExists: Boolean(initialButton),
@@ -1702,8 +1702,11 @@ app.whenReady().then(async () => {
   const managedSkillService = createManagedSkillService(artifactService)
   aiBackendService = createBackendService()
   knowledgeStore = new FileKnowledgeStore(repository.knowledgePath)
-  knowledgeTaskHistory = new FileKnowledgeTaskHistory(repository.tasksPath)
-  const processingRepository = new KnowledgeTaskWorkspaceRepository(repository)
+  const processingRepository = new KnowledgeTaskGitRepository(repository, {
+    worktreesPath: join(app.getPath('userData'), 'worktrees'),
+    runtimePath: join(app.getPath('userData'), 'agent-runtime')
+  })
+  knowledgeTaskHistory = new GitKnowledgeTaskHistory(repository, processingRepository)
   knowledgeProcessingService = createKnowledgeProcessingService(
     aiBackendService,
     processingRepository,

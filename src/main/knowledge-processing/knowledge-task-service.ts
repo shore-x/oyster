@@ -20,9 +20,9 @@ import {
   type AgentInvocationContext
 } from './knowledge-processing-service'
 import {
-  KnowledgeTaskWorkspaceRepository,
-  type KnowledgeTaskWorkspace
-} from './knowledge-task-workspace-repository'
+  KnowledgeTaskGitRepository,
+  type KnowledgeTaskWorktree
+} from './knowledge-task-git-repository'
 import type { KnowledgeTaskHistory } from './knowledge-task-history'
 import {
   InMemoryAgentDebugStore,
@@ -39,19 +39,9 @@ interface ActiveKnowledgeTask {
   controller: AbortController
 }
 
-function terminalStatus(signal: AbortSignal): 'failed' | 'cancelled' {
-  return signal.aborted ? 'cancelled' : 'failed'
-}
-
-function terminalError(error: unknown, status: 'failed' | 'cancelled'): string {
-  if (status === 'cancelled') return 'Knowledge Processing Task 已取消'
+function errorText(error: unknown, cancelled: boolean): string {
+  if (cancelled) return 'Knowledge Processing Task 的当前 Agent 执行已取消；Task 仍可继续'
   return error instanceof Error ? error.message : String(error)
-}
-
-function terminalRecordFailure(primary: unknown, secondary: unknown): AggregateError {
-  const primaryError = primary instanceof Error ? primary : new Error(String(primary))
-  const secondaryError = secondary instanceof Error ? secondary : new Error(String(secondary))
-  return new AggregateError([primaryError, secondaryError], primaryError.message)
 }
 
 function validateInput(input: StartKnowledgeTaskInput): void {
@@ -61,24 +51,20 @@ function validateInput(input: StartKnowledgeTaskInput): void {
   }
 }
 
-function internalWorkspace(result: KnowledgeTaskRound['maintenance']): KnowledgeTaskWorkspace {
-  return { ...result.workspace }
-}
-
-/** Executes one accepted Knowledge Processing Task through Maintainer/Reviewer rounds. */
+/** Executes accepted Tasks; failed Agent turns leave an open, checkpointed Task branch. */
 export class KnowledgeTaskService {
-  private active?: ActiveKnowledgeTask
+  private readonly active = new Map<string, ActiveKnowledgeTask>()
 
   constructor(
     private readonly discovery: DiscoveryService,
     private readonly processing: KnowledgeProcessingService,
-    private readonly workspaces: KnowledgeTaskWorkspaceRepository,
+    private readonly tasks: KnowledgeTaskGitRepository,
     private readonly history?: KnowledgeTaskHistory,
     private readonly debugStore: AgentDebugStore = new InMemoryAgentDebugStore()
   ) {}
 
   isActive(): boolean {
-    return Boolean(this.active)
+    return this.active.size > 0
   }
 
   async start(
@@ -86,19 +72,27 @@ export class KnowledgeTaskService {
     bindings: KnowledgeTaskBindings
   ): Promise<KnowledgeTaskResult> {
     validateInput(input)
-    if (this.active) throw new Error('另一个 Knowledge Processing Task 正在进行')
-
     const taskId = randomUUID()
     const controller = new AbortController()
     const active: ActiveKnowledgeTask = { taskId, controller }
-    this.active = active
+    if (!this.active.size) this.processing.clearLiveInvocations('knowledge_task')
+    this.active.set(taskId, active)
+
     let startedAt = Date.now()
     let startedAtIso = new Date(startedAt).toISOString()
-    let taskAccepted = false
-    let workspace: KnowledgeTaskWorkspace | undefined
+    let worktree: KnowledgeTaskWorktree | undefined
     let sourceConversation: SourceConversationSummary | undefined
     const agentInvocations: AgentInvocationRecord[] = []
-    let historySaveAttempted = false
+    const invocationContexts: AgentInvocationContext[] = []
+
+    const createInvocationContext = (): AgentInvocationContext => {
+      const context: AgentInvocationContext = {
+        invocationId: randomUUID(),
+        origin: 'knowledge_task'
+      }
+      invocationContexts.push(context)
+      return context
+    }
 
     const recordInvocation = (context: AgentInvocationContext): void => {
       const invocation = this.processing.invocationRecord(context)
@@ -109,50 +103,40 @@ export class KnowledgeTaskService {
       agentInvocations.push(invocation)
     }
 
-    const saveHistory = (
+    const record = (
       status: KnowledgeTaskRecord['status'],
-      completedAt: string,
-      durationMs: number,
+      updatedAt: string,
       result?: KnowledgeTaskResult,
-      error?: string
-    ): void => {
-      if (!this.history) return
-      historySaveAttempted = true
-      this.history.save({
-        formatVersion: 1,
-        taskId,
-        status,
-        startedAt: startedAtIso,
-        completedAt,
-        durationMs,
-        input: structuredClone(input),
-        ...(sourceConversation
-          ? { sourceConversation: structuredClone(sourceConversation) }
-          : {}),
-        configuration: {
-          maintainer: structuredClone(bindings.maintainer),
-          reviewer: structuredClone(bindings.reviewer)
-        },
-        agentInvocations: structuredClone(agentInvocations),
-        ...(result ? { result } : {}),
-        ...(error ? { error } : {})
-      })
-    }
+      lastError?: string
+    ): KnowledgeTaskRecord => ({
+      formatVersion: 2,
+      taskId,
+      status,
+      startedAt: startedAtIso,
+      updatedAt,
+      ...(status === 'completed' ? { completedAt: updatedAt } : {}),
+      durationMs: Math.max(0, new Date(updatedAt).getTime() - new Date(startedAtIso).getTime()),
+      input: structuredClone(input),
+      ...(sourceConversation ? { sourceConversation: structuredClone(sourceConversation) } : {}),
+      configuration: {
+        maintainer: structuredClone(bindings.maintainer),
+        reviewer: structuredClone(bindings.reviewer)
+      },
+      agentInvocations: structuredClone(agentInvocations),
+      ...(result ? { result } : {}),
+      ...(lastError ? { lastError } : {})
+    })
 
     try {
       const material = await loadSourceSnapshotMaterial(this.discovery, input)
       sourceConversation = material.sourceConversation
       controller.signal.throwIfAborted()
-      taskAccepted = true
       startedAt = Date.now()
       startedAtIso = new Date(startedAt).toISOString()
-      this.processing.clearLiveInvocations('knowledge_task')
       const rounds: KnowledgeTaskRound[] = []
+      const initialRecord = record('open', startedAtIso)
 
-      const firstMaintenanceContext: AgentInvocationContext = {
-        invocationId: randomUUID(),
-        origin: 'knowledge_task'
-      }
+      const firstMaintenanceContext = createInvocationContext()
       let maintenance = await this.processing.executeMaintenance(
         {
           rawEvidence: material.evidence.rawEvidence,
@@ -163,25 +147,23 @@ export class KnowledgeTaskService {
         {
           binding: structuredClone(bindings.maintainer),
           taskId,
+          taskRecord: initialRecord,
           invocation: firstMaintenanceContext,
-          onWorkspaceCreated: (created) => {
-            workspace = created
+          onWorktreeCreated: (created) => {
+            worktree = created
           }
         }
       )
       recordInvocation(firstMaintenanceContext)
-      const taskWorkspace = internalWorkspace(maintenance)
-      workspace = taskWorkspace
+      if (!worktree) throw new Error('Knowledge Processing Task worktree 未创建')
+      const taskWorktree = worktree
       let candidateRepositoryRevision = maintenance.candidateRepositoryRevision
 
       while (true) {
         controller.signal.throwIfAborted()
-        const reviewContext: AgentInvocationContext = {
-          invocationId: randomUUID(),
-          origin: 'knowledge_task'
-        }
+        const reviewContext = createInvocationContext()
         const review = await this.processing.executeReview(
-          taskWorkspace,
+          taskWorktree,
           candidateRepositoryRevision,
           {
             binding: structuredClone(bindings.reviewer),
@@ -198,10 +180,7 @@ export class KnowledgeTaskService {
         candidateRepositoryRevision = review.candidateRepositoryRevision
         if (review.decision === 'approved') break
 
-        const maintenanceContext: AgentInvocationContext = {
-          invocationId: randomUUID(),
-          origin: 'knowledge_task'
-        }
+        const maintenanceContext = createInvocationContext()
         maintenance = await this.processing.executeMaintenance(
           {
             rawEvidence: material.evidence.rawEvidence,
@@ -211,7 +190,7 @@ export class KnowledgeTaskService {
           input.attention,
           {
             binding: structuredClone(bindings.maintainer),
-            workspace: taskWorkspace,
+            worktree: taskWorktree,
             previousRepositoryRevision: candidateRepositoryRevision,
             invocation: maintenanceContext
           }
@@ -221,7 +200,8 @@ export class KnowledgeTaskService {
       }
 
       controller.signal.throwIfAborted()
-      const finalView = await this.workspaces.revisionView(candidateRepositoryRevision)
+      const finalView = await this.tasks.revisionView(candidateRepositoryRevision)
+      const completedAt = new Date().toISOString()
       const result: KnowledgeTaskResult = {
         taskId,
         sourceConversation: structuredClone(sourceConversation),
@@ -230,67 +210,59 @@ export class KnowledgeTaskService {
           sourceRevision: input.sourceRevision
         },
         sourceRef: material.sourceRef,
-        workspace: maintenance.workspace,
+        worktree: maintenance.worktree,
         rounds,
         approvedRepositoryRevision: candidateRepositoryRevision,
-        changedPaths: await this.workspaces.revisionChangedPaths(
-          taskWorkspace.baseRepositoryRevision,
+        changedPaths: await this.tasks.revisionChangedPaths(
+          taskWorktree.baseRepositoryRevision,
           candidateRepositoryRevision
         ),
         knowledge: finalView.knowledge.map(({ title, content }) => ({ title, content })),
         artifactPaths: finalView.artifactPaths,
         durationMs: Date.now() - startedAt,
-        completedAt: new Date().toISOString()
+        completedAt
       }
-      saveHistory('completed', result.completedAt, result.durationMs, result)
+      if (this.history) await this.history.save(record('completed', completedAt, result), taskWorktree)
       return result
     } catch (error) {
-      let reportedError = error
-      const status = terminalStatus(controller.signal)
-      if (taskAccepted) {
-        for (const view of this.processing.stateView().liveInvocations) {
-          if (view.origin !== 'knowledge_task') continue
-          recordInvocation({
-            invocationId: view.invocation.id,
-            origin: view.origin
-          })
-        }
-      }
-      if (taskAccepted && !historySaveAttempted) {
+      for (const context of invocationContexts) recordInvocation(context)
+      if (worktree && this.history) {
+        const updatedAt = new Date().toISOString()
         try {
-          if (workspace) await this.workspaces.removeReservedTaskRecord(workspace)
-          const completedAt = new Date().toISOString()
-          saveHistory(
-            status,
-            completedAt,
-            Math.max(0, new Date(completedAt).getTime() - new Date(startedAtIso).getTime()),
+          await this.history.save(record(
+            'open',
+            updatedAt,
             undefined,
-            terminalError(error, status)
-          )
-        } catch (recordError) {
-          reportedError = terminalRecordFailure(error, recordError)
+            errorText(error, controller.signal.aborted)
+          ), worktree)
+        } catch (checkpointError) {
+          const primary = error instanceof Error ? error : new Error(String(error))
+          const secondary = checkpointError instanceof Error
+            ? checkpointError
+            : new Error(String(checkpointError))
+          throw new AggregateError([primary, secondary], primary.message)
         }
       }
-      throw reportedError
+      throw error
     } finally {
-      if (this.active === active) this.active = undefined
+      if (this.active.get(taskId) === active) this.active.delete(taskId)
     }
   }
 
   cancel(): void {
-    const active = this.active
-    if (!active) return
-    active.controller.abort(new Error('用户取消了 Knowledge Processing Task'))
+    for (const active of this.active.values()) {
+      active.controller.abort(new Error('用户取消了当前 Knowledge Agent 执行'))
+    }
     this.processing.cancelAgentInvocation('knowledge_maintainer')
     this.processing.cancelAgentInvocation('knowledge_reviewer')
   }
 
-  listTasks(): KnowledgeTaskSummary[] {
-    return this.history?.list() ?? []
+  async listTasks(): Promise<KnowledgeTaskSummary[]> {
+    return await this.history?.list() ?? []
   }
 
-  readTask(taskId: string): KnowledgeTaskDetail | undefined {
-    const record = this.history?.read(taskId)
+  async readTask(taskId: string): Promise<KnowledgeTaskDetail | undefined> {
+    const record = await this.history?.read(taskId)
     if (!record) return undefined
     return {
       ...record,

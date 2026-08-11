@@ -431,30 +431,30 @@ h1 { margin: 0 0 10px; font-size: var(--font-size-display); line-height: 1.25; l
 .processing-page-panel[hidden],
 .knowledge-agent[hidden],
 .processing-tab-panel[hidden] { display: none !important; }
-.processing-workspace-panel { min-width: 0; margin-top: 14px; }
-.processing-workspace-panel > .processing-connection,
-.processing-workspace-panel > .processing-input,
-.processing-workspace-panel > .processing-dependency,
-.processing-workspace-panel > .processing-result,
-.processing-workspace-panel > .agent-invocation-panel { margin-top: 0; }
-.processing-workspace-empty { display: grid; place-items: center; min-height: 220px; padding: 28px; color: var(--text-muted); background: var(--surface-card); border: 1px dashed var(--border-strong); border-radius: var(--radius-surface); font-size: var(--font-size-label); line-height: 1.6; text-align: center; }
-.knowledge-agent .processing-workspace-empty { min-height: 250px; background: var(--surface-subtle); border-radius: var(--radius-control); }
-.processing-workspace-disclosure { margin: 9px 2px 0; color: var(--text-muted); font-size: var(--font-size-caption); line-height: 1.5; }
+.processing-worktree-panel { min-width: 0; margin-top: 14px; }
+.processing-worktree-panel > .processing-connection,
+.processing-worktree-panel > .processing-input,
+.processing-worktree-panel > .processing-dependency,
+.processing-worktree-panel > .processing-result,
+.processing-worktree-panel > .agent-invocation-panel { margin-top: 0; }
+.processing-worktree-empty { display: grid; place-items: center; min-height: 220px; padding: 28px; color: var(--text-muted); background: var(--surface-card); border: 1px dashed var(--border-strong); border-radius: var(--radius-surface); font-size: var(--font-size-label); line-height: 1.6; text-align: center; }
+.knowledge-agent .processing-worktree-empty { min-height: 250px; background: var(--surface-subtle); border-radius: var(--radius-control); }
+.processing-worktree-disclosure { margin: 9px 2px 0; color: var(--text-muted); font-size: var(--font-size-caption); line-height: 1.5; }
 
-.agent-preview-workspace { display: grid; grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr); gap: 14px; }
-.agent-preview-workspace > .knowledge-agent__header,
-.agent-preview-workspace > .processing-capabilities { grid-column: 1 / -1; }
-.agent-preview-workspace > .processing-capabilities { margin-top: -2px; }
+.agent-preview-worktree { display: grid; grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr); gap: 14px; }
+.agent-preview-worktree > .knowledge-agent__header,
+.agent-preview-worktree > .processing-capabilities { grid-column: 1 / -1; }
+.agent-preview-worktree > .processing-capabilities { margin-top: -2px; }
 .agent-preview__configuration { grid-column: 1; grid-row: 3; }
 .agent-preview__input { grid-column: 1; grid-row: 4; }
 .agent-preview__process { grid-column: 2; grid-row: 3; }
 .agent-preview__output { grid-column: 2; grid-row: 4; }
-.agent-preview-workspace .processing-workspace-empty { min-height: 180px; }
+.agent-preview-worktree .processing-worktree-empty { min-height: 180px; }
 
 .knowledge-task { display: grid; gap: 14px; margin-top: 20px; }
 .knowledge-task__boundary { display: flex; align-items: center; gap: 10px; padding: 10px 12px; color: var(--text-tertiary); background: #f4f8fa; border: 1px solid #dcebf2; border-radius: var(--radius-surface); }
 .knowledge-task__boundary p { margin: 0; font-size: var(--font-size-label); line-height: 1.5; }
-.knowledge-task__workspace { display: grid; grid-template-columns: minmax(340px, .86fr) minmax(0, 1.14fr); gap: 12px; align-items: start; }
+.knowledge-task__worktree { display: grid; grid-template-columns: minmax(340px, .86fr) minmax(0, 1.14fr); gap: 12px; align-items: start; }
 .knowledge-task__setup,
 .knowledge-task__activity,
 .knowledge-task__result,
@@ -596,8 +596,8 @@ h1 { margin: 0 0 10px; font-size: var(--font-size-display); line-height: 1.25; l
   .processing-connection__details { grid-template-columns: 1fr 1fr; }
   .knowledge-task-details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .knowledge-browser__body { grid-template-columns: 260px minmax(0, 1fr); }
-  .knowledge-task__workspace,
-  .agent-preview-workspace { grid-template-columns: 1fr; }
+  .knowledge-task__worktree,
+  .agent-preview-worktree { grid-template-columns: 1fr; }
   .processing-history__list { grid-template-columns: 1fr; }
   .agent-config-layout { grid-template-columns: 1fr; }
   .agent-config-roles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; border-right: 0; border-bottom: 1px solid var(--border-default); }

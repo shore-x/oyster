@@ -123,24 +123,29 @@ export interface AgentInvocationSummary {
   reasoningEffort?: ReasoningEffort
 }
 
-export interface KnowledgeTaskWorkspaceView {
+export interface KnowledgeTaskWorktreeView {
   taskId: string
+  /** User-owned main checkout. */
   repositoryPath: string
-  workspacePath: string
+  /** Task-owned linked checkout used as the Agent cwd. */
+  worktreePath: string
+  /** Runtime-only Pi state outside Git. */
+  runtimePath: string
+  taskPath: string
   briefPath: string
   progressPath: string
   inputPath: string
-  workspaceRevision: string
   branchName: string
   targetBranch: string
   baseRepositoryRevision: string
+  taskStartRepositoryRevision: string
 }
 
 export interface KnowledgeMaintenanceResult {
   agentId: 'knowledge_maintainer'
   sourceRef: string
   activitySegmentCount: number
-  workspace: KnowledgeTaskWorkspaceView
+  worktree: KnowledgeTaskWorktreeView
   previousRepositoryRevision: string
   candidateRepositoryRevision: string
   changedPaths: string[]
@@ -175,7 +180,7 @@ export interface KnowledgeTaskResult {
   sourceConversation: SourceConversationSummary
   sourceSnapshot: SourceSnapshotRef
   sourceRef: string
-  workspace: KnowledgeTaskWorkspaceView
+  worktree: KnowledgeTaskWorktreeView
   rounds: KnowledgeTaskRound[]
   approvedRepositoryRevision: string
   changedPaths: string[]
@@ -193,11 +198,12 @@ export interface KnowledgeAgentBinding {
 }
 
 export interface KnowledgeTaskRecord {
-  formatVersion: 1
+  formatVersion: 2
   taskId: string
-  status: 'completed' | 'failed' | 'cancelled'
+  status: 'open' | 'completed' | 'abandoned'
   startedAt: string
-  completedAt: string
+  updatedAt: string
+  completedAt?: string
   durationMs: number
   input: StartKnowledgeTaskInput
   sourceConversation?: SourceConversationSummary
@@ -207,7 +213,7 @@ export interface KnowledgeTaskRecord {
   }
   agentInvocations: AgentInvocationRecord[]
   result?: KnowledgeTaskResult
-  error?: string
+  lastError?: string
 }
 
 /** Read model that joins a small Task record with separately stored debug data. */
@@ -218,7 +224,7 @@ export interface KnowledgeTaskDetail extends KnowledgeTaskRecord {
 export interface KnowledgeTaskSummary {
   taskId: string
   status: KnowledgeTaskRecord['status']
-  completedAt: string
+  updatedAt: string
   durationMs: number
   sourceConversationTitle?: string
   sourceDisplayName?: string

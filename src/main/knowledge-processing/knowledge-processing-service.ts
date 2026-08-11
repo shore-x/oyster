@@ -9,6 +9,7 @@ import {
   type KnowledgeMaintenanceResult,
   type KnowledgeProcessingStateView,
   type KnowledgeReviewResult,
+  type KnowledgeTaskRecord,
   type LiveAgentInvocationView,
   type SaveKnowledgeAgentDefaultInstructionsInput,
   type SaveKnowledgeAgentInput
@@ -35,12 +36,12 @@ import type {
 import { KNOWLEDGE_AGENT_DEFINITIONS, knowledgeAgentDefinition } from './prompts'
 import {
   activitySegmentCharacterLimit,
-  planKnowledgeTaskWorkspace
-} from './task-workspace'
+  planKnowledgeTaskInput
+} from './task-input'
 import {
-  KnowledgeTaskWorkspaceRepository,
-  type KnowledgeTaskWorkspace
-} from './knowledge-task-workspace-repository'
+  KnowledgeTaskGitRepository,
+  type KnowledgeTaskWorktree
+} from './knowledge-task-git-repository'
 
 const MAX_SOURCE_REF_CHARACTERS = 512
 const MAX_LIVE_ERROR_CHARACTERS = 2 * 1_024
@@ -53,11 +54,12 @@ export interface AgentInvocationContext {
 export interface KnowledgeMaintenanceInvocationOptions {
   binding?: KnowledgeAgentBinding
   agent?: KnowledgeMaintainerRuntime
-  workspace?: KnowledgeTaskWorkspace
+  worktree?: KnowledgeTaskWorktree
   taskId?: string
   previousRepositoryRevision?: string
   invocation?: AgentInvocationContext
-  onWorkspaceCreated?: (workspace: KnowledgeTaskWorkspace) => void
+  taskRecord?: KnowledgeTaskRecord
+  onWorktreeCreated?: (worktree: KnowledgeTaskWorktree) => void
 }
 
 export interface KnowledgeReviewInvocationOptions {
@@ -192,18 +194,20 @@ function invocationSummary(
   }
 }
 
-function workspaceView(workspace: KnowledgeTaskWorkspace) {
+function worktreeView(worktree: KnowledgeTaskWorktree) {
   return {
-    taskId: workspace.taskId,
-    repositoryPath: workspace.repositoryPath,
-    workspacePath: workspace.workspacePath,
-    briefPath: workspace.briefPath,
-    progressPath: workspace.progressPath,
-    inputPath: workspace.inputPath,
-    workspaceRevision: workspace.workspaceRevision,
-    branchName: workspace.branchName,
-    targetBranch: workspace.targetBranch,
-    baseRepositoryRevision: workspace.baseRepositoryRevision
+    taskId: worktree.taskId,
+    repositoryPath: worktree.repositoryPath,
+    worktreePath: worktree.worktreePath,
+    runtimePath: worktree.runtimePath,
+    taskPath: worktree.taskPath,
+    briefPath: worktree.briefPath,
+    progressPath: worktree.progressPath,
+    inputPath: worktree.inputPath,
+    branchName: worktree.branchName,
+    targetBranch: worktree.targetBranch,
+    baseRepositoryRevision: worktree.baseRepositoryRevision,
+    taskStartRepositoryRevision: worktree.taskStartRepositoryRevision
   }
 }
 
@@ -212,14 +216,18 @@ export class KnowledgeProcessingService {
   private configurationError?: string
   private mutationQueue: Promise<void> = Promise.resolve()
   private readonly listeners = new Set<KnowledgeProcessingStateListener>()
-  private readonly activeInvocations = new Map<KnowledgeAgentId, AbortController>()
+  private readonly activeInvocations = new Map<string, {
+    agentId: KnowledgeAgentId
+    controller: AbortController
+  }>()
+  private readonly activeWorktrees = new Set<string>()
   private readonly liveInvocations = new Map<string, LiveAgentInvocationView>()
   private readonly unsubscribeAiBackend: () => void
 
   constructor(
     private readonly configuration: KnowledgeProcessingConfigurationRepository,
     private readonly aiBackend: AiBackendPort,
-    private readonly workspaces: KnowledgeTaskWorkspaceRepository,
+    private readonly tasks: KnowledgeTaskGitRepository,
     private readonly maintainer: KnowledgeMaintainerRuntime,
     private readonly reviewer: KnowledgeReviewerRuntime
   ) {
@@ -234,7 +242,7 @@ export class KnowledgeProcessingService {
       this.state = { agents: [] }
       this.configurationError = `知识加工配置无法读取：${errorText(error)}`
     }
-    await this.workspaces.initialize()
+    await this.tasks.initialize()
   }
 
   stateView(): KnowledgeProcessingStateView {
@@ -262,7 +270,9 @@ export class KnowledgeProcessingService {
       }),
       connections,
       ...(backend.defaultLlm ? { defaultLlm: { ...backend.defaultLlm } } : {}),
-      activeAgentIds: [...this.activeInvocations.keys()],
+      activeAgentIds: [...new Set(
+        [...this.activeInvocations.values()].map(({ agentId }) => agentId)
+      )],
       liveInvocations: [...this.liveInvocations.values()],
       ...(this.configurationError ? { configurationError: this.configurationError } : {})
     })
@@ -373,19 +383,29 @@ export class KnowledgeProcessingService {
     })
   }
 
-  private beginInvocation(agentId: KnowledgeAgentId): AbortController {
-    if (this.activeInvocations.size) throw new Error('另一个知识 Agent 正在执行')
+  private beginInvocation(agentId: KnowledgeAgentId, invocationId: string): AbortController {
     const controller = new AbortController()
-    this.activeInvocations.set(agentId, controller)
+    this.activeInvocations.set(invocationId, { agentId, controller })
     this.emit()
     return controller
   }
 
-  private finishInvocation(agentId: KnowledgeAgentId, controller: AbortController): void {
-    if (this.activeInvocations.get(agentId) === controller) {
-      this.activeInvocations.delete(agentId)
+  private finishInvocation(invocationId: string, controller: AbortController): void {
+    if (this.activeInvocations.get(invocationId)?.controller === controller) {
+      this.activeInvocations.delete(invocationId)
     }
     this.emit()
+  }
+
+  private beginWorktree(worktreePath: string): void {
+    if (this.activeWorktrees.has(worktreePath)) {
+      throw new Error('这个 Task worktree 已有 Agent 正在执行')
+    }
+    this.activeWorktrees.add(worktreePath)
+  }
+
+  private finishWorktree(worktreePath: string | undefined): void {
+    if (worktreePath) this.activeWorktrees.delete(worktreePath)
   }
 
   private recordInvocation(
@@ -470,7 +490,8 @@ export class KnowledgeProcessingService {
       origin: 'agent_preview' as const
     }
     if (!options.invocation) this.clearLiveInvocations(invocation.origin)
-    const controller = this.beginInvocation('knowledge_maintainer')
+    const controller = this.beginInvocation('knowledge_maintainer', invocation.invocationId)
+    let activeWorktreePath: string | undefined
     const startedAt = Date.now()
     try {
       return await this.aiBackend.withModelStream(
@@ -483,49 +504,52 @@ export class KnowledgeProcessingService {
             )
             && !modelStream.model.input?.includes('image')
           ) throw new Error('所选 Maintainer Model 不支持图片输入')
-          const taskId = options.workspace?.taskId ?? options.taskId ?? randomUUID()
-          const workspacePlan = planKnowledgeTaskWorkspace(
+          const taskId = options.worktree?.taskId ?? options.taskId ?? randomUUID()
+          const inputPlan = planKnowledgeTaskInput(
             observation,
             sourceRef,
             activitySegmentCharacterLimit(modelStream.model.contextWindow)
           )
-          const workspaceInput = {
+          const worktreeInput = {
             taskId,
             sourceRef,
             attention: normalizedAttention,
-            workspace: workspacePlan
+            plan: inputPlan,
+            kind: invocation.origin === 'knowledge_task' ? 'task' as const : 'preview' as const,
+            taskRecord: options.taskRecord
           }
-          const workspace = options.workspace
-            ?? await this.workspaces.createWorkspace(workspaceInput)
-          if (!options.workspace) options.onWorkspaceCreated?.(workspace)
-          const previousRepositoryRevision = options.previousRepositoryRevision
-            ?? workspace.baseRepositoryRevision
-          await this.workspaces.assertAgentStart(
-            workspace,
-            previousRepositoryRevision,
-            workspaceInput,
-            !options.workspace
+          const worktree = options.worktree
+            ?? await this.tasks.createWorktree(worktreeInput)
+          if (!options.worktree) options.onWorktreeCreated?.(worktree)
+          this.beginWorktree(worktree.worktreePath)
+          activeWorktreePath = worktree.worktreePath
+          const expectedRepositoryRevision = options.previousRepositoryRevision
+            ?? worktree.taskStartRepositoryRevision
+          const previousRepositoryRevision = await this.tasks.prepareAgentTurn(
+            worktree,
+            expectedRepositoryRevision
           )
           const result = await (options.agent ?? this.maintainer).invoke({
             modelStream,
             systemPrompt: binding.instructions,
-            workspace,
+            worktree,
             previousRepositoryRevision,
             reasoningEffort: binding.reasoningEffort,
             invocationId: invocation.invocationId,
             onInvocationUpdate: (record) => this.recordInvocation(invocation, record),
             signal: controller.signal
           })
-          const handoff = await this.workspaces.recordMaintainerHandoff(
-            workspace,
-            previousRepositoryRevision
+          const handoff = await this.tasks.checkpointMaintainer(
+            worktree,
+            previousRepositoryRevision,
+            result.invocation.id
           )
           this.settleInvocation(invocation, result.invocation)
           return {
             agentId: 'knowledge_maintainer' as const,
             sourceRef,
-            activitySegmentCount: workspacePlan.activitySegmentCount,
-            workspace: workspaceView(workspace),
+            activitySegmentCount: inputPlan.activitySegmentCount,
+            worktree: worktreeView(worktree),
             previousRepositoryRevision: handoff.previousRepositoryRevision,
             candidateRepositoryRevision: handoff.candidateRepositoryRevision,
             changedPaths: handoff.changedPaths,
@@ -547,12 +571,13 @@ export class KnowledgeProcessingService {
       this.failLiveInvocation(invocation, terminalStatus(controller.signal), error)
       throw error
     } finally {
-      this.finishInvocation('knowledge_maintainer', controller)
+      this.finishWorktree(activeWorktreePath)
+      this.finishInvocation(invocation.invocationId, controller)
     }
   }
 
   async executeReview(
-    workspace: KnowledgeTaskWorkspace,
+    worktree: KnowledgeTaskWorktree,
     reviewedRepositoryRevision: string,
     options: KnowledgeReviewInvocationOptions = {}
   ): Promise<KnowledgeReviewResult> {
@@ -566,27 +591,34 @@ export class KnowledgeProcessingService {
       origin: 'agent_preview' as const
     }
     if (!options.invocation) this.clearLiveInvocations(invocation.origin)
-    const controller = this.beginInvocation('knowledge_reviewer')
+    const controller = this.beginInvocation('knowledge_reviewer', invocation.invocationId)
+    let activeWorktreePath: string | undefined
     const startedAt = Date.now()
     try {
       return await this.aiBackend.withModelStream(
         binding.connectionId,
         binding.modelId,
         async (modelStream) => {
-          await this.workspaces.assertAgentStart(workspace, reviewedRepositoryRevision)
+          this.beginWorktree(worktree.worktreePath)
+          activeWorktreePath = worktree.worktreePath
+          const actualReviewedRepositoryRevision = await this.tasks.prepareAgentTurn(
+            worktree,
+            reviewedRepositoryRevision
+          )
           const result = await (options.agent ?? this.reviewer).invoke({
             modelStream,
             systemPrompt: binding.instructions,
-            workspace,
-            reviewedRepositoryRevision,
+            worktree,
+            reviewedRepositoryRevision: actualReviewedRepositoryRevision,
             reasoningEffort: binding.reasoningEffort,
             invocationId: invocation.invocationId,
             onInvocationUpdate: (record) => this.recordInvocation(invocation, record),
             signal: controller.signal
           })
-          const decision = await this.workspaces.recordReviewDecision(
-            workspace,
-            reviewedRepositoryRevision
+          const decision = await this.tasks.checkpointReview(
+            worktree,
+            actualReviewedRepositoryRevision,
+            result.invocation.id
           )
           this.settleInvocation(invocation, result.invocation)
           return {
@@ -614,13 +646,18 @@ export class KnowledgeProcessingService {
       this.failLiveInvocation(invocation, terminalStatus(controller.signal), error)
       throw error
     } finally {
-      this.finishInvocation('knowledge_reviewer', controller)
+      this.finishWorktree(activeWorktreePath)
+      this.finishInvocation(invocation.invocationId, controller)
     }
   }
 
   cancelAgentInvocation(agentId: KnowledgeAgentId): void {
     if (!isKnowledgeAgentId(agentId)) throw new Error('未知的知识 Agent')
-    this.activeInvocations.get(agentId)?.abort(new Error('用户取消了 Agent Invocation'))
+    for (const active of this.activeInvocations.values()) {
+      if (active.agentId === agentId) {
+        active.controller.abort(new Error('用户取消了 Agent Invocation'))
+      }
+    }
   }
 
   subscribe(listener: KnowledgeProcessingStateListener): () => void {
@@ -634,10 +671,11 @@ export class KnowledgeProcessingService {
   }
 
   dispose(): void {
-    for (const controller of this.activeInvocations.values()) {
+    for (const { controller } of this.activeInvocations.values()) {
       controller.abort(new Error('Oyster 正在退出'))
     }
     this.activeInvocations.clear()
+    this.activeWorktrees.clear()
     this.unsubscribeAiBackend()
     this.listeners.clear()
   }

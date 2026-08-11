@@ -22,11 +22,11 @@ function formatDuration(durationMs: number): string {
 
 function statusLabel(status: KnowledgeTaskSummary['status']): string {
   if (status === 'completed') return '已完成'
-  if (status === 'cancelled') return '已取消'
-  return '失败'
+  if (status === 'abandoned') return '已放弃'
+  return '可继续'
 }
 
-export function KnowledgeTaskHistoryWorkspace(props: {
+export function KnowledgeTaskHistory(props: {
   tasks: KnowledgeTaskSummary[]
   loading: boolean
   selected?: KnowledgeTaskDetail
@@ -58,7 +58,7 @@ export function KnowledgeTaskHistoryWorkspace(props: {
           <div class="processing-history__heading">
             <div>
               <h2>测试历史</h2>
-              <p>成功、失败和取消都会保存为本地终态快照；详情和调用轨迹按需读取。</p>
+              <p>Task、领域变化和 Agent Session 由同一 Git 历史保存；执行失败不会自动终结 Task。</p>
             </div>
             <strong>{props.tasks.length}</strong>
           </div>
@@ -68,7 +68,7 @@ export function KnowledgeTaskHistoryWorkspace(props: {
           >
             <Show
               when={props.tasks.length}
-              fallback={<div class="processing-history__empty">还没有终态链路测试。</div>}
+              fallback={<div class="processing-history__empty">还没有 Knowledge Processing Task。</div>}
             >
               <div class="processing-history__list">
                 <For each={props.tasks}>{(task) => (
@@ -78,7 +78,7 @@ export function KnowledgeTaskHistoryWorkspace(props: {
                         <h3>{task.sourceConversationTitle || '未命名 Source Conversation'}</h3>
                         <p>{task.sourceDisplayName || 'Source Conversation 尚未解析'}{task.projectPath ? ` · ${task.projectPath}` : ''}</p>
                       </div>
-                      <time>{statusLabel(task.status)} · {formatTime(task.completedAt)}</time>
+                      <time>{statusLabel(task.status)} · {formatTime(task.updatedAt)}</time>
                     </div>
                     <div class="processing-history-task__metrics">
                       <span><strong>{task.statementCount}</strong> Statements</span>
@@ -130,9 +130,9 @@ export function KnowledgeTaskHistoryWorkspace(props: {
                 <KnowledgeTaskActivityDetail
                   invocations={record().invocationDebugRecords}
                   status={record().status}
-                  error={record().error}
+                  error={record().lastError}
                   title="历史 Agent Invocations"
-                  description="这是该次测试结束时保存的模型与工具调用快照。"
+                  description="这是该 Task 已保存的模型与工具调用记录。"
                   detailTestId="history-task-activity-detail"
                 />
               </Show>
