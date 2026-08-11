@@ -3,13 +3,15 @@ import {
   createAgentConfigurationController,
   type AgentConfigurationRoleId
 } from '../agent-configuration-controller'
+import { CHAT_AGENT_ID } from '../../../shared/chat'
 import { runtimeLabel } from '../processing-configuration'
 import { Button, Icon } from '../ui'
+import { PiAgentSettingsPanel } from './PiAgentSettingsPanel'
 
 export function AgentConfigurationPage(props: { embedded?: boolean } = {}) {
   const controller = createAgentConfigurationController()
   const [selectedRoleId, setSelectedRoleId] = createSignal<AgentConfigurationRoleId>()
-  const [detailView, setDetailView] = createSignal<'prompt' | 'tools'>('prompt')
+  const [detailView, setDetailView] = createSignal<'prompt' | 'tools' | 'runtime'>('prompt')
   const [promptDraft, setPromptDraft] = createSignal('')
   const selectedRole = createMemo(() => controller.roles().find(
     (role) => role.id === selectedRoleId()
@@ -64,7 +66,7 @@ export function AgentConfigurationPage(props: { embedded?: boolean } = {}) {
             <div class="page-summary">
               <span><strong>{controller.roles().length}</strong> 个 Agent</span>
               <span class="page-summary__separator">·</span>
-              <span>默认 Prompt 可配置，工具由代码提供</span>
+              <span>默认 Prompt 与通用 Agent Runtime 可配置</span>
             </div>
           </div>
         </header>
@@ -140,6 +142,15 @@ export function AgentConfigurationPage(props: { embedded?: boolean } = {}) {
                   aria-selected={detailView() === 'tools'}
                   onClick={() => setDetailView('tools')}
                 >Tools <span>{role().tools.length}</span></button>
+                <Show when={role().id === CHAT_AGENT_ID}>
+                  <button
+                    type="button"
+                    role="tab"
+                    data-testid="agent-config-tab-runtime"
+                    aria-selected={detailView() === 'runtime'}
+                    onClick={() => setDetailView('runtime')}
+                  >Pi Runtime</button>
+                </Show>
               </div>
 
               <Show when={detailView() === 'prompt'}>
@@ -227,6 +238,10 @@ export function AgentConfigurationPage(props: { embedded?: boolean } = {}) {
                     </div>
                   </Show>
                 </div>
+              </Show>
+
+              <Show when={detailView() === 'runtime' && role().id === CHAT_AGENT_ID}>
+                <PiAgentSettingsPanel />
               </Show>
             </section>
           )}

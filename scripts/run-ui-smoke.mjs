@@ -428,6 +428,19 @@ if (
 ) {
   throw new Error('The conversational Agent default System Prompt cannot be configured and restored')
 }
+if (
+  !agentConfiguration.runtimeSettings?.tabExists
+  || !agentConfiguration.runtimeSettings.pageVisible
+  || agentConfiguration.runtimeSettings.compaction !== false
+  || agentConfiguration.runtimeSettings.transport !== 'sse'
+  || agentConfiguration.runtimeSettings.timeout !== '42'
+  || !agentConfiguration.runtimeSettings.settingsPath?.endsWith('pi-agent/settings.json')
+  || !agentConfiguration.runtimeSettings.notice?.includes('最多 3 次')
+  || agentConfiguration.runtimeSettings.error
+  || !agentConfiguration.runtimeSettings.saveDisabled
+) {
+  throw new Error(`The general Agent Pi Runtime settings are unavailable: ${JSON.stringify(agentConfiguration.runtimeSettings)}`)
+}
 if (agentConfiguration.overflowX) throw new Error('Agent configuration page has unexpected horizontal overflow')
 
 const chat = semantics.chat
@@ -753,6 +766,8 @@ const agentPreviewImage = await readFile(join(dirname(capturePath), 'knowledge-a
 if (agentPreviewImage.length === 0) throw new Error('Knowledge processing agent-preview screenshot is empty')
 const maintainerInvocationImage = await readFile(join(dirname(capturePath), 'knowledge-processing-maintainer-invocation.png'))
 if (maintainerInvocationImage.length === 0) throw new Error('Maintainer Invocation screenshot is empty')
+const agentRuntimeImage = await readFile(join(dirname(capturePath), 'agent-configuration-runtime.png'))
+if (agentRuntimeImage.length === 0) throw new Error('Pi Agent Runtime settings screenshot is empty')
 const knowledgeImage = await readFile(join(dirname(capturePath), 'knowledge.png'))
 if (knowledgeImage.length === 0) throw new Error('Knowledge browser screenshot is empty')
 const clearKnowledgeImage = await readFile(join(dirname(capturePath), 'knowledge-clear-confirmation.png'))

@@ -29,14 +29,16 @@ OpenAI Chat Completions 与 Responses 不再由 Oyster 维护平行的 streaming
 
 - `cwd` 是唯一 Oyster Repository 根；
 - `agentDir` 固定为 `<Electron userData>/pi-agent/`，不隐式继承用户的 `~/.pi/agent`；
-- 设置页直接通过 Pi `SettingsManager` 管理 `<agentDir>/settings.json` 中的 Package 与本地 Extension 来源，不建立 Oyster 插件数据库；
+- 设置页直接通过 Pi `SettingsManager` 管理 `<agentDir>/settings.json` 中的常用 Runtime 设置、Package 与本地 Extension 来源，不建立 Oyster 平行配置数据库；
 - Package 配置显式关闭其中的 Skill、Prompt 和 Theme；Runtime 也设置 `noSkills`、`noPromptTemplates`、`noThemes`；
 - Oyster 固定的 Chat System Prompt 是 base prompt，Extension 可以按 Pi 生命周期扩展它；
 - 普通 Coding Tools、Extension tools、通用 Todo 与 `spawn_agent` 进入同一个 SDK tool registry。
 
 Extension 是在 Electron 主进程内执行的受信代码，不是受限声明文件。本期采用“配置即信任”，不增加权限弹窗、命令白名单、Extension 沙箱或细粒度网络治理。`SettingsManager` 明确以 `projectTrusted: false` 创建，因此只有 Oyster 专属 `agentDir` 的配置生效，Repository 内的 `.pi/settings.json`、Package 和 Extension 不会因打开 Repository 而执行；普通 `AGENTS.md` 等 context file 仍按 Pi 规则加载。Pi TUI renderer、theme、shortcut 和交互组件不会映射为 Electron UI。
 
-设置页支持添加、启用、停用和移除 Pi Package 或本地 Extension 路径。Package 的解析、安装缓存和加载语义沿用 Pi SDK，不由 Oyster 复制实现。配置从下一次通用 Chat Agent Invocation 起生效。
+“Agent 配置 / 通用 Agent / Pi Runtime”支持修改自动上下文压缩、Provider 传输方式和 HTTP 空闲超时，并只显示当前 Pi 配置中的 compaction reserve/keep 数值。Agent Turn 重试属于 Host 不变量，不作为可编辑设置。该作用域只覆盖读取 file-backed agentDir 的通用 Chat Agent；Knowledge Maintainer 与 Reviewer 的隔离内存设置不受影响。
+
+“Pi Extensions”支持添加、启用、停用和移除 Pi Package 或本地 Extension 路径。Package 的解析、安装缓存和加载语义沿用 Pi SDK，不由 Oyster 复制实现。上述配置均从下一次通用 Chat Agent Invocation 起生效。
 
 Knowledge Maintainer 与 Reviewer 使用同一 `AgentSession` 基础，但资源模式固定为 `disabled`：不加载 Extension、Skill、Prompt、Theme 或 context file，只启用普通 `read`、`bash`、`edit`、`write`，也不安装通用 Todo。这一差异是业务能力定义，不是第二套 Runtime。
 

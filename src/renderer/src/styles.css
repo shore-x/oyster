@@ -333,7 +333,8 @@ h1 { margin: 0 0 10px; font-size: var(--font-size-display); line-height: 1.25; l
 .agent-config-tabs button[aria-selected="true"]::after { position: absolute; right: 8px; bottom: -1px; left: 8px; height: 2px; background: var(--text-primary); border-radius: 2px 2px 0 0; content: ""; }
 .agent-config-tabs button span { margin-left: 4px; color: var(--text-muted); }
 .agent-config-prompt,
-.agent-config-tools { padding-top: 18px; }
+.agent-config-tools,
+.pi-agent-settings { padding-top: 18px; }
 .agent-config-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 11px; }
 .agent-config-section-heading h3 { margin: 0; color: var(--text-secondary); font-size: var(--font-size-label); font-weight: var(--font-weight-semibold); }
 .agent-config-section-heading p { margin: 4px 0 0; color: var(--text-muted); font-size: var(--font-size-caption); line-height: 1.5; }
@@ -354,6 +355,21 @@ h1 { margin: 0 0 10px; font-size: var(--font-size-display); line-height: 1.25; l
 .agent-config-tool__schema summary small { color: var(--text-muted); font-family: var(--font-mono); font-size: var(--font-size-caption); font-weight: var(--font-weight-regular); }
 .agent-config-tool__schema pre { max-height: 420px; margin: 11px 0 0; overflow: auto; padding: 12px; color: var(--text-secondary); background: #fff; border: 1px solid var(--border-default); border-radius: var(--radius-control); font-family: var(--font-mono); font-size: var(--font-size-caption); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-config-tools__empty { display: grid; place-items: center; min-height: 300px; color: var(--text-muted); background: var(--surface-subtle); border: 1px dashed var(--border-strong); border-radius: var(--radius-control); font-size: var(--font-size-label); }
+.pi-agent-settings__fields { overflow: hidden; border: 1px solid var(--border-default); border-radius: var(--radius-control); background: var(--surface-subtle); }
+.pi-agent-setting { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 76px; padding: 14px 16px; }
+.pi-agent-setting + .pi-agent-setting { border-top: 1px solid var(--border-default); }
+.pi-agent-setting > span:first-child { min-width: 0; }
+.pi-agent-setting strong { display: block; color: var(--text-secondary); font-size: var(--font-size-label); font-weight: var(--font-weight-semibold); }
+.pi-agent-setting small { display: block; max-width: 680px; margin-top: 5px; color: var(--text-muted); font-size: var(--font-size-caption); line-height: 1.5; }
+.pi-agent-setting > input[type="checkbox"] { width: 18px; height: 18px; flex: 0 0 auto; accent-color: var(--text-primary); }
+.pi-agent-setting > select { width: 190px; height: 36px; flex: 0 0 auto; padding: 0 10px; color: var(--text-primary); background: #fff; border: 1px solid var(--border-strong); border-radius: var(--radius-control); }
+.pi-agent-setting__number { display: flex; align-items: center; flex: 0 0 auto; }
+.pi-agent-setting__number input { width: 128px; height: 36px; padding: 0 40px 0 10px; color: var(--text-primary); background: #fff; border: 1px solid var(--border-strong); border-radius: var(--radius-control); }
+.pi-agent-setting__number input[aria-invalid="true"] { border-color: var(--control-danger-text); }
+.pi-agent-setting__number em { width: 32px; margin-left: -37px; color: var(--text-muted); font-size: var(--font-size-caption); font-style: normal; text-align: center; pointer-events: none; }
+.pi-agent-settings__path { margin: 10px 2px 0; overflow: hidden; color: var(--text-muted); font-family: var(--font-mono); font-size: var(--font-size-caption); text-overflow: ellipsis; white-space: nowrap; }
+.pi-agent-settings__notice { margin-top: 14px; padding: 11px 13px; color: var(--text-tertiary); background: var(--surface-subtle); border-left: 3px solid var(--border-strong); font-size: var(--font-size-caption); line-height: 1.55; }
+.pi-agent-settings__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .knowledge-agent__action-note { margin: 0; color: #8a5d18; font-size: var(--font-size-label); }
 .knowledge-agent__preview-status { margin: 0; color: var(--text-muted); font-size: var(--font-size-label); line-height: 1.45; }
 .knowledge-agent__preview-status--blocked { color: #8a5d18; }
@@ -600,6 +616,8 @@ h1 { margin: 0 0 10px; font-size: var(--font-size-display); line-height: 1.25; l
   .agent-config-roles__heading { grid-column: 1 / -1; }
   .agent-config-role + .agent-config-role { margin-top: 0; }
   .agent-config-tool-list { grid-template-columns: 1fr; }
+  .pi-agent-setting { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .pi-agent-setting > select { width: min(100%, 260px); }
   .agent-preview__configuration,
   .agent-preview__input,
   .agent-preview__process,

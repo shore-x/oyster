@@ -7,6 +7,7 @@ import {
   folderBrowserChannels,
   knowledgeChannels,
   knowledgeProcessingChannels,
+  piAgentSettingsChannels,
   piExtensionChannels,
   skillChannels
 } from '../shared/channels'
@@ -25,6 +26,7 @@ import type { ChatApi, ChatEvent } from '../shared/chat'
 import type { ArtifactApi } from '../shared/artifacts'
 import type { SkillApi } from '../shared/skills'
 import type { FolderBrowserApi } from '../shared/folder-browser'
+import type { PiAgentSettingsApi } from '../shared/pi-agent-settings'
 import type { PiExtensionConfigurationApi } from '../shared/pi-extensions'
 
 const api: DiscoveryApi = {
@@ -180,6 +182,11 @@ const piExtensions: PiExtensionConfigurationApi = {
   removeSource: (input) => ipcRenderer.invoke(piExtensionChannels.removeSource, input)
 }
 
+const piAgentSettings: PiAgentSettingsApi = {
+  getSettings: () => ipcRenderer.invoke(piAgentSettingsChannels.getSettings),
+  saveSettings: (input) => ipcRenderer.invoke(piAgentSettingsChannels.saveSettings, input)
+}
+
 contextBridge.exposeInMainWorld('oyster', {
   discovery: api,
   skills,
@@ -189,5 +196,6 @@ contextBridge.exposeInMainWorld('oyster', {
   folderBrowser,
   knowledgeProcessing,
   chat,
+  piAgentSettings,
   piExtensions
 })

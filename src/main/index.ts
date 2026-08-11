@@ -60,6 +60,8 @@ import { registerFolderBrowserIpc } from './folder-browser/ipc'
 import { FileAgentDebugStore, type AgentDebugStore } from './agent-runtime/agent-debug-store'
 import { PiExtensionConfigurationService } from './agent-runtime/pi-extension-configuration-service'
 import { registerPiExtensionConfigurationIpc } from './agent-runtime/pi-extension-configuration-ipc'
+import { PiAgentSettingsService } from './agent-runtime/pi-agent-settings-service'
+import { registerPiAgentSettingsIpc } from './agent-runtime/pi-agent-settings-ipc'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 let mainWindow: BrowserWindow | undefined
@@ -1330,6 +1332,8 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       .querySelector('[data-testid="processing-instructions-knowledge_maintainer"]')
       ?.value?.includes('Configured default from Agent configuration UI.')
 
+    document.querySelector('[data-testid="nav-ai-backends"]')?.click()
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
     document.querySelector('[data-testid="nav-agent-configuration"]')?.click()
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
     page.querySelector('[data-testid="restore-built-in-agent-prompt"]')?.click()
@@ -1383,6 +1387,46 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     ) await new Promise((resolve) => setTimeout(resolve, 25))
     const chatRestoredPrompt = page.querySelector('[data-testid="agent-default-prompt-editor"]')?.value
 
+    page.querySelector('[data-testid="agent-config-tab-runtime"]')?.click()
+    deadline = Date.now() + 2_000
+    while (
+      (
+        !page.querySelector('[data-testid="pi-agent-auto-compaction"]')
+        || page.querySelector('[data-testid="pi-agent-auto-compaction"]')?.disabled
+      )
+      && Date.now() < deadline
+    ) await new Promise((resolve) => setTimeout(resolve, 25))
+    const runtimeCompaction = page.querySelector('[data-testid="pi-agent-auto-compaction"]')
+    const runtimeTransport = page.querySelector('[data-testid="pi-agent-transport"]')
+    const runtimeTimeout = page.querySelector('[data-testid="pi-agent-http-idle-timeout"]')
+    if (runtimeCompaction && runtimeTransport && runtimeTimeout) {
+      runtimeCompaction.checked = false
+      runtimeCompaction.dispatchEvent(new Event('change', { bubbles: true }))
+      runtimeTransport.value = 'sse'
+      runtimeTransport.dispatchEvent(new Event('change', { bubbles: true }))
+      runtimeTimeout.value = '42'
+      runtimeTimeout.dispatchEvent(new Event('input', { bubbles: true }))
+      page.querySelector('[data-testid="save-pi-agent-settings"]')?.click()
+      deadline = Date.now() + 2_000
+      while (
+        page.querySelector('[data-testid="save-pi-agent-settings"]')?.textContent?.trim() === '保存中…'
+        && Date.now() < deadline
+      ) await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    const runtimeSettings = {
+      tabExists: Boolean(page.querySelector('[data-testid="agent-config-tab-runtime"]')),
+      pageVisible: !page.hidden
+        && !page.closest('[data-testid="page-settings"]')?.hidden,
+      compaction: page.querySelector('[data-testid="pi-agent-auto-compaction"]')?.checked,
+      transport: page.querySelector('[data-testid="pi-agent-transport"]')?.value,
+      timeout: page.querySelector('[data-testid="pi-agent-http-idle-timeout"]')?.value,
+      settingsPath: page.querySelector('.pi-agent-settings__path')?.textContent?.trim(),
+      notice: page.querySelector('.pi-agent-settings__notice')?.textContent?.trim(),
+      error: page.querySelector('.pi-agent-settings .page-error')?.textContent?.trim(),
+      saveDisabled: page.querySelector('[data-testid="save-pi-agent-settings"]')?.disabled
+    }
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+
     page.querySelector('[data-testid="agent-config-role-knowledge_maintainer"]')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
 
@@ -1409,9 +1453,22 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       chatSpawnSchema,
       chatConfiguredBadge,
       chatRestoredMatchesBuiltIn: chatRestoredPrompt === chatBuiltInPrompt,
+      runtimeSettings,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
     }
   })()`)
+  await window.webContents.executeJavaScript(`new Promise((resolve) => {
+    const page = document.querySelector('[data-testid="page-agent-configuration"]')
+    page.querySelector('[data-testid="agent-config-role-chat_agent"]')?.click()
+    requestAnimationFrame(() => {
+      page.querySelector('[data-testid="agent-config-tab-runtime"]')?.click()
+      requestAnimationFrame(resolve)
+    })
+  })`)
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  const agentRuntimeImage = await window.webContents.capturePage()
+  await writeFile(join(dirname(capturePath), 'agent-configuration-runtime.png'), agentRuntimeImage.toPNG())
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="agent-config-role-knowledge_maintainer"]')?.click()`)
   await window.webContents.executeJavaScript(`new Promise((resolve) => {
     const page = document.querySelector('[data-testid="page-agent-configuration"]')
     page.querySelector('[data-testid="agent-config-tab-tools"]')?.click()
@@ -1799,6 +1856,10 @@ app.whenReady().then(async () => {
   registerChatIpc(chatAgentService, () => mainWindow)
   registerPiExtensionConfigurationIpc(
     new PiExtensionConfigurationService(join(app.getPath('userData'), 'pi-agent')),
+    () => mainWindow
+  )
+  registerPiAgentSettingsIpc(
+    new PiAgentSettingsService(join(app.getPath('userData'), 'pi-agent')),
     () => mainWindow
   )
   await createMainWindow()

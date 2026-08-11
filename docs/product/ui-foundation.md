@@ -61,7 +61,7 @@ Renderer 使用 viewport-owned App Shell：`html`、`body`、`#root` 和 App She
 
 ### 4.2 Tab
 
-Tab 只用于同一领域中的同级工作面，并保持共享上下文。例如产物的“概览 / 文件”、设置的“AI 后端 / Agent 配置 / Pi Extensions”。Tab 不模拟跨领域导航。
+Tab 只用于同一领域中的同级工作面，并保持共享上下文。例如产物的“概览 / 文件”、设置的“AI 后端 / Agent 配置 / Pi Extensions”。Agent 配置内部只对读取 file-backed Pi agentDir 的通用 Agent 提供“Pi Runtime”，Knowledge Agent 不显示不会生效的共享设置。Tab 不模拟跨领域导航。
 
 ### 4.3 分栏
 

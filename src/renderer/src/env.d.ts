@@ -6,6 +6,7 @@ import type { ChatApi } from '../../shared/chat'
 import type { ArtifactApi } from '../../shared/artifacts'
 import type { SkillApi } from '../../shared/skills'
 import type { FolderBrowserApi } from '../../shared/folder-browser'
+import type { PiAgentSettingsApi } from '../../shared/pi-agent-settings'
 import type { PiExtensionConfigurationApi } from '../../shared/pi-extensions'
 
 declare global {
@@ -19,6 +20,7 @@ declare global {
       folderBrowser: FolderBrowserApi
       knowledgeProcessing: KnowledgeProcessingApi
       chat: ChatApi
+      piAgentSettings: PiAgentSettingsApi
       piExtensions: PiExtensionConfigurationApi
     }
   }

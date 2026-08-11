@@ -86,3 +86,8 @@ export const piExtensionChannels = {
   setSourceEnabled: 'pi-extensions:set-source-enabled',
   removeSource: 'pi-extensions:remove-source'
 } as const
+
+export const piAgentSettingsChannels = {
+  getSettings: 'pi-agent-settings:get-settings',
+  saveSettings: 'pi-agent-settings:save-settings'
+} as const
