@@ -31,6 +31,14 @@ import {
 
 const RUNTIME_FEEDBACK_CUSTOM_TYPE = 'oyster-runtime-feedback-v1'
 
+const AGENT_TURN_RETRY = {
+  enabled: true,
+  maxRetries: 3,
+  baseDelayMs: 2_000,
+  // Keep retries at one layer so the total retry budget remains predictable.
+  provider: { maxRetries: 0 }
+} as const
+
 export type PiCodingAgentResourceMode = 'ecosystem' | 'disabled'
 
 export interface CreatePiCodingAgentInvocationOptions {
@@ -161,6 +169,14 @@ function resourceLoader(
   })
 }
 
+function applyRuntimeSettings(settingsManager: SettingsManager): void {
+  settingsManager.applyOverrides({
+    shellCommandPrefix: artifactGitCommandPrefix(),
+    retry: AGENT_TURN_RETRY,
+    images: { autoResize: false, blockImages: false }
+  })
+}
+
 function finalAssistantMessage(messages: readonly AgentMessage[]): Extract<AgentMessage, { role: 'assistant' }> | undefined {
   return [...messages].reverse().find(
     (message): message is Extract<AgentMessage, { role: 'assistant' }> => message.role === 'assistant'
@@ -209,19 +225,11 @@ export async function createPiCodingAgentInvocation(
     // disabled while still loading user resources from the explicit agentDir and context files.
     ? SettingsManager.create(options.cwd, options.agentDir, { projectTrusted: false })
     : SettingsManager.inMemory()
-  settingsManager.applyOverrides({
-    shellCommandPrefix: artifactGitCommandPrefix(),
-    retry: { enabled: false },
-    images: { autoResize: false, blockImages: false }
-  })
+  applyRuntimeSettings(settingsManager)
   const loader = resourceLoader(options, settingsManager)
   await loader.reload()
   // Resource loading reloads file-backed settings; Host invariants must win afterwards.
-  settingsManager.applyOverrides({
-    shellCommandPrefix: artifactGitCommandPrefix(),
-    retry: { enabled: false },
-    images: { autoResize: false, blockImages: false }
-  })
+  applyRuntimeSettings(settingsManager)
   const todoTools = options.todoTools === false ? [] : createAgentTodoTools(todos)
   const customTools = [...(options.customTools ?? []), ...todoTools]
   const activeTools = options.tools

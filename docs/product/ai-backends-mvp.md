@@ -57,7 +57,7 @@ Coding Plan 提供两个明确登录入口：Device Code 适合远程或 loopbac
 
 Coding Plan 的直接生成和 Pi Coding Agent SDK Runtime 都复用同一个 `SelectedModelStream`：已选 Pi Model 与已经过 Oyster Connection 认证的 `StreamFn`。它不是另一种 Runtime。适配层把该 stream 注册为 request-local Pi `ModelRuntime` Provider，使 `AgentSession` 能使用 Extension hooks、工具循环与原生压缩；真实 credential 仍由 Oyster Connection / Keychain 持有，SDK 不读取默认 Pi auth 文件，也不形成嵌套的外部 Agent loop。角色能够读取的 Observation、Knowledge 与工具仍由 Oyster 当前调用授予，与 Backend 类型无关。
 
-OpenAI Chat Completions 与 Responses 的正式模型调用直接复用 `pi-ai` 原生 Provider transport；Oyster 不再维护 `guardedFetch`、自定义 SSE parser 或第二套 payload/retry/timeout 语义。自定义远程 URL 的保存边界仍要求 HTTPS，只有用户显式填写的 localhost 端点可使用 HTTP；模型目录发现和连接测试继续使用各自的有界读取保护。正式 Agent 模型请求的 redirect、单响应体大小和 transport retry 行为遵循当前固定版本的 Pi Provider，不额外叠加 Oyster 策略。连接失效只影响该 Connection；应用可以继续启动，也不会自动切换计费来源。
+OpenAI Chat Completions 与 Responses 的正式模型调用直接复用 `pi-ai` 原生 Provider transport；Oyster 不再维护 `guardedFetch`、自定义 SSE parser 或第二套 payload/timeout 语义。自定义远程 URL 的保存边界仍要求 HTTPS，只有用户显式填写的 localhost 端点可使用 HTTP；模型目录发现和连接测试继续使用各自的有界读取保护。正式 Agent 模型请求由 Pi `AgentSession` 对瞬时故障统一执行最多 3 次 Agent Turn 重试和 2、4、8 秒指数退避，Provider 请求层不再叠加重试；非瞬时错误立即失败。连接失效只影响该 Connection；应用可以继续启动，也不会自动切换计费来源。
 
 本地 Debug Store 可以保存 Extension hook 处理后的最终 Provider payload、脱敏后的请求 header 视图以及响应 status/header。API Key、Authorization 和 Cookie 等 credential-bearing 值不进入 Debug Store。该记录用于离线检查，不改变实际传输，也不引入 OpenTelemetry 或外部观测服务。
 

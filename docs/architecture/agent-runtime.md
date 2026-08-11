@@ -19,7 +19,9 @@ Oyster 直接以 `@earendil-works/pi-coding-agent` 的 `AgentSession` 作为唯�
 - 不读取默认 `~/.pi/agent/auth.json`，也不允许 Pi 设置静默替换 Chat Conversation 或 Knowledge Agent 已固定的模型；
 - Recorder 在实际 StreamFn 边界保存模型收到的 Pi Context，并通过 Provider callback 保存 Extension hook 处理后的最终 payload。
 
-OpenAI Chat Completions 与 Responses 不再由 Oyster 维护平行的 streaming transport，而是直接使用 `pi-ai` 的原生 Provider 实现。Payload 转换、流解析、Provider retry/timeout、错误语义和 Provider hooks 均由 Pi 负责；Oyster 只提供已校验的 endpoint、所选模型和凭据。原有 `guardedFetch` 及其针对 Agent 模型请求的 redirect、响应体大小和自定义流解析策略已经删除，避免两套 transport 逐渐分叉。模型目录发现与连接测试仍可拥有各自的有界 HTTP 校验，但不能把这些校验误写成 Agent Provider transport 的保证。
+OpenAI Chat Completions 与 Responses 不再由 Oyster 维护平行的 streaming transport，而是直接使用 `pi-ai` 的原生 Provider 实现。Payload 转换、流解析、Provider timeout、错误语义和 Provider hooks 均由 Pi 负责；Oyster 只提供已校验的 endpoint、所选模型和凭据。原有 `guardedFetch` 及其针对 Agent 模型请求的 redirect、响应体大小和自定义流解析策略已经删除，避免两套 transport 逐渐分叉。模型目录发现与连接测试仍可拥有各自的有界 HTTP 校验，但不能把这些校验误写成 Agent Provider transport 的保证。
+
+瞬时故障只在 Pi `AgentSession` 的 Agent Turn 层统一重试：最多重试 3 次，按 2、4、8 秒指数退避。`overloaded`、瞬时限流、服务端错误和连接中断等由 Pi 的统一错误分类决定；配额、账单、取消和确定性错误立即失败。Provider 请求层的 `maxRetries` 固定为 `0`，避免两层重试预算叠加；重试当前失败的 Assistant 调用不会重新执行本次 Invocation 中已经完成的工具调用。该策略是 Host 不变量，不受 agentDir 或项目设置覆盖。
 
 ## Headless Extension 资源策略
 
