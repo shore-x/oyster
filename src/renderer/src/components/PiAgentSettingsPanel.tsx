@@ -5,6 +5,7 @@ import {
   type PiAgentTransport
 } from '../../../shared/pi-agent-settings'
 import { Button, Icon } from '../ui'
+import { uiText } from '../i18n'
 
 function errorText(value: unknown): string {
   return value instanceof Error ? value.message : String(value)
@@ -90,9 +91,12 @@ export function PiAgentSettingsPanel() {
       <div class="agent-config-section-heading">
         <div>
           <h3>Pi Coding Agent Runtime</h3>
-          <p>写入 Pi 原生 settings.json，从下一次通用 Agent Invocation 起生效。</p>
+          <p>{uiText(
+            '写入 Pi 原生 settings.json，从下一次通用 Agent Invocation 起生效。',
+            'Writes to Pi’s native settings.json and takes effect with the next General Agent Invocation.'
+          )}</p>
         </div>
-        <span>通用 Agent</span>
+        <span>{uiText('通用 Agent', 'General Agent')}</span>
       </div>
 
       <Show when={error() || settings()?.error}>{(message) => (
@@ -102,9 +106,12 @@ export function PiAgentSettingsPanel() {
       <div class="pi-agent-settings__fields">
         <label class="pi-agent-setting pi-agent-setting--switch">
           <span>
-            <strong>自动上下文压缩</strong>
+            <strong>{uiText('自动上下文压缩', 'Automatic context compaction')}</strong>
             <small>
-              接近模型上下文上限时总结较早历史。当前预留 {settings()?.compactionReserveTokens.toLocaleString() ?? '—'} tokens，保留最近约 {settings()?.compactionKeepRecentTokens.toLocaleString() ?? '—'} tokens。
+              {uiText(
+                `接近模型上下文上限时总结较早历史。当前预留 ${settings()?.compactionReserveTokens.toLocaleString() ?? '—'} tokens，保留最近约 ${settings()?.compactionKeepRecentTokens.toLocaleString() ?? '—'} tokens。`,
+                `Summarizes older history near the model context limit. Currently reserves ${settings()?.compactionReserveTokens.toLocaleString() ?? '—'} tokens, keeping about ${settings()?.compactionKeepRecentTokens.toLocaleString() ?? '—'} tokens.`
+              )}
             </small>
           </span>
           <input
@@ -118,8 +125,11 @@ export function PiAgentSettingsPanel() {
 
         <label class="pi-agent-setting">
           <span>
-            <strong>Provider 传输方式</strong>
-            <small>Auto 由 Pi 根据 Provider 能力选择；固定方式仅用于诊断或特定网络环境。</small>
+            <strong>{uiText('Provider 传输方式', 'Provider transport')}</strong>
+            <small>{uiText(
+              'Auto 由 Pi 根据 Provider 能力选择；固定方式仅用于诊断或特定网络环境。',
+              'Auto lets Pi choose based on Provider capabilities; fixed modes are intended for diagnostics or specific network environments.'
+            )}</small>
           </span>
           <select
             value={transport()}
@@ -136,8 +146,11 @@ export function PiAgentSettingsPanel() {
 
         <label class="pi-agent-setting">
           <span>
-            <strong>HTTP 空闲超时</strong>
-            <small>等待响应数据期间允许的最长静默时间；设置为 0 表示不限制。</small>
+            <strong>{uiText('HTTP 空闲超时', 'HTTP idle timeout')}</strong>
+            <small>{uiText(
+              '等待响应数据期间允许的最长静默时间；设置为 0 表示不限制。',
+              'Maximum silence while waiting for response data; set to 0 for no limit.'
+            )}</small>
           </span>
           <span class="pi-agent-setting__number">
             <input
@@ -150,16 +163,19 @@ export function PiAgentSettingsPanel() {
               data-testid="pi-agent-http-idle-timeout"
               onInput={(event) => setHttpIdleTimeoutSeconds(event.currentTarget.value)}
             />
-            <em>秒</em>
+            <em>{uiText('秒', 'sec')}</em>
           </span>
         </label>
       </div>
 
       <p class="pi-agent-settings__path" title={settings()?.settingsPath}>
-        {settings()?.settingsPath || '正在读取 Pi 配置…'}
+        {settings()?.settingsPath || uiText('正在读取 Pi 配置…', 'Reading Pi settings…')}
       </p>
       <div class="pi-agent-settings__notice">
-        Agent Turn 瞬时错误重试由 Oyster 固定为最多 3 次，不受此页面设置影响。Knowledge Maintainer 与 Reviewer 使用各自的隔离运行时设置。
+        {uiText(
+          'Agent Turn 瞬时错误重试由 Oyster 固定为最多 3 次，不受此页面设置影响。Knowledge Maintainer 与 Reviewer 使用各自的隔离运行时设置。',
+          'Oyster fixes transient Agent Turn retries at a maximum of 3; this page does not change that. Knowledge Maintainer and Reviewer use their own isolated runtime settings.'
+        )}
       </div>
       <div class="pi-agent-settings__actions">
         <Button
@@ -167,14 +183,14 @@ export function PiAgentSettingsPanel() {
           icon="refresh"
           disabled={pending()}
           onClick={restoreDefaults}
-        >恢复 Pi 默认值</Button>
+        >{uiText('恢复 Pi 默认值', 'Restore Pi Defaults')}</Button>
         <Button
           variant="primary"
           icon="check"
           data-testid="save-pi-agent-settings"
           disabled={pending() || !settings() || !dirty() || !timeoutValid()}
           onClick={() => void save()}
-        >{pending() ? '保存中…' : '保存 Runtime 设置'}</Button>
+        >{pending() ? uiText('保存中…', 'Saving…') : uiText('保存 Runtime 设置', 'Save Runtime Settings')}</Button>
       </div>
     </div>
   )

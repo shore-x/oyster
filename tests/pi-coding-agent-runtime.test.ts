@@ -6,8 +6,10 @@ import {
   createAssistantMessageEventStream,
   fauxAssistantMessage,
   fauxProvider,
-  type AssistantMessage
+  type AssistantMessage,
+  type Context
 } from '@earendil-works/pi-ai'
+import type { AppLanguage } from '../src/shared/app-settings'
 import type { SelectedModelStream } from '../src/main/ai-backends/model'
 import { InMemoryAgentDebugStore } from '../src/main/agent-runtime/agent-debug-store'
 import {
@@ -26,10 +28,11 @@ afterEach(async () => {
 
 async function retryInvocation(
   invocationId: string,
-  response: (call: number) => AssistantMessage,
+  response: (call: number, context: Context) => AssistantMessage,
   options: {
     resourceMode?: 'ecosystem' | 'disabled'
     settings?: object
+    language?: AppLanguage
   } = {}
 ) {
   const rootPath = await mkdtemp(join(tmpdir(), 'oyster-pi-retry-'))
@@ -43,10 +46,10 @@ async function retryInvocation(
   let calls = 0
   const modelStream: SelectedModelStream = {
     model,
-    streamFn: () => {
+    streamFn: (_model, context) => {
       calls++
       const stream = createAssistantMessageEventStream()
-      stream.end(response(calls))
+      stream.end(response(calls, context))
       return stream
     }
   }
@@ -62,6 +65,7 @@ async function retryInvocation(
       id: invocationId
     }),
     resourceMode: options.resourceMode ?? 'disabled',
+    language: options.language,
     tools: [],
     todoTools: false
   })
@@ -69,6 +73,32 @@ async function retryInvocation(
 }
 
 describe('Pi Coding Agent runtime retry', () => {
+  it('adds the current application language at the Pi Runtime boundary', async () => {
+    let systemPrompt = ''
+    const { invocation } = await retryInvocation(
+      'language-instruction',
+      (_call, context) => {
+        systemPrompt = context.systemPrompt || ''
+        return fauxAssistantMessage('Done.')
+      },
+      { language: 'en-US' }
+    )
+
+    try {
+      await promptPiCodingAgent(
+        invocation,
+        'Inspect the effective system prompt.',
+        new AbortController().signal,
+        'Test'
+      )
+
+      expect(systemPrompt).toContain('Test bounded transient-error retries.')
+      expect(systemPrompt).toContain('Application language: English.')
+    } finally {
+      invocation.dispose()
+    }
+  })
+
   it('recovers from a transient overload through the bounded Agent Turn policy', async () => {
     const { invocation, calls } = await retryInvocation(
       'retry-success',

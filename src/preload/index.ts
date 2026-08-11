@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import {
+  appSettingsChannels,
   aiBackendChannels,
   artifactChannels,
   chatChannels,
@@ -11,6 +12,7 @@ import {
   piExtensionChannels,
   skillChannels
 } from '../shared/channels'
+import type { AppSettingsApi } from '../shared/app-settings'
 import type { AiBackendApi, AiBackendSnapshot } from '../shared/ai-backends'
 import type {
   DiscoveryApi,
@@ -187,7 +189,13 @@ const piAgentSettings: PiAgentSettingsApi = {
   saveSettings: (input) => ipcRenderer.invoke(piAgentSettingsChannels.saveSettings, input)
 }
 
+const appSettings: AppSettingsApi = {
+  getSettings: () => ipcRenderer.invoke(appSettingsChannels.getSettings),
+  saveSettings: (input) => ipcRenderer.invoke(appSettingsChannels.saveSettings, input)
+}
+
 contextBridge.exposeInMainWorld('oyster', {
+  appSettings,
   discovery: api,
   skills,
   aiBackends,

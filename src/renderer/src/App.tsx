@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal } from 'solid-js'
+import { For, Show, createMemo, createSignal, onMount } from 'solid-js'
 import { createDiscoveryController } from './discovery-controller'
 import { ChatPage } from './components/ChatPage'
 import { ArtifactsPage, type ArtifactBrowserTarget } from './components/ArtifactsPage'
@@ -8,10 +8,12 @@ import { SettingsPage } from './components/SettingsPage'
 import { SkillsPage, type SkillsNavigationRequest } from './components/SkillsPage'
 import { SourceCard } from './components/SourceCard'
 import { Button, Icon } from './ui'
+import { loadAppLanguage, uiText } from './i18n'
 
 type PageId = 'chat' | 'knowledge' | 'artifacts' | 'sources' | 'skills' | 'settings' | 'knowledge-processing'
 
 export function App() {
+  onMount(() => { void loadAppLanguage() })
   const controller = createDiscoveryController()
   const [page, setPage] = createSignal<PageId>('chat')
   const [knowledgeResetVersion, setKnowledgeResetVersion] = createSignal(0)
@@ -37,7 +39,7 @@ export function App() {
     try {
       browseFolder({
         folderPath: await window.oyster.folderBrowser.getDesignDocumentsPath(),
-        label: 'Oyster 设计文档'
+        label: uiText('Oyster 设计文档', 'Oyster Design Documents')
       })
     } catch (error) {
       setNavigationError(error instanceof Error ? error.message : String(error))
@@ -58,32 +60,32 @@ export function App() {
     <div class="app-shell">
       <aside class="sidebar">
         <div class="brand"><span class="brand__mark">O</span><span>Oyster</span></div>
-        <nav class="sidebar__navigation" aria-label="主导航">
+        <nav class="sidebar__navigation" aria-label={uiText('主导航', 'Primary navigation')}>
           <div class="nav-primary">
           <a
             href="#chat"
             data-testid="nav-chat"
             class={`nav-item${page() === 'chat' ? ' nav-item--active' : ''}`}
             onClick={(event) => { event.preventDefault(); navigateTo('chat') }}
-          ><Icon name="chat" /><span>对话</span></a>
+          ><Icon name="chat" /><span>{uiText('对话', 'Chat')}</span></a>
           <a
             href="#knowledge"
             data-testid="nav-knowledge"
             class={`nav-item${page() === 'knowledge' ? ' nav-item--active' : ''}`}
             onClick={(event) => { event.preventDefault(); navigateTo('knowledge') }}
-          ><Icon name="layers" /><span>知识库</span></a>
+          ><Icon name="layers" /><span>{uiText('知识库', 'Knowledge')}</span></a>
           <a
             href="#artifacts"
             data-testid="nav-artifacts"
             class={`nav-item${page() === 'artifacts' ? ' nav-item--active' : ''}`}
             onClick={(event) => { event.preventDefault(); navigateTo('artifacts') }}
-          ><Icon name="folder" /><span>产物</span></a>
+          ><Icon name="folder" /><span>{uiText('产物', 'Artifacts')}</span></a>
           <a
             href="#sources"
             data-testid="nav-sources"
             class={`nav-item${page() === 'sources' ? ' nav-item--active' : ''}`}
             onClick={(event) => { event.preventDefault(); navigateTo('sources') }}
-          ><Icon name="archive" /><span>数据来源</span></a>
+          ><Icon name="archive" /><span>{uiText('数据来源', 'Sources')}</span></a>
           <a
             href="#skills"
             data-testid="nav-skills"
@@ -95,7 +97,7 @@ export function App() {
             data-testid="nav-knowledge-processing"
             class={`nav-item${page() === 'knowledge-processing' ? ' nav-item--active' : ''}`}
             onClick={(event) => { event.preventDefault(); navigateTo('knowledge-processing') }}
-          ><Icon name="play" /><span>加工测试</span></a>
+          ><Icon name="play" /><span>{uiText('加工测试', 'Processing')}</span></a>
           </div>
           <div class="nav-system">
             <a
@@ -103,7 +105,7 @@ export function App() {
               data-testid="nav-ai-backends"
               class={`nav-item${page() === 'settings' ? ' nav-item--active' : ''}`}
               onClick={(event) => { event.preventDefault(); navigateTo('settings') }}
-            ><Icon name="spark" /><span data-testid="nav-settings">设置</span></a>
+            ><Icon name="spark" /><span data-testid="nav-settings">{uiText('设置', 'Settings')}</span></a>
           </div>
         </nav>
       </aside>
@@ -118,11 +120,11 @@ export function App() {
         <div class="ui-page ui-page--flow" data-testid="page-sources" hidden={page() !== 'sources'}>
           <header class="page-header">
             <div>
-              <h1>Agent 数据来源</h1>
+              <h1>{uiText('Agent 数据来源', 'Agent Sources')}</h1>
               <div class="page-summary">
-                <span><strong>{foundCount()}</strong> 个来源</span>
+                <span><strong>{foundCount()}</strong> {uiText('个来源', 'sources')}</span>
                 <span class="page-summary__separator">·</span>
-                <span><strong>{totalConversations()}</strong> 个对话</span>
+                <span><strong>{totalConversations()}</strong> {uiText('个对话', 'conversations')}</span>
               </div>
             </div>
             <div class="page-header__actions">
@@ -133,7 +135,9 @@ export function App() {
                 onClick={controller.detectAgents}
                 disabled={controller.detecting()}
               >
-                {controller.detecting() ? '探测中…' : '探测本机 Agent'}
+                {controller.detecting()
+                  ? uiText('探测中…', 'Detecting…')
+                  : uiText('探测本机 Agent', 'Detect Local Agents')}
               </Button>
             </div>
           </header>
@@ -142,7 +146,7 @@ export function App() {
             <div class="page-error"><Icon name="warning" />{controller.error()}</div>
           </Show>
 
-          <section class="source-list" aria-label="Agent 数据来源">
+          <section class="source-list" aria-label={uiText('Agent 数据来源', 'Agent sources')}>
             <For each={controller.state().sources}>{(source) => {
               const activeScan = () => controller.state().scans.find(
                 (scan) => scan.sourceId === source.id

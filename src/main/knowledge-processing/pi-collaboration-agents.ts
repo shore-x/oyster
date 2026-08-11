@@ -11,6 +11,7 @@ import {
   SessionManager
 } from '../agent-runtime/pi-coding-agent-runtime'
 import { REASONING_EFFORTS } from '../../shared/ai-backends'
+import { DEFAULT_APP_SETTINGS, type AppLanguage } from '../../shared/app-settings'
 import type { AgentInvocationDebugRecord } from '../../shared/agent-runtime'
 import {
   InMemoryAgentDebugStore,
@@ -60,6 +61,7 @@ interface InvokeRepositoryAgentInput {
   agentId: 'knowledge_maintainer' | 'knowledge_reviewer'
   modelStream: SelectedModelStream
   systemPrompt: string
+  language: AppLanguage
   taskPrompt: string
   worktree: KnowledgeTaskWorktree
   reasoningEffort?: KnowledgeMaintainerInvocationInput['reasoningEffort']
@@ -86,6 +88,7 @@ async function invokeRepositoryAgent(
     // Resources are disabled; runtime-only Pi state remains outside the tracked Repository.
     agentDir: input.worktree.runtimePath,
     systemPrompt: input.systemPrompt,
+    language: input.language,
     reasoningEffort: input.reasoningEffort,
     piSessionManager,
     debugStore,
@@ -141,7 +144,10 @@ function reviewerTaskPrompt(_input: KnowledgeReviewerInvocationInput): string {
 }
 
 export class PiKnowledgeMaintainerAgent implements KnowledgeMaintainerRuntime {
-  constructor(private readonly debugStore: AgentDebugStore = new InMemoryAgentDebugStore()) {}
+  constructor(
+    private readonly debugStore: AgentDebugStore = new InMemoryAgentDebugStore(),
+    private readonly getLanguage: () => AppLanguage = () => DEFAULT_APP_SETTINGS.language
+  ) {}
 
   async invoke(input: KnowledgeMaintainerInvocationInput): Promise<RepositoryAgentInvocationResult> {
     validateBaseInput(input)
@@ -149,6 +155,7 @@ export class PiKnowledgeMaintainerAgent implements KnowledgeMaintainerRuntime {
       agentId: 'knowledge_maintainer',
       modelStream: input.modelStream,
       systemPrompt: input.systemPrompt,
+      language: this.getLanguage(),
       taskPrompt: maintainerTaskPrompt(input),
       worktree: input.worktree,
       reasoningEffort: input.reasoningEffort,
@@ -160,7 +167,10 @@ export class PiKnowledgeMaintainerAgent implements KnowledgeMaintainerRuntime {
 }
 
 export class PiKnowledgeReviewerAgent implements KnowledgeReviewerRuntime {
-  constructor(private readonly debugStore: AgentDebugStore = new InMemoryAgentDebugStore()) {}
+  constructor(
+    private readonly debugStore: AgentDebugStore = new InMemoryAgentDebugStore(),
+    private readonly getLanguage: () => AppLanguage = () => DEFAULT_APP_SETTINGS.language
+  ) {}
 
   async invoke(input: KnowledgeReviewerInvocationInput): Promise<RepositoryAgentInvocationResult> {
     validateBaseInput(input)
@@ -171,6 +181,7 @@ export class PiKnowledgeReviewerAgent implements KnowledgeReviewerRuntime {
       agentId: 'knowledge_reviewer',
       modelStream: input.modelStream,
       systemPrompt: input.systemPrompt,
+      language: this.getLanguage(),
       taskPrompt: reviewerTaskPrompt(input),
       worktree: input.worktree,
       reasoningEffort: input.reasoningEffort,

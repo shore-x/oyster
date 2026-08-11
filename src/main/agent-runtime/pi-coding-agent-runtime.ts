@@ -16,6 +16,7 @@ import {
   type ToolDefinition
 } from '@earendil-works/pi-coding-agent'
 import type { ReasoningEffort } from '../../shared/ai-backends'
+import { DEFAULT_APP_SETTINGS, type AppLanguage } from '../../shared/app-settings'
 import type {
   AgentInvocationDebugRecord,
   AgentModelCallPurpose
@@ -23,6 +24,7 @@ import type {
 import type { SelectedModelStream } from '../ai-backends/model'
 import { createArtifactGitEnvironment } from '../artifacts/git-runtime'
 import { AgentTodoStore, createAgentTodoTools } from './agent-todos'
+import { withAgentLanguage } from './agent-language'
 import type { AgentDebugStore } from './agent-debug-store'
 import {
   createPiAgentInvocationRecorder,
@@ -51,6 +53,7 @@ export interface CreatePiCodingAgentInvocationOptions {
   cwd: string
   agentDir: string
   systemPrompt: string
+  language?: AppLanguage
   reasoningEffort?: ReasoningEffort
   piSessionManager: SessionManager
   resourceMode: PiCodingAgentResourceMode
@@ -153,7 +156,10 @@ function resourceLoader(
     cwd: options.cwd,
     agentDir: options.agentDir,
     settingsManager,
-    systemPromptOverride: () => options.systemPrompt,
+    systemPromptOverride: () => withAgentLanguage(
+      options.systemPrompt,
+      options.language ?? DEFAULT_APP_SETTINGS.language
+    ),
     ...(options.resourceMode === 'disabled' ? {
       noExtensions: true,
       noSkills: true,

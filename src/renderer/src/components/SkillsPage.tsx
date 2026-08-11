@@ -14,21 +14,7 @@ import {
 import { createSkillDiscoveryController } from '../skill-discovery-controller'
 import { Button, Icon, Markdown } from '../ui'
 import './SkillsPage.css'
-
-const SCOPE_LABELS: Record<SkillScope, string> = {
-  user: '全局',
-  project: '项目',
-  admin: '管理',
-  system: '系统',
-  other: '其他'
-}
-
-const TARGET_STATE_LABELS: Record<SkillBindingTargetState, string> = {
-  unbound: '未绑定',
-  bound: '已绑定',
-  conflict: '冲突',
-  error: '错误'
-}
+import { appLanguage, uiText } from '../i18n'
 
 export type SkillsPageView = 'managed' | 'external'
 
@@ -44,11 +30,22 @@ export interface SkillsPageProps {
 }
 
 export function skillScopeLabel(scope: SkillScope): string {
-  return SCOPE_LABELS[scope]
+  return {
+    user: uiText('全局', 'Global'),
+    project: uiText('项目', 'Project'),
+    admin: uiText('管理', 'Admin'),
+    system: uiText('系统', 'System'),
+    other: uiText('其他', 'Other')
+  }[scope]
 }
 
 export function skillBindingStateLabel(state: SkillBindingTargetState): string {
-  return TARGET_STATE_LABELS[state]
+  return {
+    unbound: uiText('未绑定', 'Unbound'),
+    bound: uiText('已绑定', 'Bound'),
+    conflict: uiText('冲突', 'Conflict'),
+    error: uiText('错误', 'Error')
+  }[state]
 }
 
 export function groupSkillsByAgent(skills: readonly DiscoveredSkill[]) {
@@ -85,7 +82,7 @@ function formatBytes(bytes: number): string {
 function modifiedAtLabel(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('zh-CN', {
+  return new Intl.DateTimeFormat(appLanguage(), {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -137,10 +134,10 @@ function ManagedSkillListItem(props: {
       <strong>{props.skill.name || props.skill.artifactDirectoryName}</strong>
       <span class="skills-browser__item-badges">
         <span class={`managed-skill-status managed-skill-status--${props.skill.status}`}>
-          {props.skill.status === 'ready' ? '可绑定' : '输出无效'}
+          {props.skill.status === 'ready' ? uiText('可绑定', 'Ready') : uiText('输出无效', 'Invalid output')}
         </span>
         <Show when={props.skill.status === 'ready'}>
-          <span>{boundCount()} 个目标已绑定</span>
+          <span>{boundCount()} {uiText('个目标已绑定', 'targets bound')}</span>
         </Show>
       </span>
       <code title={props.skill.artifactDirectoryName}>{props.skill.artifactDirectoryName}</code>
@@ -169,9 +166,9 @@ function ManagedTargetRow(props: {
     >
       <div class="managed-target__identity">
         <strong>{props.target.agentDisplayName}</strong>
-        <span>全局</span>
+        <span>{uiText('全局', 'Global')}</span>
         <Show when={props.target.shared}>
-          <span class="managed-target__shared">共享注册目录</span>
+          <span class="managed-target__shared">{uiText('共享注册目录', 'Shared registration directory')}</span>
         </Show>
       </div>
       <div class="managed-target__location">
@@ -197,7 +194,7 @@ function ManagedTargetRow(props: {
             data-testid="bind-managed-skill"
             disabled={props.busy}
             onClick={() => props.onBind(input())}
-          >{props.busy ? '正在绑定…' : '绑定'}</Button>
+          >{props.busy ? uiText('正在绑定…', 'Binding…') : uiText('绑定', 'Bind')}</Button>
         </Show>
         <Show when={props.target.state === 'bound'}>
           <Button
@@ -206,7 +203,7 @@ function ManagedTargetRow(props: {
             data-testid="unbind-managed-skill"
             disabled={props.busy}
             onClick={() => props.onUnbind(input())}
-          >{props.busy ? '正在解绑…' : '解绑'}</Button>
+          >{props.busy ? uiText('正在解绑…', 'Unbinding…') : uiText('解绑', 'Unbind')}</Button>
         </Show>
       </div>
     </article>
@@ -254,17 +251,17 @@ export function SkillsPage(props: SkillsPageProps = {}) {
               when={view() === 'managed'}
               fallback={(
                 <>
-                  <span><strong>{externalSkillCount() ?? '—'}</strong> 个外部注册</span>
+                  <span><strong>{externalSkillCount() ?? '—'}</strong> {uiText('个外部注册', 'external registrations')}</span>
                   <span class="page-summary__separator">·</span>
-                  <span><strong>{agentCount() ?? '—'}</strong> 个 Agent</span>
+                  <span><strong>{agentCount() ?? '—'}</strong> Agents</span>
                   <span class="page-summary__separator">·</span>
-                  <span>只读展示原始注册位置</span>
+                  <span>{uiText('只读展示原始注册位置', 'Read-only view of original registrations')}</span>
                 </>
               )}
             >
-              <span><strong>{managedSkillCount() ?? '—'}</strong> 个 Skill Artifact</span>
+              <span><strong>{managedSkillCount() ?? '—'}</strong> Skill Artifacts</span>
               <span class="page-summary__separator">·</span>
-              <span>通过符号链接管理用户级绑定</span>
+              <span>{uiText('通过符号链接管理用户级绑定', 'Manage user-level bindings through symbolic links')}</span>
             </Show>
           </div>
         </div>
@@ -279,7 +276,7 @@ export function SkillsPage(props: SkillsPageProps = {}) {
                 data-testid="discover-skills"
                 disabled={Boolean(external.busy())}
                 onClick={() => void external.discover()}
-              >{external.busy() === 'discover' ? '正在发现…' : '发现本机 Skill'}</Button>
+              >{external.busy() === 'discover' ? uiText('正在发现…', 'Discovering…') : uiText('发现本机 Skill', 'Discover Local Skills')}</Button>
             )}
           >
             <Button
@@ -288,26 +285,26 @@ export function SkillsPage(props: SkillsPageProps = {}) {
               data-testid="refresh-managed-skills"
               disabled={managed.isBusy('load') || managed.isBusy('refresh')}
               onClick={() => void managed.refresh()}
-            >{managed.isBusy('refresh') ? '正在刷新…' : '刷新'}</Button>
+            >{managed.isBusy('refresh') ? uiText('正在刷新…', 'Refreshing…') : uiText('刷新', 'Refresh')}</Button>
           </Show>
         </div>
       </header>
 
-      <div class="skills-page__tabs" role="tablist" aria-label="Skill 视图">
+      <div class="skills-page__tabs" role="tablist" aria-label={uiText('Skill 视图', 'Skill views')}>
         <button
           type="button"
           role="tab"
           data-testid="skills-view-managed"
           aria-selected={view() === 'managed'}
           onClick={() => setView('managed')}
-        >Oyster 管理</button>
+        >{uiText('Oyster 管理', 'Managed by Oyster')}</button>
         <button
           type="button"
           role="tab"
           data-testid="skills-view-external"
           aria-selected={view() === 'external'}
           onClick={() => setView('external')}
-        >外部发现</button>
+        >{uiText('外部发现', 'External Discovery')}</button>
       </div>
 
       <Show when={view() === 'managed'}>
@@ -317,12 +314,12 @@ export function SkillsPage(props: SkillsPageProps = {}) {
           </Show>
 
           <Show when={(managed.snapshot()?.errors.length ?? 0) > 0}>
-            <section class="managed-skill-errors" aria-label="Skill Artifact 错误">
+            <section class="managed-skill-errors" aria-label={uiText('Skill Artifact 错误', 'Skill Artifact errors')}>
               <div class="skill-discovery-errors__heading">
                 <Icon name="warning" />
                 <div>
-                  <strong>部分 Skill Artifact 无法读取</strong>
-                  <span>其他可用 Skill 仍可正常管理。</span>
+                  <strong>{uiText('部分 Skill Artifact 无法读取', 'Some Skill Artifacts Cannot Be Read')}</strong>
+                  <span>{uiText('其他可用 Skill 仍可正常管理。', 'Other available Skills can still be managed.')}</span>
                 </div>
               </div>
               <ul>
@@ -338,7 +335,7 @@ export function SkillsPage(props: SkillsPageProps = {}) {
             </section>
           </Show>
 
-          <section class="skills-browser managed-skills-browser" aria-label="Oyster 管理的 Skills">
+          <section class="skills-browser managed-skills-browser" aria-label={uiText('Oyster 管理的 Skills', 'Skills managed by Oyster')}>
             <aside class="skills-browser__list" aria-label="Skill Artifacts">
               <div class="skills-browser__list-heading">
                 <span>Skill Artifacts</span>
@@ -350,10 +347,10 @@ export function SkillsPage(props: SkillsPageProps = {}) {
                   fallback={(
                     <div class="skills-browser__empty-list">
                       {managed.snapshot()
-                        ? '还没有 Skill Artifact。在 Artifact 的 output/ 中提供 SKILL.md 后即可管理。'
+                        ? uiText('还没有 Skill Artifact。在 Artifact 的 output/ 中提供 SKILL.md 后即可管理。', 'No Skill Artifacts yet. Add SKILL.md under an Artifact’s output/ to manage it here.')
                         : managed.error()
-                          ? '无法读取 Skill Artifact。'
-                          : '正在读取 Skill Artifact…'}
+                          ? uiText('无法读取 Skill Artifact。', 'Unable to read Skill Artifacts.')
+                          : uiText('正在读取 Skill Artifact…', 'Reading Skill Artifacts…')}
                     </div>
                   )}
                 >
@@ -371,16 +368,16 @@ export function SkillsPage(props: SkillsPageProps = {}) {
             <div class="skills-browser__detail" data-testid="managed-skill-detail-scroll">
               <Show
                 when={managed.selectedSkill()}
-                fallback={<div class="skills-browser__empty-detail">选择一个 Skill Artifact 查看输出和 Agent 绑定。</div>}
+                fallback={<div class="skills-browser__empty-detail">{uiText('选择一个 Skill Artifact 查看输出和 Agent 绑定。', 'Select a Skill Artifact to view its output and Agent bindings.')}</div>}
               >
                 {(skill) => (
                   <>
                     <header class="skill-detail__header managed-skill-detail__header">
                       <div>
                         <div class="skill-detail__badges">
-                          <span class="skill-agent-badge">Oyster 管理</span>
+                          <span class="skill-agent-badge">{uiText('Oyster 管理', 'Managed by Oyster')}</span>
                           <span class={`managed-skill-status managed-skill-status--${skill().status}`}>
-                            {skill().status === 'ready' ? '可绑定' : '输出无效'}
+                            {skill().status === 'ready' ? uiText('可绑定', 'Ready') : uiText('输出无效', 'Invalid output')}
                           </span>
                         </div>
                         <h2>{skill().name || skill().artifactDirectoryName}</h2>
@@ -397,7 +394,7 @@ export function SkillsPage(props: SkillsPageProps = {}) {
                         data-testid="open-managed-skill-folder"
                         disabled={managed.isBusy(`open:${skill().artifactDirectoryName}`)}
                         onClick={() => void managed.openFolder(skill().artifactDirectoryName)}
-                      >{managed.isBusy(`open:${skill().artifactDirectoryName}`) ? '正在打开…' : '打开输出目录'}</Button>
+                      >{managed.isBusy(`open:${skill().artifactDirectoryName}`) ? uiText('正在打开…', 'Opening…') : uiText('打开输出目录', 'Open Output Folder')}</Button>
                     </header>
 
                     <dl class="skill-detail__metadata managed-skill-detail__metadata">
@@ -406,20 +403,20 @@ export function SkillsPage(props: SkillsPageProps = {}) {
                         <dd>{skill().artifactDirectoryName}</dd>
                       </div>
                       <div>
-                        <dt>状态</dt>
-                        <dd>{skill().status === 'ready' ? 'Skill 输出可用' : 'Skill 输出无效'}</dd>
+                        <dt>{uiText('状态', 'Status')}</dt>
+                        <dd>{skill().status === 'ready' ? uiText('Skill 输出可用', 'Skill output available') : uiText('Skill 输出无效', 'Skill output invalid')}</dd>
                       </div>
                       <div class="skill-detail__metadata-wide">
-                        <dt>Artifact 位置</dt>
+                        <dt>{uiText('Artifact 位置', 'Artifact Location')}</dt>
                         <dd><code data-testid="managed-skill-artifact-path">{skill().artifactPath}</code></dd>
                       </div>
                       <div class="skill-detail__metadata-wide">
-                        <dt>输出目录</dt>
+                        <dt>{uiText('输出目录', 'Output Folder')}</dt>
                         <dd><code data-testid="managed-skill-output-path">{skill().outputPath}</code></dd>
                       </div>
                       <Show when={skill().documentPath}>
                         <div class="skill-detail__metadata-wide">
-                          <dt>入口文档</dt>
+                          <dt>{uiText('入口文档', 'Entry Document')}</dt>
                           <dd><code data-testid="managed-skill-document-path">{skill().documentPath}</code></dd>
                         </div>
                       </Show>
@@ -428,14 +425,20 @@ export function SkillsPage(props: SkillsPageProps = {}) {
                     <section class="managed-bindings" aria-labelledby="managed-bindings-title">
                       <div class="managed-bindings__heading">
                         <div>
-                          <h3 id="managed-bindings-title">Agent 注入</h3>
-                          <p>在目标 Agent 的用户级注册位置创建指向 output/ 的目录符号链接。</p>
+                          <h3 id="managed-bindings-title">{uiText('Agent 注入', 'Agent Injection')}</h3>
+                          <p>{uiText(
+                            '在目标 Agent 的用户级注册位置创建指向 output/ 的目录符号链接。',
+                            'Creates a directory symbolic link to output/ in the target Agent’s user-level registration location.'
+                          )}</p>
                         </div>
-                        <span>用户级</span>
+                        <span>{uiText('用户级', 'User Level')}</span>
                       </div>
                       <Show when={skill().status !== 'ready'}>
                         <div class="managed-bindings__unavailable">
-                          当前输出不能创建新绑定；已有 Oyster 绑定仍可在下方解绑。
+                          {uiText(
+                            '当前输出不能创建新绑定；已有 Oyster 绑定仍可在下方解绑。',
+                            'The current output cannot create new bindings; existing Oyster bindings can still be removed below.'
+                          )}
                         </div>
                       </Show>
                       <div class="managed-bindings__targets">
@@ -470,17 +473,17 @@ export function SkillsPage(props: SkillsPageProps = {}) {
                             <h3 id="managed-skill-document-title">SKILL.md</h3>
                             <Show when={managed.document()}>
                               {(document) => (
-                                <span>{formatBytes(document().sizeBytes)} · 更新于 {modifiedAtLabel(document().modifiedAt)}</span>
+                                <span>{formatBytes(document().sizeBytes)} · {uiText('更新于', 'updated')} {modifiedAtLabel(document().modifiedAt)}</span>
                               )}
                             </Show>
                           </div>
-                          <span>Markdown 预览</span>
+                          <span>{uiText('Markdown 预览', 'Markdown Preview')}</span>
                         </div>
                         <Show
                           when={managed.document()}
                           fallback={(
                             <div class="skill-document__empty">
-                              {loadingManagedDocument() ? '正在读取文档…' : '该入口文档暂时无法预览。'}
+                              {loadingManagedDocument() ? uiText('正在读取文档…', 'Reading document…') : uiText('该入口文档暂时无法预览。', 'This entry document cannot be previewed right now.')}
                             </div>
                           )}
                         >
@@ -510,12 +513,12 @@ export function SkillsPage(props: SkillsPageProps = {}) {
           </Show>
 
           <Show when={(external.snapshot()?.errors.length ?? 0) > 0}>
-            <section class="skill-discovery-errors" aria-label="Skill 发现错误">
+            <section class="skill-discovery-errors" aria-label={uiText('Skill 发现错误', 'Skill discovery errors')}>
               <div class="skill-discovery-errors__heading">
                 <Icon name="warning" />
                 <div>
-                  <strong>部分 Skill 位置无法读取</strong>
-                  <span>其他已发现结果仍可正常查看。</span>
+                  <strong>{uiText('部分 Skill 位置无法读取', 'Some Skill Locations Cannot Be Read')}</strong>
+                  <span>{uiText('其他已发现结果仍可正常查看。', 'Other discovered results remain available.')}</span>
                 </div>
               </div>
               <ul>
@@ -530,10 +533,10 @@ export function SkillsPage(props: SkillsPageProps = {}) {
             </section>
           </Show>
 
-          <section class="skills-browser" aria-label="已发现的 Agent Skills">
+          <section class="skills-browser" aria-label={uiText('已发现的 Agent Skills', 'Discovered Agent Skills')}>
             <aside class="skills-browser__list" aria-label="Skills">
               <div class="skills-browser__list-heading">
-                <span>按 Agent 分组</span>
+                <span>{uiText('按 Agent 分组', 'Grouped by Agent')}</span>
                 <strong>{externalSkillCount() ?? '—'}</strong>
               </div>
               <div class="skills-browser__list-scroll" data-testid="skill-list-scroll">
@@ -542,10 +545,10 @@ export function SkillsPage(props: SkillsPageProps = {}) {
                   fallback={(
                     <div class="skills-browser__empty-list">
                       {external.snapshot()
-                        ? '没有发现 Skill。可重新发现本机 Agent 的注册位置。'
+                        ? uiText('没有发现 Skill。可重新发现本机 Agent 的注册位置。', 'No Skills found. Discover local Agent registrations again.')
                         : external.error()
-                          ? '无法读取 Skill。'
-                          : '正在读取 Skill…'}
+                          ? uiText('无法读取 Skill。', 'Unable to read Skills.')
+                          : uiText('正在读取 Skill…', 'Reading Skills…')}
                     </div>
                   )}
                 >
@@ -578,7 +581,7 @@ export function SkillsPage(props: SkillsPageProps = {}) {
             <div class="skills-browser__detail" data-testid="skill-detail-scroll">
               <Show
                 when={external.selectedSkill()}
-                fallback={<div class="skills-browser__empty-detail">选择一个 Skill 查看原始内容和位置。</div>}
+                fallback={<div class="skills-browser__empty-detail">{uiText('选择一个 Skill 查看原始内容和位置。', 'Select a Skill to view its original content and location.')}</div>}
               >
                 {(skill) => (
                   <>
@@ -602,7 +605,7 @@ export function SkillsPage(props: SkillsPageProps = {}) {
                         data-testid="open-skill-folder"
                         disabled={Boolean(external.busy())}
                         onClick={() => void external.openFolder(skill().id)}
-                      >{external.busy() === `open:${skill().id}` ? '正在打开…' : '打开文件夹'}</Button>
+                      >{external.busy() === `open:${skill().id}` ? uiText('正在打开…', 'Opening…') : uiText('打开文件夹', 'Open Folder')}</Button>
                     </header>
 
                     <dl class="skill-detail__metadata">
@@ -611,25 +614,25 @@ export function SkillsPage(props: SkillsPageProps = {}) {
                         <dd>{skill().agentDisplayName}</dd>
                       </div>
                       <div>
-                        <dt>作用域</dt>
+                        <dt>{uiText('作用域', 'Scope')}</dt>
                         <dd>{skillScopeLabel(skill().scope)}</dd>
                       </div>
                       <div>
-                        <dt>格式</dt>
+                        <dt>{uiText('格式', 'Format')}</dt>
                         <dd>{skill().format === 'agent_skill' ? 'Agent Skill' : 'Markdown'}</dd>
                       </div>
                       <Show when={skill().scope === 'project' && skill().projectPath}>
                         <div class="skill-detail__metadata-wide">
-                          <dt>项目位置</dt>
+                          <dt>{uiText('项目位置', 'Project Location')}</dt>
                           <dd><code data-testid="skill-project-path">{skill().projectPath}</code></dd>
                         </div>
                       </Show>
                       <div class="skill-detail__metadata-wide">
-                        <dt>原始文件夹</dt>
+                        <dt>{uiText('原始文件夹', 'Original Folder')}</dt>
                         <dd><code data-testid="skill-directory-path">{skill().directoryPath}</code></dd>
                       </div>
                       <div class="skill-detail__metadata-wide">
-                        <dt>入口文档</dt>
+                        <dt>{uiText('入口文档', 'Entry Document')}</dt>
                         <dd><code data-testid="skill-document-path">{skill().documentPath}</code></dd>
                       </div>
                     </dl>
@@ -638,15 +641,15 @@ export function SkillsPage(props: SkillsPageProps = {}) {
                       <div class="skill-document__heading">
                         <div>
                           <h3 id="skill-document-title">{skill().documentFileName}</h3>
-                          <span>{formatBytes(skill().sizeBytes)} · 更新于 {modifiedAtLabel(skill().modifiedAt)}</span>
+                          <span>{formatBytes(skill().sizeBytes)} · {uiText('更新于', 'updated')} {modifiedAtLabel(skill().modifiedAt)}</span>
                         </div>
-                        <span>Markdown 预览</span>
+                        <span>{uiText('Markdown 预览', 'Markdown Preview')}</span>
                       </div>
                       <Show
                         when={external.document()}
                         fallback={(
                           <div class="skill-document__empty">
-                            {loadingExternalDocument() ? '正在读取文档…' : '该入口文档暂时无法预览。'}
+                            {loadingExternalDocument() ? uiText('正在读取文档…', 'Reading document…') : uiText('该入口文档暂时无法预览。', 'This entry document cannot be previewed right now.')}
                           </div>
                         )}
                       >

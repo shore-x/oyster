@@ -1,3 +1,4 @@
+import type { AppSettingsApi } from '../../shared/app-settings'
 import type { DiscoveryApi } from '../../shared/discovery'
 import type { AiBackendApi } from '../../shared/ai-backends'
 import type { KnowledgeProcessingApi } from '../../shared/knowledge-processing'
@@ -12,6 +13,7 @@ import type { PiExtensionConfigurationApi } from '../../shared/pi-extensions'
 declare global {
   interface Window {
     oyster: {
+      appSettings: AppSettingsApi
       discovery: DiscoveryApi
       skills: SkillApi
       aiBackends: AiBackendApi

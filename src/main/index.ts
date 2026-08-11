@@ -62,6 +62,9 @@ import { PiExtensionConfigurationService } from './agent-runtime/pi-extension-co
 import { registerPiExtensionConfigurationIpc } from './agent-runtime/pi-extension-configuration-ipc'
 import { PiAgentSettingsService } from './agent-runtime/pi-agent-settings-service'
 import { registerPiAgentSettingsIpc } from './agent-runtime/pi-agent-settings-ipc'
+import { AppSettingsService } from './app-settings/app-settings-service'
+import { registerAppSettingsIpc } from './app-settings/ipc'
+import type { AppLanguage } from '../shared/app-settings'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 let mainWindow: BrowserWindow | undefined
@@ -227,7 +230,8 @@ function createManagedSkillService(repository: ArtifactService): ManagedSkillSer
 function createKnowledgeProcessingService(
   aiBackend: AiBackendService,
   processingRepository: KnowledgeTaskGitRepository,
-  debugStore: AgentDebugStore
+  debugStore: AgentDebugStore,
+  getLanguage: () => AppLanguage
 ): KnowledgeProcessingService {
   if (fixtureMode()) {
     return createFixtureKnowledgeProcessingService(aiBackend, processingRepository, debugStore)
@@ -238,12 +242,12 @@ function createKnowledgeProcessingService(
     ),
     aiBackend,
     processingRepository,
-    new PiKnowledgeMaintainerAgent(debugStore),
-    new PiKnowledgeReviewerAgent(debugStore)
+    new PiKnowledgeMaintainerAgent(debugStore, getLanguage),
+    new PiKnowledgeReviewerAgent(debugStore, getLanguage)
   )
 }
 
-function registerIpc(service: DiscoveryService): void {
+function registerIpc(service: DiscoveryService, getLanguage: () => AppLanguage): void {
   ipcMain.handle(discoveryChannels.getState, () => service.stateView())
   ipcMain.handle(
     discoveryChannels.getSourceConversationCatalog,
@@ -261,7 +265,7 @@ function registerIpc(service: DiscoveryService): void {
     const source = service.stateView().sources.find((candidate) => candidate.id === sourceId)
     const defaultPath = await nearestExistingDirectory(source?.rootPath || app.getPath('home'), app.getPath('home'))
     const result = await dialog.showOpenDialog(owner!, {
-      title: '选择历史记录目录',
+      title: getLanguage() === 'en-US' ? 'Choose History Directory' : '选择历史记录目录',
       defaultPath,
       properties: ['openDirectory']
     })
@@ -1220,6 +1224,13 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     maintainerInvocationImage.toPNG()
   )
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-ai-backends"]').click()`)
+  await window.webContents.executeJavaScript(`new Promise((resolve) => requestAnimationFrame(resolve))`)
+  const generalSettingsDefaultSemantics = await window.webContents.executeJavaScript(`(() => ({
+    selected: document.querySelector('[data-testid="settings-tab-general"]')?.getAttribute('aria-selected'),
+    visible: !document.querySelector('[data-testid="page-general-settings"]')?.hidden,
+    language: document.querySelector('[data-testid="app-language-select"]')?.value
+  }))()`)
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="settings-tab-ai-backends"]')?.click()`)
   await new Promise((resolve) => setTimeout(resolve, 120))
   const aiImage = await window.webContents.capturePage()
   await writeFile(join(dirname(capturePath), 'ai-backends.png'), aiImage.toPNG())
@@ -1312,7 +1323,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     page.querySelector('[data-testid="save-agent-default-prompt"]')?.click()
     deadline = Date.now() + 2_000
     while (
-      page.querySelector('.agent-config-detail__header .processing-mode-badge')?.textContent?.trim() !== 'Configured default'
+      page.querySelector('.agent-config-detail__header .processing-mode-badge')?.textContent?.trim() !== '已配置默认值'
       && Date.now() < deadline
     ) await new Promise((resolve) => setTimeout(resolve, 25))
     const configuredBadge = page.querySelector('.agent-config-detail__header .processing-mode-badge')?.textContent?.trim()
@@ -1339,7 +1350,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     page.querySelector('[data-testid="restore-built-in-agent-prompt"]')?.click()
     deadline = Date.now() + 2_000
     while (
-      page.querySelector('.agent-config-detail__header .processing-mode-badge')?.textContent?.trim() !== 'Built-in default'
+      page.querySelector('.agent-config-detail__header .processing-mode-badge')?.textContent?.trim() !== '内置默认值'
       && Date.now() < deadline
     ) await new Promise((resolve) => setTimeout(resolve, 25))
     const restoredBadge = page.querySelector('.agent-config-detail__header .processing-mode-badge')?.textContent?.trim()
@@ -1375,14 +1386,14 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     page.querySelector('[data-testid="save-agent-default-prompt"]')?.click()
     deadline = Date.now() + 2_000
     while (
-      page.querySelector('.agent-config-detail__header .processing-mode-badge')?.textContent?.trim() !== 'Configured default'
+      page.querySelector('.agent-config-detail__header .processing-mode-badge')?.textContent?.trim() !== '已配置默认值'
       && Date.now() < deadline
     ) await new Promise((resolve) => setTimeout(resolve, 25))
     const chatConfiguredBadge = page.querySelector('.agent-config-detail__header .processing-mode-badge')?.textContent?.trim()
     page.querySelector('[data-testid="restore-built-in-agent-prompt"]')?.click()
     deadline = Date.now() + 2_000
     while (
-      page.querySelector('.agent-config-detail__header .processing-mode-badge')?.textContent?.trim() !== 'Built-in default'
+      page.querySelector('.agent-config-detail__header .processing-mode-badge')?.textContent?.trim() !== '内置默认值'
       && Date.now() < deadline
     ) await new Promise((resolve) => setTimeout(resolve, 25))
     const chatRestoredPrompt = page.querySelector('[data-testid="agent-default-prompt-editor"]')?.value
@@ -1694,10 +1705,42 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       agentPreviewSelected: page.querySelector('[data-testid="processing-view-agent-preview"]')?.getAttribute('aria-selected')
     }
   })()`)
+
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-ai-backends"]')?.click()`)
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="settings-tab-general"]')?.click()`)
+  const languageSemantics = await window.webContents.executeJavaScript(`(async () => {
+    const select = document.querySelector('[data-testid="app-language-select"]')
+    select.value = 'en-US'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    const deadline = Date.now() + 2_000
+    while (
+      (document.documentElement.lang !== 'en-US' || select.disabled)
+      && !document.querySelector('[data-testid="page-general-settings"] .page-error')
+      && Date.now() < deadline
+    ) await new Promise((resolve) => setTimeout(resolve, 25))
+    return {
+      documentLanguage: document.documentElement.lang,
+      selectedLanguage: select.value,
+      settingsTitle: document.querySelector('[data-testid="settings-page"] h1')?.textContent?.trim(),
+      generalTab: document.querySelector('[data-testid="settings-tab-general"]')?.textContent?.trim(),
+      generalPageVisible: !document.querySelector('[data-testid="page-general-settings"]')?.hidden,
+      navigationItems: Array.from(document.querySelectorAll('.sidebar__navigation .nav-item'))
+        .map((item) => item.textContent?.trim()),
+      error: document.querySelector('[data-testid="page-general-settings"] .page-error')?.textContent?.trim(),
+      overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
+    }
+  })()`)
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  const englishSettingsImage = await window.webContents.capturePage()
+  await writeFile(join(dirname(capturePath), 'settings-english.png'), englishSettingsImage.toPNG())
   await writeFile(
     `${capturePath}.json`,
     `${JSON.stringify({
       ...semantics,
+      settings: {
+        defaultGeneral: generalSettingsDefaultSemantics,
+        language: languageSemantics
+      },
       skills: skillSemantics,
       ai: { ...aiSemantics, directTest: aiDirectTestSemantics },
       agentConfiguration: agentConfigurationSemantics,
@@ -1776,6 +1819,10 @@ async function createMainWindow(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  const appSettingsService = new AppSettingsService(
+    join(app.getPath('userData'), 'app-settings.json')
+  )
+  await appSettingsService.initialize()
   const service = createService()
   const skillDiscoveryService = createSkillDiscoveryService(service)
   if (fixtureMode()) await initializeFixtureSkills(skillDiscoveryHomeDirectory())
@@ -1800,7 +1847,8 @@ app.whenReady().then(async () => {
   knowledgeProcessingService = createKnowledgeProcessingService(
     aiBackendService,
     processingRepository,
-    agentDebugStore
+    agentDebugStore,
+    () => appSettingsService.languageSetting
   )
   chatConversationRepository = new PiChatConversationRepository(
     join(app.getPath('userData'), 'chat-conversations'),
@@ -1817,7 +1865,8 @@ app.whenReady().then(async () => {
     agent: new PiChatAgent(
       repository.rootPath,
       join(app.getPath('userData'), 'pi-agent'),
-      agentDebugStore
+      agentDebugStore,
+      () => appSettingsService.languageSetting
     )
   })
   knowledgeTaskService = new KnowledgeTaskService(
@@ -1838,7 +1887,7 @@ app.whenReady().then(async () => {
     chatAgentService.initialize()
   ])
   if (fixtureMode()) await initializeFixtureKnowledge(knowledgeStore)
-  registerIpc(service)
+  registerIpc(service, () => appSettingsService.languageSetting)
   registerSkillIpc(skillDiscoveryService, managedSkillService, () => mainWindow)
   registerArtifactIpc(artifactService, () => mainWindow)
   registerFolderBrowserIpc(folderBrowser, designDocumentsPath, () => mainWindow)
@@ -1854,6 +1903,7 @@ app.whenReady().then(async () => {
     () => mainWindow
   )
   registerChatIpc(chatAgentService, () => mainWindow)
+  registerAppSettingsIpc(appSettingsService, () => mainWindow)
   registerPiExtensionConfigurationIpc(
     new PiExtensionConfigurationService(join(app.getPath('userData'), 'pi-agent')),
     () => mainWindow

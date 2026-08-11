@@ -16,6 +16,7 @@ import { backendLabel, connectionStatusLabel, reasoningLabel } from '../processi
 import { Button, Icon } from '../ui'
 import { AgentInvocationExplorer } from './AgentInvocationView'
 import { parseStatementContent } from './KnowledgeStatementBrowser'
+import { appLanguage, uiText } from '../i18n'
 
 export interface ChatPageProps {
   onOpenKnowledge?(title: string): void
@@ -41,7 +42,10 @@ function ChatKnowledgeInspector(props: {
       .then((result) => {
         if (generation !== readGeneration) return
         setStatement(result)
-        if (!result) setError('当前知识库中没有找到这条知识。')
+        if (!result) setError(uiText(
+          '当前知识库中没有找到这条知识。',
+          'This Knowledge Statement was not found in the current Knowledge Store.'
+        ))
       })
       .catch((cause) => {
         if (generation === readGeneration) setError(cause instanceof Error ? cause.message : String(cause))
@@ -60,18 +64,18 @@ function ChatKnowledgeInspector(props: {
   })
 
   return (
-    <aside class="chat-knowledge-inspector" role="complementary" aria-label="知识详情" data-testid="chat-knowledge-inspector">
+    <aside class="chat-knowledge-inspector" role="complementary" aria-label={uiText('知识详情', 'Knowledge details')} data-testid="chat-knowledge-inspector">
       <header class="context-inspector__toolbar">
         <div>
-          <span>知识库</span>
+          <span>{uiText('知识库', 'Knowledge')}</span>
           <strong>{props.title}</strong>
         </div>
-        <button type="button" aria-label="关闭知识详情" onClick={props.onClose}>
+        <button type="button" aria-label={uiText('关闭知识详情', 'Close Knowledge details')} onClick={props.onClose}>
           <Icon name="close" />
         </button>
       </header>
       <div class="chat-knowledge-inspector__content">
-        <Show when={loading()}><div class="context-inspector__state">正在读取知识…</div></Show>
+        <Show when={loading()}><div class="context-inspector__state">{uiText('正在读取知识…', 'Reading Knowledge…')}</div></Show>
         <Show when={error()}>{(message) => <div class="context-inspector__state context-inspector__state--error">{message()}</div>}</Show>
         <Show when={statement()}>{(current) => (
           <article>
@@ -97,7 +101,7 @@ function ChatKnowledgeInspector(props: {
 function formatTime(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.valueOf())) return value
-  return new Intl.DateTimeFormat('zh-CN', {
+  return new Intl.DateTimeFormat(appLanguage(), {
     month: 'numeric',
     day: 'numeric',
     hour: '2-digit',
@@ -109,15 +113,15 @@ function ExistingBinding(props: { conversation: ChatConversationDetail }) {
   return (
     <div class="chat-binding-summary" data-testid="chat-current-binding">
       <div>
-        <span>Connection</span>
+        <span>{uiText('连接', 'Connection')}</span>
         <strong>{props.conversation.binding.connectionId}</strong>
       </div>
       <div>
-        <span>Model</span>
+        <span>{uiText('模型', 'Model')}</span>
         <strong>{props.conversation.binding.modelId}</strong>
       </div>
       <div>
-        <span>Reasoning</span>
+        <span>{uiText('推理强度', 'Reasoning')}</span>
         <strong>{reasoningLabel(props.conversation.binding.reasoningEffort)}</strong>
       </div>
     </div>
@@ -208,14 +212,14 @@ export function ChatPage(props: ChatPageProps) {
     <div class="chat-page" data-testid="chat-page">
       <header class="page-header chat-page__header">
         <div>
-          <h1>对话</h1>
+          <h1>{uiText('对话', 'Chat')}</h1>
           <div class="page-summary">
-            <span><strong>{controller.state().conversations.length}</strong> 个对话</span>
+            <span><strong>{controller.state().conversations.length}</strong> {uiText('个对话', 'conversations')}</span>
             <span class="page-summary__separator">·</span>
-            <span>管理知识与产物</span>
+            <span>{uiText('管理知识与产物', 'Manage Knowledge and Artifacts')}</span>
           </div>
         </div>
-        <Button variant="primary" icon="plus" onClick={startNew}>新对话</Button>
+        <Button variant="primary" icon="plus" onClick={startNew}>{uiText('新对话', 'New Chat')}</Button>
       </header>
 
       <Show when={controller.error() || controller.state().configurationError || controller.backendState().configurationError}>
@@ -225,19 +229,19 @@ export function ChatPage(props: ChatPageProps) {
         </div>
       </Show>
 
-      <section class="chat-workspace" aria-label="对话工作区">
-        <aside class="chat-conversations" aria-label="历史对话">
+      <section class="chat-workspace" aria-label={uiText('对话工作区', 'Chat workspace')}>
+        <aside class="chat-conversations" aria-label={uiText('历史对话', 'Chat history')}>
           <div class="chat-conversations__heading">
-            <span>历史对话</span>
+            <span>{uiText('历史对话', 'Chat History')}</span>
             <strong>{sortedConversations().length}</strong>
           </div>
           <Show
             when={!controller.loading()}
-            fallback={<div class="chat-conversations__empty">正在读取对话…</div>}
+            fallback={<div class="chat-conversations__empty">{uiText('正在读取对话…', 'Reading chats…')}</div>}
           >
             <Show
               when={sortedConversations().length}
-              fallback={<div class="chat-conversations__empty">还没有历史对话。</div>}
+              fallback={<div class="chat-conversations__empty">{uiText('还没有历史对话。', 'No chat history yet.')}</div>}
             >
               <div class="chat-conversations__list">
                 <For each={sortedConversations()}>{(item) => (
@@ -248,11 +252,11 @@ export function ChatPage(props: ChatPageProps) {
                     onClick={() => void controller.readConversation(item.id)}
                   >
                     <span class="chat-conversation-item__title">
-                      <strong>{item.title || '未命名对话'}</strong>
-                      <Show when={controller.hasActiveInvocation(item.id)}><em>调用中</em></Show>
+                      <strong>{item.title || uiText('未命名对话', 'Untitled Chat')}</strong>
+                      <Show when={controller.hasActiveInvocation(item.id)}><em>{uiText('调用中', 'Running')}</em></Show>
                     </span>
                     <span>{item.binding.modelId}</span>
-                    <small>{formatTime(item.updatedAt)} · {item.messageCount} 条消息</small>
+                    <small>{formatTime(item.updatedAt)} · {item.messageCount} {uiText('条消息', 'messages')}</small>
                   </button>
                 )}</For>
               </div>
@@ -267,19 +271,22 @@ export function ChatPage(props: ChatPageProps) {
               fallback={(
                 <Show
                   when={controller.conversation()}
-                  fallback={<div class="chat-binding-empty">选择一个对话，或开始新对话。</div>}
+                  fallback={<div class="chat-binding-empty">{uiText('选择一个对话，或开始新对话。', 'Select a chat or start a new one.')}</div>}
                 >{(current) => <ExistingBinding conversation={current()} />}</Show>
               )}
             >
               <Show
                 when={defaultLlmUsable()}
-                fallback={<div class="chat-binding-empty">请先在“设置 / AI 后端”中配置可用的默认 LLM。</div>}
+                fallback={<div class="chat-binding-empty">{uiText(
+                  '请先在“设置 / AI 后端”中配置可用的默认 LLM。',
+                  'Configure an available default LLM in Settings / AI Backends first.'
+                )}</div>}
               >
                 <div class="chat-binding-summary" data-testid="chat-default-binding">
-                  <div><span>默认 Connection</span><strong>{defaultConnection()?.displayName}</strong></div>
-                  <div><span>Model</span><strong>{defaultModel()?.id}</strong></div>
-                  <div><span>Reasoning</span><strong>{reasoningLabel(defaultBinding()?.reasoningEffort)}</strong></div>
-                  <small>{backendLabel(defaultConnection()!.backendKind)} · {connectionStatusLabel(defaultConnection()!.status)} · 创建后固定到该 Chat Conversation</small>
+                  <div><span>{uiText('默认连接', 'Default Connection')}</span><strong>{defaultConnection()?.displayName}</strong></div>
+                  <div><span>{uiText('模型', 'Model')}</span><strong>{defaultModel()?.id}</strong></div>
+                  <div><span>{uiText('推理强度', 'Reasoning')}</span><strong>{reasoningLabel(defaultBinding()?.reasoningEffort)}</strong></div>
+                  <small>{backendLabel(defaultConnection()!.backendKind)} · {connectionStatusLabel(defaultConnection()!.status)} · {uiText('创建后固定到该 Chat Conversation', 'Fixed to this Chat Conversation after creation')}</small>
                 </div>
               </Show>
             </Show>
@@ -287,17 +294,20 @@ export function ChatPage(props: ChatPageProps) {
 
           <div class="chat-messages" ref={messageScroller} aria-live="polite">
             <Show when={controller.loadingConversationId()}>
-              <div class="chat-messages__empty">正在读取对话…</div>
+              <div class="chat-messages__empty">{uiText('正在读取对话…', 'Reading chat…')}</div>
             </Show>
             <Show when={!controller.loadingConversationId() && controller.creatingNew()}>
               <div class="chat-messages__empty">
                 <span class="chat-messages__empty-mark">O</span>
-                <strong>开始一段新对话</strong>
-                <p>使用“设置 / AI 后端”保存的默认 LLM，可以询问现有知识，或让 Agent 更新 Knowledge Statement。</p>
+                <strong>{uiText('开始一段新对话', 'Start a New Chat')}</strong>
+                <p>{uiText(
+                  '使用“设置 / AI 后端”保存的默认 LLM，可以询问现有知识，或让 Agent 更新 Knowledge Statement。',
+                  'Use the default LLM saved in Settings / AI Backends to ask about existing Knowledge or have the Agent update Knowledge Statements.'
+                )}</p>
               </div>
             </Show>
             <Show when={!controller.loadingConversationId() && !controller.creatingNew() && !controller.conversation()?.invocations.length}>
-              <div class="chat-messages__empty">这个对话还没有消息。</div>
+              <div class="chat-messages__empty">{uiText('这个对话还没有消息。', 'This chat has no messages yet.')}</div>
             </Show>
             <For each={controller.conversation()?.invocations ?? []}>{(invocation) => (
               <AgentInvocationExplorer
@@ -317,14 +327,16 @@ export function ChatPage(props: ChatPageProps) {
               value={draft()}
               rows={3}
               placeholder={controller.creatingNew() && !defaultLlmUsable()
-                ? '请先在“设置 / AI 后端”中配置可用的默认 LLM'
-                : '输入消息；Enter 发送，Shift+Enter 换行'}
+                ? uiText('请先在“设置 / AI 后端”中配置可用的默认 LLM', 'Configure an available default LLM in Settings / AI Backends first')
+                : uiText('输入消息；Enter 发送，Shift+Enter 换行', 'Type a message; Enter to send, Shift+Enter for a new line')}
               disabled={controller.loading()}
               onInput={(event) => setDraft(event.currentTarget.value)}
               onKeyDown={onComposerKeyDown as JSX.EventHandlerUnion<HTMLTextAreaElement, KeyboardEvent>}
             />
             <div class="chat-composer__footer">
-              <span>{draft().length ? `${draft().length.toLocaleString()} 字符` : 'Agent 可以查询和更新正式知识库'}</span>
+              <span>{draft().length
+                ? `${draft().length.toLocaleString(appLanguage())} ${uiText('字符', 'characters')}`
+                : uiText('Agent 可以查询和更新正式知识库', 'The Agent can query and update the formal Knowledge Store')}</span>
               <Show
                 when={currentInvocationActive()}
                 fallback={(
@@ -334,7 +346,7 @@ export function ChatPage(props: ChatPageProps) {
                     data-testid="chat-send"
                     disabled={!canSend()}
                     onClick={() => void submit()}
-                  >{controller.sending() ? '发送中…' : '发送'}</Button>
+                  >{controller.sending() ? uiText('发送中…', 'Sending…') : uiText('发送', 'Send')}</Button>
                 )}
               >
                 <Button
@@ -343,7 +355,7 @@ export function ChatPage(props: ChatPageProps) {
                   data-testid="chat-stop"
                   disabled={Boolean(controller.cancellingConversationId())}
                   onClick={() => void controller.stop()}
-                >{controller.cancellingConversationId() ? '停止中…' : '停止'}</Button>
+                >{controller.cancellingConversationId() ? uiText('停止中…', 'Stopping…') : uiText('停止', 'Stop')}</Button>
               </Show>
             </div>
           </div>

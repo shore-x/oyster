@@ -24,6 +24,7 @@ import {
 } from '../knowledge-explorer-navigation'
 import { Button } from '../ui'
 import { KnowledgeReferenceExplorer } from './KnowledgeReferenceExplorer'
+import { uiText } from '../i18n'
 
 type StatementContentPart =
   | { kind: 'text'; value: string }
@@ -193,10 +194,10 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
 
   function previewCopy(title: string): string {
     const preview = previews()[title]
-    if (!preview || preview.status === 'loading') return '正在读取简介…'
-    if (preview.status === 'missing') return '当前知识空间中没有找到这个 Statement。'
-    if (preview.status === 'failed') return '暂时无法读取这个 Statement。'
-    return statementPreview(preview.statement?.content || '') || '这个 Statement 暂无正文。'
+    if (!preview || preview.status === 'loading') return uiText('正在读取简介…', 'Reading preview…')
+    if (preview.status === 'missing') return uiText('当前知识空间中没有找到这个 Statement。', 'This Statement was not found in the current Knowledge space.')
+    if (preview.status === 'failed') return uiText('暂时无法读取这个 Statement。', 'This Statement cannot be read right now.')
+    return statementPreview(preview.statement?.content || '') || uiText('这个 Statement 暂无正文。', 'This Statement has no content yet.')
   }
 
   return (
@@ -231,7 +232,7 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
                 class="knowledge-browser__more"
                 disabled={props.loadingMore}
                 onClick={props.onLoadMore}
-              >{props.loadingMore ? '正在加载…' : '加载更多'}</button>
+              >{props.loadingMore ? uiText('正在加载…', 'Loading…') : uiText('加载更多', 'Load More')}</button>
             </Show>
           </Show>
         </div>
@@ -243,30 +244,30 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
       >
         <Show
           when={props.selectedStatement}
-          fallback={<div class="knowledge-browser__empty-detail">选择一条知识查看完整内容。</div>}
+          fallback={<div class="knowledge-browser__empty-detail">{uiText('选择一条知识查看完整内容。', 'Select a Knowledge Statement to view its full content.')}</div>}
         >
           {(statement) => (
             <>
-              <div class="knowledge-browser__navigation" aria-label="Statement 浏览历史">
+              <div class="knowledge-browser__navigation" aria-label={uiText('Statement 浏览历史', 'Statement navigation history')}>
                 <div>
                   <Button
                     variant="ghost"
                     icon="back"
                     data-testid="statement-nav-back"
-                    aria-label="后退到上一个 Statement"
-                    title="后退"
+                    aria-label={uiText('后退到上一个 Statement', 'Go back to the previous Statement')}
+                    title={uiText('后退', 'Back')}
                     disabled={navigationState().historyIndex <= 0}
                     onClick={() => moveHistory(-1)}
-                  >后退</Button>
+                  >{uiText('后退', 'Back')}</Button>
                   <Button
                     variant="ghost"
                     icon="forward"
                     data-testid="statement-nav-forward"
-                    aria-label="前进到下一个 Statement"
-                    title="前进"
+                    aria-label={uiText('前进到下一个 Statement', 'Go forward to the next Statement')}
+                    title={uiText('前进', 'Forward')}
                     disabled={navigationState().historyIndex < 0 || navigationState().historyIndex >= navigationState().history.length - 1}
                     onClick={() => moveHistory(1)}
-                  >前进</Button>
+                  >{uiText('前进', 'Forward')}</Button>
                 </div>
                 <span>{navigationState().historyIndex >= 0 ? `${navigationState().historyIndex + 1} / ${navigationState().history.length}` : ''}</span>
               </div>

@@ -2,6 +2,7 @@ import { For, Show } from 'solid-js'
 import type { SourceConversationSummary } from '../../../shared/discovery'
 import { Button } from '../ui'
 import { sourceConversationOptionLabel } from './SourceConversationMetadata'
+import { uiText } from '../i18n'
 
 export interface SourceConversationPickerProps {
   conversations: SourceConversationSummary[]
@@ -33,10 +34,10 @@ export function SourceConversationPicker(props: SourceConversationPickerProps) {
         >
           <option value="">
             {props.loading
-              ? '正在刷新 Source Conversations…'
+              ? uiText('正在刷新 Source Conversations…', 'Refreshing Source Conversations…')
               : props.conversations.length
-                ? '选择一个 Source Conversation'
-                : '暂无可用 Source Conversation'}
+                ? uiText('选择一个 Source Conversation', 'Select a Source Conversation')
+                : uiText('暂无可用 Source Conversation', 'No Source Conversation available')}
           </option>
           <For each={props.conversations}>{(conversation) => (
             <option value={conversation.sourceConversationId}>
@@ -51,7 +52,7 @@ export function SourceConversationPicker(props: SourceConversationPickerProps) {
         data-testid={props.refreshTestId}
         disabled={props.loading || props.disabled}
         onClick={props.onRefresh}
-      >{props.loading ? '刷新中…' : '刷新来源对话'}</Button>
+      >{props.loading ? uiText('刷新中…', 'Refreshing…') : uiText('刷新来源对话', 'Refresh Source Conversations')}</Button>
       <Show when={props.error}>{(error) => (
         <p class="source-conversation-picker__error">{error()}</p>
       )}</Show>

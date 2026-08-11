@@ -117,6 +117,67 @@ describe('PiChatAgent', () => {
     await conversations.dispose()
   })
 
+  it('reads the application language for each invocation without changing the saved binding', async () => {
+    const rootPath = await mkdtemp(join(tmpdir(), 'oyster-pi-chat-language-'))
+    temporaryPaths.push(rootPath)
+    const sessions = new PiChatConversationRepository(join(rootPath, 'sessions'))
+    const binding = {
+      connectionId: 'connection:test',
+      modelId: 'language-model',
+      systemPrompt: 'Keep this conversation binding.'
+    }
+    const opened = await sessions.create(binding)
+    const faux = fauxProvider()
+    faux.setResponses([
+      (context) => {
+        expect(context.systemPrompt).toContain('Application language: English.')
+        return fauxAssistantMessage('First invocation.')
+      },
+      (context) => {
+        expect(context.systemPrompt).toContain('Application language: Simplified Chinese.')
+        return fauxAssistantMessage('Second invocation.')
+      }
+    ])
+    const models = createModels()
+    models.setProvider(faux.provider)
+    const modelStream: SelectedModelStream = {
+      model: { ...faux.getModel(), id: binding.modelId },
+      streamFn: (model, context, options) => models.streamSimple(model, context, options)
+    }
+    let language: 'zh-CN' | 'en-US' = 'en-US'
+    const agent = new PiChatAgent(
+      rootPath,
+      join(rootPath, 'pi-agent'),
+      undefined,
+      () => language
+    )
+
+    await agent.invoke({
+      conversationId: opened.id,
+      rootInvocationId: randomUUID(),
+      piSessionManager: opened.piSessionManager,
+      binding,
+      modelStream,
+      text: 'First.',
+      signal: new AbortController().signal
+    })
+    language = 'zh-CN'
+    await agent.invoke({
+      conversationId: opened.id,
+      rootInvocationId: randomUUID(),
+      piSessionManager: opened.piSessionManager,
+      binding,
+      modelStream,
+      text: 'Second.',
+      signal: new AbortController().signal
+    })
+
+    await sessions.dispose()
+    const restarted = new PiChatConversationRepository(join(rootPath, 'sessions'))
+    expect((await restarted.open(opened.id)).binding.systemPrompt).toBe(binding.systemPrompt)
+    await restarted.dispose()
+  })
+
   it('compacts model context while retaining the complete persisted transcript', async () => {
     const rootPath = await mkdtemp(join(tmpdir(), 'oyster-pi-chat-'))
     temporaryPaths.push(rootPath)

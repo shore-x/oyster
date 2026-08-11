@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import type { AgentMessage, AgentTool } from '@earendil-works/pi-agent-core'
+import { DEFAULT_APP_SETTINGS, type AppLanguage } from '../../shared/app-settings'
 import { ModelConnectionFailureError } from '../ai-backends/model'
 import {
   createPiCodingAgentInvocation,
@@ -56,12 +57,15 @@ export class PiChatAgent {
   constructor(
     private readonly repositoryPath: string,
     private readonly agentDir = join(repositoryPath, '.oyster', 'pi-agent'),
-    private readonly debugStore: AgentDebugStore = new InMemoryAgentDebugStore()
+    private readonly debugStore: AgentDebugStore = new InMemoryAgentDebugStore(),
+    private readonly getLanguage: () => AppLanguage = () => DEFAULT_APP_SETTINGS.language
   ) {}
 
   async invoke(input: PiChatAgentInvocationInput): Promise<void> {
     if (!input.text.trim()) throw new Error('消息不能为空')
     input.signal.throwIfAborted()
+    // One root Invocation tree uses one language even if the application setting changes mid-turn.
+    const language = this.getLanguage()
 
     const systemPrompt = chatAgentSystemPrompt(
       input.binding.systemPrompt,
@@ -138,6 +142,7 @@ export class PiChatAgent {
         cwd: this.repositoryPath,
         agentDir: this.agentDir,
         systemPrompt,
+        language,
         reasoningEffort: input.binding.reasoningEffort,
         piSessionManager,
         resourceMode: 'ecosystem',

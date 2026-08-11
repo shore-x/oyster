@@ -1,5 +1,6 @@
 import { For, Show } from 'solid-js'
 import type { AgentTodo } from '../../../shared/agent-runtime'
+import { uiText } from '../i18n'
 
 export interface AgentTodoListProps {
   todos: AgentTodo[]
@@ -12,7 +13,7 @@ export function AgentTodoList(props: AgentTodoListProps) {
       when={props.todos.length}
       fallback={(
         <div class="statement-candidates__empty">
-          {props.emptyText ?? '当前 Agent Invocation 没有 Todo。'}
+          {props.emptyText ?? uiText('当前 Agent Invocation 没有 Todo。', 'The current Agent Invocation has no Todos.')}
         </div>
       )}
     >
@@ -24,7 +25,7 @@ export function AgentTodoList(props: AgentTodoListProps) {
           >
             <div class="statement-candidate__heading">
               <strong>{todo.id}</strong>
-              <span>{todo.status === 'completed' ? '已完成' : '待处理'}</span>
+              <span>{todo.status === 'completed' ? uiText('已完成', 'Completed') : uiText('待处理', 'Pending')}</span>
             </div>
             <p>{todo.content}</p>
           </article>

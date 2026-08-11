@@ -24,7 +24,7 @@ Chat Agent 是主要人机协作入口，因此应用默认进入“对话”。
 6. 加工测试；
 7. 设置。
 
-“加工测试”是验证 Knowledge Processing Task 和 Agent Invocation 的稳定工作面，直接进入左侧一级导航，不再使用“高级功能”分组。“AI 后端”“Agent 配置”和“Pi Extensions”属于同一个设置页，以 Tab 区分，不再各自占用一级导航。“文件浏览”是产物页中的文件工作面，不是独立页面。
+“加工测试”是验证 Knowledge Processing Task 和 Agent Invocation 的稳定工作面，直接进入左侧一级导航，不再使用“高级功能”分组。“通用”“AI 后端”“Agent 配置”和“Pi Extensions”属于同一个设置页，以 Tab 区分，不再各自占用一级导航。“文件浏览”是产物页中的文件工作面，不是独立页面。
 
 一级导航只切换稳定产品领域。用户在一个领域中查看对象详情时，优先级从高到低为：
 
@@ -35,13 +35,19 @@ Chat Agent 是主要人机协作入口，因此应用默认进入“对话”。
 
 不得为了查看详情创建“列表 → 二级页面 → 返回列表”的业务导航。Modal 只用于必须先处理才能继续的确认、危险操作或短暂阻塞状态，不用于普通阅读、模型调用详情或对象浏览。
 
-## 3. App Shell 与滚动所有权
+## 3. 应用语言
+
+应用语言是一个同时服务 Renderer 与 Agent Runtime 的应用级设置，不分别维护“界面语言”和“Agent 语言”。设置页的“通用”Tab 默认展示该设置，当前支持简体中文和 English，并持久化到 `<Electron userData>/app-settings.json`。
+
+选择语言后，已挂载的 UI 立即更新，`html lang` 同步变化；下一次 Agent Invocation 使用相同语言。切换只翻译产品界面文案，不改写用户输入、Repository 既有内容、领域数据、原始错误或 Debug Record。日期和数字展示使用当前应用 locale。
+
+## 4. App Shell 与滚动所有权
 
 Renderer 使用 viewport-owned App Shell：`html`、`body`、`#root` 和 App Shell 填满可用窗口，`body` 不承担业务滚动。侧栏、标题栏和当前页面共同位于一个固定视口中。
 
 页面只有两种布局：
 
-- **Flow page**：页面内容自然变长，由页面自己的主内容容器纵向滚动。数据来源和高级加工工作面属于此类。
+- **Flow page**：页面内容自然变长，由页面自己的主内容容器纵向滚动。数据来源和加工测试工作面属于此类。
 - **Workspace page**：页面填满 App Shell 剩余空间，稳定的列表、正文、编辑器或 Inspector 各自滚动。对话、知识库、Skills、产物文件浏览和设置属于此类。
 
 滚动区域必须满足以下约束：
@@ -53,25 +59,25 @@ Renderer 使用 viewport-owned App Shell：`html`、`body`、`#root` 和 App She
 - 业务样式不得通过 `calc(100vh - Npx)` 或 `calc(100dvh - Npx)`猜测 App Shell 高度，只能填充父布局提供的空间；
 - 切换一级导航不会依赖或重置 document scroll，也不会销毁仍在运行的页面状态。
 
-## 4. 详情交互
+## 5. 详情交互
 
-### 4.1 折叠展开
+### 5.1 折叠展开
 
 摘要必须能独立说明条目身份和关键状态。展开内容可以包含完整正文、参数、诊断输出和次要操作，但完成当前任务必需的主要操作、错误和状态不能被隐藏。
 
-### 4.2 Tab
+### 5.2 Tab
 
-Tab 只用于同一领域中的同级工作面，并保持共享上下文。例如产物的“概览 / 文件”、设置的“AI 后端 / Agent 配置 / Pi Extensions”。Agent 配置内部只对读取 file-backed Pi agentDir 的通用 Agent 提供“Pi Runtime”，Knowledge Agent 不显示不会生效的共享设置。Tab 不模拟跨领域导航。
+Tab 只用于同一领域中的同级工作面，并保持共享上下文。例如产物的“概览 / 文件”、设置的“通用 / AI 后端 / Agent 配置 / Pi Extensions”。Agent 配置内部只对读取 file-backed Pi agentDir 的通用 Agent 提供“Pi Runtime”，Knowledge Agent 不显示不会生效的共享设置。Tab 不模拟跨领域导航。
 
-### 4.3 分栏
+### 5.3 分栏
 
 需要持续选择对象并阅读或编辑详情时使用主从分栏。列表保持稳定，选择新对象只替换详情区域，不增加页面历史层级。
 
-### 4.4 Inspector
+### 5.4 Inspector
 
 Inspector 是当前页面的非模态上下文层。对话中的 Knowledge Statement、Model Call 详情以及加工历史详情使用 Inspector：打开后主任务仍保持可见和可操作，关闭只收起详情，不执行“返回页面”。Inspector 必须有可见关闭按钮、支持 `Escape`，并拥有自己的滚动容器。用户从 Inspector 内继续查看其子详情时，应在同一个 Inspector 中切换内容并提供内部返回操作；不得叠加第二个 Inspector 或遮挡当前 Inspector 的关闭入口。
 
-## 5. 视觉语言
+## 6. 视觉语言
 
 文字、留白和稳定的阅读顺序负责主要层级；背景、边框和形状只用于区分交互边界、状态或真正独立的区域，不装饰每一块信息。
 
@@ -87,7 +93,7 @@ Inspector 是当前页面的非模态上下文层。对话中的 Knowledge State
 
 `src/renderer/src/ui/disclosure.css` 定义统一摘要—详情交互。通用 Button、Icon、Tab、Inspector 和页面布局样式优先在共享层定义，业务组件只增加领域结构，不复制一套视觉语言。
 
-## 6. 代码约束
+## 7. 代码约束
 
 - App 中的一级 `PageId` 必须对应第 2 节定义的稳定入口或明确标记的高级工作面；对象详情和文件浏览不能新增 `PageId`；
 - 页面根使用 `ui-page--flow` 或 `ui-page--workspace` 声明布局契约；
@@ -98,7 +104,7 @@ Inspector 是当前页面的非模态上下文层。对话中的 Knowledge State
 
 `npm run lint:ui` 对可机械验证的约束执行静态检查。不能可靠静态判断的层级和信息密度问题通过评审与 UI smoke 保证。
 
-## 7. 验证要求
+## 8. 验证要求
 
 - `window.scrollY` 在任一业务页面保持为 `0`；
 - 对话历史、消息区和 Inspector 能独立滚动，Composer 始终留在视口内；

@@ -8,6 +8,7 @@ import type {
   SerializableJsonValue
 } from '../../../shared/agent-runtime'
 import { Icon, Markdown } from '../ui'
+import { uiText } from '../i18n'
 
 type JsonObject = { [key: string]: SerializableJsonValue }
 
@@ -41,16 +42,16 @@ function pretty(value: unknown): string {
 }
 
 function formatDuration(durationMs?: number): string {
-  if (durationMs === undefined) return '进行中'
+  if (durationMs === undefined) return uiText('进行中', 'In progress')
   if (durationMs < 1_000) return `${durationMs} ms`
   return `${(durationMs / 1_000).toFixed(1)} s`
 }
 
 export function agentInvocationStatusLabel(status: AgentInvocationStatus): string {
-  if (status === 'in_progress') return '运行中'
-  if (status === 'completed') return '已完成'
-  if (status === 'cancelled') return '已取消'
-  return '失败'
+  if (status === 'in_progress') return uiText('运行中', 'Running')
+  if (status === 'completed') return uiText('已完成', 'Completed')
+  if (status === 'cancelled') return uiText('已取消', 'Cancelled')
+  return uiText('失败', 'Failed')
 }
 
 function messageContent(message: AgentInvocationMessageRecord): SerializableJsonValue[] {
@@ -87,7 +88,9 @@ function toolResultBody(call: AgentToolCallRecord): SerializableJsonValue | unde
 }
 
 function modelCallTitle(call: AgentModelCallRecord, index: number): string {
-  return call.purpose === 'context_compaction' ? `上下文压缩 ${index + 1}` : `模型调用 ${index + 1}`
+  return call.purpose === 'context_compaction'
+    ? `${uiText('上下文压缩', 'Context Compaction')} ${index + 1}`
+    : `${uiText('模型调用', 'Model Call')} ${index + 1}`
 }
 
 type TimelineItem =
@@ -161,19 +164,19 @@ function Message(props: {
   return (
     <article class={`agent-activity-message agent-activity-message--${props.message.role}`}>
       <div class="agent-activity-message__heading">
-        <strong>{props.message.role === 'user' ? '你' : props.message.role === 'assistant' ? props.assistantName : 'Runtime'}</strong>
+        <strong>{props.message.role === 'user' ? uiText('你', 'You') : props.message.role === 'assistant' ? props.assistantName : 'Runtime'}</strong>
         <Show when={props.modelCall && props.onSelectModelCall}>
-          <button type="button" onClick={() => props.onSelectModelCall?.(props.modelCall!.id)}>查看模型调用</button>
+          <button type="button" onClick={() => props.onSelectModelCall?.(props.modelCall!.id)}>{uiText('查看模型调用', 'View Model Call')}</button>
         </Show>
       </div>
       <For each={thinking()}>{(block) => (
         <details class="agent-activity-thinking">
-          <summary>思考过程</summary>
-          <pre>{block.redacted === true ? '[Provider 已隐藏思考内容]' : stringValue(block.thinking) || '—'}</pre>
+          <summary>{uiText('思考过程', 'Thinking')}</summary>
+          <pre>{block.redacted === true ? uiText('[Provider 已隐藏思考内容]', '[Thinking content hidden by Provider]') : stringValue(block.thinking) || '—'}</pre>
         </details>
       )}</For>
       <Show when={text()} fallback={props.message.status === 'streaming'
-        ? <div class="agent-activity-waiting"><span />正在等待模型输出…</div>
+        ? <div class="agent-activity-waiting"><span />{uiText('正在等待模型输出…', 'Waiting for model output…')}</div>
         : undefined}>
         {(value) => <Markdown class="agent-activity-message__text" text={value()} onOpenKnowledge={props.onOpenKnowledge} />}
       </Show>
@@ -211,7 +214,7 @@ function TimelineEntry(props: AgentInvocationViewProps & {
             onClick={() => props.onSelectModelCall?.(call().id)}
           >
             <span class="agent-activity-marker" aria-hidden="true" />
-            <span><strong>{call().purpose === 'context_compaction' ? '压缩上下文' : '请求模型'}</strong><small>{call().model.id}</small></span>
+            <span><strong>{call().purpose === 'context_compaction' ? uiText('压缩上下文', 'Compact Context') : uiText('请求模型', 'Request Model')}</strong><small>{call().model.id}</small></span>
             <span>{agentInvocationStatusLabel(call().status)} · {formatDuration(call().durationMs)}</span>
           </button>
         )}
@@ -232,7 +235,7 @@ export function AgentInvocationTimeline(props: AgentInvocationViewProps & {
   const itemKeys = createMemo(() => items().map(timelineItemKey))
   return (
     <div class="agent-activity-timeline" data-testid="agent-invocation-timeline">
-      <Show when={itemKeys().length} fallback={<div class="agent-activity-empty">Agent 启动后，执行轨迹会显示在这里。</div>}>
+      <Show when={itemKeys().length} fallback={<div class="agent-activity-empty">{uiText('Agent 启动后，执行轨迹会显示在这里。', 'The execution trace appears here after the Agent starts.')}</div>}>
         <For each={itemKeys()}>{(key) => (
           <TimelineEntry
             {...props}
@@ -267,7 +270,7 @@ export function AgentModelCallInspector(props: {
         <pre data-testid="agent-model-call-system-prompt">{props.call.context.systemPrompt || '—'}</pre>
       </details>
       <details open class="agent-call-inspector__section">
-        <summary>Messages（完整 Pi Context）</summary>
+        <summary>{uiText('Messages（完整 Pi Context）', 'Messages (Complete Pi Context)')}</summary>
         <pre data-testid="agent-model-call-context">{pretty(props.call.context.messages)}</pre>
       </details>
       <details class="agent-call-inspector__section">
@@ -279,7 +282,7 @@ export function AgentModelCallInspector(props: {
         <pre>{pretty(props.call.options ?? {})}</pre>
       </details>
       <details class="agent-call-inspector__section">
-        <summary>Provider Request（最终 Payload）</summary>
+        <summary>{uiText('Provider Request（最终 Payload）', 'Provider Request (Final Payload)')}</summary>
         <pre data-testid="agent-model-call-provider-request">{pretty(props.call.providerRequest ?? {})}</pre>
       </details>
       <details class="agent-call-inspector__section">
@@ -328,7 +331,7 @@ export function AgentInvocationExplorer(props: AgentInvocationViewProps & {
       <Show when={props.compact}>
         <header class="agent-invocation-view__compact-header">
           <strong>{props.agentDisplayName ?? props.invocation.agentId}</strong>
-          <span title={props.invocation.parentInvocationId}>{props.invocation.parentInvocationId ? '子 Agent' : '根 Agent'} · {agentInvocationStatusLabel(props.invocation.status)}</span>
+          <span title={props.invocation.parentInvocationId}>{props.invocation.parentInvocationId ? uiText('子 Agent', 'Child Agent') : uiText('根 Agent', 'Root Agent')} · {agentInvocationStatusLabel(props.invocation.status)}</span>
         </header>
       </Show>
       <Show when={!props.compact}>
@@ -351,10 +354,10 @@ export function AgentInvocationExplorer(props: AgentInvocationViewProps & {
             data-testid="agent-invocation-inspector"
           >
             <div class="agent-invocation-view__inspector-toolbar">
-              <strong id={inspectorTitleId}>模型调用详情</strong>
+              <strong id={inspectorTitleId}>{uiText('模型调用详情', 'Model Call Details')}</strong>
               <button class="agent-invocation-view__close" type="button" onClick={() => setSelectedCallId(undefined)}>
                 <Icon name="close" />
-                <span>关闭</span>
+                <span>{uiText('关闭', 'Close')}</span>
               </button>
             </div>
             <AgentModelCallInspector call={call()} index={props.invocation.modelCalls.findIndex((item) => item.id === call().id)} />
@@ -409,12 +412,12 @@ export function AgentInvocationCollectionExplorer(props: {
             >
               <span>{index() + 1}</span>
               <strong>{props.agentDisplayName?.(invocation) ?? invocation.agentId}</strong>
-              <small>{agentInvocationStatusLabel(invocation.status)} · {invocation.modelCalls.length} 次模型</small>
+              <small>{agentInvocationStatusLabel(invocation.status)} · {invocation.modelCalls.length} {uiText('次模型', 'model calls')}</small>
             </button>
           )}</For>
         </div>
       </Show>
-      <Show when={selectedInvocation()} fallback={<div class="agent-activity-empty">没有实际启动的 Agent Invocation。</div>}>
+      <Show when={selectedInvocation()} fallback={<div class="agent-activity-empty">{uiText('没有实际启动的 Agent Invocation。', 'No Agent Invocation was actually started.')}</div>}>
         {(invocation) => <AgentInvocationExplorer
           invocation={invocation()}
           agentDisplayName={props.agentDisplayName?.(invocation())}

@@ -20,6 +20,8 @@ Chat 不连接平行 SQLite Knowledge Store，也不安装 `search_knowledge`、
 
 Chat 仍拥有通用 Todo 与 `spawn_agent`。子 Agent 使用独立、持久化的 Pi Session，但继承相同 Repository 根、模型、System Prompt 和工具集合；Pi `parentSession` 和 Oyster `parentInvocationId` 分别连接 Session 与 Invocation。子 Invocation 不是新的 Chat Conversation，父 Tool Result 只保存其最终文本以及 `invocationId` / `sessionId`，不复制完整子 transcript。
 
+应用语言由“设置 / 通用”中的单一应用设置控制。Chat Conversation 保存的 System Prompt binding 和用户自定义 Prompt 保持不变；每次 Invocation 创建时，Runtime 在有效 System Prompt 后追加当前语言要求，用于用户回复和新建或修改的自然语言 Repository 内容。已有 Conversation 无需重建，下一次 Invocation 即使用新语言；子 Agent 继承父 Invocation 的同一要求。代码、命令、路径、结构化格式、引用原文以及 Repository 或任务明确要求的语言不被强制翻译。
+
 Chat 只启用 Pi 生态中的 Headless Extension 和普通 context file。应用把 `<Electron userData>/pi-agent/` 作为专属 `agentDir`，设置页直接管理其 Pi 原生 `settings.json`：Agent 配置页可以修改自动上下文压缩、Provider 传输方式和 HTTP 空闲超时，Pi Extensions 页可以添加、启用、停用和移除 Pi Package 或本地 Extension 路径。Package 中的 Skill、Prompt 和 Theme 被显式关闭，Runtime 也不加载 Skill、Prompt Template 或 Theme。
 
 Extension 注册的工具和 hooks 与内置工具处于同一个 `AgentSession` 生命周期；TUI renderer、shortcut 和交互组件不进入 Electron UI。Extension 在 Electron 主进程中按当前 OS 用户权限执行，本期采用“配置即信任”。Oyster 以 `projectTrusted: false` 创建 Pi 设置，因此 Repository 内的 `.pi/settings.json`、Package 和 Extension 不会自动生效，普通 `AGENTS.md` context file 仍按 Pi 规则加载。

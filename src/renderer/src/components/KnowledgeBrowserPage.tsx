@@ -2,6 +2,7 @@ import { Show, createEffect, createSignal, onCleanup } from 'solid-js'
 import { createKnowledgeController } from '../knowledge-controller'
 import { Button, Icon } from '../ui'
 import { KnowledgeStatementBrowser } from './KnowledgeStatementBrowser'
+import { uiText } from '../i18n'
 
 export function KnowledgeBrowserPage(props: {
   active: boolean
@@ -39,11 +40,11 @@ export function KnowledgeBrowserPage(props: {
     <>
       <header class="page-header">
         <div>
-          <h1>知识库</h1>
+          <h1>{uiText('知识库', 'Knowledge')}</h1>
           <div class="page-summary">
-            <span><strong>{controller.result().total}</strong> 条知识</span>
+            <span><strong>{controller.result().total}</strong> {uiText('条知识', 'Statements')}</span>
             <span class="page-summary__separator">·</span>
-            <span>当前持久知识</span>
+            <span>{uiText('当前持久知识', 'Current durable Knowledge')}</span>
           </div>
         </div>
         <div class="page-header__actions">
@@ -53,7 +54,7 @@ export function KnowledgeBrowserPage(props: {
             data-testid="clear-knowledge"
             disabled={controller.clearing() || controller.result().total === 0}
             onClick={() => setClearDialogOpen(true)}
-          >{controller.clearing() ? '正在清空…' : '清空知识'}</Button>
+          >{controller.clearing() ? uiText('正在清空…', 'Clearing…') : uiText('清空知识', 'Clear Knowledge')}</Button>
         </div>
       </header>
 
@@ -63,12 +64,12 @@ export function KnowledgeBrowserPage(props: {
       <Show when={controller.clearResult()}>
         {(result) => (
           <div class="knowledge-browser__notice" role="status" data-testid="clear-knowledge-result">
-            已清空 {result().deletedStatementCount} 条知识。
+            {uiText('已清空', 'Cleared')} {result().deletedStatementCount} {uiText('条知识。', 'Knowledge Statements.')}
           </div>
         )}
       </Show>
 
-      <section class="knowledge-browser" aria-label="当前知识库">
+      <section class="knowledge-browser" aria-label={uiText('当前知识库', 'Current Knowledge')}>
         <div class="knowledge-browser__toolbar">
           <label>
             <Icon name="search" />
@@ -76,11 +77,13 @@ export function KnowledgeBrowserPage(props: {
               type="search"
               value={query()}
               data-testid="knowledge-search"
-              placeholder="搜索标题或正文"
+              placeholder={uiText('搜索标题或正文', 'Search titles or content')}
               onInput={(event) => setQuery(event.currentTarget.value)}
             />
           </label>
-          <span>{controller.loading() ? '正在读取…' : `${controller.result().total} 条结果`}</span>
+          <span>{controller.loading()
+            ? uiText('正在读取…', 'Reading…')
+            : `${controller.result().total} ${uiText('条结果', 'results')}`}</span>
         </div>
 
         <KnowledgeStatementBrowser
@@ -90,10 +93,10 @@ export function KnowledgeBrowserPage(props: {
           selectedStatement={controller.statement()}
           neighborhood={controller.neighborhood()}
           emptyListText={controller.loading()
-            ? '正在读取知识…'
+            ? uiText('正在读取知识…', 'Reading Knowledge…')
             : query().trim()
-              ? '没有匹配的知识。'
-              : '知识库目前为空。知识写入后会显示在这里。'}
+              ? uiText('没有匹配的知识。', 'No matching Knowledge found.')
+              : uiText('知识库目前为空。知识写入后会显示在这里。', 'The Knowledge Store is empty. Knowledge will appear here after it is written.')}
           navigationKey={query()}
           loadingMore={controller.loadingMore()}
           hasMore={controller.result().nextOffset !== undefined}
@@ -123,9 +126,12 @@ export function KnowledgeBrowserPage(props: {
             aria-describedby="clear-knowledge-dialog-description"
           >
             <div class="confirmation-dialog__body">
-              <h2 id="clear-knowledge-dialog-title">清空知识？</h2>
+              <h2 id="clear-knowledge-dialog-title">{uiText('清空知识？', 'Clear Knowledge?')}</h2>
               <p id="clear-knowledge-dialog-description">
-                将删除知识库中的全部知识。此操作无法撤销。
+                {uiText(
+                  '将删除知识库中的全部知识。此操作无法撤销。',
+                  'This deletes all Knowledge from the Knowledge Store. This action cannot be undone.'
+                )}
               </p>
             </div>
             <div class="confirmation-dialog__actions">
@@ -136,14 +142,14 @@ export function KnowledgeBrowserPage(props: {
                 disabled={controller.clearing()}
                 autofocus
                 onClick={() => setClearDialogOpen(false)}
-              >取消</Button>
+              >{uiText('取消', 'Cancel')}</Button>
               <Button
                 variant="danger"
                 icon="trash"
                 data-testid="confirm-clear-knowledge"
                 disabled={controller.clearing()}
                 onClick={() => void confirmClear()}
-              >{controller.clearing() ? '正在清空…' : '清空知识'}</Button>
+              >{controller.clearing() ? uiText('正在清空…', 'Clearing…') : uiText('清空知识', 'Clear Knowledge')}</Button>
             </div>
           </section>
         </div>

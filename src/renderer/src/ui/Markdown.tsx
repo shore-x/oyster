@@ -1,6 +1,7 @@
 import DOMPurify from 'dompurify'
 import { Marked, type RendererThis, type Tokens } from 'marked'
 import { createMemo, type JSX } from 'solid-js'
+import { appLanguage, uiText } from '../i18n'
 
 interface KnowledgeLinkToken extends Tokens.Generic {
   type: 'knowledgeLink'
@@ -81,8 +82,8 @@ function createMarkdownParser(
       },
       ...(allowImages ? {} : {
         image({ text }: Tokens.Image): string {
-          const label = text.trim() || '未命名图片'
-          return `<span class="markdown-image--disabled">[图片：${escapeHtml(label)}]</span>`
+          const label = text.trim() || uiText('未命名图片', 'Untitled image')
+          return `<span class="markdown-image--disabled">[${uiText('图片：', 'Image: ')}${escapeHtml(label)}]</span>`
         }
       })
     }
@@ -127,7 +128,7 @@ function createMarkdownParser(
         return [
           '<button type="button" class="markdown-knowledge-link"',
           ` data-knowledge-title="${escapeHtml(link.target)}"`,
-          ` title="在知识库中打开 ${escapeHtml(link.target)}">`,
+          ` title="${uiText('在知识库中打开', 'Open in Knowledge')} ${escapeHtml(link.target)}">`,
           escapeHtml(link.label),
           '</button>'
         ].join('')
@@ -145,7 +146,7 @@ function markdownParser(
   allowImages: boolean,
   interactiveFileLinks: boolean
 ): Marked {
-  const key = `${Number(interactiveKnowledgeLinks)}:${Number(allowImages)}:${Number(interactiveFileLinks)}`
+  const key = `${appLanguage()}:${Number(interactiveKnowledgeLinks)}:${Number(allowImages)}:${Number(interactiveFileLinks)}`
   const existing = markdownParsers.get(key)
   if (existing) return existing
   const parser = createMarkdownParser(interactiveKnowledgeLinks, allowImages, interactiveFileLinks)

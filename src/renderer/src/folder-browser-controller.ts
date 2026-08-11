@@ -5,6 +5,7 @@ import type {
   FolderFile,
   FolderSnapshot
 } from '../../shared/folder-browser'
+import { uiText } from './i18n'
 
 export type FolderBrowserDocument =
   | {
@@ -166,7 +167,7 @@ export function createFolderBrowserController() {
   }
 
   async function readFirst(paths: readonly string[]): Promise<FolderFile> {
-    if (!paths.length) throw new Error('链接目标为空')
+    if (!paths.length) throw new Error(uiText('链接目标为空', 'Link target is empty'))
     let lastError: unknown
     for (const path of paths) {
       try {
@@ -207,7 +208,7 @@ export function createFolderBrowserController() {
   async function openTarget(target: string): Promise<boolean> {
     const currentPath = selectedPath()
     if (!currentPath) {
-      setError('请先选择当前 Markdown 文件')
+      setError(uiText('请先选择当前 Markdown 文件', 'Select the current Markdown file first'))
       return false
     }
     return openPaths(resolveFolderFileTargets(currentPath, target))
@@ -227,7 +228,9 @@ export function createFolderBrowserController() {
         kind: 'error',
         target,
         path: paths[0],
-        message: currentPath ? '链接目标为空' : '没有可用于解析链接的当前文件'
+        message: currentPath
+          ? uiText('链接目标为空', 'Link target is empty')
+          : uiText('没有可用于解析链接的当前文件', 'No current file is available to resolve the link')
       })
       return
     }

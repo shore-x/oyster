@@ -7,6 +7,7 @@ import {
 } from '../folder-browser-controller'
 import { Button, Icon, Markdown } from '../ui'
 import './FolderBrowserPage.css'
+import { uiText } from '../i18n'
 
 export interface FolderBrowserPageProps {
   folderPath: string
@@ -23,8 +24,8 @@ function entryIcon(entry: FolderEntry): 'folder' | 'skill' | 'link' | 'warning' 
 }
 
 function unavailableLabel(entry: FolderEntry): string | undefined {
-  if (entry.kind === 'symlink') return '符号链接暂不支持预览'
-  if (entry.kind === 'other') return '此文件类型暂不支持预览'
+  if (entry.kind === 'symlink') return uiText('符号链接暂不支持预览', 'Symbolic link previews are not supported')
+  if (entry.kind === 'other') return uiText('此文件类型暂不支持预览', 'This file type cannot be previewed')
   return undefined
 }
 
@@ -96,11 +97,15 @@ function LinkPreviewCard(props: { preview: FolderBrowserLinkPreview }) {
     <aside class="folder-browser-link-preview" role="tooltip" data-testid="folder-browser-link-preview">
       <header>
         <strong>{props.preview.target}</strong>
-        <span>{props.preview.kind === 'loading' ? '正在读取' : props.preview.kind === 'error' ? '无法预览' : '只读预览'}</span>
+        <span>{props.preview.kind === 'loading'
+          ? uiText('正在读取', 'Reading')
+          : props.preview.kind === 'error'
+            ? uiText('无法预览', 'Preview unavailable')
+            : uiText('只读预览', 'Read-only preview')}</span>
       </header>
       <Switch>
         <Match when={props.preview.kind === 'loading'}>
-          <div class="folder-browser-link-preview__state">正在读取链接目标…</div>
+          <div class="folder-browser-link-preview__state">{uiText('正在读取链接目标…', 'Reading link target…')}</div>
         </Match>
         <Match when={props.preview.kind === 'error'}>
           <div class="folder-browser-link-preview__state folder-browser-link-preview__state--error">
@@ -126,7 +131,7 @@ function LinkPreviewCard(props: { preview: FolderBrowserLinkPreview }) {
                 <Match when={document().kind === 'unsupported'}>
                   <div class="folder-browser-link-preview__state folder-browser-link-preview__state--unsupported">
                     <Icon name="warning" />
-                    <span>目标文件无法按严格 UTF-8 文本解码。</span>
+                    <span>{uiText('目标文件无法按严格 UTF-8 文本解码。', 'The target file cannot be decoded as strict UTF-8 text.')}</span>
                   </div>
                 </Match>
               </Switch>
@@ -154,11 +159,11 @@ export function FolderBrowserPage(props: FolderBrowserPageProps) {
             icon="back"
             data-testid="folder-browser-close"
             onClick={props.onBack}
-          >{props.embedded ? '返回概览' : '返回'}</Button>
+          >{props.embedded ? uiText('返回概览', 'Back to Overview') : uiText('返回', 'Back')}</Button>
           <div>
             <h1>{props.label}</h1>
             <div class="page-summary">
-              <span>文件浏览</span>
+              <span>{uiText('文件浏览', 'File Browser')}</span>
               <span class="page-summary__separator">·</span>
               <span class="folder-browser-page__path" title={props.folderPath}>{props.folderPath}</span>
             </div>
@@ -172,10 +177,10 @@ export function FolderBrowserPage(props: FolderBrowserPageProps) {
         )}
       </Show>
 
-      <section class="folder-browser" aria-label={`${props.label} 文件`}>
+      <section class="folder-browser" aria-label={`${props.label} ${uiText('文件', 'files')}`}>
         <aside class="folder-browser__tree">
           <header>
-            <strong>文件</strong>
+            <strong>{uiText('文件', 'Files')}</strong>
             <Show when={controller.snapshot()}>
               {(snapshot) => <span>{snapshot().entries.length}</span>}
             </Show>
@@ -185,14 +190,14 @@ export function FolderBrowserPage(props: FolderBrowserPageProps) {
               when={controller.snapshot()}
               fallback={(
                 <div class="folder-browser__empty">
-                  {controller.loadingFolder() ? '正在读取文件夹…' : '无法读取文件夹。'}
+                  {controller.loadingFolder() ? uiText('正在读取文件夹…', 'Reading folder…') : uiText('无法读取文件夹。', 'Unable to read folder.')}
                 </div>
               )}
             >
               {(snapshot) => (
                 <Show
                   when={snapshot().entries.length > 0}
-                  fallback={<div class="folder-browser__empty">文件夹为空。</div>}
+                  fallback={<div class="folder-browser__empty">{uiText('文件夹为空。', 'The folder is empty.')}</div>}
                 >
                   <ul class="folder-browser-tree" data-testid="folder-browser-tree">
                     <For each={snapshot().entries}>
@@ -211,8 +216,8 @@ export function FolderBrowserPage(props: FolderBrowserPageProps) {
           </div>
         </aside>
 
-        <section class="folder-browser__viewer" aria-label="文件预览">
-          <nav class="folder-browser__navigation" aria-label="文件浏览历史">
+        <section class="folder-browser__viewer" aria-label={uiText('文件预览', 'File preview')}>
+          <nav class="folder-browser__navigation" aria-label={uiText('文件浏览历史', 'File navigation history')}>
             <div>
               <Button
                 variant="ghost"
@@ -220,16 +225,16 @@ export function FolderBrowserPage(props: FolderBrowserPageProps) {
                 data-testid="folder-browser-history-back"
                 disabled={!controller.canGoBack() || controller.loadingFile()}
                 onClick={() => void controller.goBack()}
-              >后退</Button>
+              >{uiText('后退', 'Back')}</Button>
               <Button
                 variant="ghost"
                 icon="forward"
                 data-testid="folder-browser-history-forward"
                 disabled={!controller.canGoForward() || controller.loadingFile()}
                 onClick={() => void controller.goForward()}
-              >前进</Button>
+              >{uiText('前进', 'Forward')}</Button>
             </div>
-            <span title={controller.selectedPath()}>{controller.selectedPath() || '未选择文件'}</span>
+            <span title={controller.selectedPath()}>{controller.selectedPath() || uiText('未选择文件', 'No file selected')}</span>
           </nav>
 
           <div class="folder-browser__document">
@@ -237,7 +242,7 @@ export function FolderBrowserPage(props: FolderBrowserPageProps) {
               when={!controller.loadingFile() && controller.document()}
               fallback={(
                 <div class="folder-browser__empty folder-browser__empty--viewer">
-                  {controller.loadingFile() ? '正在读取文件…' : '选择一个文件以预览。'}
+                  {controller.loadingFile() ? uiText('正在读取文件…', 'Reading file…') : uiText('选择一个文件以预览。', 'Select a file to preview.')}
                 </div>
               )}
             >
@@ -245,7 +250,7 @@ export function FolderBrowserPage(props: FolderBrowserPageProps) {
                 {(document) => (
                   <>
                     <div class="folder-browser__document-meta">
-                      <span>{document().kind === 'markdown' ? 'Markdown' : document().kind === 'text' ? '纯文本' : '暂不支持'}</span>
+                      <span>{document().kind === 'markdown' ? 'Markdown' : document().kind === 'text' ? uiText('纯文本', 'Plain Text') : uiText('暂不支持', 'Unsupported')}</span>
                       <span>{fileSizeLabel(document().size)}</span>
                     </div>
                     <Switch>
@@ -265,8 +270,8 @@ export function FolderBrowserPage(props: FolderBrowserPageProps) {
                       <Match when={document().kind === 'unsupported'}>
                         <div class="folder-browser__unsupported" data-testid="folder-browser-unsupported">
                           <Icon name="warning" />
-                          <strong>暂不支持预览</strong>
-                          <p>这个文件无法按严格 UTF-8 文本解码。</p>
+                          <strong>{uiText('暂不支持预览', 'Preview Not Supported')}</strong>
+                          <p>{uiText('这个文件无法按严格 UTF-8 文本解码。', 'This file cannot be decoded as strict UTF-8 text.')}</p>
                         </div>
                       </Match>
                     </Switch>

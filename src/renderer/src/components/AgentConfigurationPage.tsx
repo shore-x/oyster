@@ -7,6 +7,30 @@ import { CHAT_AGENT_ID } from '../../../shared/chat'
 import { runtimeLabel } from '../processing-configuration'
 import { Button, Icon } from '../ui'
 import { PiAgentSettingsPanel } from './PiAgentSettingsPanel'
+import { uiText } from '../i18n'
+
+function roleDisplayName(roleId: AgentConfigurationRoleId, fallback: string): string {
+  if (roleId === CHAT_AGENT_ID) return uiText('通用 Agent', 'General Agent')
+  if (roleId === 'knowledge_maintainer') return uiText('知识维护 Agent', 'Knowledge Maintainer')
+  if (roleId === 'knowledge_reviewer') return uiText('知识审阅 Agent', 'Knowledge Reviewer')
+  return fallback
+}
+
+function roleDescription(roleId: AgentConfigurationRoleId, fallback: string): string {
+  if (roleId === CHAT_AGENT_ID) return uiText(
+    '理解和维护 Oyster 的 Knowledge 与 Artifact。',
+    'Understands and maintains Oyster Knowledge and Artifacts.'
+  )
+  if (roleId === 'knowledge_maintainer') return uiText(
+    '在统一 Repository 中按 Task 工作清单检查活动并直接维护 Knowledge 与 Artifact。',
+    'Checks activities from the Task checklist and directly maintains Knowledge and Artifacts in the unified Repository.'
+  )
+  if (roleId === 'knowledge_reviewer') return uiText(
+    '在同一 Task branch 上独立审阅文件 tree，并通过 Task 记录反馈或批准。',
+    'Independently reviews the file tree on the same Task branch and records feedback or approval through the Task.'
+  )
+  return fallback
+}
 
 export function AgentConfigurationPage(props: { embedded?: boolean } = {}) {
   const controller = createAgentConfigurationController()
@@ -62,11 +86,11 @@ export function AgentConfigurationPage(props: { embedded?: boolean } = {}) {
       <Show when={!props.embedded}>
         <header class="page-header">
           <div>
-            <h1>Agent 配置</h1>
+            <h1>{uiText('Agent 配置', 'Agent Configuration')}</h1>
             <div class="page-summary">
-              <span><strong>{controller.roles().length}</strong> 个 Agent</span>
+              <span><strong>{controller.roles().length}</strong> {uiText('个 Agent', 'Agents')}</span>
               <span class="page-summary__separator">·</span>
-              <span>默认 Prompt 与通用 Agent Runtime 可配置</span>
+              <span>{uiText('默认 Prompt 与通用 Agent Runtime 可配置', 'Configure default Prompts and the General Agent Runtime')}</span>
             </div>
           </div>
         </header>
@@ -87,7 +111,7 @@ export function AgentConfigurationPage(props: { embedded?: boolean } = {}) {
           </div>
           <Show
             when={!controller.loading()}
-            fallback={<div class="agent-config-roles__empty">正在读取配置…</div>}
+            fallback={<div class="agent-config-roles__empty">{uiText('正在读取配置…', 'Reading configuration…')}</div>}
           >
             <For each={controller.roles()}>{(role) => (
               <button
@@ -102,10 +126,10 @@ export function AgentConfigurationPage(props: { embedded?: boolean } = {}) {
               >
                 <span class="agent-config-role__mark">A</span>
                 <span>
-                  <strong>{role.displayName}</strong>
-                  <small>{runtimeLabel(role.runtime)} · {role.tools.length} 个工具</small>
+                  <strong>{roleDisplayName(role.id, role.displayName)}</strong>
+                  <small>{runtimeLabel(role.runtime)} · {role.tools.length} {uiText('个工具', 'tools')}</small>
                 </span>
-                <em>{role.isDefaultCustomized ? '自定义默认' : '代码默认'}</em>
+                <em>{role.isDefaultCustomized ? uiText('自定义默认', 'Custom default') : uiText('代码默认', 'Code default')}</em>
               </button>
             )}</For>
           </Show>
@@ -117,17 +141,19 @@ export function AgentConfigurationPage(props: { embedded?: boolean } = {}) {
               <div class="agent-config-detail__header">
                 <div>
                   <div class="agent-config-detail__identity">
-                    <h2>{role().displayName}</h2>
+                    <h2>{roleDisplayName(role().id, role().displayName)}</h2>
                     <span class="agent-runtime-label">{runtimeLabel(role().runtime)}</span>
                   </div>
-                  <p>{role().description}</p>
+                  <p>{roleDescription(role().id, role().description)}</p>
                 </div>
                 <span class={`processing-mode-badge${role().isDefaultCustomized ? ' processing-mode-badge--custom' : ''}`}>
-                  {role().isDefaultCustomized ? 'Configured default' : 'Built-in default'}
+                  {role().isDefaultCustomized
+                    ? uiText('已配置默认值', 'Configured default')
+                    : uiText('内置默认值', 'Built-in default')}
                 </span>
               </div>
 
-              <div class="agent-config-tabs" role="tablist" aria-label="Agent 配置内容">
+              <div class="agent-config-tabs" role="tablist" aria-label={uiText('Agent 配置内容', 'Agent configuration content')}>
                 <button
                   type="button"
                   role="tab"
@@ -157,7 +183,7 @@ export function AgentConfigurationPage(props: { embedded?: boolean } = {}) {
                 <div class="agent-config-prompt" data-testid="agent-config-prompt-panel">
                   <div class="agent-config-section-heading">
                     <div>
-                      <h3>默认 System Prompt</h3>
+                      <h3>{uiText('默认 System Prompt', 'Default System Prompt')}</h3>
                       <p>{role().promptUsageDescription}</p>
                     </div>
                     <span>{role().promptUsageStatus}</span>
@@ -173,7 +199,7 @@ export function AgentConfigurationPage(props: { embedded?: boolean } = {}) {
                   />
                   <Show when={controller.wasSaved(role().id) && !dirty()}>
                     <div class="knowledge-browser__notice" role="status" data-testid="agent-default-prompt-saved">
-                      已保存 {role().displayName} 的默认 System Prompt。
+                      {uiText('已保存', 'Saved')} {roleDisplayName(role().id, role().displayName)} {uiText('的默认 System Prompt。', 'default System Prompt.')}
                     </div>
                   </Show>
                   <div class="agent-config-prompt__actions">
@@ -183,17 +209,17 @@ export function AgentConfigurationPage(props: { embedded?: boolean } = {}) {
                       data-testid="restore-built-in-agent-prompt"
                       disabled={controller.isSaving(role().id) || (!role().isDefaultCustomized && !dirty())}
                       onClick={() => void restoreBuiltIn()}
-                    >恢复代码默认</Button>
+                    >{uiText('恢复代码默认', 'Restore Code Default')}</Button>
                     <Button
                       variant="primary"
                       icon="check"
                       data-testid="save-agent-default-prompt"
                       disabled={controller.isSaving(role().id) || !dirty() || !promptDraft().trim()}
                       onClick={() => void saveDefault()}
-                    >{controller.isSaving(role().id) ? '保存中…' : '保存默认 Prompt'}</Button>
+                    >{controller.isSaving(role().id) ? uiText('保存中…', 'Saving…') : uiText('保存默认 Prompt', 'Save Default Prompt')}</Button>
                   </div>
                   <details class="agent-config-built-in ui-disclosure">
-                    <summary>查看代码内置 Prompt</summary>
+                    <summary>{uiText('查看代码内置 Prompt', 'View Built-in Prompt')}</summary>
                     <pre>{role().builtInInstructions}</pre>
                   </details>
                 </div>
@@ -204,15 +230,18 @@ export function AgentConfigurationPage(props: { embedded?: boolean } = {}) {
                   <div class="agent-config-section-heading">
                     <div>
                       <h3>Tools</h3>
-                      <p>以下清单与 Agent Invocation 实际使用同一份代码定义，只读展示。</p>
+                      <p>{uiText(
+                        '以下清单与 Agent Invocation 实际使用同一份代码定义，只读展示。',
+                        'This read-only list uses the same code definitions as the actual Agent Invocation.'
+                      )}</p>
                     </div>
-                    <span>{role().tools.length} 个工具</span>
+                    <span>{role().tools.length} {uiText('个工具', 'tools')}</span>
                   </div>
                   <Show
                     when={role().tools.length}
                     fallback={(
                       <div class="agent-config-tools__empty">
-                        该 Agent 当前没有工具。
+                        {uiText('该 Agent 当前没有工具。', 'This Agent currently has no tools.')}
                       </div>
                     )}
                   >
@@ -228,7 +257,7 @@ export function AgentConfigurationPage(props: { embedded?: boolean } = {}) {
                             data-testid={`agent-tool-schema-${tool.name}`}
                           >
                             <summary>
-                              <span>参数定义</span>
+                              <span>{uiText('参数定义', 'Parameters')}</span>
                               <small>JSON Schema</small>
                             </summary>
                             <pre>{JSON.stringify(tool.parameters, null, 2)}</pre>

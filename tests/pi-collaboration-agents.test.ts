@@ -116,6 +116,7 @@ describe('Pi collaboration Agents', () => {
         expect(context.tools?.map((tool) => tool.name)).toEqual([
           'read', 'bash', 'edit', 'write'
         ])
+        expect(context.systemPrompt).toContain('Application language: English.')
         expect(contextText(context)).toContain('Review the current Task branch checkout')
         expect(contextText(context)).not.toContain('read_evidence')
         expect(contextText(context)).not.toContain('Raw Evidence format')
@@ -124,7 +125,7 @@ describe('Pi collaboration Agents', () => {
       }
     ])
 
-    const result = await new PiKnowledgeReviewerAgent().invoke({
+    const result = await new PiKnowledgeReviewerAgent(undefined, () => 'en-US').invoke({
       modelStream,
       systemPrompt: 'Review the collaboration tree without reading inputs/.',
       worktree,

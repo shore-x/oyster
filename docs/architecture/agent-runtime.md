@@ -23,6 +23,8 @@ OpenAI Chat Completions 与 Responses 不再由 Oyster 维护平行的 streaming
 
 瞬时故障只在 Pi `AgentSession` 的 Agent Turn 层统一重试：最多重试 3 次，按 2、4、8 秒指数退避。`overloaded`、瞬时限流、服务端错误和连接中断等由 Pi 的统一错误分类决定；配额、账单、取消和确定性错误立即失败。Provider 请求层的 `maxRetries` 固定为 `0`，避免两层重试预算叠加；重试当前失败的 Assistant 调用不会重新执行本次 Invocation 中已经完成的工具调用。该策略是 Host 不变量，不受 agentDir 或项目设置覆盖。
 
+应用语言同样是 Host 在 Pi Runtime 边界施加的 Invocation 级要求。`<Electron userData>/app-settings.json` 是唯一语言状态；创建每次 Chat、Maintainer 或 Reviewer Invocation 时，适配层读取当前值，并在已配置的 System Prompt 之后追加语言指令。它要求 Agent 用所选语言回复用户并维护自然语言 Repository 内容，同时保留代码标识符、命令、路径、结构化格式、引用原文以及 Repository 或任务明确指定的语言。该追加不修改 Chat Conversation 已保存的 binding 或用户自定义 Prompt；已有 Conversation 从下一次 Invocation 起生效，Chat 子 Agent 继承同一有效 Prompt。
+
 ## Headless Extension 资源策略
 
 通用 Chat Agent 只启用 Pi 的 Headless Extension 和普通 context file：
@@ -31,7 +33,7 @@ OpenAI Chat Completions 与 Responses 不再由 Oyster 维护平行的 streaming
 - `agentDir` 固定为 `<Electron userData>/pi-agent/`，不隐式继承用户的 `~/.pi/agent`；
 - 设置页直接通过 Pi `SettingsManager` 管理 `<agentDir>/settings.json` 中的常用 Runtime 设置、Package 与本地 Extension 来源，不建立 Oyster 平行配置数据库；
 - Package 配置显式关闭其中的 Skill、Prompt 和 Theme；Runtime 也设置 `noSkills`、`noPromptTemplates`、`noThemes`；
-- Oyster 固定的 Chat System Prompt 是 base prompt，Extension 可以按 Pi 生命周期扩展它；
+- Oyster 固定的 Chat System Prompt 是 base prompt，Host 在执行边界追加当前应用语言要求，Extension 再按 Pi 生命周期扩展有效 Prompt；
 - 普通 Coding Tools、Extension tools、通用 Todo 与 `spawn_agent` 进入同一个 SDK tool registry。
 
 Extension 是在 Electron 主进程内执行的受信代码，不是受限声明文件。本期采用“配置即信任”，不增加权限弹窗、命令白名单、Extension 沙箱或细粒度网络治理。`SettingsManager` 明确以 `projectTrusted: false` 创建，因此只有 Oyster 专属 `agentDir` 的配置生效，Repository 内的 `.pi/settings.json`、Package 和 Extension 不会因打开 Repository 而执行；普通 `AGENTS.md` 等 context file 仍按 Pi 规则加载。Pi TUI renderer、theme、shortcut 和交互组件不会映射为 Electron UI。

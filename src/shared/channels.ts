@@ -91,3 +91,8 @@ export const piAgentSettingsChannels = {
   getSettings: 'pi-agent-settings:get-settings',
   saveSettings: 'pi-agent-settings:save-settings'
 } as const
+
+export const appSettingsChannels = {
+  getSettings: 'app-settings:get-settings',
+  saveSettings: 'app-settings:save-settings'
+} as const

@@ -9,6 +9,7 @@ import type {
   AiConnectionView,
   KnowledgeAgentRuntimeKind
 } from '../../shared/knowledge-processing'
+import { uiText } from './i18n'
 
 export const REASONING_LABELS: Record<ReasoningEffort, string> = {
   minimal: 'Minimal',
@@ -30,16 +31,6 @@ const BACKEND_LABELS: Record<AiBackendKind, string> = {
   api: 'API'
 }
 
-const CONNECTION_STATUS_LABELS: Record<AiConnectionStatus, string> = {
-  not_found: '未安装',
-  needs_auth: '需要认证',
-  authenticating: '认证中',
-  unverified: '未测试',
-  ready: '可用',
-  unsupported: '不支持',
-  unavailable: '暂时不可用'
-}
-
 export function providerLabel(providerId: AiProviderId): string {
   return PROVIDER_LABELS[providerId]
 }
@@ -49,7 +40,16 @@ export function backendLabel(backendKind: AiBackendKind): string {
 }
 
 export function connectionStatusLabel(status: AiConnectionStatus): string {
-  return CONNECTION_STATUS_LABELS[status]
+  const labels: Record<AiConnectionStatus, string> = {
+    not_found: uiText('未安装', 'Not installed'),
+    needs_auth: uiText('需要认证', 'Authentication required'),
+    authenticating: uiText('认证中', 'Authenticating'),
+    unverified: uiText('未测试', 'Untested'),
+    ready: uiText('可用', 'Available'),
+    unsupported: uiText('不支持', 'Unsupported'),
+    unavailable: uiText('暂时不可用', 'Temporarily unavailable')
+  }
+  return labels[status]
 }
 
 export function connectionCanInvokeAgent(
@@ -67,7 +67,7 @@ export function runtimeLabel(runtime: KnowledgeAgentRuntimeKind): string {
 }
 
 export function reasoningLabel(reasoningEffort?: ReasoningEffort): string {
-  return reasoningEffort ? REASONING_LABELS[reasoningEffort] : '模型默认'
+  return reasoningEffort ? REASONING_LABELS[reasoningEffort] : uiText('模型默认', 'Model default')
 }
 
 export function selectedLlmModel(

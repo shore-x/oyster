@@ -6,6 +6,7 @@ import type {
   KnowledgeAgentDefinitionView,
   AgentToolDefinitionView
 } from '../../shared/knowledge-processing'
+import { uiText } from './i18n'
 
 const EMPTY_PROCESSING_STATE: KnowledgeProcessingStateView = {
   agents: [],
@@ -52,8 +53,11 @@ function isKnowledgeAgent(
 function chatRole(agent: ChatAgentConfigurationView): AgentConfigurationRoleView {
   return {
     ...agent,
-    promptUsageDescription: '新建对话会固化当时的默认 Prompt；已有对话继续使用创建时的配置。',
-    promptUsageStatus: '新建对话使用默认'
+    promptUsageDescription: uiText(
+      '新建对话会固化当时的默认 Prompt；已有对话继续使用创建时的配置。',
+      'New conversations capture the current default Prompt; existing conversations keep the configuration used at creation.'
+    ),
+    promptUsageStatus: uiText('新建对话使用默认', 'Default for new conversations')
   }
 }
 
@@ -77,8 +81,13 @@ export function createAgentConfigurationController() {
         builtInInstructions: agent.builtInInstructions,
         defaultInstructions: agent.defaultInstructions,
         isDefaultCustomized: agent.isDefaultCustomized,
-        promptUsageDescription: '没有 Agent 覆盖的调用使用此值；测试页的 Agent 覆盖优先级更高。',
-        promptUsageStatus: agent.isCustomized ? 'Agent Preview 存在覆盖' : '当前调用使用默认'
+        promptUsageDescription: uiText(
+          '没有 Agent 覆盖的调用使用此值；测试页的 Agent 覆盖优先级更高。',
+          'Invocations without an Agent override use this value; an Agent override on the Processing page takes precedence.'
+        ),
+        promptUsageStatus: agent.isCustomized
+          ? uiText('Agent Preview 存在覆盖', 'Agent Preview override active')
+          : uiText('当前调用使用默认', 'Current invocations use default')
       })),
     chatRole(chatState().agent)
   ])

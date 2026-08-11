@@ -72,6 +72,37 @@ for (const removedCopy of ['KNOWLEDGE SOURCES', '数据仅保存在本机', 'LOC
   if (semantics.bodyText.includes(removedCopy)) throw new Error(`Redundant copy is still rendered: ${removedCopy}`)
 }
 
+const settings = semantics.settings
+if (
+  settings?.defaultGeneral?.selected !== 'true'
+  || !settings.defaultGeneral.visible
+  || settings.defaultGeneral.language !== 'zh-CN'
+) {
+  throw new Error('General settings is not the default Settings tab')
+}
+if (
+  settings.language.documentLanguage !== 'en-US'
+  || settings.language.selectedLanguage !== 'en-US'
+  || settings.language.settingsTitle !== 'Settings'
+  || settings.language.generalTab !== 'General'
+  || !settings.language.generalPageVisible
+  || settings.language.error
+  || settings.language.overflowX
+) {
+  throw new Error(`English application language did not update the Settings UI: ${JSON.stringify(settings.language)}`)
+}
+for (const navigationItem of ['Chat', 'Knowledge', 'Artifacts', 'Sources', 'Processing', 'Settings']) {
+  if (!settings.language.navigationItems?.includes(navigationItem)) {
+    throw new Error(`English primary navigation is missing: ${navigationItem}`)
+  }
+}
+const persistedAppSettings = JSON.parse(await readFile(join(userDataPath, 'app-settings.json'), 'utf8'))
+if (persistedAppSettings.language !== 'en-US') {
+  throw new Error('English application language was not persisted')
+}
+const englishSettingsImage = await readFile(join(dirname(capturePath), 'settings-english.png'))
+if (englishSettingsImage.length === 0) throw new Error('English Settings screenshot is empty')
+
 const skills = semantics.skills
 const expectedSkillProjectPath = join(userDataPath, 'skill-fixture-home', 'projects', 'oyster')
 if (skills?.title !== 'Skills' || skills.skillCount !== 6) {
@@ -397,13 +428,13 @@ if (
 }
 if (
   !agentConfiguration.builtInPrompt?.includes('Knowledge Maintainer')
-  || agentConfiguration.configuredBadge !== 'Configured default'
+  || agentConfiguration.configuredBadge !== '已配置默认值'
   || !agentConfiguration.saveNotice?.includes('已保存')
   || !agentConfiguration.processingPromptUsesConfiguredDefault
 ) {
   throw new Error('A configured default System Prompt does not flow into knowledge processing')
 }
-if (agentConfiguration.restoredBadge !== 'Built-in default' || !agentConfiguration.restoredMatchesBuiltIn) {
+if (agentConfiguration.restoredBadge !== '内置默认值' || !agentConfiguration.restoredMatchesBuiltIn) {
   throw new Error('The configured default System Prompt cannot be restored to the code default')
 }
 if (!agentConfiguration.chatRoleText?.includes('通用 Agent')) {
@@ -423,7 +454,7 @@ if (
   throw new Error('The conversational Agent delegation schema is not available to developers')
 }
 if (
-  agentConfiguration.chatConfiguredBadge !== 'Configured default'
+  agentConfiguration.chatConfiguredBadge !== '已配置默认值'
   || !agentConfiguration.chatRestoredMatchesBuiltIn
 ) {
   throw new Error('The conversational Agent default System Prompt cannot be configured and restored')
@@ -691,7 +722,7 @@ for (const requiredCopy of ['Knowledge Maintainer', 'BRIEF.md', 'inputs/README.m
 if (processing.promptValues.some((prompt) => prompt.includes('Oyster'))) {
   throw new Error('A default processing prompt assumes product-specific context')
 }
-if (processing.badgeValues.length !== 1 || processing.badgeValues.some((badge) => badge !== 'Default')) {
+if (processing.badgeValues.length !== 1 || processing.badgeValues.some((badge) => badge !== '默认')) {
   throw new Error('The Knowledge Agent must show the Default prompt badge in fixture mode')
 }
 const agentPreviewConfiguration = processing.configurationText.join('\n')
@@ -723,10 +754,10 @@ if (processing.buttonCount !== processing.sharedButtonCount + processing.tabButt
 if (processing.buttonIconCount !== processing.sharedButtonCount) {
   throw new Error('A knowledge processing shared button icon was not rendered')
 }
-if (processing.promptRestore.customizedBeforeRestore !== 'Customized') {
+if (processing.promptRestore.customizedBeforeRestore !== '已自定义') {
   throw new Error('An unsaved prompt draft was not shown as Customized')
 }
-if (!processing.promptRestore.matchesOriginal || processing.promptRestore.defaultAfterRestore !== 'Default') {
+if (!processing.promptRestore.matchesOriginal || processing.promptRestore.defaultAfterRestore !== '默认') {
   throw new Error('Restore default did not reset an unsaved prompt draft after a successful save')
 }
 if (processing.agentPreviewActivity.panelCount !== 1) throw new Error('The Agent Preview Invocation panel must be rendered')

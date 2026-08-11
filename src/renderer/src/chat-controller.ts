@@ -5,6 +5,7 @@ import type {
   ChatEvent,
   ChatStateView
 } from '../../shared/chat'
+import { uiText } from './i18n'
 
 const EMPTY_CHAT_STATE: ChatStateView = {
   agent: {
@@ -71,7 +72,7 @@ export function createChatController() {
     }
     if (event.type === 'invocation_state_changed') {
       setInvocationStates((current) => ({ ...current, [event.conversationId]: event }))
-      if (event.status === 'failed') setError(event.error || '对话 Agent Invocation 失败。')
+      if (event.status === 'failed') setError(event.error || uiText('对话 Agent Invocation 失败。', 'Chat Agent Invocation failed.'))
       return
     }
     if (event.type === 'message_appended') {

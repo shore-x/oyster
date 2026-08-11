@@ -4,6 +4,7 @@ import {
   buildKnowledgeLocalGraphScene,
   type KnowledgeLocalGraphSceneNode
 } from '../knowledge-local-graph-scene'
+import { uiText } from '../i18n'
 
 export interface KnowledgeReferenceExplorerProps {
   projection: KnowledgeNeighborhoodProjection
@@ -106,11 +107,11 @@ export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProp
     <section
       ref={(element) => { graphContainerElement = element }}
       class="knowledge-reference-explorer"
-      aria-label="Statement 局部引用图"
+      aria-label={uiText('Statement 局部引用图', 'Local Statement reference graph')}
     >
       <Show
         when={scene().nodes.length > 1}
-        fallback={<p class="knowledge-local-graph__empty">当前 Statement 暂无可解析的相邻引用。</p>}
+        fallback={<p class="knowledge-local-graph__empty">{uiText('当前 Statement 暂无可解析的相邻引用。', 'The current Statement has no resolvable adjacent references.')}</p>}
       >
         <div
           ref={(element) => { graphViewportElement = element }}
@@ -167,7 +168,10 @@ export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProp
                 style={`left:${node.x}px;top:${node.y}px;width:${node.width}px;height:${node.height}px;--knowledge-cluster-color:${node.title === props.projection.centerTitle
                   ? 'var(--text-primary)'
                   : clusterColor(node.clusterIndex)}`}
-                aria-label={`${node.title}，距中心 ${node.distance} 跳，${node.neighborTitles.length} 个相邻 Statement`}
+                aria-label={uiText(
+                  `${node.title}，距中心 ${node.distance} 跳，${node.neighborTitles.length} 个相邻 Statement`,
+                  `${node.title}, ${node.distance} hops from center, ${node.neighborTitles.length} adjacent Statements`
+                )}
                 aria-current={node.title === props.projection.centerTitle ? 'true' : undefined}
                 aria-describedby={props.hoveredTitle === node.title ? 'knowledge-local-graph-preview' : undefined}
                 onMouseEnter={() => props.onHover(node.title)}
@@ -187,7 +191,7 @@ export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProp
                 style={`left:${previewPlacement()!.left}px;top:${previewPlacement()!.top}px;width:${previewPlacement()!.width}px`}
               >
                 <strong>{hoveredNode()!.title}</strong>
-                <p>{hoveredNode()!.excerpt || '这个 Statement 暂无正文摘要。'}</p>
+                <p>{hoveredNode()!.excerpt || uiText('这个 Statement 暂无正文摘要。', 'This Statement has no content summary yet.')}</p>
               </aside>
             </Show>
           </div>
@@ -196,13 +200,13 @@ export function KnowledgeReferenceExplorer(props: KnowledgeReferenceExplorerProp
 
       <Show when={props.projection.unresolvedReferences.length}>
         <details class="knowledge-reference-explorer__unresolved ui-disclosure">
-          <summary>{props.projection.unresolvedReferences.length} 个引用在当前知识视图中没有目标</summary>
+          <summary>{`${props.projection.unresolvedReferences.length} ${uiText('个引用在当前知识视图中没有目标', 'references have no target in the current Knowledge view')}`}</summary>
           <div class="ui-disclosure__content">
             <ul>
               <For each={props.projection.unresolvedReferences}>{(reference) => (
                 <li>
                   <code>{reference.targetTitle}</code>
-                  <span>{reference.occurrenceCount > 1 ? `${reference.occurrenceCount} 次` : '1 次'}</span>
+                  <span>{`${reference.occurrenceCount} ${uiText('次', reference.occurrenceCount === 1 ? 'occurrence' : 'occurrences')}`}</span>
                 </li>
               )}</For>
             </ul>
