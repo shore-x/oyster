@@ -136,9 +136,7 @@ const knowledge: KnowledgeApi = {
 
 const artifacts: ArtifactApi = {
   getSnapshot: () => ipcRenderer.invoke(artifactChannels.getSnapshot),
-  refresh: () => ipcRenderer.invoke(artifactChannels.refresh),
-  createArtifact: (input) => ipcRenderer.invoke(artifactChannels.createArtifact, input),
-  openRepository: () => ipcRenderer.invoke(artifactChannels.openRepository)
+  refresh: () => ipcRenderer.invoke(artifactChannels.refresh)
 }
 
 const folderBrowser: FolderBrowserApi = {

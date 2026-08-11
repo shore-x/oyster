@@ -204,6 +204,20 @@ async function initializeFixtureKnowledge(store: FileKnowledgeStore): Promise<vo
   ], repositoryPath)
 }
 
+async function initializeFixtureArtifact(repository: OysterRepository): Promise<void> {
+  const artifactPath = join(repository.artifactsPath, 'research-brief')
+  await mkdir(artifactPath, { recursive: true })
+  await writeFile(
+    join(artifactPath, 'AGENTS.md'),
+    '# 研究简报\n\n持续维护 **Agent Memory 研究简报**，区分事实、推断和待确认事项。\n',
+    'utf8'
+  )
+  await runArtifactGit(['add', '--', 'artifacts'], repository.rootPath)
+  await runArtifactGit([
+    'commit', '--quiet', '--no-gpg-sign', '-m', 'Initialize fixture Artifact'
+  ], repository.rootPath)
+}
+
 function createSkillDiscoveryService(discovery: DiscoveryService): SkillDiscoveryService {
   const useFixtures = fixtureMode()
   const homeDirectory = skillDiscoveryHomeDirectory()
@@ -983,7 +997,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
         const resultDetailExists = Boolean(page.querySelector('[data-testid="knowledge-task-result-detail"]'))
         const statementCount = page.querySelectorAll('.knowledge-browser--collaboration .knowledge-browser__item').length
         const gitResultText = page.querySelector('[data-testid="knowledge-task-git-result"]')?.textContent
-        const changedPathCount = page.querySelectorAll('.knowledge-task__candidates code').length
+        const changedPathCount = page.querySelector('.knowledge-task__candidates')?.querySelectorAll('code').length
         const collaborationInitialTitle = page.querySelector('.knowledge-browser--collaboration [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
         const collaborationLink = page.querySelector('.knowledge-browser--collaboration .knowledge-statement-link > a')
         collaborationLink?.dispatchEvent(new MouseEvent('mouseenter'))
@@ -1576,30 +1590,10 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-artifacts"]').click()`)
   const artifactSemantics = await window.webContents.executeJavaScript(`(async () => {
     const page = document.querySelector('[data-testid="page-artifacts"]')
-    const createDisclosure = page.querySelector('.artifact-create')
-    const createWasCollapsed = Boolean(createDisclosure && !createDisclosure.open)
-    const path = page.querySelector('[data-testid="artifact-repository-path"]')
     let deadline = Date.now() + 2_000
-    while (
-      (!path?.textContent?.trim() || path.textContent.trim() === '正在读取…' || path.textContent.trim() === '—')
-      && !page.querySelector('.page-error')
-      && Date.now() < deadline
-    ) await new Promise((resolve) => setTimeout(resolve, 25))
-
-    const directoryInput = page.querySelector('[data-testid="artifact-directory-name"]')
-    const attentionInput = page.querySelector('[data-testid="artifact-attention"]')
-    directoryInput.value = 'attention-tracking'
-    directoryInput.dispatchEvent(new Event('input', { bubbles: true }))
-    attentionInput.value = '持续维护 **Attention 测试**。'
-    attentionInput.dispatchEvent(new Event('input', { bubbles: true }))
-    await new Promise((resolve) => requestAnimationFrame(resolve))
-    page.querySelector('[data-testid="create-artifact"]')?.click()
-
-    deadline = Date.now() + 2_000
     while (!page.querySelector('[data-testid="artifact-card"]') && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
-    const cardCountAfterCreate = page.querySelectorAll('[data-testid="artifact-card"]').length
     const refresh = page.querySelector('[data-testid="refresh-artifacts"]')
     refresh?.click()
     deadline = Date.now() + 2_000
@@ -1609,24 +1603,16 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
 
     return {
       title: page.querySelector('h1')?.textContent?.trim(),
-      hasIndependentDesignDocumentsNavigation: Boolean(
-        document.querySelector('[data-testid="nav-design-documents"]')
-      ),
       designDocumentsCard: Boolean(page.querySelector('[data-testid="design-documents-card"]')),
-      designDocumentsTitle: page.querySelector('[data-testid="design-documents-card"] h2')?.textContent?.trim(),
-      designDocumentsBuiltIn: page.querySelector('[data-testid="design-documents-card"] .artifact-built-in-badge')?.textContent?.trim(),
-      designDocumentsBrowseDisabled: page.querySelector('[data-testid="browse-design-documents"]')?.disabled,
-      designDocumentsOpenDisabled: page.querySelector('[data-testid="open-design-documents"]')?.disabled,
-      repositoryPath: path?.textContent?.trim(),
-      cardCountAfterCreate,
+      manualCreateExists: Boolean(page.querySelector('[data-testid="create-artifact"]')),
+      repositoryManagementExists: Boolean(page.querySelector('[data-testid="artifact-repository-path"]')),
+      startConversationDisabled: page.querySelector('[data-testid="start-artifact-conversation"]')?.disabled,
       cardCountAfterRefresh: page.querySelectorAll('[data-testid="artifact-card"]').length,
       directoryName: page.querySelector('[data-testid="artifact-card"] .folder-card__identity h2')?.textContent?.trim(),
       attentionHeading: page.querySelector('.artifact-card__attention h1')?.textContent?.trim(),
       attentionStrong: page.querySelector('.artifact-card__attention strong')?.textContent?.trim(),
-      repositoryOpenDisabled: page.querySelector('[data-testid="open-artifact-repository"]')?.disabled,
       artifactBrowseDisabled: page.querySelector('[data-testid="browse-artifact"]')?.disabled,
       artifactOpenDisabled: page.querySelector('[data-testid="open-artifact"]')?.disabled,
-      createWasCollapsed,
       cardDetailsCollapsed: Boolean(page.querySelector('.artifact-card__details:not([open])')),
       pageError: page.querySelector('.page-error')?.textContent?.trim(),
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
@@ -1671,12 +1657,14 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   await writeFile(join(dirname(capturePath), 'artifact-browser.png'), artifactBrowserImage.toPNG())
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="folder-browser-close"]')?.click()`)
 
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-ai-backends"]')?.click()`)
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="settings-tab-general"]')?.click()`)
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="browse-design-documents"]')?.click()`)
   const designDocumentsBrowserSemantics = await window.webContents.executeJavaScript(`(async () => {
     const deadline = Date.now() + 2_000
     let page
     while (Date.now() < deadline) {
-      page = document.querySelector('[data-testid="page-folder-browser"]')
+      page = document.querySelector('[data-testid="settings-design-documents-browser"] [data-testid="folder-browser-page"]')
       if (page && !page.hidden && page.querySelector('[data-testid="folder-browser-markdown"]')) break
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
@@ -1687,12 +1675,14 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       fileNames: Array.from(page?.querySelectorAll('[data-testid="folder-browser-entry"] span') || [])
         .map((element) => element.textContent?.trim()),
       markdownRendered: Boolean(page?.querySelector('[data-testid="folder-browser-markdown"]')),
+      nestedInSettings: Boolean(page?.closest('[data-testid="settings-design-documents-browser"]')),
       pageError: page?.querySelector('.page-error')?.textContent?.trim(),
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
     }
   })()`)
   const designDocumentsBrowserImage = await window.webContents.capturePage()
   await writeFile(join(dirname(capturePath), 'design-documents-browser.png'), designDocumentsBrowserImage.toPNG())
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="folder-browser-close"]')?.click()`)
 
   window.setSize(1160, 780)
   await new Promise((resolve) => setTimeout(resolve, 80))
@@ -1828,6 +1818,7 @@ app.whenReady().then(async () => {
   if (fixtureMode()) await initializeFixtureSkills(skillDiscoveryHomeDirectory())
   const repository = new OysterRepository(join(app.getPath('userData'), 'repository'))
   await repository.initialize()
+  if (fixtureMode()) await initializeFixtureArtifact(repository)
   const agentDebugStore = new FileAgentDebugStore(
     join(app.getPath('userData'), 'agent-debug', 'invocations')
   )
@@ -1877,7 +1868,7 @@ app.whenReady().then(async () => {
     agentDebugStore
   )
   const artifactInitialization = artifactService.initialize().catch((error: unknown) => {
-    console.error('Artifact 层初始化失败；可在产物页面重试。', error)
+    console.error('Artifact 层初始化失败；可在工作台重试。', error)
   })
   await Promise.all([
     service.initialize(),

@@ -18,13 +18,13 @@ Chat Agent 是主要人机协作入口，因此应用默认进入“对话”。
 
 1. 对话；
 2. 知识库；
-3. 产物；
+3. 工作台；
 4. 数据来源；
 5. Skills；
 6. 加工测试；
 7. 设置。
 
-“加工测试”是验证 Knowledge Processing Task 和 Agent Invocation 的稳定工作面，直接进入左侧一级导航，不再使用“高级功能”分组。“通用”“AI 后端”“Agent 配置”和“Pi Extensions”属于同一个设置页，以 Tab 区分，不再各自占用一级导航。“文件浏览”是产物页中的文件工作面，不是独立页面。
+“工作台”是全局 Artifact 文件层面向用户的浏览与未来维护界面，不引入新的领域对象。“加工测试”是验证 Knowledge Processing Task 和 Agent Invocation 的稳定工作面，直接进入左侧一级导航，不再使用“高级功能”分组。“通用”“AI 后端”“Agent 配置”和“Pi Extensions”属于同一个设置页，以 Tab 区分，不再各自占用一级导航。“文件浏览”是工作台中的文件工作面，不是独立页面。
 
 一级导航只切换稳定产品领域。用户在一个领域中查看对象详情时，优先级从高到低为：
 
@@ -48,7 +48,7 @@ Renderer 使用 viewport-owned App Shell：`html`、`body`、`#root` 和 App She
 页面只有两种布局：
 
 - **Flow page**：页面内容自然变长，由页面自己的主内容容器纵向滚动。数据来源和加工测试工作面属于此类。
-- **Workspace page**：页面填满 App Shell 剩余空间，稳定的列表、正文、编辑器或 Inspector 各自滚动。对话、知识库、Skills、产物文件浏览和设置属于此类。
+- **Workspace page**：页面填满 App Shell 剩余空间，稳定的列表、正文、编辑器或 Inspector 各自滚动。对话、知识库、Skills、工作台文件浏览和设置属于此类。这里的 Workspace 只表示布局类别，不是 Oyster 领域中的 Workspace 实体。
 
 滚动区域必须满足以下约束：
 
@@ -67,7 +67,7 @@ Renderer 使用 viewport-owned App Shell：`html`、`body`、`#root` 和 App She
 
 ### 5.2 Tab
 
-Tab 只用于同一领域中的同级工作面，并保持共享上下文。例如产物的“概览 / 文件”、设置的“通用 / AI 后端 / Agent 配置 / Pi Extensions”。Agent 配置内部只对读取 file-backed Pi agentDir 的通用 Agent 提供“Pi Runtime”，Knowledge Agent 不显示不会生效的共享设置。Tab 不模拟跨领域导航。
+Tab 只用于同一领域中的同级工作面，并保持共享上下文。例如工作台的“概览 / 文件”、设置的“通用 / AI 后端 / Agent 配置 / Pi Extensions”。Agent 配置内部只对读取 file-backed Pi agentDir 的通用 Agent 提供“Pi Runtime”，Knowledge Agent 不显示不会生效的共享设置。Tab 不模拟跨领域导航。
 
 ### 5.3 分栏
 
@@ -110,6 +110,6 @@ Inspector 是当前页面的非模态上下文层。对话中的 Knowledge State
 - 对话历史、消息区和 Inspector 能独立滚动，Composer 始终留在视口内；
 - 知识库和 Skills 的列表与详情能独立滚动；
 - 打开 Inspector 不产生水平溢出，也不改变底层页面滚动位置；
-- 产物浏览在“文件”Tab 内完成，设置项在同一设置页内切换；
+- Artifact 浏览在工作台的“文件”Tab 内完成，设计文档从设置的通用区域进入；
 - Electron UI smoke 至少覆盖 900px 与 1160px 窗口，并检查放大文字、长标题、长路径和长正文；
 - 类型检查、组件测试和 UI smoke 均通过后，布局改动才视为完成。

@@ -139,7 +139,7 @@ Oyster 管理视图只需要：
 - 解绑；
 - 对格式无效、目标冲突、权限失败和失效 symlink 给出明确错误。
 
-通用 Artifact 页面只显示 Skill Artifact 标记、输出摘要和前往 Skills 页面的入口，不放置绑定管理控件。一个 Oyster Skill 在管理视图中出现一次，绑定后又可能在外部发现视图中按 Agent 出现多次；这是权威 Artifact 与外部注册事实的并列展示，不做身份合并。
+工作台只显示 Skill Artifact 标记、输出摘要和前往 Skills 页面的入口，不放置绑定管理控件。一个 Oyster Skill 在管理视图中出现一次，绑定后又可能在外部发现视图中按 Agent 出现多次；这是权威 Artifact 与外部注册事实的并列展示，不做身份合并。
 
 不增加格式编辑器、映射编辑器、同步状态机、关系图、自动冲突修复或运行时 enabled 推断。发现结果不会因为路径相同或内容相似而自动转为 Skill Artifact 或 Skill Binding。
 

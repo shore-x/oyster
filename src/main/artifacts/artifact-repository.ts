@@ -1,9 +1,8 @@
-import { mkdir, lstat, readFile, readdir, rmdir, writeFile } from 'node:fs/promises'
+import { mkdir, lstat, readFile, readdir } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import type {
   ArtifactSnapshot,
-  ArtifactSummary,
-  CreateArtifactInput
+  ArtifactSummary
 } from '../../shared/artifacts'
 import { inspectArtifactSkill } from './skill-artifact'
 import { OysterRepository } from '../repository/oyster-repository'
@@ -14,16 +13,9 @@ function clone<T>(value: T): T {
   return structuredClone(value)
 }
 
-function assertAttention(attention: string): string {
-  if (typeof attention !== 'string' || !attention.trim()) {
-    throw new Error('Artifact Attention 不能为空')
-  }
-  return attention.trim()
-}
-
 /**
  * Resolves one first-level, visible Artifact directory without allowing path traversal.
- * IPC handlers can reuse this before opening an Artifact in the operating system.
+ * Artifact consumers reuse this before accessing a managed directory.
  */
 export function resolveArtifactDirectoryPath(
   repositoryPath: string,
@@ -46,20 +38,6 @@ export function resolveArtifactDirectoryPath(
     throw new Error('Artifact 文件夹名称无效')
   }
   return artifactPath
-}
-
-function resolveNewArtifactDirectoryPath(
-  repositoryPath: string,
-  directoryName: string
-): string {
-  if (
-    typeof directoryName !== 'string'
-    || directoryName !== directoryName.trim()
-    || directoryName.includes('\\')
-  ) {
-    throw new Error('Artifact 文件夹名称无效')
-  }
-  return resolveArtifactDirectoryPath(repositoryPath, directoryName)
 }
 
 async function readArtifact(
@@ -133,32 +111,4 @@ export class ArtifactService {
     })
   }
 
-  async createArtifact(input: CreateArtifactInput): Promise<ArtifactSnapshot> {
-    await mkdir(this.artifactsPath, { recursive: true })
-    const artifactPath = resolveNewArtifactDirectoryPath(this.artifactsPath, input?.directoryName)
-    const attention = assertAttention(input?.attention)
-
-    try {
-      await mkdir(artifactPath, { recursive: false })
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-        throw new Error(`Artifact 文件夹已存在：${input.directoryName}`)
-      }
-      throw error
-    }
-
-    try {
-      await writeFile(
-        resolve(artifactPath, ATTENTION_FILE_NAME),
-        `# Attention\n\n${attention}\n`,
-        { encoding: 'utf8', flag: 'wx' }
-      )
-    } catch (error) {
-      // Remove only the directory just created by this operation, and only if it is still empty.
-      await rmdir(artifactPath).catch(() => undefined)
-      throw error
-    }
-
-    return this.scan()
-  }
 }

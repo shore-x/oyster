@@ -353,69 +353,6 @@ describe('ArtifactService', () => {
     }
   })
 
-  it('creates an Artifact with the minimal attention file and reloads it', async () => {
-    const repositoryPath = await temporaryRepositoryPath()
-    const repository = new ArtifactService(repositoryPath)
-    await repository.initialize()
-
-    const snapshot = await repository.createArtifact({
-      directoryName: 'agent-memory',
-      attention: '  Track Agent Memory over time.\n\nPreserve manual edits.  '
-    })
-
-    expect(await readFile(join(repository.artifactsPath, 'agent-memory', 'AGENTS.md'), 'utf8')).toBe(
-      '# Attention\n\nTrack Agent Memory over time.\n\nPreserve manual edits.\n'
-    )
-    expect(snapshot.artifacts).toHaveLength(1)
-    expect(snapshot.artifacts[0]).toMatchObject({
-      directoryName: 'agent-memory',
-      attention: '# Attention\n\nTrack Agent Memory over time.\n\nPreserve manual edits.\n'
-    })
-  })
-
-  it.each([
-    '',
-    '   ',
-    '.',
-    '..',
-    '.hidden',
-    '../escape',
-    'nested/artifact',
-    'nested\\artifact',
-    '/absolute',
-    ' trailing-space '
-  ])('rejects an unsafe Artifact directory name: %j', async (directoryName) => {
-    const repositoryPath = await temporaryRepositoryPath()
-    const repository = new ArtifactService(repositoryPath)
-    await repository.initialize()
-
-    await expect(repository.createArtifact({
-      directoryName,
-      attention: 'Maintain this Artifact.'
-    })).rejects.toThrow('Artifact 文件夹名称无效')
-  })
-
-  it('rejects empty attention and preserves an existing directory on conflict', async () => {
-    const repositoryPath = await temporaryRepositoryPath()
-    const repository = new ArtifactService(repositoryPath)
-    await repository.initialize()
-
-    await expect(repository.createArtifact({
-      directoryName: 'empty-attention',
-      attention: '   '
-    })).rejects.toThrow('Artifact Attention 不能为空')
-    await expect(lstat(join(repository.artifactsPath, 'empty-attention'))).rejects.toMatchObject({ code: 'ENOENT' })
-
-    const existingPath = join(repository.artifactsPath, 'existing')
-    await mkdir(existingPath)
-    await writeFile(join(existingPath, 'keep.txt'), 'keep me', 'utf8')
-    await expect(repository.createArtifact({
-      directoryName: 'existing',
-      attention: 'Do not overwrite.'
-    })).rejects.toThrow('Artifact 文件夹已存在：existing')
-    expect(await readFile(join(existingPath, 'keep.txt'), 'utf8')).toBe('keep me')
-  })
-
   it('uses the same safe path resolution for later open-directory integration', async () => {
     const repositoryPath = await temporaryRepositoryPath()
     expect(resolveArtifactDirectoryPath(repositoryPath, 'valid-artifact')).toBe(

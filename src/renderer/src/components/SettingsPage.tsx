@@ -1,14 +1,43 @@
-import { createSignal } from 'solid-js'
+import { Show, createSignal } from 'solid-js'
 import { AgentConfigurationPage } from './AgentConfigurationPage'
 import { AiBackendsPage } from './AiBackendsPage'
 import { PiExtensionsPage } from './PiExtensionsPage'
 import { GeneralSettingsPage } from './GeneralSettingsPage'
+import { FolderBrowserPage } from './FolderBrowserPage'
 import { uiText } from '../i18n'
 
 type SettingsTab = 'general' | 'ai-backends' | 'agents' | 'extensions'
 
 export function SettingsPage() {
   const [tab, setTab] = createSignal<SettingsTab>('general')
+  const [designDocumentsPath, setDesignDocumentsPath] = createSignal<string>()
+  const [designDocumentsBusy, setDesignDocumentsBusy] = createSignal<'browse' | 'open'>()
+  const [designDocumentsError, setDesignDocumentsError] = createSignal<string>()
+
+  async function browseDesignDocuments(): Promise<void> {
+    try {
+      setDesignDocumentsBusy('browse')
+      setDesignDocumentsError(undefined)
+      setDesignDocumentsPath(await window.oyster.folderBrowser.getDesignDocumentsPath())
+    } catch (error) {
+      setDesignDocumentsError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setDesignDocumentsBusy(undefined)
+    }
+  }
+
+  async function openDesignDocuments(): Promise<void> {
+    try {
+      setDesignDocumentsBusy('open')
+      setDesignDocumentsError(undefined)
+      const folderPath = await window.oyster.folderBrowser.getDesignDocumentsPath()
+      await window.oyster.folderBrowser.openFolder(folderPath)
+    } catch (error) {
+      setDesignDocumentsError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setDesignDocumentsBusy(undefined)
+    }
+  }
 
   return (
     <div class="settings-page" data-testid="settings-page">
@@ -53,12 +82,33 @@ export function SettingsPage() {
       </div>
 
       <section
-        class="settings-page__panel"
+        class={`settings-page__panel${designDocumentsPath() ? ' settings-page__panel--workspace' : ''}`}
         role="tabpanel"
         data-testid="page-general-settings"
         hidden={tab() !== 'general'}
       >
-        <GeneralSettingsPage />
+        <Show
+          when={designDocumentsPath()}
+          fallback={(
+            <GeneralSettingsPage
+              designDocumentsBusy={designDocumentsBusy()}
+              designDocumentsError={designDocumentsError()}
+              onBrowseDesignDocuments={() => void browseDesignDocuments()}
+              onOpenDesignDocuments={() => void openDesignDocuments()}
+            />
+          )}
+        >
+          {(folderPath) => (
+            <div class="settings-page__folder-browser" data-testid="settings-design-documents-browser">
+              <FolderBrowserPage
+                embedded
+                folderPath={folderPath()}
+                label={uiText('Oyster 设计文档', 'Oyster Design Documents')}
+                onBack={() => setDesignDocumentsPath(undefined)}
+              />
+            </div>
+          )}
+        </Show>
       </section>
 
       <section

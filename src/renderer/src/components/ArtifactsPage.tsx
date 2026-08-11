@@ -1,10 +1,10 @@
 import { For, Show, createEffect, createSignal, type JSX } from 'solid-js'
 import type { ArtifactSummary } from '../../../shared/artifacts'
 import { createArtifactsController } from '../artifacts-controller'
+import { appLanguage, uiText } from '../i18n'
 import { Button, Icon, Markdown } from '../ui'
 import { FolderBrowserPage } from './FolderBrowserPage'
 import './ArtifactsPage.css'
-import { appLanguage, uiText } from '../i18n'
 
 function modifiedAtLabel(value: string): string {
   const date = new Date(value)
@@ -19,7 +19,15 @@ function modifiedAtLabel(value: string): string {
 }
 
 function attentionSummary(value: string): string {
-  const compact = value.replace(/\s+/gu, ' ').trim()
+  const compact = value
+    .replace(/^\s{0,3}#{1,6}\s+/gmu, '')
+    .replace(/\*\*([^*]+)\*\*/gu, '$1')
+    .replace(/__([^_]+)__/gu, '$1')
+    .replace(/`([^`]+)`/gu, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/gu, '$1')
+    .replace(/^\s*[-*+]\s+/gmu, '')
+    .replace(/\s+/gu, ' ')
+    .trim()
   return compact.length > 110 ? `${compact.slice(0, 109).trimEnd()}…` : compact
 }
 
@@ -64,7 +72,7 @@ function FolderCard(props: {
             data-testid={props.browseTestId}
             disabled={props.disabled}
             onClick={props.onBrowse}
-          >{uiText('浏览', 'Browse')}</Button>
+          >{uiText('查看内容', 'View Content')}</Button>
           <Button
             variant="ghost"
             icon="folder"
@@ -90,7 +98,7 @@ function ArtifactCard(props: {
     <FolderCard
       testId="artifact-card"
       title={props.artifact.directoryName}
-      description={`${uiText('AGENTS.md 更新于', 'AGENTS.md updated')} ${modifiedAtLabel(props.artifact.modifiedAt)}`}
+      description={`${uiText('更新于', 'Updated')} ${modifiedAtLabel(props.artifact.modifiedAt)}`}
       badge={props.artifact.skill ? {
         class: 'artifact-skill-badge',
         label: 'Skill',
@@ -106,8 +114,8 @@ function ArtifactCard(props: {
       <details class="artifact-card__details ui-disclosure">
         <summary>
           <span class="artifact-card__details-summary">
-            <strong>{uiText('Attention 与绑定详情', 'Attention and Binding Details')}</strong>
-            <span>{attentionSummary(props.artifact.attention) || uiText('暂无 Attention 内容', 'No Attention content')}</span>
+            <strong>{uiText('目标与维护说明', 'Goals and Maintenance Guidance')}</strong>
+            <span>{attentionSummary(props.artifact.attention) || uiText('暂无维护说明', 'No maintenance guidance')}</span>
           </span>
         </summary>
         <div class="ui-disclosure__content">
@@ -141,7 +149,9 @@ function ArtifactCard(props: {
               </section>
             )}
           </Show>
-          <div class="artifact-card__attention-label">AGENTS.md · Attention</div>
+          <div class="artifact-card__attention-label">
+            {uiText('目标与维护说明', 'Goals and Maintenance Guidance')}
+          </div>
           <Markdown
             class="artifact-card__attention"
             text={props.artifact.attention}
@@ -152,27 +162,6 @@ function ArtifactCard(props: {
   )
 }
 
-function DesignDocumentsCard(props: {
-  opening: boolean
-  onBrowse(): void
-  onOpen(): void
-}) {
-  return (
-    <FolderCard
-      testId="design-documents-card"
-      title={uiText('Oyster 设计文档', 'Oyster Design Documents')}
-      description={uiText('随 Oyster 发布的产品、架构与决策文档', 'Product, architecture, and decision documents bundled with Oyster')}
-      badge={{ class: 'artifact-built-in-badge', label: uiText('内置', 'Built-in') }}
-      browseTestId="browse-design-documents"
-      openTestId="open-design-documents"
-      disabled={props.opening}
-      opening={props.opening}
-      onBrowse={props.onBrowse}
-      onOpen={props.onOpen}
-    />
-  )
-}
-
 export interface ArtifactBrowserTarget {
   folderPath: string
   label: string
@@ -180,57 +169,37 @@ export interface ArtifactBrowserTarget {
 
 export function ArtifactsPage(props: {
   browserTarget?: ArtifactBrowserTarget
-  onBrowseDesignDocuments(): void
-  onOpenDesignDocuments(): Promise<void>
   onBrowseArtifact(artifact: ArtifactSummary): void
   onCloseBrowser?(): void
+  onStartConversation(): void
   onManageSkill(artifactDirectoryName: string): void
 }) {
   const controller = createArtifactsController()
   const [view, setView] = createSignal<'overview' | 'files'>('overview')
-  const [directoryName, setDirectoryName] = createSignal('')
-  const [attention, setAttention] = createSignal('')
-  const [openingDesignDocuments, setOpeningDesignDocuments] = createSignal(false)
 
   createEffect(() => {
     if (props.browserTarget) setView('files')
   })
 
-  async function createArtifact(event: SubmitEvent): Promise<void> {
-    event.preventDefault()
-    const input = {
-      directoryName: directoryName().trim(),
-      attention: attention().trim()
-    }
-    if (!controller.snapshot() || !input.directoryName || !input.attention) return
-    if (await controller.createArtifact(input)) {
-      setDirectoryName('')
-      setAttention('')
-    }
-  }
-
-  async function openDesignDocuments(): Promise<void> {
-    setOpeningDesignDocuments(true)
-    try {
-      await props.onOpenDesignDocuments()
-    } finally {
-      setOpeningDesignDocuments(false)
-    }
-  }
-
   return (
     <div class="artifacts-page" data-testid="artifacts-page">
       <header class="page-header">
         <div>
-          <h1>{uiText('产物', 'Artifacts')}</h1>
+          <h1>{uiText('工作台', 'Workbench')}</h1>
           <div class="page-summary">
-            <span><strong>1</strong> {uiText('组设计文档', 'design document set')}</span>
+            <span><strong>{controller.snapshot()?.artifacts.length ?? '—'}</strong> {uiText('项内容', 'items')}</span>
             <span class="page-summary__separator">·</span>
-            <span><strong>{controller.snapshot()?.artifacts.length ?? '—'}</strong> Artifacts</span>
+            <span>{uiText('与 Agent 共同创建和维护', 'Created and maintained with Agents')}</span>
           </div>
         </div>
         <div class="page-header__actions">
           <Show when={view() === 'overview'}>
+            <Button
+              variant="primary"
+              icon="chat"
+              data-testid="start-artifact-conversation"
+              onClick={props.onStartConversation}
+            >{uiText('与 Agent 对话', 'Chat with Agent')}</Button>
             <Button
               variant="secondary"
               icon="refresh"
@@ -242,7 +211,7 @@ export function ArtifactsPage(props: {
         </div>
       </header>
 
-      <div class="page-tabs artifacts-page__tabs" role="tablist" aria-label={uiText('产物视图', 'Artifact views')}>
+      <div class="page-tabs artifacts-page__tabs" role="tablist" aria-label={uiText('工作台视图', 'Workbench views')}>
         <button
           type="button"
           role="tab"
@@ -260,154 +229,80 @@ export function ArtifactsPage(props: {
       </div>
 
       <div class="artifacts-page__panel artifacts-page__panel--overview" hidden={view() !== 'overview'}>
-      <Show when={controller.error()}>
-        <div class="page-error" role="alert"><Icon name="warning" />{controller.error()}</div>
-      </Show>
-
-      <section class="artifact-repository" aria-labelledby="artifact-repository-title">
-        <div>
-          <h2 id="artifact-repository-title">Oyster Repository</h2>
-          <p>{uiText(
-            'Artifact 位于统一仓库的 artifacts/；其中一级子文件夹存在 AGENTS.md 时，即识别为一个 Artifact。',
-            'Artifacts live under artifacts/ in the unified Repository; a first-level folder with an AGENTS.md is recognized as an Artifact.'
-          )}</p>
-          <code data-testid="artifact-repository-path">
-            {controller.snapshot()?.repositoryPath || (controller.busy() === 'load' ? uiText('正在读取…', 'Reading…') : '—')}
-          </code>
-        </div>
-        <Button
-          variant="secondary"
-          icon="folder"
-          data-testid="open-artifact-repository"
-          disabled={Boolean(controller.busy()) || !controller.snapshot()?.repositoryPath}
-          onClick={() => void controller.openRepository()}
-        >{controller.busy() === 'open-repository' ? uiText('正在打开…', 'Opening…') : uiText('打开仓库', 'Open Repository')}</Button>
-      </section>
-
-      <details class="artifact-create ui-disclosure">
-        <summary>
-          <span class="artifact-create__heading">
-            <h2 id="artifact-create-title">{uiText('创建 Artifact', 'Create Artifact')}</h2>
-            <p>{uiText('按需展开，填写文件夹名称与长期 Attention。', 'Expand when needed and provide a folder name and durable Attention.')}</p>
-          </span>
-        </summary>
-        <div class="ui-disclosure__content">
-          <form data-testid="artifact-create-form" onSubmit={(event) => void createArtifact(event)}>
-          <label class="artifact-field">
-            <span>{uiText('文件夹名称', 'Folder Name')}</span>
-            <input
-              type="text"
-              required
-              autocomplete="off"
-              data-testid="artifact-directory-name"
-              value={directoryName()}
-              placeholder={uiText('例如 agent-memory-tracking', 'For example, agent-memory-tracking')}
-              disabled={controller.busy() === 'create'}
-              onInput={(event) => setDirectoryName(event.currentTarget.value)}
-            />
-          </label>
-          <label class="artifact-field artifact-field--attention">
-            <span>Attention</span>
-            <textarea
-              required
-              data-testid="artifact-attention"
-              value={attention()}
-              placeholder={uiText(
-                '描述这个 Artifact 长期关注的目标、范围和维护原则。',
-                'Describe this Artifact’s long-term goals, scope, and maintenance principles.'
-              )}
-              disabled={controller.busy() === 'create'}
-              onInput={(event) => setAttention(event.currentTarget.value)}
-            />
-          </label>
-          <div class="artifact-create__actions">
-            <Button
-              type="submit"
-              variant="primary"
-              icon="plus"
-              data-testid="create-artifact"
-              disabled={
-                Boolean(controller.busy())
-                || !controller.snapshot()
-                || !directoryName().trim()
-                || !attention().trim()
-              }
-            >{controller.busy() === 'create' ? uiText('正在创建…', 'Creating…') : uiText('创建 Artifact', 'Create Artifact')}</Button>
-          </div>
-          </form>
-        </div>
-      </details>
-
-      <Show when={(controller.snapshot()?.invalidDirectories.length ?? 0) > 0}>
-        <section class="artifact-invalid" data-testid="invalid-artifact-directories" aria-labelledby="artifact-invalid-title">
-          <div class="artifact-invalid__heading">
-            <Icon name="warning" />
-            <div>
-              <h2 id="artifact-invalid-title">{uiText('未识别的文件夹', 'Unrecognized Folders')}</h2>
-              <p>{uiText(
-                '以下可见一级目录缺少可读取的普通 AGENTS.md，因此不会作为 Artifact 展示。',
-                'These visible first-level directories lack a readable regular AGENTS.md and are not shown as Artifacts.'
-              )}</p>
-            </div>
-          </div>
-          <ul>
-            <For each={controller.snapshot()?.invalidDirectories ?? []}>
-              {(directory) => <li><code>{directory}</code></li>}
-            </For>
-          </ul>
-        </section>
-      </Show>
-
-      <section class="artifact-list" aria-label={uiText('产物', 'Artifacts')}>
-        <DesignDocumentsCard
-          opening={openingDesignDocuments()}
-          onBrowse={props.onBrowseDesignDocuments}
-          onOpen={() => void openDesignDocuments()}
-        />
-        <Show
-          when={controller.snapshot()}
-          fallback={(
-            <div class="artifact-list__empty">
-              <Icon name="folder" />
-              <strong>{controller.error() ? uiText('无法读取 Artifact', 'Unable to Read Artifacts') : uiText('正在读取 Artifact…', 'Reading Artifacts…')}</strong>
-              <p>{controller.error()
-                ? uiText('请检查错误信息并刷新重试。', 'Check the error and refresh to retry.')
-                : uiText('正在加载统一 Repository 的 Artifact 文件层。', 'Loading the Artifact file layer from the unified Repository.')}</p>
-            </div>
-          )}
-        >
-          {(snapshot) => (
-            <Show
-              when={snapshot().artifacts.length > 0}
-              fallback={(
-                <div class="artifact-list__empty">
-                  <Icon name="folder" />
-                  <strong>{uiText('还没有 Artifact', 'No Artifacts Yet')}</strong>
-                  <p>{uiText(
-                    '创建后，APP 会在固定仓库目录中生成文件夹和 AGENTS.md。',
-                    'After creation, the app generates a folder and AGENTS.md in the fixed Repository directory.'
-                  )}</p>
-                </div>
-              )}
-            >
-              <For each={snapshot().artifacts}>
-                {(artifact) => (
-                  <ArtifactCard
-                    artifact={artifact}
-                    busy={controller.busy()}
-                    onBrowse={() => props.onBrowseArtifact(artifact)}
-                    onOpen={() => void controller.openFolder(
-                      artifact.directoryPath,
-                      artifact.directoryName
-                    )}
-                    onManageSkill={() => props.onManageSkill(artifact.directoryName)}
-                  />
-                )}
-              </For>
-            </Show>
-          )}
+        <Show when={controller.error()}>
+          <div class="page-error" role="alert"><Icon name="warning" />{controller.error()}</div>
         </Show>
-      </section>
+
+        <Show when={(controller.snapshot()?.invalidDirectories.length ?? 0) > 0}>
+          <section class="artifact-invalid" data-testid="invalid-artifact-directories" aria-labelledby="artifact-invalid-title">
+            <div class="artifact-invalid__heading">
+              <Icon name="warning" />
+              <div>
+                <h2 id="artifact-invalid-title">{uiText('未识别的文件夹', 'Unrecognized Folders')}</h2>
+                <p>{uiText(
+                  '以下文件夹缺少可读取的 AGENTS.md，因此暂时无法在工作台中展示。',
+                  'These folders lack a readable AGENTS.md and cannot currently appear in the Workbench.'
+                )}</p>
+              </div>
+            </div>
+            <ul>
+              <For each={controller.snapshot()?.invalidDirectories ?? []}>
+                {(directory) => <li><code>{directory}</code></li>}
+              </For>
+            </ul>
+          </section>
+        </Show>
+
+        <section class="artifact-list" aria-label={uiText('工作台内容', 'Workbench content')}>
+          <Show
+            when={controller.snapshot()}
+            fallback={(
+              <div class="artifact-list__empty">
+                <Icon name="folder" />
+                <strong>{controller.error()
+                  ? uiText('无法读取工作台内容', 'Unable to Read Workbench Content')
+                  : uiText('正在读取工作台…', 'Reading Workbench…')}</strong>
+                <p>{controller.error()
+                  ? uiText('请检查错误信息并刷新重试。', 'Check the error and refresh to retry.')
+                  : uiText('正在加载你与 Agent 共同维护的内容。', 'Loading content maintained with Agents.')}</p>
+              </div>
+            )}
+          >
+            {(snapshot) => (
+              <Show
+                when={snapshot().artifacts.length > 0}
+                fallback={(
+                  <div class="artifact-list__empty">
+                    <Icon name="folder" />
+                    <strong>{uiText('工作台中还没有内容', 'The Workbench Is Empty')}</strong>
+                    <p>{uiText(
+                      '在对话中告诉 Agent 你想完成什么，它会在需要时创建并维护相应内容。',
+                      'Tell the Agent what you want to accomplish; it will create and maintain the appropriate content when needed.'
+                    )}</p>
+                    <Button variant="primary" icon="chat" onClick={props.onStartConversation}>
+                      {uiText('与 Agent 开始', 'Start with Agent')}
+                    </Button>
+                  </div>
+                )}
+              >
+                <For each={snapshot().artifacts}>
+                  {(artifact) => (
+                    <ArtifactCard
+                      artifact={artifact}
+                      busy={controller.busy()}
+                      onBrowse={() => props.onBrowseArtifact(artifact)}
+                      onOpen={() => void controller.openFolder(
+                        artifact.directoryPath,
+                        artifact.directoryName
+                      )}
+                      onManageSkill={() => props.onManageSkill(artifact.directoryName)}
+                    />
+                  )}
+                </For>
+              </Show>
+            )}
+          </Show>
+        </section>
       </div>
 
       <div class="artifacts-page__panel artifacts-page__panel--files" hidden={view() !== 'files'}>
@@ -416,8 +311,8 @@ export function ArtifactsPage(props: {
           fallback={(
             <div class="artifacts-page__file-empty">
               <Icon name="folder" />
-              <strong>{uiText('选择一个文件夹', 'Select a Folder')}</strong>
-              <p>{uiText('回到“概览”，从设计文档或 Artifact 卡片进入文件浏览。', 'Return to Overview and open Files from a design document or Artifact card.')}</p>
+              <strong>{uiText('选择一项内容', 'Select an Item')}</strong>
+              <p>{uiText('回到“概览”，从一项工作台内容进入文件浏览。', 'Return to Overview and open Files from a Workbench item.')}</p>
               <Button variant="secondary" icon="back" onClick={() => setView('overview')}>{uiText('返回概览', 'Back to Overview')}</Button>
             </div>
           )}

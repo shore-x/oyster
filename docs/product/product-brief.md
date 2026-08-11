@@ -48,7 +48,7 @@ Oyster 向用户提供六个核心能力：
 1. **发现与接入**：发现本机 Agent 的可执行程序、应用、配置和数据目录，明确展示每个来源支持历史访问、实时通知或上下文输出中的哪些能力。
 2. **保真访问**：为聊天 transcript 与人类编写的 Agent 指令建立轻量 catalog，并在需要时由 Source Adapter 从原始位置读取确定版本；不同 Harness 的原始格式不因统一模型而丢失，Agent 自动生成的 memory 不作为历史来源。
 3. **知识加工与管理**：由 Knowledge Maintenance Agent 在用户 Attention 下完整扫描 Canonical Activity 与附件、按 locator 回查由固定 Raw Evidence 行模型生成的 Evidence page、核查现有知识并形成可复用的理解；通用管理 Agent 也可以直接搜索、读取和维护正式 Knowledge。
-4. **协作产物**：在统一 Repository 的 `artifacts/` 中保存围绕持久 Attention 组织的任意文件产物；当前通用管理 Agent 可以根据对话和文件系统自主发现相关 Artifact，并与用户共同维护当前状态，但不构成 Artifact 的唯一维护方式。
+4. **协作产物**：在统一 Repository 的 `artifacts/` 中保存围绕持久 Attention 组织的任意文件产物；当前通用管理 Agent 可以根据对话和文件系统自主发现、初始化和维护相关 Artifact，用户通过“工作台”统一浏览这些内容。工作台只是 Artifact 文件层的用户界面，不构成新的领域或维护方式。
 5. **Skill 发现与管理**：在专门的 Skills 页面中分开展示 Oyster 管理的 Skill Artifact 与其他 Agent 的外部注册事实；前者可以预览统一输出并通过显式 symlink Binding 注入已支持的用户级目标，后者保持只读发现。两者不因名称或路径相似而合并身份。
 6. **安全供给**：通过本地 API 和 MCP 等开放边界向第三方 Agent 提供检索；未来可在用户授权、Scope 和 Token Budget 内生成并注入 Context Packet。
 
@@ -86,6 +86,8 @@ Oyster 必须区分领域事实与工作过程，避免把模型总结覆盖到�
 本文将 `Artifact` 作为第三个权威域中单个协作产物的正式英文名称；观察中的来源侧对象使用 Activity Artifact 等限定名称，Discovery catalog 中的外部来源记录称为 Source Record。
 
 Artifact Domain 不定义全局 Maintainer、Reviewer 或 Critic，也不把当前通用管理 Agent 固化为唯一责任主体。Artifact 的说明文档描述维护后必须成立的局部契约，而具体维护可以由用户、一个或多个通用 Agent、临时 subagent、面向特定任务的流程或未来其他机制完成。需要多视角校验时，工作流可以按说明形成临时任务分工；角色名称、数量、编排和执行机制不是 Artifact 的领域语义。可强制的独立审批与 promotion 由采用它的具体工作流定义，不能仅由说明文档宣称完成。
+
+“工作台”是用户浏览 Artifact、并在未来直接维护其内容的工作界面。它从正式 Artifact 文件层投影当前状态，不拥有或复制 Artifact，不引入 Project、Workspace 或新的持久化边界，也不将 Chat Conversation 绑定到某个 Artifact。当前用户通过与通用管理 Agent 对话来形成新的 Artifact，工作台不提供手动创建目录的表单；未来模板只作为对话起点，不能成为新的 Artifact 类型或绕过 Attention 的空壳创建机制。
 
 Source Adapter 从完整 Raw Evidence 确定性生成可回查、对话优先的 Canonical Activity。它完整保留对话正文和上下文压缩的语义摘要；工具只保留操作身份以及调用和结果的 Raw locator，参数、结果、Codex 运行时 user-role 信封、模型内部 reasoning、压缩 replacement history、执行状态和重复上下文快照不进入默认语义正文，图片等附件独立提取。Core 为已接受 Source Snapshot 创建 `task/<taskId>` branch 和 Repository 外 linked worktree；Task start commit 固定 `BRIEF.md`、`PROGRESS.md`、`inputs/` 和初始 `task.json`，后续 commit 同时保存 Pi Session、Review handoff 与 Knowledge/Artifact 变化。Maintainer 使用普通 `read` 完整扫描这些文件并按 locator 回查 Evidence；不再安装按 Observation 格式命名的专用工具。Maintainer/Reviewer 也不安装通用 Todo，Chat Agent 继续使用通用 Todo。
 
@@ -149,7 +151,7 @@ Knowledge Maintenance Agent 是一个普通、可替换的工具使用 Agent：�
 
 ### 6.5 Artifact 维护、Projection 与当前通用管理 Agent
 
-Projection 可以根据共享 Knowledge、Attention 和必要的当前状态生成按需消费输出，也可以初始化 Artifact，或基于当前 Artifact 形成新修订。用户可以直接创建或编辑 Artifact；后续维护默认以当前状态为输入并延续已接纳的编辑，除非用户明确要求替换、重建、回退或删除。Artifact 内容不会仅因存在而自动成为 Knowledge；一次明确的现实修改可以同时更新 `knowledge/` 与 `artifacts/`。
+Projection 可以根据共享 Knowledge、Attention 和必要的当前状态生成按需消费输出，也可以初始化 Artifact，或基于当前 Artifact 形成新修订。当前新的 Artifact 由通用管理 Agent 根据用户对话初始化，用户仍可以直接编辑其正式文件；后续维护默认以当前状态为输入并延续已接纳的编辑，除非用户明确要求替换、重建、回退或删除。Artifact 内容不会仅因存在而自动成为 Knowledge；一次明确的现实修改可以同时更新 `knowledge/` 与 `artifacts/`。
 
 统一 Repository 的 `artifacts/<artifact>/` 是 Artifact 文件层；带可读取根 `AGENTS.md` 的目录是一个 Artifact。`AGENTS.md` 表达持久 Attention，并作为适用于该 Artifact 的维护目标、证据边界、质量义务和完成条件的表达载体；四项内容是否充分属于内容质量，不成为 Artifact 有效性的固定 Schema，也不以固定 Agent 拓扑作为 Artifact 身份的一部分。`knowledge/**/*.md` 是 Knowledge 文件层。Repository 继续使用捆绑的标准 Git Runtime，系统 Git 不是前置条件。
 
@@ -169,7 +171,7 @@ Artifact 层不预设全局 Maintainer、Reviewer 或 Critic。某个 Artifact �
 
 一个由 Oyster 管理的 Skill 对应一个 Artifact；Artifact 根 `AGENTS.md` 继续表达持久 Attention，根部存在 `output` 时由 Skill 应用派生出 Skill Artifact 视图。外部 Agent 原生加载的 Skill 根固定为有效的 `output/` 子目录。当前实现允许在 Claude Code、Pi 和 Codex 的用户级规范注册根创建目录 symlink，链接目标是该 `output/`，不是 Artifact 根；项目级 Binding 留给后续切片。
 
-当前实现不复制或同步 Skill，不做 Agent 专属内容转换，也不安装 Plugin、Hook 或 MCP。所有 Agent 暂时共用同一个 `output/`；不同 Agent 仍需要各自的注册根定位，但这只是路径适配，不改变 Skill 内容。symlink 本身就是绑定事实，不新增 Binding 数据库、Artifact 类型或 manifest。管理入口集中在 Skills 页面；Artifact 页面只显示 Skill 标记、输出摘要和导航入口。完整边界见[《Skill Symlink 注入 MVP》](skill-symlink-injection-mvp.md)。
+当前实现不复制或同步 Skill，不做 Agent 专属内容转换，也不安装 Plugin、Hook 或 MCP。所有 Agent 暂时共用同一个 `output/`；不同 Agent 仍需要各自的注册根定位，但这只是路径适配，不改变 Skill 内容。symlink 本身就是绑定事实，不新增 Binding 数据库、Artifact 类型或 manifest。管理入口集中在 Skills 页面；工作台只显示 Skill 标记、输出摘要和导航入口。完整边界见[《Skill Symlink 注入 MVP》](skill-symlink-injection-mvp.md)。
 
 这里的持久 Skill Binding 与下一节按请求形成的 Context Packet 或 Prompt-time 上下文注入是两种不同能力，不能共用 enabled、Scope、Token Budget 或审计语义。
 

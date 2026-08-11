@@ -1,6 +1,6 @@
 import { createRoot } from 'solid-js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { ArtifactApi, ArtifactSnapshot, CreateArtifactInput } from '../src/shared/artifacts'
+import type { ArtifactApi, ArtifactSnapshot } from '../src/shared/artifacts'
 import type { FolderBrowserApi } from '../src/shared/folder-browser'
 import { createArtifactsController } from '../src/renderer/src/artifacts-controller'
 
@@ -19,8 +19,6 @@ function installApi(
   const api: ArtifactApi = {
     getSnapshot: async () => EMPTY_SNAPSHOT,
     refresh: async () => EMPTY_SNAPSHOT,
-    createArtifact: async () => EMPTY_SNAPSHOT,
-    openRepository: async () => undefined,
     ...overrides
   }
   vi.stubGlobal('window', { oyster: { artifacts: api, folderBrowser: { openFolder } } })
@@ -30,8 +28,8 @@ function installApi(
 afterEach(() => vi.unstubAllGlobals())
 
 describe('artifacts controller', () => {
-  it('loads the fixed repository and replaces the snapshot after creating an Artifact', async () => {
-    const createdSnapshot: ArtifactSnapshot = {
+  it('loads the fixed repository snapshot', async () => {
+    const loadedSnapshot: ArtifactSnapshot = {
       ...EMPTY_SNAPSHOT,
       artifacts: [{
         directoryName: 'agent-memory-tracking',
@@ -40,24 +38,15 @@ describe('artifacts controller', () => {
         modifiedAt: '2026-07-30T09:00:00.000Z'
       }]
     }
-    const getSnapshot = vi.fn<ArtifactApi['getSnapshot']>(async () => EMPTY_SNAPSHOT)
-    const createArtifact = vi.fn<ArtifactApi['createArtifact']>(async () => createdSnapshot)
-    installApi({ getSnapshot, createArtifact })
+    const getSnapshot = vi.fn<ArtifactApi['getSnapshot']>(async () => loadedSnapshot)
+    installApi({ getSnapshot })
 
     await createRoot(async (dispose) => {
       try {
         const controller = createArtifactsController()
-        await vi.waitFor(() => expect(controller.snapshot()).toEqual(EMPTY_SNAPSHOT))
-
-        const input: CreateArtifactInput = {
-          directoryName: 'agent-memory-tracking',
-          attention: '# Attention\n\nTrack agent memory research.'
-        }
-        await expect(controller.createArtifact(input)).resolves.toBe(true)
+        await vi.waitFor(() => expect(controller.snapshot()).toEqual(loadedSnapshot))
 
         expect(getSnapshot).toHaveBeenCalledOnce()
-        expect(createArtifact).toHaveBeenCalledWith(input)
-        expect(controller.snapshot()).toEqual(createdSnapshot)
         expect(controller.error()).toBeUndefined()
       } finally {
         dispose()

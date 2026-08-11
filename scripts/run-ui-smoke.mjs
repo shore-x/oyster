@@ -91,7 +91,7 @@ if (
 ) {
   throw new Error(`English application language did not update the Settings UI: ${JSON.stringify(settings.language)}`)
 }
-for (const navigationItem of ['Chat', 'Knowledge', 'Artifacts', 'Sources', 'Processing', 'Settings']) {
+for (const navigationItem of ['Chat', 'Knowledge', 'Workbench', 'Sources', 'Processing', 'Settings']) {
   if (!settings.language.navigationItems?.includes(navigationItem)) {
     throw new Error(`English primary navigation is missing: ${navigationItem}`)
   }
@@ -148,39 +148,32 @@ if (skills.openFolderDisabled !== false || skills.pageError || skills.overflowX)
 const artifacts = semantics.artifacts
 const expectedRepositoryPath = join(userDataPath, 'repository')
 const expectedArtifactPath = join(expectedRepositoryPath, 'artifacts')
-if (artifacts?.title !== '产物') throw new Error('Artifact page was not rendered')
+if (artifacts?.title !== '工作台') throw new Error('Workbench page was not rendered')
 if (
-  artifacts.hasIndependentDesignDocumentsNavigation
-  || !artifacts.designDocumentsCard
-  || artifacts.designDocumentsTitle !== 'Oyster 设计文档'
-  || artifacts.designDocumentsBuiltIn !== '内置'
-  || artifacts.designDocumentsBrowseDisabled !== false
-  || artifacts.designDocumentsOpenDisabled !== false
+  artifacts.designDocumentsCard
+  || artifacts.manualCreateExists
+  || artifacts.repositoryManagementExists
+  || artifacts.startConversationDisabled !== false
 ) {
-  throw new Error('Bundled design documents are not presented as an accessible built-in folder card')
-}
-if (artifacts.repositoryPath !== expectedRepositoryPath) {
-  throw new Error(`Oyster Repository is not fixed under userData: ${artifacts.repositoryPath}`)
+  throw new Error('Workbench still exposes non-Artifact or manual Repository management UI')
 }
 if (
-  artifacts.cardCountAfterCreate !== 1
-  || artifacts.cardCountAfterRefresh !== 1
-  || artifacts.directoryName !== 'attention-tracking'
+  artifacts.cardCountAfterRefresh !== 1
+  || artifacts.directoryName !== 'research-brief'
 ) {
-  throw new Error('Artifact creation or filesystem refresh did not preserve the Artifact')
+  throw new Error('Workbench did not load and refresh the fixture Artifact')
 }
-if (artifacts.attentionHeading !== 'Attention' || artifacts.attentionStrong !== 'Attention 测试') {
+if (artifacts.attentionHeading !== '研究简报' || artifacts.attentionStrong !== 'Agent Memory 研究简报') {
   throw new Error('Artifact AGENTS.md Markdown was not rendered')
 }
 if (
-  artifacts.repositoryOpenDisabled !== false
-  || artifacts.artifactBrowseDisabled !== false
+  artifacts.artifactBrowseDisabled !== false
   || artifacts.artifactOpenDisabled !== false
 ) {
   throw new Error('Artifact browse or folder open actions are unavailable')
 }
-if (!artifacts.createWasCollapsed || !artifacts.cardDetailsCollapsed) {
-  throw new Error('Artifact creation or Attention details are not progressively disclosed')
+if (!artifacts.cardDetailsCollapsed) {
+  throw new Error('Artifact maintenance guidance is not progressively disclosed')
 }
 if (artifacts.pageError) throw new Error(`Artifact page reported an error: ${artifacts.pageError}`)
 if (artifacts.overflowX) throw new Error(`Artifact page has unexpected horizontal overflow at 900px: ${JSON.stringify(artifacts.overflowElements)}`)
@@ -188,19 +181,19 @@ if (!(await stat(join(expectedRepositoryPath, '.git'))).isDirectory()) {
   throw new Error('Oyster Repository was not initialized as Git')
 }
 if (
-  await readFile(join(expectedArtifactPath, 'attention-tracking', 'AGENTS.md'), 'utf8')
-  !== '# Attention\n\n持续维护 **Attention 测试**。\n'
+  await readFile(join(expectedArtifactPath, 'research-brief', 'AGENTS.md'), 'utf8')
+  !== '# 研究简报\n\n持续维护 **Agent Memory 研究简报**，区分事实、推断和待确认事项。\n'
 ) {
   throw new Error('Artifact AGENTS.md was not persisted with the expected content')
 }
 
 const artifactBrowser = semantics.folderBrowser?.artifact
 if (
-  artifactBrowser?.title !== 'attention-tracking'
-  || artifactBrowser.path !== join(expectedArtifactPath, 'attention-tracking')
-  || !artifactBrowser.selectedPath?.endsWith(join('attention-tracking', 'AGENTS.md'))
+  artifactBrowser?.title !== 'research-brief'
+  || artifactBrowser.path !== join(expectedArtifactPath, 'research-brief')
+  || !artifactBrowser.selectedPath?.endsWith(join('research-brief', 'AGENTS.md'))
   || !artifactBrowser.fileNames?.includes('AGENTS.md')
-  || artifactBrowser.markdownHeading !== 'Attention'
+  || artifactBrowser.markdownHeading !== '研究简报'
   || artifactBrowser.fileTabSelected !== 'true'
   || !artifactBrowser.nestedInArtifacts
   || artifactBrowser.pageError
@@ -216,6 +209,7 @@ if (
   || !designDocumentsBrowser.selectedPath?.startsWith(join(root, 'docs'))
   || !designDocumentsBrowser.fileNames?.includes('folder-browser-mvp.md')
   || !designDocumentsBrowser.markdownRendered
+  || !designDocumentsBrowser.nestedInSettings
   || designDocumentsBrowser.pageError
   || designDocumentsBrowser.overflowX
 ) {

@@ -29,14 +29,7 @@ export interface ArtifactSnapshot {
   invalidDirectories: string[]
 }
 
-export interface CreateArtifactInput {
-  directoryName: string
-  attention: string
-}
-
 export interface ArtifactApi {
   getSnapshot(): Promise<ArtifactSnapshot>
   refresh(): Promise<ArtifactSnapshot>
-  createArtifact(input: CreateArtifactInput): Promise<ArtifactSnapshot>
-  openRepository(): Promise<void>
 }

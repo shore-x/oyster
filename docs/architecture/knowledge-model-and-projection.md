@@ -34,6 +34,8 @@ Knowledge 浏览器直接扫描这一文件层。全文搜索、邻域图和引�
 
 根 `AGENTS.md` 是当前 Artifact 说明，也是本地维护契约的表达载体。除持久 Attention 外，它以自然语言说明维护目标、证据边界、质量义务和完成条件，不规定固定 Agent 名称、数量、调用次数或编排拓扑。
 
+工作台是 Artifact 文件层面向用户的界面投影。用户通过工作台浏览 Artifact，并可以在未来通过该界面直接维护其内容；工作台不拥有 Artifact，不是新的持久化领域、Repository、Project 或 Workspace，也不改变 Artifact 的身份和生命周期。当前 Artifact 由通用 Chat Agent 根据用户在对话中表达的目标，通过普通文件工具初始化和维护；工作台不提供绕过 Agent 的手动创建表单。
+
 Artifact Domain 不定义全局 Maintainer、Reviewer 或 Critic。结构化知识加工中的 Maintainer 和 Reviewer 是 Knowledge Agent Definition，只服务于具体 Task。Artifact 也可以由用户、通用 Chat Agent、临时协作 Agent 或未来其他机制修订。若未来需要可强制的独立审批、权限分离或 promotion，应由采用它的工作流定义。
 
 ## 4. Knowledge Processing Task

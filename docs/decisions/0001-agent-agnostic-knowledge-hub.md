@@ -23,6 +23,7 @@
 - 修订：2026-08-10，Source Adapter 从完整 Raw Evidence 确定性生成对话优先的 Canonical Activity；对话正文和上下文压缩语义摘要完整保留，工具只保留操作身份与 Raw locator，Codex 的运行时 user-role 信封、参数、结果、模型内部 reasoning、压缩 replacement history、协议包装和重复运行时快照不进入默认正文；Maintainer 完整扫描活动与附件，并按 locator 回查由固定 Raw Evidence 行模型生成的 Evidence page
 - 修订：2026-08-10，明确 Artifact Domain 不定义全局 Maintainer、Reviewer 或 Critic；Artifact 说明表达维护目标、证据边界、质量义务和完成条件，当前通用管理 Agent 只是已实现入口，不排除未来其他维护方式
 - 修订：2026-08-11，依据 ADR-0002，每个 Knowledge Processing Task 使用 `task/<taskId>` branch、tracked `tasks/<taskId>/` 与 Repository 外 linked worktree；Maintainer/Reviewer 不再使用 Observation 专用读取工具
+- 修订：2026-08-11，将 Artifact 的用户界面正式命名为“工作台”；工作台只投影全局 Artifact，不引入 Project 或 Workspace，Artifact 当前由用户通过通用 Chat Agent 对话初始化，界面不提供手动创建表单
 - 关联文档：[ADR-0002](0002-unified-git-agent-collaboration.md)、[Product Brief](../product/product-brief.md)、[本地 Agent 发现与外部证据访问](../product/local-agent-discovery-mvp.md)、[AI Backend MVP](../product/ai-backends-mvp.md)、[知识加工验证 MVP](../product/knowledge-processing-mvp.md)、[Artifact Repository MVP](../product/artifact-repository-mvp.md)、[知识加工、Projection 与 Artifact](../architecture/knowledge-model-and-projection.md)
 
 ## Context
@@ -53,6 +54,8 @@ Attention 可以让 Artifact 自然形成分组，但是否正式引入 Project�
 
 当前统一 Repository 位于 `app.getPath('userData')/repository/`。其中 `artifacts/` 下每个带有可读取普通根 `AGENTS.md` 的一级目录是一个 Artifact；`AGENTS.md` 以无固定 Schema 的 Markdown 表达该 Artifact 的持久 Attention，并作为维护目标、证据边界、质量义务和完成条件的表达载体，其余内部结构任意。四项内容是否表达充分属于内容质量，不进入当前 Artifact 有效性检查。APP 直接扫描文件系统，使用 `artifacts/` 下一级目录的 Repository 相对路径作为当前身份，不建立 manifest、稳定 `artifactId`、Artifact 类型或数据库镜像。缺少或无法读取根 `AGENTS.md` 的可见一级目录不是 Artifact，并在 UI 中明确显示为无效目录。
 
+工作台是上述 Artifact 文件层面向用户的界面投影。它不拥有 Artifact，不引入 Project、Workspace 或新的权威域，也不改变 Chat Conversation 的全局工作坐标。当前用户通过与通用管理 Agent 对话形成新的 Artifact；工作台只负责发现、浏览和打开已有 Artifact，不提供手动创建表单。未来模板只帮助用户形成对话起点，不能成为新的 Artifact 类型。
+
 Git 在这一 MVP 中只是文件历史基础。Oyster 随 APP 捆绑并始终使用私有的标准 Git Runtime；APP 发起 Git 操作时直接调用包内 Git 可执行文件的绝对路径，不通过进程 `PATH` 查找，也不以系统 Git 作为前置条件。私有 Runtime 仍产生可由普通 Git CLI 读取的标准 Repository，不形成 Oyster 专有格式或 Git 方言。
 
 当前通用管理 Agent 可以在普通对话中完成 Artifact 初始化、修订和知识选择，不建立 Artifact Domain 级的固定 Agent 角色或固定 Projection Pipeline；这是当前实现入口，不是对未来维护方式的排他决定。其 `bash` 局部 `PATH` 暴露同一个标准 Git CLI，不增加专用 Git Tool 或替代协议。普通 Artifact 维护不自动继承结构化知识加工的 Reviewer 或 approval。结构化知识加工由 ADR-0002 定义 `task/<taskId>`、外置 linked worktree、Host checkpoint 和“批准但不 merge”；通用 Chat 仍直接使用主 checkout，是后续需要统一的 repo-writer 边界。该实现不把 Git、目录或 `AGENTS.md` 提升为 Artifact Domain 的长期本体。
@@ -69,7 +72,7 @@ Knowledge Statement 是知识层领域语义的 Source of Truth。canonical titl
 
 Knowledge Maintenance Agent 是普通、可替换的工具使用 Agent，其角色由 System Prompt、Task worktree、工具集合和 Host 对自然结束的解释定义，不引入专用状态机或任意的总轮次、工具次数和时长配额。具体 Runtime、上下文管理和工具协议属于可替换实现。
 
-Artifact 不是新的世界事实，也不是可由知识层覆盖式重建的纯派生物。用户可以直接创建或编辑 Artifact；Agent 的后续更新以当前 Artifact 状态为输入，并延续已经接纳的编辑。Artifact 文件修改不会自动回流为知识；对 `knowledge/` 的修改是另一项明确的领域修改，即使两者可以位于同一个 commit。是否为需要深入核查的反馈建立 `Knowledge Need` 或其他异步协议尚未决定。
+Artifact 不是新的世界事实，也不是可由知识层覆盖式重建的纯派生物。当前新的 Artifact 由通用管理 Agent 根据用户对话初始化，用户仍可以直接编辑其正式文件；Agent 的后续更新以当前 Artifact 状态为输入，并延续已经接纳的编辑。Artifact 文件修改不会自动回流为知识；对 `knowledge/` 的修改是另一项明确的领域修改，即使两者可以位于同一个 commit。是否为需要深入核查的反馈建立 `Knowledge Need` 或其他异步协议尚未决定。
 
 本地历史和未来实时来源进入同一观察处理边界。输出侧优先通过 MCP 和本地 API 提供 Pull-based Search/Context。通用管理 Agent 已作为内置协作界面；自动上下文注入、浏览器和其他专用执行产品能力仍延后。
 

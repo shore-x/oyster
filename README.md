@@ -24,9 +24,9 @@ Oyster 是一个独立于外部 Agent Harness 的本地知识与产物中心。�
 - 通过知识页面直接搜索和浏览 `knowledge/**/*.md` 中的全局 Knowledge Statement；
 - 使用持久化的通用 Chat Agent 进行普通对话，并通过 `read`、`edit`、`write`、`bash` 维护 Knowledge 与一个或多个 Artifact；
 - 使用随 APP 捆绑的私有标准 Git Runtime 自动初始化固定的 `userData/repository/`，不依赖系统 Git 或用户 `PATH`；
-- 按“带根 `AGENTS.md` 的一级目录”发现、刷新和创建 Artifact，并显示持久 Attention 与无效目录；
-- 在系统文件管理器中打开 Artifact Repository 或单个 Artifact；Artifact 内部结构任意，通用管理 Agent 可以直接维护其普通文件；
-- 在“产物”页面中，用户 Artifact 与内置的 Oyster 设计文档都按同一种文件夹卡片展示；两者都可以进入同一个通用文件夹浏览器，或在系统文件管理器中打开对应文件夹；浏览器完整列出所有文件，Markdown 支持相对链接和 `[[...]]` 预览跳转，其他 UTF-8 文件按纯文本展示；设计文档的 UI 位置不改变其非 Artifact 的领域语义，也不会使其进入用户 Artifact Repository；
+- 按“带根 `AGENTS.md` 的一级目录”发现和刷新 Artifact，并在“工作台”中显示持久 Attention 与无效目录；新的 Artifact 由通用 Chat Agent 根据用户对话通过普通文件工具初始化，工作台不提供手动创建表单；
+- 在工作台中浏览 Artifact，或在系统文件管理器中打开单个 Artifact；Artifact 内部结构任意，通用管理 Agent 可以直接维护其普通文件；
+- Artifact 与内置 Oyster 设计文档复用同一个通用文件夹浏览器；工作台只展示 Artifact，设计文档从设置的通用区域进入；浏览器完整列出所有文件，Markdown 支持相对链接和 `[[...]]` 预览跳转，其他 UTF-8 文件按纯文本展示；
 - 在专门的 Skills 页面分开展示 Oyster 管理的 Skill Artifact 与其他 Agent 的外部注册事实，并预览各自入口文档；
 - 将有效 Skill Artifact 的 `output/` 通过安全、可撤销的目录 symlink 绑定到 Claude Code、Pi 或 Codex 的用户级 Skill 注册位置；
 - 提供 Maintainer → Reviewer 完整加工测试，并保留高级阶段调试；
@@ -83,7 +83,7 @@ src/main/knowledge-store
 src/main/chat
   基于 Pi Agent Core 的通用管理 Agent、文件/Coding 工具、JSONL 会话与默认 Prompt 配置
 src/main/artifacts
-  全局 Artifact 目录扫描与创建，以及 Skill Artifact 派生识别
+  全局 Artifact 目录扫描，以及 Skill Artifact 派生识别
 src/main/folder-browser
   任意绝对文件夹的只读树发现、原始文件读取与系统打开
 src/main/repository
@@ -97,7 +97,7 @@ src/shared       Main / Preload / Renderer 共用契约
 
 AI Connection 元数据和唯一 Default LLM 保存在 `userData/ai-connections.json`；Maintainer/Reviewer Prompt 覆盖独立保存在 `userData/knowledge-processing.json`；OAuth 与 API Key 凭据只保存在系统 Keychain。通用 Chat Agent 的默认 Prompt 保存在 `userData/chat-agent.json`，完整对话与工具消息使用 Pi JSONL 格式独立保存在 `userData/chat-sessions/`。新 Session 捕获创建时的 Default LLM，已有 Session 不随默认值变化；Session 不绑定 Artifact、Project 或独立 `cwd`。
 
-APP 固定创建一个 `userData/repository/` 标准 Git Repository。`knowledge/` 与 `artifacts/` 是全局事实层；`runs/<run-id>/` 是与二者并列的过程记录，不拥有或复制领域文件。每个带根 `AGENTS.md` 的 `artifacts/` 一级目录是一个 Artifact，`AGENTS.md` 表达持久 Attention，其余内容保持包容。根部存在 `output` 时，Skill 应用派生出 Skill Artifact 视图，但不增加 manifest 或核心 Artifact 类型。Knowledge 与 Artifact 页面直接读取文件系统，不维护数据库镜像。
+APP 固定创建一个 `userData/repository/` 标准 Git Repository。`knowledge/` 与 `artifacts/` 是全局事实层；`runs/<run-id>/` 是与二者并列的过程记录，不拥有或复制领域文件。每个带根 `AGENTS.md` 的 `artifacts/` 一级目录是一个 Artifact，`AGENTS.md` 表达持久 Attention，其余内容保持包容。根部存在 `output` 时，Skill 应用派生出 Skill Artifact 视图，但不增加 manifest 或核心 Artifact 类型。知识库与工作台分别直接读取 Knowledge 和 Artifact 文件层，不维护数据库镜像；工作台只是用户界面，不引入 Project 或 Workspace。
 
 结构化知识加工从 `main` 创建 `processing/<run-id>` 分支，但所有 Agent 都在同一个物理工作树和 Repository 根工作，不创建 worktree、Workspace 副本或 symlink。Maintainer 创建 Knowledge/Artifact commit；Reviewer 请求修改时提交反馈，批准时只由 Harness 在当前 Run 的 `WORK.md` 记录精确 candidate OID。Reviewer 不 merge。`runs/` 被 Git 忽略，因此运行记录不会污染候选内容 diff；当前模型暂不加入并发锁、队列或 promotion 治理。
 

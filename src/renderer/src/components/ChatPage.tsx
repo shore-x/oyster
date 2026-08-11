@@ -216,7 +216,7 @@ export function ChatPage(props: ChatPageProps) {
           <div class="page-summary">
             <span><strong>{controller.state().conversations.length}</strong> {uiText('个对话', 'conversations')}</span>
             <span class="page-summary__separator">·</span>
-            <span>{uiText('管理知识与产物', 'Manage Knowledge and Artifacts')}</span>
+            <span>{uiText('管理知识与工作台内容', 'Manage Knowledge and Workbench content')}</span>
           </div>
         </div>
         <Button variant="primary" icon="plus" onClick={startNew}>{uiText('新对话', 'New Chat')}</Button>

@@ -35,27 +35,6 @@ export function App() {
     setArtifactBrowserTarget(target)
   }
 
-  const browseDesignDocuments = async (): Promise<void> => {
-    try {
-      browseFolder({
-        folderPath: await window.oyster.folderBrowser.getDesignDocumentsPath(),
-        label: uiText('Oyster 设计文档', 'Oyster Design Documents')
-      })
-    } catch (error) {
-      setNavigationError(error instanceof Error ? error.message : String(error))
-    }
-  }
-
-  const openDesignDocuments = async (): Promise<void> => {
-    try {
-      setNavigationError(undefined)
-      const folderPath = await window.oyster.folderBrowser.getDesignDocumentsPath()
-      await window.oyster.folderBrowser.openFolder(folderPath)
-    } catch (error) {
-      setNavigationError(error instanceof Error ? error.message : String(error))
-    }
-  }
-
   return (
     <div class="app-shell">
       <aside class="sidebar">
@@ -79,7 +58,7 @@ export function App() {
             data-testid="nav-artifacts"
             class={`nav-item${page() === 'artifacts' ? ' nav-item--active' : ''}`}
             onClick={(event) => { event.preventDefault(); navigateTo('artifacts') }}
-          ><Icon name="folder" /><span>{uiText('产物', 'Artifacts')}</span></a>
+          ><Icon name="folder" /><span>{uiText('工作台', 'Workbench')}</span></a>
           <a
             href="#sources"
             data-testid="nav-sources"
@@ -176,13 +155,12 @@ export function App() {
         <div class="ui-page ui-page--workspace" data-testid="page-artifacts" hidden={page() !== 'artifacts'}>
           <ArtifactsPage
             browserTarget={artifactBrowserTarget()}
-            onBrowseDesignDocuments={() => void browseDesignDocuments()}
-            onOpenDesignDocuments={openDesignDocuments}
             onBrowseArtifact={(artifact) => browseFolder({
               folderPath: artifact.directoryPath,
               label: artifact.directoryName
             })}
             onCloseBrowser={() => setArtifactBrowserTarget(undefined)}
+            onStartConversation={() => navigateTo('chat')}
             onManageSkill={(artifactDirectoryName) => {
               setSkillsNavigation((current) => ({
                 artifactDirectoryName,

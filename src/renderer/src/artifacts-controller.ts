@@ -1,5 +1,5 @@
 import { createSignal, onMount } from 'solid-js'
-import type { ArtifactSnapshot, CreateArtifactInput } from '../../shared/artifacts'
+import type { ArtifactSnapshot } from '../../shared/artifacts'
 
 function errorText(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
@@ -48,11 +48,6 @@ export function createArtifactsController() {
     busy,
     error,
     refresh: () => update('refresh', () => window.oyster.artifacts.refresh()),
-    createArtifact: (input: CreateArtifactInput) => update(
-      'create',
-      () => window.oyster.artifacts.createArtifact(input)
-    ),
-    openRepository: () => open('open-repository', () => window.oyster.artifacts.openRepository()),
     openFolder: (folderPath: string, key: string) => open(
       `open:${key}`,
       () => window.oyster.folderBrowser.openFolder(folderPath)
