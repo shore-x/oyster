@@ -26,7 +26,7 @@ describe('JsonDiscoveryRepository', () => {
           discoveryState: 'found',
           scanState: 'ready',
           fileCount: 1,
-          sessionCount: 1,
+          conversationCount: 1,
           instructionFileCount: 0,
           totalBytes: 10,
           invalidFileCount: 0,
@@ -95,8 +95,11 @@ describe('JsonDiscoveryRepository', () => {
         fingerprint: 'legacy-fingerprint'
       }
     ])
-    expect(state.runs).toEqual([expect.objectContaining({ id: 'legacy-scan', state: 'completed' })])
-    expect(state.runs[0]).not.toHaveProperty('kind')
+    expect(state.scans).toEqual([expect.objectContaining({
+      scanId: 'legacy-scan',
+      status: 'completed'
+    })])
+    expect(state.scans[0]).not.toHaveProperty('kind')
   })
 
   it('loads the previous artifacts catalog as source records', async () => {
@@ -143,10 +146,10 @@ describe('JsonDiscoveryRepository', () => {
         modifiedAt: '2026-07-26T00:00:00.000Z',
         fingerprint: 'b'.repeat(64)
       }],
-      runs: [{
-        id: 'scan-one',
+      scans: [{
+        scanId: 'scan-one',
         sourceId: 'source:codex',
-        state: 'completed',
+        status: 'completed',
         totalFiles: 1,
         processedFiles: 1,
         totalBytes: 20,

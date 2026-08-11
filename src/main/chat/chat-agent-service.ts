@@ -1,12 +1,12 @@
 import type {
-  CancelChatRunInput,
+  CancelChatInvocationInput,
   ChatApi,
   ChatEvent,
-  ChatSessionDetail,
-  ChatSessionModelBinding,
-  ChatSnapshot,
-  CreateChatSessionInput,
-  DeleteChatSessionInput,
+  ChatConversationDetail,
+  ChatConversationModelBinding,
+  ChatStateView,
+  CreateChatConversationInput,
+  DeleteChatConversationInput,
   SaveChatDefaultInstructionsInput,
   SendChatMessageInput
 } from '../../shared/chat'
@@ -17,20 +17,27 @@ import type {
   ChatAiBackendPort,
   ChatConfigurationRepository,
   ChatConfigurationStateData,
-  ChatSessionRepository
+  ChatConversationRepository
 } from './model'
 import { chatAgentToolViews } from './chat-tool-catalog'
 import { DEFAULT_CHAT_AGENT_SYSTEM_PROMPT } from './prompt'
 import { PiChatAgent } from './pi-chat-agent'
+import { createPiAgentInvocationRecorder } from '../agent-runtime/pi-agent-invocation-recorder'
+import type { AgentInvocationDebugRecord } from '../../shared/agent-runtime'
+import {
+  InMemoryAgentDebugStore,
+  type AgentDebugStore
+} from '../agent-runtime/agent-debug-store'
 
-const MAX_SESSION_TITLE_LENGTH = 512
+const MAX_CONVERSATION_TITLE_LENGTH = 512
 
 export interface ChatAgentServiceOptions {
-  sessions: ChatSessionRepository
+  conversations: ChatConversationRepository
   configuration: ChatConfigurationRepository
   aiBackend: ChatAiBackendPort
   repositoryPath: string
   agent?: ChatAgentRuntime
+  debugStore?: AgentDebugStore
 }
 
 function requiredString(value: unknown, label: string, maximum?: number): string {
@@ -56,14 +63,23 @@ function automaticTitle(text: string): string {
 
 export class ChatAgentService implements ChatApi {
   private readonly agent: ChatAgentRuntime
+  private readonly debugStore: AgentDebugStore
   private readonly listeners = new Set<(event: ChatEvent) => void>()
-  private readonly activeRuns = new Map<string, AbortController>()
+  private readonly activeInvocations = new Map<string, {
+    invocationId: string
+    controller: AbortController
+  }>()
   private state: ChatConfigurationStateData = {}
   private configurationError?: string
   private mutationQueue: Promise<void> = Promise.resolve()
 
   constructor(private readonly options: ChatAgentServiceOptions) {
-    this.agent = options.agent ?? new PiChatAgent(options.repositoryPath)
+    this.debugStore = options.debugStore ?? new InMemoryAgentDebugStore()
+    this.agent = options.agent ?? new PiChatAgent(
+      options.repositoryPath,
+      undefined,
+      this.debugStore
+    )
   }
 
   async initialize(): Promise<void> {
@@ -90,10 +106,10 @@ export class ChatAgentService implements ChatApi {
     }
   }
 
-  private async emitSnapshot(): Promise<ChatSnapshot> {
-    const snapshot = await this.getSnapshot()
-    this.emit({ type: 'snapshot_changed', snapshot })
-    return snapshot
+  private async emitState(): Promise<ChatStateView> {
+    const state = await this.getState()
+    this.emit({ type: 'state_changed', state })
+    return state
   }
 
   private enqueueMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -108,7 +124,7 @@ export class ChatAgentService implements ChatApi {
     }
   }
 
-  private validateModelBinding(binding: ChatSessionModelBinding): ChatSessionModelBinding {
+  private validateModelBinding(binding: ChatConversationModelBinding): ChatConversationModelBinding {
     if (!binding || typeof binding !== 'object') throw new Error('对话模型绑定无效')
     const connectionId = requiredString(binding.connectionId, 'Connection ID', 512)
     const modelId = requiredString(binding.modelId, 'Model ID', 512)
@@ -132,17 +148,17 @@ export class ChatAgentService implements ChatApi {
     }
   }
 
-  async getSnapshot(): Promise<ChatSnapshot> {
-    const sessions = (await this.options.sessions.list()).map((session) => ({
-      ...session,
-      isRunning: this.activeRuns.has(session.id)
+  async getState(): Promise<ChatStateView> {
+    const conversations = (await this.options.conversations.list()).map((conversation) => ({
+      ...conversation,
+      hasActiveInvocation: this.activeInvocations.has(conversation.id)
     }))
     return structuredClone({
       agent: {
         id: CHAT_AGENT_ID,
         displayName: '通用 Agent',
         description: '理解和维护 Oyster 的 Knowledge 与 Artifact。',
-        runtime: 'pi_agent_core' as const,
+        runtime: 'pi_coding_agent' as const,
         tools: chatAgentToolViews(this.options.repositoryPath).map((tool) => (
           structuredClone(tool)
         )),
@@ -150,104 +166,147 @@ export class ChatAgentService implements ChatApi {
         defaultInstructions: this.defaultInstructions(),
         isDefaultCustomized: Boolean(this.state.defaultInstructionsOverride)
       },
-      sessions,
+      conversations,
       ...(this.configurationError ? { configurationError: this.configurationError } : {})
     })
   }
 
-  async createSession(input: CreateChatSessionInput): Promise<ChatSessionDetail> {
+  async createConversation(input: CreateChatConversationInput): Promise<ChatConversationDetail> {
     if (!input || typeof input !== 'object') throw new Error('新建对话参数无效')
     const defaultLlm = this.options.aiBackend.snapshot().defaultLlm
     if (!defaultLlm) throw new Error('请先在 AI 后端页面配置默认 LLM')
     const binding = this.validateModelBinding(defaultLlm)
     const title = input.title === undefined
       ? undefined
-      : requiredString(input.title, '对话标题', MAX_SESSION_TITLE_LENGTH)
-    const opened = await this.options.sessions.create({
+      : requiredString(input.title, '对话标题', MAX_CONVERSATION_TITLE_LENGTH)
+    const opened = await this.options.conversations.create({
       ...binding,
       systemPrompt: this.defaultInstructions()
     }, title)
-    const metadata = await opened.session.getMetadata()
-    const detail = await this.options.sessions.detail(metadata.id)
-    await this.emitSnapshot()
+    const detail = await this.options.conversations.detail(opened.id)
+    await this.emitState()
     return detail
   }
 
-  async readSession(sessionId: string): Promise<ChatSessionDetail> {
-    const normalizedId = requiredString(sessionId, 'Session ID', 512)
-    return this.options.sessions.detail(normalizedId, this.activeRuns.has(normalizedId))
+  async readConversation(conversationId: string): Promise<ChatConversationDetail> {
+    const normalizedId = requiredString(conversationId, 'Conversation ID', 512)
+    return this.options.conversations.detail(
+      normalizedId,
+      this.activeInvocations.has(normalizedId)
+    )
   }
 
-  async deleteSession(input: DeleteChatSessionInput): Promise<ChatSnapshot> {
+  async deleteConversation(input: DeleteChatConversationInput): Promise<ChatStateView> {
     if (!input || typeof input !== 'object') throw new Error('删除对话参数无效')
-    const sessionId = requiredString(input.sessionId, 'Session ID', 512)
-    if (this.activeRuns.has(sessionId)) throw new Error('运行中的对话不能删除；请先取消当前运行')
-    await this.options.sessions.delete(sessionId)
-    return this.emitSnapshot()
+    const conversationId = requiredString(input.conversationId, 'Conversation ID', 512)
+    if (this.activeInvocations.has(conversationId)) {
+      throw new Error('存在进行中的 Agent Invocation；请先取消再删除对话')
+    }
+    await this.options.conversations.delete(conversationId)
+    return this.emitState()
   }
 
-  async sendMessage(input: SendChatMessageInput): Promise<ChatSessionDetail> {
+  async sendMessage(input: SendChatMessageInput): Promise<ChatConversationDetail> {
     if (!input || typeof input !== 'object') throw new Error('发送消息参数无效')
-    const sessionId = requiredString(input.sessionId, 'Session ID', 512)
+    const conversationId = requiredString(input.conversationId, 'Conversation ID', 512)
     const text = requiredString(input.text, '消息')
-    if (this.activeRuns.has(sessionId)) throw new Error('该对话正在运行')
+    if (this.activeInvocations.has(conversationId)) {
+      throw new Error('该对话已有进行中的 Agent Invocation')
+    }
+    const rootInvocationId = randomUUID()
     const controller = new AbortController()
-    // Reserve synchronously, before the first repository await, so two sends cannot enter
-    // the same Pi Session concurrently.
-    this.activeRuns.set(sessionId, controller)
-    let runAnnounced = false
+    // Reserve synchronously so two messages cannot enter the same Chat Conversation concurrently.
+    this.activeInvocations.set(conversationId, { invocationId: rootInvocationId, controller })
+    const observedInvocations = new Map<string, AgentInvocationDebugRecord>()
+    const observeInvocation = (record: AgentInvocationDebugRecord): void => {
+      observedInvocations.set(record.id, structuredClone(record))
+      this.emit({
+        type: 'invocation_updated',
+        conversationId,
+        invocation: structuredClone(record)
+      })
+    }
+    const placeholder = createPiAgentInvocationRecorder({
+      agentId: CHAT_AGENT_ID,
+      invocationId: rootInvocationId,
+      debugStore: this.debugStore,
+      onUpdate: observeInvocation
+    })
+    this.emit({
+      type: 'invocation_state_changed',
+      conversationId,
+      invocationId: rootInvocationId,
+      status: 'in_progress'
+    })
     let status: 'completed' | 'failed' | 'cancelled' = 'completed'
     let failure: Error | undefined
+    let opened: Awaited<ReturnType<ChatConversationRepository['open']>> | undefined
     try {
-      const opened = await this.options.sessions.open(sessionId)
+      const openedConversation = await this.options.conversations.open(conversationId)
+      opened = openedConversation
       controller.signal.throwIfAborted()
-      if (!await opened.session.getSessionName()) {
-        await opened.session.appendSessionName(automaticTitle(text))
+      if (!openedConversation.piSessionManager.getSessionName()) {
+        await this.options.conversations.setTitle(conversationId, automaticTitle(text))
       }
       controller.signal.throwIfAborted()
-      this.emit({ type: 'run_state_changed', sessionId, status: 'running' })
-      runAnnounced = true
-      await this.options.aiBackend.withModelRuntime(
-        opened.binding.connectionId,
-        opened.binding.modelId,
-        (runtime) => this.agent.run({
-          sessionId,
-          session: opened.session,
-          binding: opened.binding,
-          runtime,
+      await this.options.aiBackend.withModelStream(
+        openedConversation.binding.connectionId,
+        openedConversation.binding.modelId,
+        (modelStream) => this.agent.invoke({
+          conversationId,
+          rootInvocationId,
+          piSessionManager: openedConversation.piSessionManager,
+          binding: openedConversation.binding,
+          modelStream,
           text,
           signal: controller.signal,
+          onInvocationUpdate: observeInvocation,
           onEvent: (event) => this.emit(event)
         }),
         { trackHealth: true }
       )
     } catch (error) {
-      failure = safeError(error, '对话 Agent 运行失败')
+      failure = safeError(error, 'Chat Agent Invocation 失败')
       status = controller.signal.aborted ? 'cancelled' : 'failed'
     } finally {
-      this.activeRuns.delete(sessionId)
+      this.activeInvocations.delete(conversationId)
     }
 
-    if (runAnnounced) {
-      this.emit({
-        type: 'run_state_changed',
-        sessionId,
-        status,
-        ...(failure ? { error: failure.message } : {})
-      })
+    const rootInvocation = observedInvocations.get(rootInvocationId)
+    if (!rootInvocation || rootInvocation.status === 'in_progress') {
+      placeholder.complete(status, failure)
     }
-    await this.emitSnapshot()
+    if (opened) {
+      for (const invocation of observedInvocations.values()) {
+        if (invocation.status !== 'in_progress') {
+          await this.options.conversations.appendInvocation(
+            conversationId,
+            invocation
+          )
+        }
+      }
+    }
+    this.emit({
+      type: 'invocation_state_changed',
+      conversationId,
+      invocationId: rootInvocationId,
+      status,
+      ...(failure ? { error: failure.message } : {})
+    })
+    await this.emitState()
     if (failure) throw failure
-    return this.options.sessions.detail(sessionId)
+    return this.options.conversations.detail(conversationId)
   }
 
-  async cancelRun(input: CancelChatRunInput): Promise<void> {
+  async cancelInvocation(input: CancelChatInvocationInput): Promise<void> {
     if (!input || typeof input !== 'object') throw new Error('取消对话参数无效')
-    const sessionId = requiredString(input.sessionId, 'Session ID', 512)
-    this.activeRuns.get(sessionId)?.abort(new Error('用户取消了对话 Agent 运行'))
+    const conversationId = requiredString(input.conversationId, 'Conversation ID', 512)
+    this.activeInvocations.get(conversationId)?.controller.abort(
+      new Error('用户取消了对话 Agent Invocation')
+    )
   }
 
-  async saveDefaultInstructions(input: SaveChatDefaultInstructionsInput): Promise<ChatSnapshot> {
+  async saveDefaultInstructions(input: SaveChatDefaultInstructionsInput): Promise<ChatStateView> {
     if (!input || typeof input !== 'object') throw new Error('System Prompt 配置无效')
     return this.enqueueMutation(async () => {
       this.assertConfigurationWritable()
@@ -259,7 +318,7 @@ export class ChatAgentService implements ChatApi {
         : {}
       await this.options.configuration.save(nextState)
       this.state = nextState
-      return this.emitSnapshot()
+      return this.emitState()
     })
   }
 
@@ -269,9 +328,10 @@ export class ChatAgentService implements ChatApi {
   }
 
   dispose(): void {
-    for (const controller of this.activeRuns.values()) {
-      controller.abort(new Error('Oyster 正在退出'))
+    for (const active of this.activeInvocations.values()) {
+      active.controller.abort(new Error('Oyster 正在退出'))
     }
     this.listeners.clear()
   }
 }
+import { randomUUID } from 'node:crypto'

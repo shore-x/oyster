@@ -5,7 +5,10 @@ import type {
   AiProviderId,
   ReasoningEffort
 } from '../../shared/ai-backends'
-import type { ProcessingConnectionView, ProcessingRuntime } from '../../shared/knowledge-processing'
+import type {
+  AiConnectionView,
+  KnowledgeAgentRuntimeKind
+} from '../../shared/knowledge-processing'
 
 export const REASONING_LABELS: Record<ReasoningEffort, string> = {
   minimal: 'Minimal',
@@ -49,18 +52,18 @@ export function connectionStatusLabel(status: AiConnectionStatus): string {
   return CONNECTION_STATUS_LABELS[status]
 }
 
-export function connectionCanAttemptRun(
-  connection: ProcessingConnectionView | undefined
+export function connectionCanInvokeAgent(
+  connection: AiConnectionView | undefined
 ): boolean {
   if (!connection) return false
-  // Health is advisory: an unchecked or previously failed connection may be retried by a real run.
+  // Health is advisory: an unchecked or previously failed connection may be retried.
   return connection.status === 'unverified'
     || connection.status === 'ready'
     || connection.status === 'unavailable'
 }
 
-export function runtimeLabel(runtime: ProcessingRuntime): string {
-  return runtime === 'pi_agent_core' ? 'Pi Agent Core' : runtime
+export function runtimeLabel(runtime: KnowledgeAgentRuntimeKind): string {
+  return runtime === 'pi_coding_agent' ? 'Pi Coding Agent SDK' : runtime
 }
 
 export function reasoningLabel(reasoningEffort?: ReasoningEffort): string {
@@ -69,7 +72,7 @@ export function reasoningLabel(reasoningEffort?: ReasoningEffort): string {
 
 export function selectedLlmModel(
   binding: LlmBinding | undefined,
-  connection: ProcessingConnectionView | undefined
+  connection: AiConnectionView | undefined
 ) {
   return connection?.models.find((model) => model.id === binding?.modelId)
 }

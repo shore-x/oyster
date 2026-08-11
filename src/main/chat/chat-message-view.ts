@@ -47,7 +47,7 @@ export function chatMessageView(message: AgentMessage): ChatMessageView {
     }
   }
   if (message.role !== 'toolResult') {
-    throw new Error(`对话 Session 包含不支持的内部消息类型：${message.role}`)
+    throw new Error(`Chat Conversation 包含不支持的内部消息类型：${message.role}`)
   }
   return {
     role: 'tool',

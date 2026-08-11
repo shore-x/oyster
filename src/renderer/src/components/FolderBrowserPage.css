@@ -1,4 +1,18 @@
 .folder-browser-page { min-width: 0; }
+.folder-browser-page--embedded { display: flex; height: 100%; min-height: 0; flex-direction: column; }
+
+.folder-browser-page__embedded-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-width: 0;
+  padding: 13px 14px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-default);
+  border-bottom: 0;
+  border-radius: var(--radius-surface) var(--radius-surface) 0 0;
+}
+.folder-browser-page__embedded-header h1 { margin-bottom: 4px; font-size: var(--font-size-title); }
 
 .folder-browser-page__heading {
   display: flex;
@@ -15,8 +29,7 @@
 
 .folder-browser {
   display: grid;
-  height: max(560px, calc(100vh - 170px));
-  height: max(560px, calc(100dvh - 170px));
+  height: 100%;
   min-height: 0;
   grid-template-columns: 300px minmax(0, 1fr);
   margin-top: 24px;
@@ -26,6 +39,8 @@
   border-radius: var(--radius-surface);
   box-shadow: var(--shadow-surface);
 }
+
+.folder-browser-page--embedded .folder-browser { flex: 1; margin-top: 0; border-radius: 0 0 var(--radius-surface) var(--radius-surface); }
 
 .folder-browser__tree {
   display: grid;

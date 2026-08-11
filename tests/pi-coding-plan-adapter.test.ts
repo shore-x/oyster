@@ -430,14 +430,14 @@ describe('PiCodingPlanAdapter', () => {
     expect((outputError as Error).message).toContain('不完整')
   })
 
-  it('provides a selected-model StreamFn for Pi Agent Core', () => {
+  it('provides a selected-model StreamFn for the Pi Coding Agent SDK bridge', () => {
     const { adapter, models } = createAdapter()
-    const runtime = adapter.runtime(MODEL.id)
+    const modelStream = adapter.modelStream(MODEL.id)
     const context: Context = { messages: [] }
-    const output = runtime.streamFn(runtime.model, context, { reasoning: 'high' })
+    const output = modelStream.streamFn(modelStream.model, context, { reasoning: 'high' })
 
     expect(output).toBe(models.stream)
-    expect(runtime.model.id).toBe(MODEL.id)
+    expect(modelStream.model.id).toBe(MODEL.id)
     expect(models.streamCalls).toEqual([{
       model: MODEL,
       context,
@@ -447,13 +447,13 @@ describe('PiCodingPlanAdapter', () => {
 
   it('preserves a bounded per-request timeout supplied to the Pi Agent StreamFn', () => {
     const { adapter, models } = createAdapter()
-    const runtime = adapter.runtime(MODEL.id)
+    const modelStream = adapter.modelStream(MODEL.id)
     const context: Context = { messages: [] }
 
-    runtime.streamFn(runtime.model, context, { timeoutMs: 30_000 })
+    modelStream.streamFn(modelStream.model, context, { timeoutMs: 30_000 })
 
     expect(models.streamCalls[0]?.options?.timeoutMs).toBe(30_000)
-    expect(() => runtime.streamFn(runtime.model, context, { timeoutMs: 0 }))
+    expect(() => modelStream.streamFn(modelStream.model, context, { timeoutMs: 0 }))
       .toThrow('请求超时')
   })
 })

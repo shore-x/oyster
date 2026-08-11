@@ -23,13 +23,17 @@ const exitCode = await new Promise((resolveExit) => child.once('exit', resolveEx
 if (exitCode !== 0) throw new Error(`Electron UI smoke test exited with code ${exitCode}`)
 
 const semantics = JSON.parse(await readFile(`${capturePath}.json`, 'utf8'))
+if (semantics.defaultPage !== 'chat') throw new Error('Chat is not the default product page')
 if (semantics.title !== 'Agent 数据来源') throw new Error('Expected page title was not rendered')
+if (semantics.documentScrollY !== 0 || semantics.bodyOverflow !== 'hidden') {
+  throw new Error('The document still owns business scrolling instead of the App Shell')
+}
 if (semantics.sourceCards !== 3) throw new Error(`Expected 3 source cards, got ${semantics.sourceCards}`)
 if (semantics.dragRegion !== 'drag') throw new Error('Right-side window drag region is missing')
 if (
   semantics.headerDragRegion !== 'drag'
   || semantics.headerPosition !== 'sticky'
-  || semantics.headerTop !== '52px'
+  || semantics.headerTop !== '0px'
   || semantics.headerActionRegion !== 'no-drag'
 ) {
   throw new Error('Page Header does not provide a sticky drag surface with interactive controls')
@@ -51,7 +55,7 @@ if (semantics.buttonIconCount < semantics.sharedButtonCount) throw new Error('A 
 if (semantics.overflowX) throw new Error('Page has unexpected horizontal overflow')
 if (!semantics.primaryActions.includes('探测本机 Agent')) throw new Error('Discovery action is missing')
 if (semantics.collapsedSourceDetails !== semantics.sourceDetailCount) throw new Error('Source details are not collapsed by default')
-if (!semantics.sourceSummary?.includes('个会话')) throw new Error('Source summary does not expose the essential scan information')
+if (!semantics.sourceSummary?.includes('个对话')) throw new Error('Source summary does not expose the essential scan information')
 if (semantics.defaultBodyText.includes('内容将在使用时从原始位置读取')) throw new Error('Source detail is visible before disclosure')
 if (!semantics.bodyText.includes('内容将在使用时从原始位置读取')) throw new Error('On-demand source reading is not explained after disclosure')
 for (const removedCopy of ['打开导入目录', '正在导入原始记录', '已全部导入']) {
@@ -159,6 +163,8 @@ if (
   || !artifactBrowser.selectedPath?.endsWith(join('attention-tracking', 'AGENTS.md'))
   || !artifactBrowser.fileNames?.includes('AGENTS.md')
   || artifactBrowser.markdownHeading !== 'Attention'
+  || artifactBrowser.fileTabSelected !== 'true'
+  || !artifactBrowser.nestedInArtifacts
   || artifactBrowser.pageError
   || artifactBrowser.overflowX
 ) {
@@ -195,7 +201,7 @@ if (
 if (
   knowledge.browse.linkLabel !== '知识维护 Agent'
   || knowledge.browse.linkPreviewTitle !== 'Knowledge Maintenance Agent'
-  || !knowledge.browse.linkPreview?.includes('TASK.md、WORK.md')
+  || !knowledge.browse.linkPreview?.includes('BRIEF.md、PROGRESS.md')
 ) {
   throw new Error('Knowledge browser did not render the wikilink alias and hover preview')
 }
@@ -314,6 +320,7 @@ if (!knowledge.clear.result?.includes('已清空 4 条知识')) {
 }
 
 if (semantics.ai.agent.title !== 'AI 后端') throw new Error('AI backend page was not rendered')
+if (!semantics.ai.agent.nestedInSettings) throw new Error('AI backend is not contained by the Settings page')
 if (semantics.ai.agent.backendKind !== 'coding_plan') throw new Error('Coding Plan is not the default backend')
 if (semantics.ai.agent.provider !== 'openai_codex') throw new Error('OpenAI Codex is not selected for the Coding Plan backend')
 if (semantics.ai.agent.codexCards !== 1) throw new Error('Codex runtime card is missing')
@@ -353,6 +360,7 @@ const agentConfiguration = semantics.agentConfiguration
 if (agentConfiguration?.title !== 'Agent 配置' || agentConfiguration.roleCount !== 3) {
   throw new Error('Agent configuration page does not list the registered Agents')
 }
+if (!agentConfiguration.nestedInSettings) throw new Error('Agent configuration is not contained by the Settings page')
 if (
   agentConfiguration.maintenanceToolNames?.join(',')
     !== 'read,bash,edit,write'
@@ -403,7 +411,7 @@ if (
 }
 if (
   agentConfiguration.chatSpawnSchema?.type !== 'object'
-  || !agentConfiguration.chatSpawnSchema?.required?.includes('task')
+  || !agentConfiguration.chatSpawnSchema?.required?.includes('instruction')
 ) {
   throw new Error('The conversational Agent delegation schema is not available to developers')
 }
@@ -416,8 +424,8 @@ if (
 if (agentConfiguration.overflowX) throw new Error('Agent configuration page has unexpected horizontal overflow')
 
 const chat = semantics.chat
-if (chat?.title !== '对话' || chat.sessionCount !== 1) {
-  throw new Error('The conversational Agent page did not create a persistent Session')
+if (chat?.title !== '对话' || chat.conversationCount !== 1) {
+  throw new Error('The conversational Agent page did not create a persistent Chat Conversation')
 }
 if (!chat.selectedModel || !chat.binding?.includes(chat.selectedModel)) {
   throw new Error('The conversational Agent did not expose its frozen model binding')
@@ -432,15 +440,25 @@ if (!chat.composerVisible || !chat.workspaceWithinViewport || chat.overflowX) {
   throw new Error('The conversational workspace does not remain within the viewport')
 }
 if (
-  chat.runViewCount !== 1
+  chat.documentScrollY !== 0
+  || chat.conversationOverflowY !== 'auto'
+  || chat.messagesOverflowY !== 'auto'
+) {
+  throw new Error('Chat panes do not own their independent scrolling')
+}
+if (
+  chat.invocationViewCount !== 1
   || !chat.modelCallAction
   || !chat.modelCallInspector
   || !chat.modelCallContext?.includes('请简要介绍你能如何使用知识库')
 ) {
-  throw new Error('The conversational page does not use the shared Agent run visualization')
+  throw new Error('The conversational page does not use the shared Agent Invocation visualization')
 }
 if (chat.overflowWithInspector) {
   throw new Error('The conversational Model Call inspector causes horizontal overflow')
+}
+if (chat.inspectorRole !== 'complementary' || chat.inspectorModal) {
+  throw new Error('Model Call details must use a non-modal contextual inspector')
 }
 if (
   chat.inspectorPosition !== 'fixed'
@@ -460,125 +478,125 @@ if (
 
 const processing = semantics.processing
 if (processing.title !== '加工测试') throw new Error('Knowledge processing page was not rendered')
-if (processing.fullChain.fullChainSelected !== 'true' || !processing.fullChain.workspaceExists) {
-  throw new Error('Full-chain Run view is not the default knowledge processing view')
+if (processing.knowledgeTask.knowledgeTaskSelected !== 'true' || !processing.knowledgeTask.workspaceExists) {
+  throw new Error('Knowledge Processing Task is not the default knowledge processing view')
 }
-if (processing.fullChain.sessionOptionCount !== 2) {
-  throw new Error(`Expected one available fixture Session, got ${processing.fullChain.sessionOptionCount - 1}`)
+if (processing.knowledgeTask.sourceConversationOptionCount !== 2) {
+  throw new Error(`Expected one available fixture Source Conversation, got ${processing.knowledgeTask.sourceConversationOptionCount - 1}`)
 }
-if (!processing.fullChain.refreshSessionsButtonExists) {
-  throw new Error('The Session selector does not expose local catalog refresh')
+if (!processing.knowledgeTask.refreshSourceConversationsButtonExists) {
+  throw new Error('The Source Conversation selector does not expose local catalog refresh')
 }
-if (!processing.fullChain.fullChainButtonExists || processing.fullChain.fullChainButtonDisabled !== true) {
-  throw new Error('Full-chain action must wait for an explicit Session selection')
+if (!processing.knowledgeTask.knowledgeTaskButtonExists || processing.knowledgeTask.knowledgeTaskButtonDisabled !== true) {
+  throw new Error('Knowledge Task action must wait for an explicit Source Conversation selection')
 }
-if (!processing.fullChain.initialDisabledReason?.includes('选择一个 Session')) {
-  throw new Error('Full-chain view does not explain why the action is initially disabled')
+if (!processing.knowledgeTask.initialDisabledReason?.includes('选择一个 Source Conversation')) {
+  throw new Error('Knowledge Task view does not explain why the action is initially disabled')
 }
-if (!processing.fullChain.selectedSession || processing.fullChain.fullChainButtonEnabledAfterSelection !== true) {
-  throw new Error('A complete stage configuration must become runnable after selecting a Session')
+if (!processing.knowledgeTask.selectedSourceConversation || processing.knowledgeTask.knowledgeTaskButtonEnabledAfterSelection !== true) {
+  throw new Error('A complete Knowledge Agent configuration must become usable after selecting a Source Conversation')
 }
-const selectedSessionDetails = processing.fullChain.selectedSessionDetails
-if (selectedSessionDetails?.title !== '知识加工 Git 协作设计讨论') {
-  throw new Error('The selected Session title is not visible in the full-chain details')
+const selectedSourceConversationDetails = processing.knowledgeTask.selectedSourceConversationDetails
+if (selectedSourceConversationDetails?.title !== '知识加工 Git 协作设计讨论') {
+  throw new Error('The selected Source Conversation title is not visible in the Knowledge Task details')
 }
-if (!selectedSessionDetails?.timeRange?.includes('→')) {
-  throw new Error('The selected Session time range is not visible in the full-chain details')
+if (!selectedSourceConversationDetails?.timeRange?.includes('→')) {
+  throw new Error('The selected Source Conversation time range is not visible in the Knowledge Task details')
 }
-if (!selectedSessionDetails?.size?.match(/\d+(\.\d+)? (B|KB|MB|GB)/)) {
-  throw new Error(`Expected readable fixture Session size, got ${selectedSessionDetails?.size || 'no value'}`)
+if (!selectedSourceConversationDetails?.size?.match(/\d+(\.\d+)? (B|KB|MB|GB)/)) {
+  throw new Error(`Expected readable Source Conversation size, got ${selectedSourceConversationDetails?.size || 'no value'}`)
 }
-if (selectedSessionDetails?.project !== '/Users/demo/projects/oyster') {
-  throw new Error('The selected Session project is not visible in the full-chain details')
+if (selectedSourceConversationDetails?.project !== '/Users/demo/projects/oyster') {
+  throw new Error('The selected Source Conversation project is not visible in the Knowledge Task details')
 }
-if (!processing.fullChain.readyReason?.includes('准备完成')) {
-  throw new Error('Full-chain view does not report that the selected configuration is runnable')
+if (!processing.knowledgeTask.readyReason?.includes('准备完成')) {
+  throw new Error('Knowledge Task view does not report that the selected configuration is runnable')
 }
 for (const requiredCopy of ['Maintainer', 'Reviewer', 'API', 'OpenAI-compatible', 'Fixture Model', '模型默认']) {
-  if (!processing.fullChain.modelSummary?.includes(requiredCopy)) {
-    throw new Error(`Full-chain stage configuration is missing: ${requiredCopy}`)
+  if (!processing.knowledgeTask.modelSummary?.includes(requiredCopy)) {
+    throw new Error(`Knowledge Agent configuration is missing: ${requiredCopy}`)
   }
 }
-if (!processing.fullChain.bodyText.includes('Git 协作测试')) {
-  throw new Error('Git collaboration boundary is not visible in the full-chain view')
+if (!processing.knowledgeTask.bodyText.includes('Git 协作测试')) {
+  throw new Error('Git collaboration boundary is not visible in the knowledge-task view')
 }
 if (
-  !processing.fullChain.bodyText.includes('统一 Repository 中创建 Run')
-  || !processing.fullChain.bodyText.includes('不会合并到目标分支')
+  !processing.knowledgeTask.bodyText.includes('统一 Repository 中创建 Knowledge Processing Task')
+  || !processing.knowledgeTask.bodyText.includes('不会合并到目标分支')
 ) {
-  throw new Error('Full-chain view does not explain its unmerged Git boundary')
+  throw new Error('Knowledge Task view does not explain its unmerged Git boundary')
 }
-if (!processing.fullChainRun?.runningStateVisible || !processing.fullChainRun?.completed) {
-  throw new Error(`Full-chain run did not complete without a native confirmation dialog: ${processing.fullChainRun?.error || 'unknown error'}`)
+if (!processing.knowledgeTaskActivity?.inProgressStateVisible || !processing.knowledgeTaskActivity?.completed) {
+  throw new Error(`Knowledge Processing Task did not complete without a native confirmation dialog: ${processing.knowledgeTaskActivity?.error || 'unknown error'}`)
 }
 if (
-  !processing.fullChainRun.liveUpdatePreservesTool
-  || !processing.fullChainRun.liveUpdateKeepsScroll
-  || !processing.fullChainRun.liveToolPayloadVisible
+  !processing.knowledgeTaskActivity.liveUpdatePreservesTool
+  || !processing.knowledgeTaskActivity.liveUpdateKeepsScroll
+  || !processing.knowledgeTaskActivity.liveToolPayloadVisible
 ) {
-  throw new Error('A live Agent Run update replaced the expanded Tool Call or moved its viewport')
+  throw new Error('A live Agent Invocation update replaced the expanded Tool Call or moved its viewport')
 }
-if (processing.fullChainRun.overviewHasTraceExplorer) {
-  throw new Error('The full-chain overview still renders the unbounded detailed trace')
+if (processing.knowledgeTaskActivity.overviewHasActivityExplorer) {
+  throw new Error('The Knowledge Task overview still renders unbounded Agent activity details')
 }
-if (processing.fullChainRun.summaryStatementCount !== '3') {
-  throw new Error('The full-chain overview does not expose compact result counts')
+if (processing.knowledgeTaskActivity.summaryStatementCount !== '3') {
+  throw new Error('The knowledge-task overview does not expose compact result counts')
 }
-if (!processing.fullChainRun.traceExplorerExists || processing.fullChainRun.traceEventCount !== 2) {
-  throw new Error('The secondary run-detail page does not expose the shared Agent timeline')
+if (!processing.knowledgeTaskActivity.activityExplorerExists || processing.knowledgeTaskActivity.activityEventCount !== 2) {
+  throw new Error('The activity inspector does not expose the shared Agent Invocation timeline')
 }
 if (
-  !processing.fullChainRun.runSelectorText?.includes('Maintainer')
-  || !processing.fullChainRun.runSelectorText?.includes('Reviewer')
-  || processing.fullChainRun.runSelectorText?.includes('knowledge_maintenance_agent')
-  || processing.fullChainRun.runSelectorText?.includes('knowledge_reviewer_agent')
-  || processing.fullChainRun.selectedAgentName !== 'Reviewer'
+  !processing.knowledgeTaskActivity.invocationSelectorText?.includes('Maintainer')
+  || !processing.knowledgeTaskActivity.invocationSelectorText?.includes('Reviewer')
+  || processing.knowledgeTaskActivity.invocationSelectorText?.includes('knowledge_maintainer')
+  || processing.knowledgeTaskActivity.invocationSelectorText?.includes('knowledge_reviewer')
+  || processing.knowledgeTaskActivity.selectedAgentName !== 'Reviewer'
 ) {
-  throw new Error('The live run-detail page does not distinguish Maintainer and Reviewer in one window')
+  throw new Error('The live activity page does not distinguish Maintainer and Reviewer Invocations')
 }
-if (!processing.fullChainRun.toolText?.includes('read') || !processing.fullChainRun.toolOutput?.includes('Fixture read completed')) {
-  throw new Error('The run-detail page does not expose Reviewer tool activity')
+if (!processing.knowledgeTaskActivity.toolText?.includes('read') || !processing.knowledgeTaskActivity.toolOutput?.includes('Fixture read completed')) {
+  throw new Error('The activity page does not expose Reviewer Tool Calls')
 }
-if (!processing.fullChainRun.resultDetailExists || !processing.fullChainRun.returnedToOverview) {
-  throw new Error('The full-chain result detail is not a navigable secondary page')
+if (!processing.knowledgeTaskActivity.resultDetailExists || !processing.knowledgeTaskActivity.returnedToOverview) {
+  throw new Error('The knowledge-task result detail is not a navigable secondary page')
 }
-if (processing.fullChainRun.statementCount !== 3) {
-  throw new Error('Full-chain result does not expose the committed Knowledge Statement')
+if (processing.knowledgeTaskActivity.statementCount !== 3) {
+  throw new Error('Knowledge Task result does not expose the committed Knowledge Statement')
 }
 if (
-  !processing.fullChainRun.collaborationLinkLabel
-  || !processing.fullChainRun.collaborationLinkPreview
-  || processing.fullChainRun.collaborationLinkedTitle === processing.fullChainRun.collaborationInitialTitle
+  !processing.knowledgeTaskActivity.collaborationLinkLabel
+  || !processing.knowledgeTaskActivity.collaborationLinkPreview
+  || processing.knowledgeTaskActivity.collaborationLinkedTitle === processing.knowledgeTaskActivity.collaborationInitialTitle
 ) {
   throw new Error('Collaboration result does not use the shared wikilink reader with hover previews')
 }
 if (
-  !processing.fullChainRun.collaborationBackAvailable
-  || processing.fullChainRun.collaborationTitleAfterBack !== processing.fullChainRun.collaborationInitialTitle
-  || processing.fullChainRun.collaborationOverflowAfterBack
-  || !processing.fullChainRun.collaborationForwardAvailable
-  || processing.fullChainRun.collaborationTitleAfterForward !== processing.fullChainRun.collaborationLinkedTitle
+  !processing.knowledgeTaskActivity.collaborationBackAvailable
+  || processing.knowledgeTaskActivity.collaborationTitleAfterBack !== processing.knowledgeTaskActivity.collaborationInitialTitle
+  || processing.knowledgeTaskActivity.collaborationOverflowAfterBack
+  || !processing.knowledgeTaskActivity.collaborationForwardAvailable
+  || processing.knowledgeTaskActivity.collaborationTitleAfterForward !== processing.knowledgeTaskActivity.collaborationLinkedTitle
 ) {
   throw new Error('Collaboration Statement reader cannot navigate backward and forward')
 }
 if (
-  !processing.fullChainRun.gitResultText?.includes('Repository')
-  || !processing.fullChainRun.gitResultText?.includes('WORK.md')
-  || !processing.fullChainRun.gitResultText?.includes('处理分支')
-  || !processing.fullChainRun.gitResultText?.includes('目标分支main（未合并）')
-  || !processing.fullChainRun.gitResultText?.includes('批准 revision')
-  || processing.fullChainRun.changedPathCount !== 6
+  !processing.knowledgeTaskActivity.gitResultText?.includes('Repository')
+  || !processing.knowledgeTaskActivity.gitResultText?.includes('PROGRESS.md')
+  || !processing.knowledgeTaskActivity.gitResultText?.includes('处理分支')
+  || !processing.knowledgeTaskActivity.gitResultText?.includes('目标分支main（未合并）')
+  || !processing.knowledgeTaskActivity.gitResultText?.includes('批准 revision')
+  || processing.knowledgeTaskActivity.changedPathCount !== 6
 ) {
-  throw new Error('The full-chain result does not expose its Repository, Run, revisions, and changed files')
+  throw new Error('The Knowledge Task result does not expose its Repository, Task Workspace, revisions, and changed files')
 }
-if (/来源范围\s+L\d|Raw source|sourceRef|扫描版本/.test(processing.fullChainRun.bodyText || '')) {
-  throw new Error('The full-chain result exposes internal observation coordinates')
+if (/来源范围\s+L\d|Raw source|sourceRef|扫描版本/.test(processing.knowledgeTaskActivity.bodyText || '')) {
+  throw new Error('The knowledge-task result exposes internal observation coordinates')
 }
-if (processing.history?.runCount !== 1 || !processing.history.listText?.includes('知识加工 Git 协作设计讨论')) {
-  throw new Error('The completed full-chain run was not added to persistent history')
+if (processing.history?.taskCount !== 1 || !processing.history.listText?.includes('知识加工 Git 协作设计讨论')) {
+  throw new Error('The completed Knowledge Task was not added to persistent history')
 }
 if (/Fixture (?:raw evidence|Canonical Activity)|Tool call ·|sourceRef|L\d{6}/.test(processing.history.listText || '')) {
-  throw new Error('The compact history list eagerly exposes trace or evidence payloads')
+  throw new Error('The compact history list eagerly exposes Agent activity or evidence payloads')
 }
 if (!processing.history.resultDetailExists || !processing.history.sharedBrowserExists) {
   throw new Error('Historical results do not reuse the shared Statement browser')
@@ -602,14 +620,14 @@ if (processing.history.overflowAfterStatementBack) {
 }
 if (
   !processing.history.activityDetailExists
-  || processing.history.traceEventCount !== 4
-  || !processing.history.traceText?.includes('Fixture read completed')
-  || !processing.history.runSelectorText?.includes('Maintainer')
-  || !processing.history.runSelectorText?.includes('Reviewer')
-  || processing.history.runSelectorText?.includes('knowledge_maintenance_agent')
-  || processing.history.runSelectorText?.includes('knowledge_reviewer_agent')
+  || processing.history.activityEventCount !== 4
+  || !processing.history.activityText?.includes('Fixture read completed')
+  || !processing.history.invocationSelectorText?.includes('Maintainer')
+  || !processing.history.invocationSelectorText?.includes('Reviewer')
+  || processing.history.invocationSelectorText?.includes('knowledge_maintainer')
+  || processing.history.invocationSelectorText?.includes('knowledge_reviewer')
 ) {
-  throw new Error('Historical run details do not expose the persisted Agent Run')
+  throw new Error('Historical Task details do not expose the persisted Agent Invocation')
 }
 if (
   !processing.history.toolExpansionKeepsScroll
@@ -621,17 +639,17 @@ if (
 if (!processing.history.returnedToHistory) {
   throw new Error('Historical secondary pages do not return to the history list')
 }
-if (processing.fullChain.bodyText.includes('已导入 Session')) {
-  throw new Error('Full-chain view still exposes the removed import model')
+if (processing.knowledgeTask.bodyText.includes('已导入会话')) {
+  throw new Error('Knowledge Task view still exposes the removed import model')
 }
-if (processing.fullChain.overflowX) throw new Error('Full-chain view has unexpected horizontal overflow')
-if (processing.stageCount !== 1) throw new Error(`Expected 1 fixed processing stage, got ${processing.stageCount}`)
+if (processing.knowledgeTask.overflowX) throw new Error('Knowledge Task view has unexpected horizontal overflow')
+if (processing.agentDefinitionCount !== 1) throw new Error(`Expected 1 fixed Knowledge Agent, got ${processing.agentDefinitionCount}`)
 if (processing.promptCount !== 1) throw new Error(`Expected 1 processing prompt editor, got ${processing.promptCount}`)
 if (processing.promptValues.some((prompt) => typeof prompt !== 'string' || !prompt.trim())) {
   throw new Error('A processing default prompt is empty')
 }
 const [maintainerPrompt] = processing.promptValues
-for (const requiredCopy of ['Knowledge Maintainer', 'TASK.md', 'inputs/README.md', 'Canonical Activity', 'ordinary evidence file', '[[canonical title]]', 'create one ordinary Git commit', 'Do not delete WORK.md']) {
+for (const requiredCopy of ['Knowledge Maintainer', 'BRIEF.md', 'inputs/README.md', 'Canonical Activity', 'ordinary evidence file', '[[canonical title]]', 'create one ordinary Git commit', 'Do not delete PROGRESS.md']) {
   if (!maintainerPrompt.includes(requiredCopy)) {
     throw new Error(`Knowledge Maintenance Agent prompt is missing its responsibility: ${requiredCopy}`)
   }
@@ -640,32 +658,32 @@ if (processing.promptValues.some((prompt) => prompt.includes('Oyster'))) {
   throw new Error('A default processing prompt assumes product-specific context')
 }
 if (processing.badgeValues.length !== 1 || processing.badgeValues.some((badge) => badge !== 'Default')) {
-  throw new Error('The processing stage must show the Default prompt badge in fixture mode')
+  throw new Error('The Knowledge Agent must show the Default prompt badge in fixture mode')
 }
-const stageConfiguration = processing.configurationText.join('\n')
-for (const requiredCopy of ['API', 'OpenAI-compatible', 'fixture-model', '模型默认', 'Pi Agent Core', 'AI 后端 · 默认 LLM']) {
-  if (!stageConfiguration.includes(requiredCopy)) {
-    throw new Error(`Stage debugging configuration is missing: ${requiredCopy}`)
+const agentPreviewConfiguration = processing.configurationText.join('\n')
+for (const requiredCopy of ['API', 'OpenAI-compatible', 'fixture-model', '模型默认', 'Pi Coding Agent SDK', 'AI 后端 · 默认 LLM']) {
+  if (!agentPreviewConfiguration.includes(requiredCopy)) {
+    throw new Error(`Agent Preview configuration is missing: ${requiredCopy}`)
   }
 }
-if (processing.maintainerSessionOptionCount !== 2) {
-  throw new Error(`Expected one available fixture Session in stage debugging, got ${processing.maintainerSessionOptionCount - 1}`)
+if (processing.maintainerSourceConversationOptionCount !== 2) {
+  throw new Error(`Expected one available Source Conversation in Agent Preview, got ${processing.maintainerSourceConversationOptionCount - 1}`)
 }
-if (processing.bodyText.includes('已导入 Session')) {
-  throw new Error('Stage debugging still exposes the removed import model')
+if (processing.bodyText.includes('已导入会话')) {
+  throw new Error('Agent Preview still exposes the removed import model')
 }
-if (processing.maintainerSessionValue !== processing.fullChain.selectedSession) {
-  throw new Error('Stage debugging did not preserve the Session selected in the full-chain view')
+if (processing.maintainerSourceConversationValue !== processing.knowledgeTask.selectedSourceConversation) {
+  throw new Error('Agent Preview did not preserve the Source Conversation selected in the Knowledge Task view')
 }
 if (!processing.maintainerButtonExists || processing.maintainerDisabled !== false) {
-  throw new Error('Knowledge maintenance action must be runnable with the preserved Session and ready configuration')
+  throw new Error('Knowledge maintenance preview must be available with the preserved Source Conversation and configuration')
 }
-if (!processing.maintainerReadyReason?.includes('可以运行知识维护')) {
-  throw new Error('Stage debugging does not report that knowledge maintenance is ready to run')
+if (!processing.maintainerReadyReason?.includes('可以启动 Agent Preview')) {
+  throw new Error('Agent Preview does not report that knowledge maintenance is ready')
 }
-if (processing.resultCount !== 0) throw new Error('Knowledge processing produced a candidate without an explicit run')
+if (processing.resultCount !== 0) throw new Error('Knowledge processing produced a candidate without an explicit Agent Preview')
 if (processing.overflowX) throw new Error('Knowledge processing page has unexpected horizontal overflow')
-if (processing.buttonCount !== processing.sharedButtonCount + processing.tabButtonCount + processing.chainStatementButtonCount) {
+if (processing.buttonCount !== processing.sharedButtonCount + processing.tabButtonCount + processing.taskStatementButtonCount) {
   throw new Error('A knowledge processing action button bypasses the shared UI component')
 }
 if (processing.buttonIconCount !== processing.sharedButtonCount) {
@@ -677,43 +695,43 @@ if (processing.promptRestore.customizedBeforeRestore !== 'Customized') {
 if (!processing.promptRestore.matchesOriginal || processing.promptRestore.defaultAfterRestore !== 'Default') {
   throw new Error('Restore default did not reset an unsaved prompt draft after a successful save')
 }
-if (processing.trace.panelCount !== 1) throw new Error('The processing debug trace panel must be rendered')
-if (processing.trace.agentName !== 'Maintainer') {
-  throw new Error('The knowledge processing trace still uses the application name instead of Maintainer')
+if (processing.agentPreviewActivity.panelCount !== 1) throw new Error('The Agent Preview Invocation panel must be rendered')
+if (processing.agentPreviewActivity.agentName !== 'Maintainer') {
+  throw new Error('The Agent Preview activity still uses the application name instead of Maintainer')
 }
-if (processing.trace.maintenanceEventCount !== 4) {
-  throw new Error(`Expected 4 Agent timeline items, got ${processing.trace.maintenanceEventCount}`)
+if (processing.agentPreviewActivity.maintenanceEventCount !== 4) {
+  throw new Error(`Expected 4 Agent timeline items, got ${processing.agentPreviewActivity.maintenanceEventCount}`)
 }
-if (processing.trace.modelCallAction) {
+if (processing.agentPreviewActivity.modelCallAction) {
   throw new Error('The deterministic fixture unexpectedly fabricated a Model Call')
 }
 for (const requiredCopy of ['read', 'write', 'bash']) {
-  if (!processing.trace.bodyText.includes(requiredCopy)) {
-    throw new Error(`Knowledge processing trace is missing: ${requiredCopy}`)
+  if (!processing.agentPreviewActivity.bodyText.includes(requiredCopy)) {
+    throw new Error(`Agent Preview activity is missing: ${requiredCopy}`)
   }
 }
 if (
-  !processing.trace.resultText?.includes('Repository')
-  || !processing.trace.resultText?.includes('Run')
-  || !processing.trace.resultText?.includes('处理分支')
-  || !processing.trace.resultText?.includes('当前 revision')
-  || !processing.trace.resultText?.includes('未合并到 main')
+  !processing.agentPreviewActivity.resultText?.includes('Repository')
+  || !processing.agentPreviewActivity.resultText?.includes('Task Workspace')
+  || !processing.agentPreviewActivity.resultText?.includes('处理分支')
+  || !processing.agentPreviewActivity.resultText?.includes('当前 revision')
+  || !processing.agentPreviewActivity.resultText?.includes('未合并到 main')
 ) {
   throw new Error('Knowledge maintenance result does not expose the Git handoff state')
 }
-if (processing.trace.overflowX) throw new Error('Debug trace view has unexpected horizontal overflow')
-if (processing.stateAfterNavigation.selectedSession !== processing.fullChain.selectedSession) {
-  throw new Error('Knowledge processing Session selection was lost after navigating away and back')
+if (processing.agentPreviewActivity.overflowX) throw new Error('Agent Preview activity has unexpected horizontal overflow')
+if (processing.stateAfterNavigation.selectedSourceConversation !== processing.knowledgeTask.selectedSourceConversation) {
+  throw new Error('Knowledge processing Source Conversation selection was lost after navigating away and back')
 }
-if (processing.stateAfterNavigation.stageDebugSelected !== 'true') {
+if (processing.stateAfterNavigation.agentPreviewSelected !== 'true') {
   throw new Error('Knowledge processing workspace state was lost after navigating away and back')
 }
 const processingImage = await readFile(join(dirname(capturePath), 'knowledge-processing.png'))
 if (processingImage.length === 0) throw new Error('Knowledge processing screenshot is empty')
-const stageDebugImage = await readFile(join(dirname(capturePath), 'knowledge-processing-stage-debug.png'))
-if (stageDebugImage.length === 0) throw new Error('Knowledge processing stage-debug screenshot is empty')
-const maintenanceTraceImage = await readFile(join(dirname(capturePath), 'knowledge-processing-trace-maintenance.png'))
-if (maintenanceTraceImage.length === 0) throw new Error('Maintenance trace screenshot is empty')
+const agentPreviewImage = await readFile(join(dirname(capturePath), 'knowledge-agent-preview.png'))
+if (agentPreviewImage.length === 0) throw new Error('Knowledge processing agent-preview screenshot is empty')
+const maintainerInvocationImage = await readFile(join(dirname(capturePath), 'knowledge-processing-maintainer-invocation.png'))
+if (maintainerInvocationImage.length === 0) throw new Error('Maintainer Invocation screenshot is empty')
 const knowledgeImage = await readFile(join(dirname(capturePath), 'knowledge.png'))
 if (knowledgeImage.length === 0) throw new Error('Knowledge browser screenshot is empty')
 const clearKnowledgeImage = await readFile(join(dirname(capturePath), 'knowledge-clear-confirmation.png'))

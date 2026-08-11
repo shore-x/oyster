@@ -254,7 +254,7 @@ function compactActivityPayload(value: string): string {
   const omitted = value.length - headLength - tailLength
   return [
     value.slice(0, headLength),
-    `[Canonical Activity omitted ${omitted} of ${value.length} payload characters. Full normalized payload SHA-256: ${createHash('sha256').update(value).digest('hex')}. Use the Raw source locator in the Run input for exact content.]`,
+    `[Canonical Activity omitted ${omitted} of ${value.length} payload characters. Full normalized payload SHA-256: ${createHash('sha256').update(value).digest('hex')}. Use the Raw source locator in the Task input for exact content.]`,
     value.slice(-tailLength)
   ].join('\n')
 }
@@ -280,7 +280,7 @@ function attachmentDescriptor(capture: AttachmentCapture): string {
     `SHA-256: ${capture.sha256}`,
     `Source field: ${capture.field}`,
     capture.mimeType.startsWith('image/')
-      ? `Inspect the ${capture.id} file materialized in the Run input with the ordinary read tool.`
+      ? `Inspect the ${capture.id} file materialized in the Task input with the ordinary read tool.`
       : 'This attachment type is opaque to the current Maintainer runtime; use the Raw source locator for provenance.'
   ].join('\n')
 }
@@ -423,7 +423,7 @@ function addUnparseableRecord(
     `Characters: ${line.length}`,
     `UTF-8 bytes: ${Buffer.byteLength(line, 'utf8')}`,
     `SHA-256: ${createHash('sha256').update(line).digest('hex')}`,
-    'Use this activity\'s Raw source locator in the Run input to inspect the exact content.'
+    'Use this activity\'s Raw source locator in the Task input to inspect the exact content.'
   ].join('\n'), range)
 }
 
@@ -658,7 +658,13 @@ function projectPi(lines: readonly string[]): CanonicalActivity {
       return
     }
     if (record.type === 'session') {
-      addValueItem(projection, 'session', 'Pi Session:', compactRecord(record, ['type', 'id', 'timestamp']), range)
+      addValueItem(
+        projection,
+        'conversation_context',
+        'Pi conversation context:',
+        compactRecord(record, ['type', 'id', 'timestamp']),
+        range
+      )
       return
     }
     if (record.type === 'model_change' || record.type === 'thinking_level_change') {
@@ -670,10 +676,10 @@ function projectPi(lines: readonly string[]): CanonicalActivity {
   return canonicalActivity('pi-canonical-activity-v2', projection)
 }
 
-function codexSessionContent(payload: Record<string, unknown>): string {
+function codexConversationContext(payload: Record<string, unknown>): string {
   return typeof payload.cwd === 'string' && payload.cwd
-    ? `Codex Session · project: ${payload.cwd}`
-    : 'Codex Session'
+    ? `Codex conversation context · project: ${payload.cwd}`
+    : 'Codex conversation context'
 }
 
 function appendCompactCodexToolCall(
@@ -787,7 +793,7 @@ function codexInterAgentMessage(value: unknown): string | undefined {
 
 function projectCodex(lines: readonly string[]): CanonicalActivity {
   const projection = builder()
-  const sessionContents = new Map<string, CanonicalActivityItem>()
+  const conversationContexts = new Map<string, CanonicalActivityItem>()
   lines.forEach((line, index) => {
     const record = parsedRecord(line)
     const range = physicalLineRange(lines, index)
@@ -799,8 +805,14 @@ function projectCodex(lines: readonly string[]): CanonicalActivity {
     const type = typeof payload.type === 'string' ? payload.type : ''
 
     if (record.type === 'session_meta') {
-      const content = codexSessionContent(payload)
-      addDeduplicatedItem(projection, sessionContents, 'session', content, range)
+      const content = codexConversationContext(payload)
+      addDeduplicatedItem(
+        projection,
+        conversationContexts,
+        'conversation_context',
+        content,
+        range
+      )
       return
     }
     if (record.type === 'compacted') {

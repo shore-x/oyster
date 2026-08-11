@@ -6,7 +6,7 @@ import {
 import { runtimeLabel } from '../processing-configuration'
 import { Button, Icon } from '../ui'
 
-export function AgentConfigurationPage() {
+export function AgentConfigurationPage(props: { embedded?: boolean } = {}) {
   const controller = createAgentConfigurationController()
   const [selectedRoleId, setSelectedRoleId] = createSignal<AgentConfigurationRoleId>()
   const [detailView, setDetailView] = createSignal<'prompt' | 'tools'>('prompt')
@@ -57,16 +57,18 @@ export function AgentConfigurationPage() {
 
   return (
     <>
-      <header class="page-header">
-        <div>
-          <h1>Agent 配置</h1>
-          <div class="page-summary">
-            <span><strong>{controller.roles().length}</strong> 个 Agent</span>
-            <span class="page-summary__separator">·</span>
-            <span>默认 Prompt 可配置，工具由代码提供</span>
+      <Show when={!props.embedded}>
+        <header class="page-header">
+          <div>
+            <h1>Agent 配置</h1>
+            <div class="page-summary">
+              <span><strong>{controller.roles().length}</strong> 个 Agent</span>
+              <span class="page-summary__separator">·</span>
+              <span>默认 Prompt 可配置，工具由代码提供</span>
+            </div>
           </div>
-        </div>
-      </header>
+        </header>
+      </Show>
 
       <Show when={controller.error()}>
         <div class="page-error"><Icon name="warning" />{controller.error()}</div>
@@ -114,7 +116,7 @@ export function AgentConfigurationPage() {
                 <div>
                   <div class="agent-config-detail__identity">
                     <h2>{role().displayName}</h2>
-                    <span class="processing-runtime">{runtimeLabel(role().runtime)}</span>
+                    <span class="agent-runtime-label">{runtimeLabel(role().runtime)}</span>
                   </div>
                   <p>{role().description}</p>
                 </div>
@@ -191,7 +193,7 @@ export function AgentConfigurationPage() {
                   <div class="agent-config-section-heading">
                     <div>
                       <h3>Tools</h3>
-                      <p>以下清单与 Agent 运行时使用同一份代码定义，只读展示。</p>
+                      <p>以下清单与 Agent Invocation 实际使用同一份代码定义，只读展示。</p>
                     </div>
                     <span>{role().tools.length} 个工具</span>
                   </div>

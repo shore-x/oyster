@@ -4,14 +4,14 @@ import type {
   SourceRecord,
   SourceRecordKind,
   InstructionScope,
-  ScanRun
+  DiscoveryScan
 } from '../../shared/discovery'
 import type { AgentObservation } from '../observation/model'
 
 export interface DiscoveryStateData {
   sources: AgentSource[]
   records: SourceRecord[]
-  runs: ScanRun[]
+  scans: DiscoveryScan[]
 }
 
 export interface DetectionContext {

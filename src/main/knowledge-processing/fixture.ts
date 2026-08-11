@@ -3,43 +3,53 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AiBackendService } from '../ai-backends/ai-backend-service'
 import {
-  AGENT_RUN_FORMAT_VERSION,
-  type AgentRunRecord
+  AGENT_INVOCATION_DEBUG_FORMAT_VERSION,
+  AGENT_INVOCATION_FORMAT_VERSION,
+  type AgentInvocationDebugRecord
 } from '../../shared/agent-runtime'
+import { parseAgentInvocationRecord } from '../agent-runtime/agent-invocation-record'
+import {
+  InMemoryAgentDebugStore,
+  type AgentDebugStore
+} from '../agent-runtime/agent-debug-store'
 import { runArtifactGit } from '../artifacts/git-runtime'
 import type {
-  KnowledgeMaintainerRunInput,
+  KnowledgeMaintainerInvocationInput,
   KnowledgeMaintainerRuntime,
-  KnowledgeReviewerRunInput,
+  KnowledgeReviewerInvocationInput,
   KnowledgeReviewerRuntime,
-  RepositoryAgentRunResult
+  RepositoryAgentInvocationResult
 } from './model'
-import { InMemoryKnowledgeProcessingRepository } from './repository'
+import { InMemoryKnowledgeProcessingConfigurationRepository } from './repository'
 import { KnowledgeProcessingService } from './knowledge-processing-service'
-import { ProcessingRepository } from './processing-repository'
+import { KnowledgeTaskWorkspaceRepository } from './knowledge-task-workspace-repository'
 
-function fixtureRun(
-  input: KnowledgeMaintainerRunInput | KnowledgeReviewerRunInput,
-  agentId: 'knowledge_maintenance_agent' | 'knowledge_reviewer_agent',
+function fixtureInvocation(
+  input: KnowledgeMaintainerInvocationInput | KnowledgeReviewerInvocationInput,
+  agentId: 'knowledge_maintainer' | 'knowledge_reviewer',
   toolCalls: string[]
-): AgentRunRecord {
+): AgentInvocationDebugRecord {
   const timestamp = new Date().toISOString()
   return {
-    formatVersion: AGENT_RUN_FORMAT_VERSION,
-    id: input.runId,
+    formatVersion: AGENT_INVOCATION_FORMAT_VERSION,
+    debugFormatVersion: AGENT_INVOCATION_DEBUG_FORMAT_VERSION,
+    id: input.invocationId,
     agentId,
     status: 'completed',
     startedAt: timestamp,
     completedAt: timestamp,
     durationMs: 0,
+    debugRecordId: input.invocationId,
+    modelCallCount: 0,
+    toolCallCount: toolCalls.length,
     turns: [],
     messages: [],
     modelCalls: [],
     toolCalls: toolCalls.map((name, index) => ({
-      id: `${input.runId}:tool:${index + 1}`,
+      id: `${input.invocationId}:tool:${index + 1}`,
       sequence: index + 1,
-      turnId: `${input.runId}:turn:1`,
-      assistantMessageId: `${input.runId}:message:1`,
+      turnId: `${input.invocationId}:turn:1`,
+      assistantMessageId: `${input.invocationId}:message:1`,
       name,
       status: 'completed',
       startedAt: timestamp,
@@ -52,25 +62,26 @@ function fixtureRun(
   }
 }
 
-function runningFixtureRun(
-  input: KnowledgeMaintainerRunInput,
+function inProgressFixtureInvocation(
+  input: KnowledgeMaintainerInvocationInput,
   toolCalls: string[],
   visibleToolCount: number
-): AgentRunRecord {
-  const run = fixtureRun(input, 'knowledge_maintenance_agent', toolCalls)
-  run.status = 'running'
-  delete run.completedAt
-  delete run.durationMs
-  run.toolCalls = run.toolCalls.slice(0, visibleToolCount)
-  const activeCall = run.toolCalls.at(-1)
+): AgentInvocationDebugRecord {
+  const invocation = fixtureInvocation(input, 'knowledge_maintainer', toolCalls)
+  invocation.status = 'in_progress'
+  delete invocation.completedAt
+  delete invocation.durationMs
+  invocation.toolCalls = invocation.toolCalls.slice(0, visibleToolCount)
+  invocation.toolCallCount = invocation.toolCalls.length
+  const activeCall = invocation.toolCalls.at(-1)
   if (activeCall) {
-    activeCall.status = 'running'
+    activeCall.status = 'in_progress'
     delete activeCall.completedAt
     delete activeCall.durationMs
     delete activeCall.result
     delete activeCall.isError
   }
-  return run
+  return invocation
 }
 
 async function emitFixtureFrame(): Promise<void> {
@@ -83,73 +94,87 @@ async function commit(repositoryPath: string, message: string): Promise<void> {
 }
 
 export class FixtureKnowledgeMaintainerRuntime implements KnowledgeMaintainerRuntime {
-  async run(input: KnowledgeMaintainerRunInput): Promise<RepositoryAgentRunResult> {
+  constructor(private readonly debugStore: AgentDebugStore = new InMemoryAgentDebugStore()) {}
+
+  async invoke(
+    input: KnowledgeMaintainerInvocationInput
+  ): Promise<RepositoryAgentInvocationResult> {
     input.signal.throwIfAborted()
     const toolCalls = ['read', 'read', 'write', 'bash']
-    input.onRunUpdate?.(runningFixtureRun(input, toolCalls, 2))
+    input.onInvocationUpdate?.(inProgressFixtureInvocation(input, toolCalls, 2))
     await emitFixtureFrame()
     input.signal.throwIfAborted()
-    const workPath = input.run.workPath
+    const progressPath = input.workspace.progressPath
     await writeFile(
-      workPath,
-      (await readFile(workPath, 'utf8')).replaceAll('- [ ]', '- [x]'),
+      progressPath,
+      (await readFile(progressPath, 'utf8')).replaceAll('- [ ]', '- [x]'),
       'utf8'
     )
     await Promise.all([
       writeFile(
-        join(input.run.repositoryPath, 'knowledge', 'knowledge-processing.md'),
-        '# 知识加工链路\n\n知识加工链路在统一 Git Repository 中由 [[Knowledge Maintenance Agent|知识维护 Agent]] 与 [[Knowledge Reviewer|知识审阅 Agent]] 通过 Run 工作状态和 commit 协作。\n',
+        join(input.workspace.repositoryPath, 'knowledge', 'knowledge-processing.md'),
+        '# 知识加工链路\n\n知识加工链路在统一 Git Repository 中由 [[Knowledge Maintenance Agent|知识维护 Agent]] 与 [[Knowledge Reviewer|知识审阅 Agent]] 通过 Knowledge Processing Task 工作状态和 commit 协作。\n',
         'utf8'
       ),
       writeFile(
-        join(input.run.repositoryPath, 'knowledge', 'knowledge-maintainer.md'),
-        '# Knowledge Maintenance Agent\n\nKnowledge Maintenance Agent 从独立 Run 工作空间读取任务、工作清单与文件化 Canonical Activity，并直接维护 [[知识加工链路]] 的 Repository tree。\n',
+        join(input.workspace.repositoryPath, 'knowledge', 'knowledge-maintainer.md'),
+        '# Knowledge Maintenance Agent\n\nKnowledge Maintenance Agent 从独立 Task 工作空间读取任务、工作清单与文件化 Canonical Activity，并直接维护 [[知识加工链路]] 的 Repository tree。\n',
         'utf8'
       ),
       writeFile(
-        join(input.run.repositoryPath, 'knowledge', 'knowledge-reviewer.md'),
-        '# Knowledge Reviewer\n\nKnowledge Reviewer 在没有 Raw Evidence 的独立上下文中审阅 processing branch，并在 Run 中记录反馈或批准。\n',
+        join(input.workspace.repositoryPath, 'knowledge', 'knowledge-reviewer.md'),
+        '# Knowledge Reviewer\n\nKnowledge Reviewer 在没有 Raw Evidence 的独立上下文中审阅 processing branch，并在 Task 工作区中记录反馈或批准。\n',
         'utf8'
       )
     ])
-    await commit(input.run.repositoryPath, 'maintain: fixture repository knowledge')
-    input.onRunUpdate?.(runningFixtureRun(input, toolCalls, 3))
+    await commit(input.workspace.repositoryPath, 'maintain: fixture repository knowledge')
+    input.onInvocationUpdate?.(inProgressFixtureInvocation(input, toolCalls, 3))
     await emitFixtureFrame()
     input.signal.throwIfAborted()
-    const run = fixtureRun(input, 'knowledge_maintenance_agent', toolCalls)
-    input.onRunUpdate?.(run)
+    const invocation = fixtureInvocation(input, 'knowledge_maintainer', toolCalls)
+    this.debugStore.save(invocation)
+    input.onInvocationUpdate?.(invocation)
     await emitFixtureFrame()
-    return { run, modelCallCount: 0, toolCalls: run.toolCalls.map((call) => call.name) }
+    return {
+      invocation: parseAgentInvocationRecord(invocation),
+      modelCallCount: 0,
+      toolCalls: invocation.toolCalls.map((call) => call.name)
+    }
   }
 }
 
 export class FixtureKnowledgeReviewerRuntime implements KnowledgeReviewerRuntime {
-  async run(input: KnowledgeReviewerRunInput): Promise<RepositoryAgentRunResult> {
+  constructor(private readonly debugStore: AgentDebugStore = new InMemoryAgentDebugStore()) {}
+
+  async invoke(
+    input: KnowledgeReviewerInvocationInput
+  ): Promise<RepositoryAgentInvocationResult> {
     input.signal.throwIfAborted()
-    const run = fixtureRun(input, 'knowledge_reviewer_agent', ['read', 'bash'])
-    input.onRunUpdate?.(run)
-    return { run, modelCallCount: 0, toolCalls: run.toolCalls.map((call) => call.name) }
+    const invocation = fixtureInvocation(input, 'knowledge_reviewer', ['read', 'bash'])
+    this.debugStore.save(invocation)
+    input.onInvocationUpdate?.(invocation)
+    return {
+      invocation: parseAgentInvocationRecord(invocation),
+      modelCallCount: 0,
+      toolCalls: invocation.toolCalls.map((call) => call.name)
+    }
   }
 }
 
 export function createFixtureKnowledgeProcessingService(
   aiBackendService: AiBackendService,
-  processingRepository: ProcessingRepository
+  processingRepository: KnowledgeTaskWorkspaceRepository,
+  debugStore: AgentDebugStore = new InMemoryAgentDebugStore()
 ): KnowledgeProcessingService {
   return new KnowledgeProcessingService(
-    new InMemoryKnowledgeProcessingRepository({
-      stages: [
-        { stageId: 'knowledge_maintenance_agent' },
-        { stageId: 'knowledge_reviewer_agent' }
-      ]
-    }),
+    new InMemoryKnowledgeProcessingConfigurationRepository(),
     aiBackendService,
     processingRepository,
-    new FixtureKnowledgeMaintainerRuntime(),
-    new FixtureKnowledgeReviewerRuntime()
+    new FixtureKnowledgeMaintainerRuntime(debugStore),
+    new FixtureKnowledgeReviewerRuntime(debugStore)
   )
 }
 
-export function fixtureProcessingRunId(): string {
+export function fixtureKnowledgeTaskWorkspaceId(): string {
   return randomUUID()
 }

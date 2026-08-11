@@ -1,17 +1,17 @@
 export const discoveryChannels = {
-  snapshot: 'discovery:snapshot',
-  getSnapshot: 'discovery:get-snapshot',
-  sessionCatalogSnapshot: 'discovery:session-catalog-snapshot',
-  getSessionCatalog: 'discovery:get-session-catalog',
-  refreshSessionCatalog: 'discovery:refresh-session-catalog',
+  state: 'discovery:state',
+  getState: 'discovery:get-state',
+  sourceConversationCatalog: 'discovery:source-conversation-catalog',
+  getSourceConversationCatalog: 'discovery:get-source-conversation-catalog',
+  refreshSourceConversationCatalog: 'discovery:refresh-source-conversation-catalog',
   detectAgents: 'discovery:detect-agents',
   scanSource: 'discovery:scan-source',
-  cancelRun: 'discovery:cancel-run',
+  cancelScan: 'discovery:cancel-scan',
   chooseSourceRoot: 'discovery:choose-source-root'
 } as const
 
 export const skillChannels = {
-  getDiscoverySnapshot: 'skills:get-discovery-snapshot',
+  getDiscoveryStateView: 'skills:get-discovery-snapshot',
   discover: 'skills:discover',
   readDiscoveredDocument: 'skills:read-discovered-document',
   openDiscoveredFolder: 'skills:open-discovered-folder',
@@ -36,16 +36,16 @@ export const aiBackendChannels = {
 } as const
 
 export const knowledgeProcessingChannels = {
-  snapshot: 'knowledge-processing:snapshot',
-  getSnapshot: 'knowledge-processing:get-snapshot',
-  saveStage: 'knowledge-processing:save-stage',
-  saveDefaultInstructions: 'knowledge-processing:save-default-instructions',
-  runKnowledgeMaintenance: 'knowledge-processing:run-knowledge-maintenance',
-  runFullChain: 'knowledge-processing:run-full-chain',
-  listFullChainRuns: 'knowledge-processing:list-full-chain-runs',
-  readFullChainRun: 'knowledge-processing:read-full-chain-run',
-  cancelFullChain: 'knowledge-processing:cancel-full-chain',
-  cancelRun: 'knowledge-processing:cancel-run'
+  state: 'knowledge-processing:state',
+  getState: 'knowledge-processing:get-state',
+  saveAgent: 'knowledge-processing:save-agent',
+  saveAgentDefaultInstructions: 'knowledge-processing:save-agent-default-instructions',
+  previewKnowledgeMaintainer: 'knowledge-processing:preview-maintainer',
+  startKnowledgeTask: 'knowledge-processing:start-task',
+  listKnowledgeTasks: 'knowledge-processing:list-tasks',
+  readKnowledgeTask: 'knowledge-processing:read-task',
+  cancelKnowledgeTask: 'knowledge-processing:cancel-task',
+  cancelAgentPreview: 'knowledge-processing:cancel-agent-preview'
 } as const
 
 export const knowledgeChannels = {
@@ -71,11 +71,18 @@ export const folderBrowserChannels = {
 
 export const chatChannels = {
   event: 'chat:event',
-  getSnapshot: 'chat:get-snapshot',
-  createSession: 'chat:create-session',
-  readSession: 'chat:read-session',
-  deleteSession: 'chat:delete-session',
+  getState: 'chat:get-state',
+  createConversation: 'chat:create-conversation',
+  readConversation: 'chat:read-conversation',
+  deleteConversation: 'chat:delete-conversation',
   sendMessage: 'chat:send-message',
-  cancelRun: 'chat:cancel-run',
+  cancelInvocation: 'chat:cancel-invocation',
   saveDefaultInstructions: 'chat:save-default-instructions'
+} as const
+
+export const piExtensionChannels = {
+  getConfiguration: 'pi-extensions:get-configuration',
+  addSource: 'pi-extensions:add-source',
+  setSourceEnabled: 'pi-extensions:set-source-enabled',
+  removeSource: 'pi-extensions:remove-source'
 } as const

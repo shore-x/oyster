@@ -28,7 +28,7 @@ import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-code
 import type {
   ModelGenerationRequest,
   ModelGenerationResult,
-  ModelRuntime
+  SelectedModelStream
 } from './model'
 import { ModelContextOverflowError, ModelOutputTruncatedError } from './model'
 
@@ -372,7 +372,7 @@ export class PiCodingPlanAdapter {
     }
   }
 
-  runtime(modelId: string): ModelRuntime {
+  modelStream(modelId: string): SelectedModelStream {
     const model = this.model(modelId)
     const streamFn: StreamFn = (_requestedModel, context, options) => {
       if (options?.reasoning) {

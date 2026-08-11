@@ -226,7 +226,7 @@ function ApiConnectionCard(props: {
   )
 }
 
-export function AiBackendsPage() {
+export function AiBackendsPage(props: { embedded?: boolean } = {}) {
   const controller = createAiBackendsController()
   const [backendKind, setBackendKind] = createSignal<AiBackendKind>('coding_plan')
   const [providerId, setProviderId] = createSignal<'openai_codex' | ModelProviderId>('openai_codex')
@@ -392,22 +392,24 @@ export function AiBackendsPage() {
 
   return (
     <>
-      <header class="page-header">
-        <div>
-          <h1>AI 后端</h1>
-          <div class="page-summary">
-            <span><strong>{readyCount()}</strong> 个可用连接</span>
-            <span class="page-summary__separator">·</span>
-            <span>{controller.snapshot().connections.length} 个已发现或已配置</span>
+      <Show when={!props.embedded}>
+        <header class="page-header">
+          <div>
+            <h1>AI 后端</h1>
+            <div class="page-summary">
+              <span><strong>{readyCount()}</strong> 个可用连接</span>
+              <span class="page-summary__separator">·</span>
+              <span>{controller.snapshot().connections.length} 个已发现或已配置</span>
+            </div>
           </div>
-        </div>
-        <Button
-          variant="secondary"
-          icon="refresh"
-          onClick={() => void controller.refresh()}
-          disabled={Boolean(controller.busy())}
-        >{controller.busy() === 'refresh' ? '检查中…' : '刷新状态'}</Button>
-      </header>
+          <Button
+            variant="secondary"
+            icon="refresh"
+            onClick={() => void controller.refresh()}
+            disabled={Boolean(controller.busy())}
+          >{controller.busy() === 'refresh' ? '检查中…' : '刷新状态'}</Button>
+        </header>
+      </Show>
 
       <Show when={controller.error()}>
         <div class="page-error"><Icon name="warning" />{controller.error()}</div>
@@ -432,7 +434,7 @@ export function AiBackendsPage() {
         <div class="ai-runtime-panel__header">
           <div>
             <h2>默认 LLM</h2>
-            <p>Knowledge Maintainer 和新建 Chat Session 使用这里保存的模型；已有 Chat Session 保留创建时的模型。</p>
+            <p>Knowledge Maintainer 和新建 Chat Conversation 使用这里保存的模型；已有 Chat Conversation 保留创建时的模型。</p>
           </div>
           <Show when={controller.snapshot().defaultLlm} fallback={<span class="status status--warning"><span class="status__dot" />未配置</span>}>
             <span class={`status ${savedDefaultLlmValid() ? 'status--success' : 'status--warning'}`}><span class="status__dot" />{savedDefaultLlmValid() ? '已配置' : '配置失效'}</span>
@@ -501,7 +503,7 @@ export function AiBackendsPage() {
             ? `${defaultConnection()!.displayName} · ${modelLabel(defaultModel())} · ${defaultReasoningSupported() ? (effectiveDefaultReasoning() ?? '模型默认思考强度') : `${defaultReasoningEffort()} · 当前 Model 不支持`}`
             : controller.snapshot().defaultLlm
               ? `已保存的默认 LLM 当前不可用：${controller.snapshot().defaultLlm!.connectionId} · ${controller.snapshot().defaultLlm!.modelId}`
-              : '设置后，内置 Agent 的新运行将从这里取得模型配置。'}
+              : '设置后，新的 Knowledge Processing Task、Agent Preview 与 Chat Conversation 将从这里取得模型配置。'}
         </p>
         <div class="ai-runtime-panel__actions">
           <Button

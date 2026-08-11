@@ -11,6 +11,7 @@ import './FolderBrowserPage.css'
 export interface FolderBrowserPageProps {
   folderPath: string
   label: string
+  embedded?: boolean
   onBack(): void
 }
 
@@ -145,15 +146,15 @@ export function FolderBrowserPage(props: FolderBrowserPageProps) {
   })
 
   return (
-    <div class="folder-browser-page" data-testid="folder-browser-page">
-      <header class="page-header">
+    <div class={`folder-browser-page${props.embedded ? ' folder-browser-page--embedded' : ''}`} data-testid="folder-browser-page">
+      <header class={props.embedded ? 'folder-browser-page__embedded-header' : 'page-header'}>
         <div class="folder-browser-page__heading">
           <Button
             variant="ghost"
             icon="back"
             data-testid="folder-browser-close"
             onClick={props.onBack}
-          >返回</Button>
+          >{props.embedded ? '返回概览' : '返回'}</Button>
           <div>
             <h1>{props.label}</h1>
             <div class="page-summary">

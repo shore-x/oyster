@@ -1,7 +1,7 @@
 import { createMemo, createSignal, onMount } from 'solid-js'
 import type {
   DiscoveredSkill,
-  SkillDiscoverySnapshot,
+  SkillDiscoveryStateView,
   SkillDocument
 } from '../../shared/skills'
 
@@ -10,7 +10,7 @@ function errorText(cause: unknown): string {
 }
 
 export function createSkillDiscoveryController() {
-  const [snapshot, setSnapshot] = createSignal<SkillDiscoverySnapshot>()
+  const [snapshot, setSnapshot] = createSignal<SkillDiscoveryStateView>()
   const [selectedId, setSelectedId] = createSignal<string>()
   const [document, setDocument] = createSignal<SkillDocument>()
   const [busy, setBusy] = createSignal<string>()
@@ -44,9 +44,9 @@ export function createSkillDiscoveryController() {
 
   async function replaceSnapshot(
     key: 'load' | 'discover',
-    action: () => Promise<SkillDiscoverySnapshot>
+    action: () => Promise<SkillDiscoveryStateView>
   ): Promise<boolean> {
-    let nextSnapshot: SkillDiscoverySnapshot
+    let nextSnapshot: SkillDiscoveryStateView
     try {
       setBusy(key)
       setError(undefined)
@@ -81,7 +81,7 @@ export function createSkillDiscoveryController() {
   }
 
   onMount(() => {
-    void replaceSnapshot('load', () => window.oyster.skills.getDiscoverySnapshot())
+    void replaceSnapshot('load', () => window.oyster.skills.getDiscoveryStateView())
   })
 
   return {

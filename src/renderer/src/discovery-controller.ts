@@ -1,39 +1,39 @@
 import { createSignal, onCleanup, onMount } from 'solid-js'
-import type { DiscoverySnapshot } from '../../shared/discovery'
+import type { DiscoveryStateView } from '../../shared/discovery'
 
-const EMPTY_SNAPSHOT: DiscoverySnapshot = { sources: [], runs: [] }
+const EMPTY_STATE: DiscoveryStateView = { sources: [], scans: [] }
 
 export function createDiscoveryController() {
-  const [snapshot, setSnapshot] = createSignal(EMPTY_SNAPSHOT)
+  const [state, setState] = createSignal(EMPTY_STATE)
   const [detecting, setDetecting] = createSignal(false)
   const [error, setError] = createSignal<string>()
 
-  async function run(action: () => Promise<DiscoverySnapshot>): Promise<void> {
+  async function execute(action: () => Promise<DiscoveryStateView>): Promise<void> {
     try {
       setError(undefined)
-      setSnapshot(await action())
+      setState(await action())
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
   }
 
   onMount(() => {
-    const unsubscribe = window.oyster.discovery.subscribe(setSnapshot)
-    void run(() => window.oyster.discovery.getSnapshot())
+    const unsubscribe = window.oyster.discovery.subscribe(setState)
+    void execute(() => window.oyster.discovery.getState())
     onCleanup(unsubscribe)
   })
 
   return {
-    snapshot,
+    state,
     detecting,
     error,
     async detectAgents() {
       setDetecting(true)
-      await run(() => window.oyster.discovery.detectAgents())
+      await execute(() => window.oyster.discovery.detectAgents())
       setDetecting(false)
     },
-    scanSource: (sourceId: string) => run(() => window.oyster.discovery.scanSource(sourceId)),
-    cancelRun: (runId: string) => run(() => window.oyster.discovery.cancelRun(runId)),
-    chooseSourceRoot: (sourceId: string) => run(() => window.oyster.discovery.chooseSourceRoot(sourceId))
+    scanSource: (sourceId: string) => execute(() => window.oyster.discovery.scanSource(sourceId)),
+    cancelScan: (scanId: string) => execute(() => window.oyster.discovery.cancelScan(scanId)),
+    chooseSourceRoot: (sourceId: string) => execute(() => window.oyster.discovery.chooseSourceRoot(sourceId))
   }
 }

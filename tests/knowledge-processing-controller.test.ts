@@ -1,82 +1,84 @@
 import { createRoot } from 'solid-js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
-  AvailableSessionSummary,
   DiscoveryApi,
-  DiscoverySnapshot,
-  SessionCatalogSnapshot
+  DiscoveryStateView,
+  SourceConversationCatalogView,
+  SourceConversationSummary
 } from '../src/shared/discovery'
 import type {
   KnowledgeMaintenanceResult,
   KnowledgeProcessingApi,
-  KnowledgeProcessingSnapshot,
-  RunKnowledgeMaintenanceInput
+  KnowledgeProcessingStateView,
+  StartKnowledgeAgentPreviewInput
 } from '../src/shared/knowledge-processing'
-import { completedAgentRun } from './agent-run-fixture'
 import { createKnowledgeProcessingController } from '../src/renderer/src/knowledge-processing-controller'
 
 vi.mock('solid-js', async () => vi.importActual('solid-js/dist/solid.js'))
 
-const SESSION: AvailableSessionSummary = {
-  sourceRecordId: 'source-record-1',
+const SOURCE_CONVERSATION: SourceConversationSummary = {
+  sourceConversationId: 'source-conversation-1',
   sourceId: 'source-1',
   agentType: 'codex',
   sourceDisplayName: 'Codex',
-  externalId: 'session-1',
-  title: 'Session one',
+  providerConversationId: 'conversation-1',
+  title: 'Conversation one',
   sizeBytes: 120,
-  revision: 'a'.repeat(64)
+  sourceRevision: 'a'.repeat(64)
 }
 
-const SNAPSHOT: KnowledgeProcessingSnapshot = {
-  stages: [],
+const STATE: KnowledgeProcessingStateView = {
+  agents: [],
   connections: [],
-  runningStageIds: [],
-  debugTraces: []
+  activeAgentIds: [],
+  liveInvocations: []
 }
 
-function discoverySnapshot(): DiscoverySnapshot {
+function discoveryState(): DiscoveryStateView {
+  return { sources: [], scans: [] }
+}
+
+function sourceConversationCatalog(
+  conversations = [SOURCE_CONVERSATION]
+): SourceConversationCatalogView {
   return {
-    sources: [],
-    runs: []
+    conversations,
+    status: 'idle',
+    refreshedAt: '2026-08-09T00:00:00.000Z'
   }
-}
-
-function sessionCatalog(sessions = [SESSION]): SessionCatalogSnapshot {
-  return { sessions, state: 'idle', refreshedAt: '2026-08-09T00:00:00.000Z' }
 }
 
 function maintenanceResult(): KnowledgeMaintenanceResult {
   const completedAt = '2026-07-26T00:00:01.000Z'
   return {
-    stageId: 'knowledge_maintenance_agent',
-    sourceRef: 'raw:source-record-1@sha256:test',
+    agentId: 'knowledge_maintainer',
+    sourceRef: 'raw:source-conversation-1@sha256:test',
     activitySegmentCount: 1,
-    run: {
-      id: 'workspace-1',
+    workspace: {
+      taskId: 'task-1',
       repositoryPath: '/tmp/oyster-repository',
-      runPath: '/tmp/oyster-repository/runs/workspace-1',
-      taskPath: '/tmp/oyster-repository/runs/workspace-1/TASK.md',
-      workPath: '/tmp/oyster-repository/runs/workspace-1/WORK.md',
-      inputPath: '/tmp/oyster-repository/runs/workspace-1/inputs',
-      workspaceRevision: 'd'.repeat(64),
-      branchName: 'processing/workspace-1',
+      workspacePath: '/tmp/oyster-repository/tasks/task-1',
+      briefPath: '/tmp/oyster-repository/tasks/task-1/BRIEF.md',
+      progressPath: '/tmp/oyster-repository/tasks/task-1/PROGRESS.md',
+      inputPath: '/tmp/oyster-repository/tasks/task-1/inputs',
+      workspaceRevision: 'd'.repeat(40),
+      branchName: 'knowledge-task/task-1',
       targetBranch: 'main',
-      baseRevision: 'b'.repeat(40)
+      baseRepositoryRevision: 'b'.repeat(40)
     },
-    previousRevision: 'b'.repeat(40),
-    revision: 'c'.repeat(40),
+    previousRepositoryRevision: 'b'.repeat(40),
+    candidateRepositoryRevision: 'c'.repeat(40),
     changedPaths: ['knowledge/raw-evidence.md'],
-    agentRunId: 'maintenance-run-1',
+    agentInvocationId: 'maintenance-invocation-1',
     durationMs: 20,
     completedAt,
-    execution: {
+    invocation: {
       connectionId: 'model:fixture',
       connectionName: 'Fixture',
       backendKind: 'api',
       providerId: 'openai_compatible',
       model: 'fixture-model',
-      runtime: 'pi_agent_core',
+      runtime: 'pi_coding_agent',
       modelCallCount: 1,
       toolCalls: ['read']
     }
@@ -87,66 +89,66 @@ function installApis(
   overrides: Partial<KnowledgeProcessingApi> = {},
   discoveryOverrides: Partial<DiscoveryApi> = {}
 ) {
-  const runKnowledgeMaintenance = vi.fn(async (_input: RunKnowledgeMaintenanceInput) => ({
+  const previewKnowledgeMaintainer = vi.fn(async (_input: StartKnowledgeAgentPreviewInput) => ({
     status: 'completed' as const,
     result: maintenanceResult()
   }))
   const knowledgeProcessing: KnowledgeProcessingApi = {
-    getSnapshot: async () => SNAPSHOT,
-    saveStage: async () => SNAPSHOT,
-    saveDefaultInstructions: async () => SNAPSHOT,
-    runKnowledgeMaintenance,
-    runFullChain: async () => ({
-      status: 'session_rejected',
+    getState: async () => STATE,
+    saveAgent: async () => STATE,
+    saveAgentDefaultInstructions: async () => STATE,
+    previewKnowledgeMaintainer,
+    startKnowledgeTask: async () => ({
+      status: 'source_snapshot_rejected',
       reason: 'unavailable',
-      message: 'Session unavailable'
+      message: 'Source Snapshot unavailable'
     }),
-    listFullChainRuns: async () => [],
-    readFullChainRun: async () => undefined,
-    cancelFullChain: async () => undefined,
-    cancelRun: async () => undefined,
+    listKnowledgeTasks: async () => [],
+    readKnowledgeTask: async () => undefined,
+    cancelKnowledgeTask: async () => undefined,
+    cancelAgentPreview: async () => undefined,
     subscribe: () => () => undefined,
     ...overrides
   }
   const discovery: DiscoveryApi = {
-    getSnapshot: async () => discoverySnapshot(),
-    getSessionCatalog: async () => sessionCatalog(),
-    refreshSessionCatalog: async () => sessionCatalog(),
-    detectAgents: async () => discoverySnapshot(),
-    scanSource: async () => discoverySnapshot(),
-    cancelRun: async () => discoverySnapshot(),
-    chooseSourceRoot: async () => discoverySnapshot(),
+    getState: async () => discoveryState(),
+    getSourceConversationCatalog: async () => sourceConversationCatalog(),
+    refreshSourceConversationCatalog: async () => sourceConversationCatalog(),
+    detectAgents: async () => discoveryState(),
+    scanSource: async () => discoveryState(),
+    cancelScan: async () => discoveryState(),
+    chooseSourceRoot: async () => discoveryState(),
     subscribe: () => () => undefined,
-    subscribeSessionCatalog: () => () => undefined,
+    subscribeSourceConversationCatalog: () => () => undefined,
     ...discoveryOverrides
   }
   vi.stubGlobal('window', { oyster: { knowledgeProcessing, discovery } })
-  return { runKnowledgeMaintenance }
+  return { previewKnowledgeMaintainer }
 }
 
 afterEach(() => vi.unstubAllGlobals())
 
 describe('knowledge processing controller', () => {
-  it('runs Maintainer directly from an immutable Session revision', async () => {
-    const { runKnowledgeMaintenance } = installApis()
+  it('previews Maintainer from an immutable Source Snapshot', async () => {
+    const { previewKnowledgeMaintainer } = installApis()
     await createRoot(async (dispose) => {
       try {
         const controller = createKnowledgeProcessingController()
-        await vi.waitFor(() => expect(controller.sessionsLoading()).toBe(false))
-        await controller.runKnowledgeMaintenance({
-          sourceRecordId: SESSION.sourceRecordId,
-          expectedRevision: SESSION.revision,
+        await vi.waitFor(() => expect(controller.sourceConversationsLoading()).toBe(false))
+        await controller.previewKnowledgeMaintainer({
+          sourceConversationId: SOURCE_CONVERSATION.sourceConversationId,
+          sourceRevision: SOURCE_CONVERSATION.sourceRevision,
           attention: 'Inspect Skill activations.'
         })
 
-        expect(runKnowledgeMaintenance).toHaveBeenCalledWith({
-          sourceRecordId: SESSION.sourceRecordId,
-          expectedRevision: SESSION.revision,
+        expect(previewKnowledgeMaintainer).toHaveBeenCalledWith({
+          sourceConversationId: SOURCE_CONVERSATION.sourceConversationId,
+          sourceRevision: SOURCE_CONVERSATION.sourceRevision,
           attention: 'Inspect Skill activations.'
         })
         expect(controller.maintenanceResult()?.activitySegmentCount).toBe(1)
-        expect(controller.maintenanceResult()?.revision).toBe('c'.repeat(40))
-        controller.invalidateInputResults()
+        expect(controller.maintenanceResult()?.candidateRepositoryRevision).toBe('c'.repeat(40))
+        controller.invalidatePreviewResult()
         expect(controller.maintenanceResult()).toBeUndefined()
       } finally {
         dispose()
@@ -154,66 +156,68 @@ describe('knowledge processing controller', () => {
     })
   })
 
-  it('keeps stage pending state local until the API call settles', async () => {
+  it('keeps the pending Invocation state local until the API call settles', async () => {
     let resolve!: (value: KnowledgeMaintenanceResult) => void
     const pending = new Promise<{
       status: 'completed'
       result: KnowledgeMaintenanceResult
     }>((done) => { resolve = (result) => done({ status: 'completed', result }) })
-    installApis({ runKnowledgeMaintenance: async () => pending })
+    installApis({ previewKnowledgeMaintainer: async () => pending })
     await createRoot(async (dispose) => {
       try {
         const controller = createKnowledgeProcessingController()
-        const run = controller.runKnowledgeMaintenance({
-          sourceRecordId: SESSION.sourceRecordId,
-          expectedRevision: SESSION.revision
+        const preview = controller.previewKnowledgeMaintainer({
+          sourceConversationId: SOURCE_CONVERSATION.sourceConversationId,
+          sourceRevision: SOURCE_CONVERSATION.sourceRevision
         })
-        expect(controller.isRunning('knowledge_maintenance_agent')).toBe(true)
+        expect(controller.hasActiveInvocation('knowledge_maintainer')).toBe(true)
         resolve(maintenanceResult())
-        await run
-        expect(controller.isRunning('knowledge_maintenance_agent')).toBe(false)
+        await preview
+        expect(controller.hasActiveInvocation('knowledge_maintainer')).toBe(false)
       } finally {
         dispose()
       }
     })
   })
 
-  it('refreshes the authoritative Session catalog through one discovery operation', async () => {
-    const refreshedSession = { ...SESSION, title: 'Refreshed Session' }
-    const refreshSessionCatalog = vi.fn(async () => sessionCatalog([refreshedSession]))
-    installApis({}, { refreshSessionCatalog })
+  it('refreshes the authoritative Source Conversation catalog', async () => {
+    const refreshed = { ...SOURCE_CONVERSATION, title: 'Refreshed Conversation' }
+    const refreshSourceConversationCatalog = vi.fn(async () => (
+      sourceConversationCatalog([refreshed])
+    ))
+    installApis({}, { refreshSourceConversationCatalog })
     await createRoot(async (dispose) => {
       try {
         const controller = createKnowledgeProcessingController()
-        await vi.waitFor(() => expect(controller.sessionsLoading()).toBe(false))
+        await vi.waitFor(() => expect(controller.sourceConversationsLoading()).toBe(false))
 
-        await expect(controller.refreshAvailableSessions()).resolves.toBe(true)
+        await expect(controller.refreshSourceConversations()).resolves.toBe(true)
 
-        expect(refreshSessionCatalog).toHaveBeenCalledOnce()
-        expect(controller.availableSessions()).toEqual([refreshedSession])
+        expect(refreshSourceConversationCatalog).toHaveBeenCalledOnce()
+        expect(controller.sourceConversations()).toEqual([refreshed])
       } finally {
         dispose()
       }
     })
   })
 
-  it('shows a structured Session rejection without exposing an IPC exception', async () => {
+  it('shows a structured Source Snapshot rejection without exposing an IPC exception', async () => {
     installApis({
-      runKnowledgeMaintenance: async () => ({
-        status: 'session_rejected',
+      previewKnowledgeMaintainer: async () => ({
+        status: 'source_snapshot_rejected',
         reason: 'changed',
-        message: '所选 Session 已更新，请重新选择'
+        message: '所选 Source Snapshot 已更新，请重新选择'
       })
     })
     await createRoot(async (dispose) => {
       try {
         const controller = createKnowledgeProcessingController()
-        await controller.runKnowledgeMaintenance({
-          sourceRecordId: SESSION.sourceRecordId,
-          expectedRevision: SESSION.revision
+        await controller.previewKnowledgeMaintainer({
+          sourceConversationId: SOURCE_CONVERSATION.sourceConversationId,
+          sourceRevision: SOURCE_CONVERSATION.sourceRevision
         })
 
-        expect(controller.error()).toBe('所选 Session 已更新，请重新选择')
+        expect(controller.error()).toBe('所选 Source Snapshot 已更新，请重新选择')
         expect(controller.maintenanceResult()).toBeUndefined()
       } finally {
         dispose()

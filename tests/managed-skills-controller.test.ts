@@ -60,7 +60,7 @@ function documentFor(artifactDirectoryName: string): ManagedSkillDocument {
 
 function installApi(overrides: Partial<SkillApi> = {}): SkillApi {
   const api: SkillApi = {
-    getDiscoverySnapshot: async () => ({ skills: [], errors: [] }),
+    getDiscoveryStateView: async () => ({ skills: [], errors: [] }),
     discover: async () => ({ skills: [], errors: [] }),
     readDiscoveredDocument: async () => { throw new Error('not used') },
     openDiscoveredFolder: async () => undefined,

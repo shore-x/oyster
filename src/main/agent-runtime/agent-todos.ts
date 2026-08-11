@@ -22,7 +22,7 @@ export const AGENT_TODO_TOOL_CATALOG = [
   {
     name: 'add_todos',
     label: '增加待办事项',
-    description: 'Add one or more items to this Agent run\'s general-purpose Todo list. The Host assigns stable IDs and keeps the list outside the conversation transcript.',
+    description: 'Add one or more items to this Agent Invocation\'s general-purpose Todo list. The Host assigns stable IDs and keeps the list outside the conversation transcript.',
     parameters: addTodosParameters
   },
   {
@@ -34,7 +34,7 @@ export const AGENT_TODO_TOOL_CATALOG = [
   {
     name: 'list_todos',
     label: '查看待办事项',
-    description: 'Read the complete Todo list bound to this Agent run, including pending and completed items.',
+    description: 'Read the complete Todo list bound to this Agent Invocation, including pending and completed items.',
     parameters: listTodosParameters
   }
 ] as const
@@ -103,7 +103,7 @@ export class AgentTodoStore {
 }
 
 function todoListText(todos: readonly AgentTodo[]): string {
-  if (!todos.length) return 'No Todos are bound to this Agent run.'
+  if (!todos.length) return 'No Todos are bound to this Agent Invocation.'
   return todos.map((todo) => `- ${todo.id} [${todo.status}] ${todo.content}`).join('\n')
 }
 

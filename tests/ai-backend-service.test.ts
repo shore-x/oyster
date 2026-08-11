@@ -24,12 +24,12 @@ import type {
   AgentTaskRequest,
   ModelBackendAdapter,
   ModelGenerationRequest,
-  ModelRuntime,
+  SelectedModelStream,
   StoredModelConnection
 } from '../src/main/ai-backends/model'
 import { InMemoryAiBackendRepository } from '../src/main/ai-backends/repository'
 
-function runtime(modelId: string): ModelRuntime {
+function modelStream(modelId: string): SelectedModelStream {
   return {
     model: {
       id: modelId,
@@ -94,7 +94,7 @@ class FakeCodingPlanBackend implements CodingPlanBackend {
     }
   ]
   calls: CodingPlanCall[] = []
-  runtimeCalls: string[] = []
+  modelStreamCalls: string[] = []
   loginMethods: CodingPlanLoginMethod[] = []
   connectHandler?: (
     loginMethod: CodingPlanLoginMethod,
@@ -125,9 +125,9 @@ class FakeCodingPlanBackend implements CodingPlanBackend {
     return { text: 'CODING_PLAN' }
   }
 
-  runtime(modelId: string): ModelRuntime {
-    this.runtimeCalls.push(modelId)
-    return runtime(modelId)
+  modelStream(modelId: string): SelectedModelStream {
+    this.modelStreamCalls.push(modelId)
+    return modelStream(modelId)
   }
 
   dispose(): void {}
@@ -172,7 +172,7 @@ function createService(repository: AiBackendRepository = new InMemoryAiBackendRe
   const discovery = new FakeCodexDiscovery()
   const model = new FakeModelAdapter()
   const codingPlan = new FakeCodingPlanBackend()
-  const apiRuntimeCalls: Array<{ modelId: string; apiKey?: string }> = []
+  const apiModelStreamCalls: Array<{ modelId: string; apiKey?: string }> = []
   const service = new AiBackendService(
     repository,
     credentials,
@@ -180,11 +180,11 @@ function createService(repository: AiBackendRepository = new InMemoryAiBackendRe
     model,
     codingPlan,
     (connection, apiKey) => {
-      apiRuntimeCalls.push({ modelId: connection.model, apiKey })
-      return runtime(connection.model)
+      apiModelStreamCalls.push({ modelId: connection.model, apiKey })
+      return modelStream(connection.model)
     }
   )
-  return { service, repository, credentials, discovery, model, codingPlan, apiRuntimeCalls }
+  return { service, repository, credentials, discovery, model, codingPlan, apiModelStreamCalls }
 }
 
 async function saveApiConnection(
@@ -460,8 +460,8 @@ describe('AiBackendService', () => {
     expect(service.snapshot().connections[0].authentication).toBeUndefined()
   })
 
-  it('passes a selected non-default API model to direct generation and Agent runtime', async () => {
-    const { service, model, apiRuntimeCalls } = createService()
+  it('passes a selected non-default API model to direct generation and the Agent model stream', async () => {
+    const { service, model, apiModelStreamCalls } = createService()
     await service.initialize()
     const connectionId = await saveApiConnection(service, 'default-model', 'api-secret')
     model.discoveredModels = [{
@@ -483,20 +483,20 @@ describe('AiBackendService', () => {
       apiKey: 'api-secret'
     })
 
-    await expect(service.withModelRuntime(
+    await expect(service.withModelStream(
       connectionId,
       'smaller-model',
-      async (selectedRuntime) => ({
-        id: selectedRuntime.model.id,
-        contextWindow: selectedRuntime.model.contextWindow,
-        maxTokens: selectedRuntime.model.maxTokens
+      async (selectedModelStream) => ({
+        id: selectedModelStream.model.id,
+        contextWindow: selectedModelStream.model.contextWindow,
+        maxTokens: selectedModelStream.model.maxTokens
       })
     )).resolves.toEqual({
       id: 'smaller-model',
       contextWindow: 32_000,
       maxTokens: 50
     })
-    expect(apiRuntimeCalls).toContainEqual({ modelId: 'smaller-model', apiKey: 'api-secret' })
+    expect(apiModelStreamCalls).toContainEqual({ modelId: 'smaller-model', apiKey: 'api-secret' })
     expect(service.snapshot().connections.find((candidate) => candidate.id === connectionId)
       ?.models.find((candidate) => candidate.id === 'smaller-model')).toMatchObject({
         contextWindowTokens: 32_000,
@@ -552,7 +552,7 @@ describe('AiBackendService', () => {
     })
   })
 
-  it('lets discovered model metadata raise an API Agent runtime fallback capability', async () => {
+  it('lets discovered model metadata raise an API model-stream fallback capability', async () => {
     const { service, model } = createService()
     await service.initialize()
     const connectionId = await saveApiConnection(service, 'default-model')
@@ -565,12 +565,12 @@ describe('AiBackendService', () => {
     }]
     await service.refresh()
 
-    await expect(service.withModelRuntime(
+    await expect(service.withModelStream(
       connectionId,
       'large-output-model',
-      async (selectedRuntime) => ({
-        contextWindow: selectedRuntime.model.contextWindow,
-        maxTokens: selectedRuntime.model.maxTokens
+      async (selectedModelStream) => ({
+        contextWindow: selectedModelStream.model.contextWindow,
+        maxTokens: selectedModelStream.model.maxTokens
       })
     )).resolves.toEqual({
       contextWindow: 128_000,
@@ -583,7 +583,7 @@ describe('AiBackendService', () => {
     await service.initialize()
     const connectionId = await saveApiConnection(service, 'test-model')
 
-    await expect(service.withModelRuntime(
+    await expect(service.withModelStream(
       connectionId,
       'test-model',
       async () => { throw new Error('Knowledge Maintenance Agent 未正常完成') }
@@ -610,7 +610,7 @@ describe('AiBackendService', () => {
     const healthyState = service.snapshot().connections.find((connection) => connection.id === connectionId)
     expect(healthyState?.status).toBe('ready')
 
-    await expect(service.withModelRuntime(
+    await expect(service.withModelStream(
       connectionId,
       'test-model',
       async () => { throw new Error('用户取消了运行') }
@@ -623,7 +623,7 @@ describe('AiBackendService', () => {
     await service.initialize()
     const connectionId = await saveApiConnection(service, 'test-model')
 
-    await expect(service.withModelRuntime(
+    await expect(service.withModelStream(
       connectionId,
       'test-model',
       async () => 'candidate',
@@ -631,7 +631,7 @@ describe('AiBackendService', () => {
     )).resolves.toBe('candidate')
     expect(service.snapshot().connections.find((connection) => connection.id === connectionId)).toMatchObject({ status: 'ready' })
 
-    await expect(service.withModelRuntime(
+    await expect(service.withModelStream(
       connectionId,
       'test-model',
       async () => { throw new ModelConnectionFailureError(new Error('provider 401')) },
@@ -640,7 +640,7 @@ describe('AiBackendService', () => {
     const unavailableState = service.snapshot().connections.find((connection) => connection.id === connectionId)
     expect(unavailableState).toMatchObject({ status: 'unavailable', errorMessage: 'provider 401' })
 
-    await expect(service.withModelRuntime(
+    await expect(service.withModelStream(
       connectionId,
       'test-model',
       async () => { throw new Error('Knowledge Maintenance Agent 未正常完成') },
@@ -681,16 +681,16 @@ describe('AiBackendService', () => {
     expect(service.snapshot().connections.find((connection) => connection.id === connectionId)).toEqual(healthyState)
   })
 
-  it('provides the explicitly selected Coding Plan runtime', async () => {
+  it('provides the explicitly selected Coding Plan model stream', async () => {
     const { service, codingPlan } = createService()
     await service.initialize()
 
-    await expect(service.withModelRuntime(
+    await expect(service.withModelStream(
       'runtime:codex',
       'gpt-codex-large',
-      async (selectedRuntime) => selectedRuntime.model.id
+      async (selectedModelStream) => selectedModelStream.model.id
     )).resolves.toBe('gpt-codex-large')
-    expect(codingPlan.runtimeCalls).toEqual(['gpt-codex-large'])
+    expect(codingPlan.modelStreamCalls).toEqual(['gpt-codex-large'])
   })
 
   it.each<ReasoningEffort>(['minimal', 'xhigh', 'max'])('rejects unavailable Coding Plan effort %s', async (reasoningEffort) => {

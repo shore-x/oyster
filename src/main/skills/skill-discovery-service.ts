@@ -6,7 +6,7 @@ import type { AgentType } from '../../shared/discovery'
 import type {
   DiscoveredSkill,
   SkillDiscoveryError,
-  SkillDiscoverySnapshot,
+  SkillDiscoveryStateView,
   SkillDocument,
   SkillFormat,
   SkillScope
@@ -356,7 +356,7 @@ function configuredRoot(value: string | undefined, fallback: string, homeDirecto
 }
 
 export class SkillDiscoveryService {
-  private snapshotValue: SkillDiscoverySnapshot = { skills: [], errors: [] }
+  private snapshotValue: SkillDiscoveryStateView = { skills: [], errors: [] }
   private catalog = new Map<string, DiscoveredSkill>()
   private documentIdentities = new Map<string, DocumentIdentity>()
 
@@ -366,11 +366,11 @@ export class SkillDiscoveryService {
     private readonly codexAdminRoot = DEFAULT_CODEX_ADMIN_ROOT
   ) {}
 
-  getSnapshot(): SkillDiscoverySnapshot {
+  getSnapshot(): SkillDiscoveryStateView {
     return clone(this.snapshotValue)
   }
 
-  async discover(): Promise<SkillDiscoverySnapshot> {
+  async discover(): Promise<SkillDiscoveryStateView> {
     const accumulator: DiscoveryAccumulator = {
       skills: new Map(),
       documentIdentities: new Map(),

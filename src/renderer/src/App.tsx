@@ -1,55 +1,43 @@
 import { For, Show, createMemo, createSignal } from 'solid-js'
 import { createDiscoveryController } from './discovery-controller'
-import { AiBackendsPage } from './components/AiBackendsPage'
-import { AgentConfigurationPage } from './components/AgentConfigurationPage'
 import { ChatPage } from './components/ChatPage'
-import { ArtifactsPage } from './components/ArtifactsPage'
+import { ArtifactsPage, type ArtifactBrowserTarget } from './components/ArtifactsPage'
 import { KnowledgeProcessingPage } from './components/KnowledgeProcessingPage'
 import { KnowledgeBrowserPage } from './components/KnowledgeBrowserPage'
+import { SettingsPage } from './components/SettingsPage'
 import { SkillsPage, type SkillsNavigationRequest } from './components/SkillsPage'
 import { SourceCard } from './components/SourceCard'
-import { FolderBrowserPage } from './components/FolderBrowserPage'
 import { Button, Icon } from './ui'
 
-type PageId = 'sources' | 'skills' | 'knowledge' | 'artifacts' | 'folder-browser' | 'chat' | 'knowledge-processing' | 'agent-configuration' | 'ai-backends'
-
-interface FolderBrowserNavigation {
-  folderPath: string
-  label: string
-  returnPage: PageId
-}
+type PageId = 'chat' | 'knowledge' | 'artifacts' | 'sources' | 'skills' | 'settings' | 'knowledge-processing'
 
 export function App() {
   const controller = createDiscoveryController()
-  const [page, setPage] = createSignal<PageId>('sources')
+  const [page, setPage] = createSignal<PageId>('chat')
   const [knowledgeResetVersion, setKnowledgeResetVersion] = createSignal(0)
-  const [knowledgeNavigation, setKnowledgeNavigation] = createSignal<{ title: string; version: number }>()
   const [skillsNavigation, setSkillsNavigation] = createSignal<SkillsNavigationRequest>()
-  const [folderBrowserNavigation, setFolderBrowserNavigation] = createSignal<FolderBrowserNavigation>()
+  const [artifactBrowserTarget, setArtifactBrowserTarget] = createSignal<ArtifactBrowserTarget>()
   const [navigationError, setNavigationError] = createSignal<string>()
   const foundCount = createMemo(
-    () => controller.snapshot().sources.filter((source) => source.discoveryState === 'found').length
+    () => controller.state().sources.filter((source) => source.discoveryState === 'found').length
   )
-  const totalSessions = createMemo(() =>
-    controller.snapshot().sources.reduce((total, source) => total + source.sessionCount, 0)
+  const totalConversations = createMemo(() =>
+    controller.state().sources.reduce((total, source) => total + source.conversationCount, 0)
   )
   const navigateTo = (nextPage: PageId): void => {
     setNavigationError(undefined)
     setPage(nextPage)
-    requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0 }))
   }
 
-  const browseFolder = (navigation: FolderBrowserNavigation): void => {
-    setFolderBrowserNavigation(navigation)
-    navigateTo('folder-browser')
+  const browseFolder = (target: ArtifactBrowserTarget): void => {
+    setArtifactBrowserTarget(target)
   }
 
   const browseDesignDocuments = async (): Promise<void> => {
     try {
       browseFolder({
         folderPath: await window.oyster.folderBrowser.getDesignDocumentsPath(),
-        label: 'Oyster 设计文档',
-        returnPage: 'artifacts'
+        label: 'Oyster 设计文档'
       })
     } catch (error) {
       setNavigationError(error instanceof Error ? error.message : String(error))
@@ -70,18 +58,14 @@ export function App() {
     <div class="app-shell">
       <aside class="sidebar">
         <div class="brand"><span class="brand__mark">O</span><span>Oyster</span></div>
-        <nav aria-label="主导航">
+        <nav class="sidebar__navigation" aria-label="主导航">
+          <div class="nav-primary">
           <a
-            href="#sources"
-            class={`nav-item${page() === 'sources' ? ' nav-item--active' : ''}`}
-            onClick={(event) => { event.preventDefault(); navigateTo('sources') }}
-          ><Icon name="archive" /><span>数据来源</span></a>
-          <a
-            href="#skills"
-            data-testid="nav-skills"
-            class={`nav-item${page() === 'skills' ? ' nav-item--active' : ''}`}
-            onClick={(event) => { event.preventDefault(); navigateTo('skills') }}
-          ><Icon name="skill" /><span>Skills</span></a>
+            href="#chat"
+            data-testid="nav-chat"
+            class={`nav-item${page() === 'chat' ? ' nav-item--active' : ''}`}
+            onClick={(event) => { event.preventDefault(); navigateTo('chat') }}
+          ><Icon name="chat" /><span>对话</span></a>
           <a
             href="#knowledge"
             data-testid="nav-knowledge"
@@ -91,50 +75,57 @@ export function App() {
           <a
             href="#artifacts"
             data-testid="nav-artifacts"
-            class={`nav-item${page() === 'artifacts' || (page() === 'folder-browser' && folderBrowserNavigation()?.returnPage === 'artifacts') ? ' nav-item--active' : ''}`}
+            class={`nav-item${page() === 'artifacts' ? ' nav-item--active' : ''}`}
             onClick={(event) => { event.preventDefault(); navigateTo('artifacts') }}
           ><Icon name="folder" /><span>产物</span></a>
           <a
-            href="#chat"
-            data-testid="nav-chat"
-            class={`nav-item${page() === 'chat' ? ' nav-item--active' : ''}`}
-            onClick={(event) => { event.preventDefault(); navigateTo('chat') }}
-          ><Icon name="chat" /><span>对话</span></a>
+            href="#sources"
+            data-testid="nav-sources"
+            class={`nav-item${page() === 'sources' ? ' nav-item--active' : ''}`}
+            onClick={(event) => { event.preventDefault(); navigateTo('sources') }}
+          ><Icon name="archive" /><span>数据来源</span></a>
           <a
+            href="#skills"
+            data-testid="nav-skills"
+            class={`nav-item${page() === 'skills' ? ' nav-item--active' : ''}`}
+            onClick={(event) => { event.preventDefault(); navigateTo('skills') }}
+          ><Icon name="skill" /><span>Skills</span></a>
+          </div>
+          <div class="nav-system">
+            <a
+              href="#settings"
+              data-testid="nav-ai-backends"
+              class={`nav-item${page() === 'settings' ? ' nav-item--active' : ''}`}
+              onClick={(event) => { event.preventDefault(); navigateTo('settings') }}
+            ><Icon name="spark" /><span data-testid="nav-settings">设置</span></a>
+            <details class="nav-advanced" open={page() === 'knowledge-processing'}>
+              <summary><Icon name="play" /><span>高级功能</span></summary>
+              <a
             href="#knowledge-processing"
             data-testid="nav-knowledge-processing"
             class={`nav-item${page() === 'knowledge-processing' ? ' nav-item--active' : ''}`}
             onClick={(event) => { event.preventDefault(); navigateTo('knowledge-processing') }}
           ><Icon name="play" /><span>加工测试</span></a>
-          <a
-            href="#agent-configuration"
-            data-testid="nav-agent-configuration"
-            class={`nav-item${page() === 'agent-configuration' ? ' nav-item--active' : ''}`}
-            onClick={(event) => { event.preventDefault(); navigateTo('agent-configuration') }}
-          ><Icon name="agent" /><span>Agent 配置</span></a>
-          <a
-            href="#ai-backends"
-            data-testid="nav-ai-backends"
-            class={`nav-item${page() === 'ai-backends' ? ' nav-item--active' : ''}`}
-            onClick={(event) => { event.preventDefault(); navigateTo('ai-backends') }}
-          ><Icon name="spark" /><span>AI 后端</span></a>
+            </details>
+          </div>
         </nav>
       </aside>
 
-      <main class={`content${page() === 'skills' || page() === 'knowledge-processing' || page() === 'knowledge' || page() === 'chat' || page() === 'agent-configuration' || page() === 'folder-browser' ? ' content--wide' : ''}`}>
+      <main class={`content${page() !== 'sources' ? ' content--wide' : ''}`}>
         <div class="window-drag-region" data-testid="window-drag-region" aria-hidden="true" />
-        <Show when={navigationError()}>
-          {(message) => <div class="page-error" role="alert"><Icon name="warning" />{message()}</div>}
-        </Show>
-        {/* Navigation changes visibility; mounted page state and active runs remain intact. */}
-        <div data-testid="page-sources" hidden={page() !== 'sources'}>
+        <div class="content__viewport">
+          <Show when={navigationError()}>
+            {(message) => <div class="page-error app-navigation-error" role="alert"><Icon name="warning" />{message()}</div>}
+          </Show>
+          {/* Navigation changes visibility; mounted page state and active invocations remain intact. */}
+        <div class="ui-page ui-page--flow" data-testid="page-sources" hidden={page() !== 'sources'}>
           <header class="page-header">
             <div>
               <h1>Agent 数据来源</h1>
               <div class="page-summary">
                 <span><strong>{foundCount()}</strong> 个来源</span>
                 <span class="page-summary__separator">·</span>
-                <span><strong>{totalSessions()}</strong> 个会话</span>
+                <span><strong>{totalConversations()}</strong> 个对话</span>
               </div>
             </div>
             <div class="page-header__actions">
@@ -155,41 +146,42 @@ export function App() {
           </Show>
 
           <section class="source-list" aria-label="Agent 数据来源">
-            <For each={controller.snapshot().sources}>{(source) => {
-              const activeRun = () => controller.snapshot().runs.find(
-                (run) => run.sourceId === source.id && (run.state === 'running' || run.state === 'queued')
+            <For each={controller.state().sources}>{(source) => {
+              const activeScan = () => controller.state().scans.find(
+                (scan) => scan.sourceId === source.id
+                  && (scan.status === 'in_progress' || scan.status === 'queued')
               )
               return (
                 <SourceCard
                   source={source}
-                  run={activeRun()}
+                  scan={activeScan()}
                   onScan={() => void controller.scanSource(source.id)}
-                  onCancel={() => activeRun() && void controller.cancelRun(activeRun()!.id)}
+                  onCancel={() => activeScan() && void controller.cancelScan(activeScan()!.scanId)}
                   onChooseRoot={() => void controller.chooseSourceRoot(source.id)}
                 />
               )
             }}</For>
           </section>
         </div>
-        <div data-testid="page-skills" hidden={page() !== 'skills'}>
+        <div class="ui-page ui-page--workspace" data-testid="page-skills" hidden={page() !== 'skills'}>
           <SkillsPage navigationRequest={skillsNavigation()} />
         </div>
-        <div class="knowledge-page" data-testid="page-knowledge" hidden={page() !== 'knowledge'}>
+        <div class="ui-page ui-page--workspace knowledge-page" data-testid="page-knowledge" hidden={page() !== 'knowledge'}>
           <KnowledgeBrowserPage
             active={page() === 'knowledge'}
-            navigationRequest={knowledgeNavigation()}
             onKnowledgeCleared={() => setKnowledgeResetVersion((version) => version + 1)}
           />
         </div>
-        <div data-testid="page-artifacts" hidden={page() !== 'artifacts'}>
+        <div class="ui-page ui-page--workspace" data-testid="page-artifacts" hidden={page() !== 'artifacts'}>
           <ArtifactsPage
+            browserTarget={artifactBrowserTarget()}
             onBrowseDesignDocuments={() => void browseDesignDocuments()}
             onOpenDesignDocuments={openDesignDocuments}
             onBrowseArtifact={(artifact) => browseFolder({
               folderPath: artifact.directoryPath,
-              label: artifact.directoryName,
-              returnPage: 'artifacts'
+              label: artifact.directoryName
             })}
+            onCloseBrowser={() => setArtifactBrowserTarget(undefined)}
             onManageSkill={(artifactDirectoryName) => {
               setSkillsNavigation((current) => ({
                 artifactDirectoryName,
@@ -199,31 +191,15 @@ export function App() {
             }}
           />
         </div>
-        <Show when={folderBrowserNavigation()}>
-          {(navigation) => (
-            <div data-testid="page-folder-browser" hidden={page() !== 'folder-browser'}>
-              <FolderBrowserPage
-                folderPath={navigation().folderPath}
-                label={navigation().label}
-                onBack={() => navigateTo(navigation().returnPage)}
-              />
-            </div>
-          )}
-        </Show>
-        <div data-testid="page-chat" hidden={page() !== 'chat'}>
-          <ChatPage onOpenKnowledge={(title) => {
-            setKnowledgeNavigation((current) => ({ title, version: (current?.version ?? 0) + 1 }))
-            navigateTo('knowledge')
-          }} />
+        <div class="ui-page ui-page--workspace" data-testid="page-chat" hidden={page() !== 'chat'}>
+          <ChatPage />
         </div>
-        <div data-testid="page-knowledge-processing" hidden={page() !== 'knowledge-processing'}>
+        <div class="ui-page ui-page--flow" data-testid="page-knowledge-processing" hidden={page() !== 'knowledge-processing'}>
           <KnowledgeProcessingPage knowledgeResetVersion={knowledgeResetVersion()} />
         </div>
-        <div data-testid="page-ai-backends" hidden={page() !== 'ai-backends'}>
-          <AiBackendsPage />
+        <div class="ui-page ui-page--workspace" data-testid="page-settings" hidden={page() !== 'settings'}>
+          <SettingsPage />
         </div>
-        <div data-testid="page-agent-configuration" hidden={page() !== 'agent-configuration'}>
-          <AgentConfigurationPage />
         </div>
       </main>
     </div>

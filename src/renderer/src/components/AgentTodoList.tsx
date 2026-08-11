@@ -12,7 +12,7 @@ export function AgentTodoList(props: AgentTodoListProps) {
       when={props.todos.length}
       fallback={(
         <div class="statement-candidates__empty">
-          {props.emptyText ?? '当前 Agent 运行没有 Todo。'}
+          {props.emptyText ?? '当前 Agent Invocation 没有 Todo。'}
         </div>
       )}
     >

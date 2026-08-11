@@ -27,7 +27,7 @@ const PROBE_CONFIG = [
 ] as const
 
 export interface CodexTaskRunner {
-  run(executablePath: string, request: AgentTaskRequest): Promise<AgentTaskResult>
+  execute(executablePath: string, request: AgentTaskRequest): Promise<AgentTaskResult>
   dispose?(): void
 }
 
@@ -72,7 +72,7 @@ export class CodexExecTaskRunner implements CodexTaskRunner {
 
   constructor(private readonly spawnProcess: typeof spawn = spawn) {}
 
-  async run(executablePath: string, request: AgentTaskRequest): Promise<AgentTaskResult> {
+  async execute(executablePath: string, request: AgentTaskRequest): Promise<AgentTaskResult> {
     request.signal?.throwIfAborted()
     const args = [
       'exec',
@@ -311,7 +311,7 @@ export class CodexAgentAdapter implements AgentBackendAdapter {
       throw new Error('Codex Coding Plan 尚未就绪')
     }
     request.signal?.throwIfAborted()
-    return this.taskRunner.run(this.executablePath, request)
+    return this.taskRunner.execute(this.executablePath, request)
   }
 
   subscribe(listener: () => void): () => void {

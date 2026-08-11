@@ -18,7 +18,7 @@ AI Backend 是 Oyster 获得模型调用能力的边界。MVP 只区分两种计
 - **Model** 表示该 Connection 当前可调用的具体模型；
 - **Default LLM** 表示应用级唯一的 Connection、Model 和可选思考强度组合。
 
-Connection 不等于 Model。同一个 Connection 可以暴露多个 Model，用户在“AI 后端”页面明确保存一个 Default LLM。Knowledge Maintainer 每次新运行在开始时读取并固定它；新建 Chat Session 在创建时将它写入 Session binding，已有 Session 不随默认值变化。通用 Agent Runtime 是执行方式，不是另一类 Backend；当前 Agent Runtime 由 Pi Agent Core 实现，但不构成知识模型的一部分。
+Connection 不等于 Model。同一个 Connection 可以暴露多个 Model，用户在“AI 后端”页面明确保存一个 Default LLM。每个新 Knowledge Processing Task 或 Agent Preview 在开始时读取并固定相应 Agent binding；新建 Chat Conversation 在创建时固定 binding，已有 Conversation 不随默认值变化。通用 Agent Runtime 是执行方式，不是另一类 Backend；当前执行基础是 Pi Coding Agent SDK `AgentSession`，但不构成知识模型的一部分。
 
 Agent 数据来源与 AI Connection 也是两个独立概念。不建立 Subscription 领域对象；套餐和账号信息只是认证后显示的 Connection 上下文。
 
@@ -55,9 +55,11 @@ Coding Plan 提供两个明确登录入口：Device Code 适合远程或 loopbac
 
 主进程负责本机发现、OAuth、Keychain、模型目录与实际调用；Renderer 只通过 typed preload API 获得脱敏状态。Browser OAuth URL 由主进程直接交给系统浏览器；Device Code 的验证地址和用户码可以短暂显示在 Renderer，token 始终不经过 Renderer。API Key 首次输入时只经受信 IPC 用于发现或保存，之后不进入配置文件、日志、Prompt、Agent transcript 或 IPC 返回。
 
-Coding Plan 的直接生成和通用 Agent Runtime（当前为 Pi Agent Core）都复用同一个已选 Model 与 Pi model stream，因此不会为了使用订阅再嵌套一个外部 Coding Agent loop。Runtime 负责普通模型—工具循环和上下文压缩；角色能够读取的 Observation、Knowledge 与工具仍由 Oyster 当前运行授予，与 Backend 类型无关。
+Coding Plan 的直接生成和 Pi Coding Agent SDK Runtime 都复用同一个 `SelectedModelStream`：已选 Pi Model 与已经过 Oyster Connection 认证的 `StreamFn`。它不是另一种 Runtime。适配层把该 stream 注册为 request-local Pi `ModelRuntime` Provider，使 `AgentSession` 能使用 Extension hooks、工具循环与原生压缩；真实 credential 仍由 Oyster Connection / Keychain 持有，SDK 不读取默认 Pi auth 文件，也不形成嵌套的外部 Agent loop。角色能够读取的 Observation、Knowledge 与工具仍由 Oyster 当前调用授予，与 Backend 类型无关。
 
-自定义远程 URL 默认必须使用 HTTPS；只有用户显式填写的 localhost 端点可以使用 HTTP。模型请求固定到所选端点，拒绝重定向，并遵循所选模型的上下文边界与每次请求的超时、输出边界；不以固定的整次 Agent 调用次数作为 Backend 安全边界。连接失效只影响该 Connection；应用可以继续启动，也不会自动切换计费来源。
+OpenAI Chat Completions 与 Responses 的正式模型调用直接复用 `pi-ai` 原生 Provider transport；Oyster 不再维护 `guardedFetch`、自定义 SSE parser 或第二套 payload/retry/timeout 语义。自定义远程 URL 的保存边界仍要求 HTTPS，只有用户显式填写的 localhost 端点可使用 HTTP；模型目录发现和连接测试继续使用各自的有界读取保护。正式 Agent 模型请求的 redirect、单响应体大小和 transport retry 行为遵循当前固定版本的 Pi Provider，不额外叠加 Oyster 策略。连接失效只影响该 Connection；应用可以继续启动，也不会自动切换计费来源。
+
+本地 Debug Store 可以保存 Extension hook 处理后的最终 Provider payload、脱敏后的请求 header 视图以及响应 status/header。API Key、Authorization 和 Cookie 等 credential-bearing 值不进入 Debug Store。该记录用于离线检查，不改变实际传输，也不引入 OpenTelemetry 或外部观测服务。
 
 ## 5. 当前不做
 

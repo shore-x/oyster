@@ -34,7 +34,7 @@ class FakeAccountClient implements CodexAccountClient {
 
 class FakeTaskRunner implements CodexTaskRunner {
   request?: AgentTaskRequest
-  async run(_path: string, request: AgentTaskRequest) {
+  async execute(_path: string, request: AgentTaskRequest) {
     this.request = request
     return { text: 'OYSTER' }
   }
@@ -107,7 +107,7 @@ describe('CodexAgentAdapter', () => {
     await expect(adapter.inspect()).resolves.toMatchObject({ status: 'needs_auth' })
   })
 
-  it('runs tasks through the separate agent contract', async () => {
+  it('executes tasks through the separate Agent contract', async () => {
     const { home } = await executableHome()
     const client = new FakeAccountClient({ account: { type: 'chatgpt', planType: 'pro' }, requiresOpenaiAuth: true })
     const runner = new FakeTaskRunner()
@@ -141,7 +141,7 @@ describe('Codex CLI protocol', () => {
       throw new Error('spawn must not run')
     }) as typeof import('node:child_process').spawn)
 
-    await expect(runner.run('/usr/bin/codex', {
+    await expect(runner.execute('/usr/bin/codex', {
       prompt: 'private prompt',
       workspacePath: '/tmp/oyster-test-workspace',
       signal: controller.signal
@@ -195,7 +195,7 @@ if (args[0] === 'app-server') {
     await expect(client.readAccount()).resolves.toMatchObject({ account: { type: 'chatgpt', planType: 'plus' } })
     client.dispose()
 
-    await expect(new CodexExecTaskRunner().run(executable, {
+    await expect(new CodexExecTaskRunner().execute(executable, {
       prompt: 'private prompt',
       workspacePath: directory
     })).resolves.toEqual({ text: 'OYSTER' })

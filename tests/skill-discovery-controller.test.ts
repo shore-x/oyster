@@ -3,14 +3,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   DiscoveredSkill,
   SkillApi,
-  SkillDiscoverySnapshot,
+  SkillDiscoveryStateView,
   SkillDocument
 } from '../src/shared/skills'
 import { createSkillDiscoveryController } from '../src/renderer/src/skill-discovery-controller'
 
 vi.mock('solid-js', async () => vi.importActual('solid-js/dist/solid.js'))
 
-const EMPTY_SNAPSHOT: SkillDiscoverySnapshot = { skills: [], errors: [] }
+const EMPTY_SNAPSHOT: SkillDiscoveryStateView = { skills: [], errors: [] }
 
 function skill(overrides: Partial<DiscoveredSkill> = {}): DiscoveredSkill {
   return {
@@ -43,7 +43,7 @@ function skillDocument(skillId: string, content = '# Review'): SkillDocument {
 
 function installApi(overrides: Partial<SkillApi> = {}): SkillApi {
   const api: SkillApi = {
-    getDiscoverySnapshot: async () => EMPTY_SNAPSHOT,
+    getDiscoveryStateView: async () => EMPTY_SNAPSHOT,
     discover: async () => EMPTY_SNAPSHOT,
     readDiscoveredDocument: async (skillId) => skillDocument(skillId),
     openDiscoveredFolder: async () => undefined,
@@ -72,18 +72,18 @@ describe('skill discovery controller', () => {
       projectPath: '/work/oyster'
     })
     const snapshot = { skills: [first, second], errors: [] }
-    const getDiscoverySnapshot = vi.fn<SkillApi['getDiscoverySnapshot']>(async () => snapshot)
+    const getDiscoveryStateView = vi.fn<SkillApi['getDiscoveryStateView']>(async () => snapshot)
     const readDiscoveredDocument = vi.fn<SkillApi['readDiscoveredDocument']>(async (skillId) => (
       skillDocument(skillId, `# ${skillId}`)
     ))
-    installApi({ getDiscoverySnapshot, readDiscoveredDocument })
+    installApi({ getDiscoveryStateView, readDiscoveredDocument })
 
     await createRoot(async (dispose) => {
       try {
         const controller = createSkillDiscoveryController()
         await vi.waitFor(() => expect(controller.document()?.skillId).toBe(first.id))
 
-        expect(getDiscoverySnapshot).toHaveBeenCalledOnce()
+        expect(getDiscoveryStateView).toHaveBeenCalledOnce()
         expect(controller.snapshot()).toEqual(snapshot)
         expect(controller.selectedSkill()).toEqual(first)
 
@@ -131,7 +131,7 @@ describe('skill discovery controller', () => {
   it('keeps the discovered list visible when one document cannot be read', async () => {
     const visibleSkill = skill()
     installApi({
-      getDiscoverySnapshot: async () => ({ skills: [visibleSkill], errors: [] }),
+      getDiscoveryStateView: async () => ({ skills: [visibleSkill], errors: [] }),
       readDiscoveredDocument: async () => { throw new Error('Skill 文档已被移动') }
     })
 

@@ -1,7 +1,8 @@
-import { For, Show, createSignal, type JSX } from 'solid-js'
+import { For, Show, createEffect, createSignal, type JSX } from 'solid-js'
 import type { ArtifactSummary } from '../../../shared/artifacts'
 import { createArtifactsController } from '../artifacts-controller'
 import { Button, Icon, Markdown } from '../ui'
+import { FolderBrowserPage } from './FolderBrowserPage'
 import './ArtifactsPage.css'
 
 function modifiedAtLabel(value: string): string {
@@ -169,16 +170,28 @@ function DesignDocumentsCard(props: {
   )
 }
 
+export interface ArtifactBrowserTarget {
+  folderPath: string
+  label: string
+}
+
 export function ArtifactsPage(props: {
+  browserTarget?: ArtifactBrowserTarget
   onBrowseDesignDocuments(): void
   onOpenDesignDocuments(): Promise<void>
   onBrowseArtifact(artifact: ArtifactSummary): void
+  onCloseBrowser?(): void
   onManageSkill(artifactDirectoryName: string): void
 }) {
   const controller = createArtifactsController()
+  const [view, setView] = createSignal<'overview' | 'files'>('overview')
   const [directoryName, setDirectoryName] = createSignal('')
   const [attention, setAttention] = createSignal('')
   const [openingDesignDocuments, setOpeningDesignDocuments] = createSignal(false)
+
+  createEffect(() => {
+    if (props.browserTarget) setView('files')
+  })
 
   async function createArtifact(event: SubmitEvent): Promise<void> {
     event.preventDefault()
@@ -214,16 +227,36 @@ export function ArtifactsPage(props: {
           </div>
         </div>
         <div class="page-header__actions">
-          <Button
-            variant="secondary"
-            icon="refresh"
-            data-testid="refresh-artifacts"
-            disabled={Boolean(controller.busy())}
-            onClick={() => void controller.refresh()}
-          >{controller.busy() === 'refresh' ? '正在刷新…' : '刷新'}</Button>
+          <Show when={view() === 'overview'}>
+            <Button
+              variant="secondary"
+              icon="refresh"
+              data-testid="refresh-artifacts"
+              disabled={Boolean(controller.busy())}
+              onClick={() => void controller.refresh()}
+            >{controller.busy() === 'refresh' ? '正在刷新…' : '刷新'}</Button>
+          </Show>
         </div>
       </header>
 
+      <div class="page-tabs artifacts-page__tabs" role="tablist" aria-label="产物视图">
+        <button
+          type="button"
+          role="tab"
+          data-testid="artifacts-tab-overview"
+          aria-selected={view() === 'overview'}
+          onClick={() => setView('overview')}
+        >概览</button>
+        <button
+          type="button"
+          role="tab"
+          data-testid="artifacts-tab-files"
+          aria-selected={view() === 'files'}
+          onClick={() => setView('files')}
+        >文件</button>
+      </div>
+
+      <div class="artifacts-page__panel artifacts-page__panel--overview" hidden={view() !== 'overview'}>
       <Show when={controller.error()}>
         <div class="page-error" role="alert"><Icon name="warning" />{controller.error()}</div>
       </Show>
@@ -358,6 +391,35 @@ export function ArtifactsPage(props: {
           )}
         </Show>
       </section>
+      </div>
+
+      <div class="artifacts-page__panel artifacts-page__panel--files" hidden={view() !== 'files'}>
+        <Show
+          when={props.browserTarget}
+          fallback={(
+            <div class="artifacts-page__file-empty">
+              <Icon name="folder" />
+              <strong>选择一个文件夹</strong>
+              <p>回到“概览”，从设计文档或 Artifact 卡片进入文件浏览。</p>
+              <Button variant="secondary" icon="back" onClick={() => setView('overview')}>返回概览</Button>
+            </div>
+          )}
+        >
+          {(target) => (
+            <div data-testid="page-folder-browser">
+              <FolderBrowserPage
+                embedded
+                folderPath={target().folderPath}
+                label={target().label}
+                onBack={() => {
+                  setView('overview')
+                  props.onCloseBrowser?.()
+                }}
+              />
+            </div>
+          )}
+        </Show>
+      </div>
     </div>
   )
 }

@@ -19,9 +19,9 @@ import {
   MODEL_PROTOCOLS,
   MODEL_PROVIDER_IDS
 } from '../../shared/ai-backends'
-import { createOysterModelRuntime } from '../knowledge-processing/oyster-model-stream'
+import { createOysterModelStream } from './oyster-model-stream'
 import { CODEX_CONNECTION_ID } from './codex-adapter'
-import type { ModelRuntime, ModelGenerationRequest, ModelGenerationResult } from './model'
+import type { SelectedModelStream, ModelGenerationRequest, ModelGenerationResult } from './model'
 import {
   ModelConnectionFailureError,
   ModelContextOverflowError,
@@ -68,10 +68,10 @@ interface ConnectionRuntimeState {
   lastCheckedAt?: string
 }
 
-type ApiRuntimeFactory = (
+type ApiModelStreamFactory = (
   connection: StoredModelConnection,
   apiKey?: string
-) => ModelRuntime
+) => SelectedModelStream
 
 export interface CodingPlanBackend {
   listModels(): AvailableModel[]
@@ -85,7 +85,7 @@ export interface CodingPlanBackend {
   ): Promise<void>
   cancelConnect(): void
   generate(modelId: string, request: ModelGenerationRequest): Promise<ModelGenerationResult>
-  runtime(modelId: string): ModelRuntime
+  modelStream(modelId: string): SelectedModelStream
   dispose(): void
 }
 
@@ -201,16 +201,19 @@ function defaultApiModels(connection: StoredModelConnection): AvailableModel[] {
   }]
 }
 
-function runtimeWithModelMetadata(runtime: ModelRuntime, model: AvailableModel): ModelRuntime {
-  const contextWindow = model.contextWindowTokens ?? runtime.model.contextWindow
-  const maxTokens = model.maxOutputTokens ?? runtime.model.maxTokens
-  if (contextWindow === runtime.model.contextWindow && maxTokens === runtime.model.maxTokens) {
-    return runtime
+function modelStreamWithMetadata(
+  modelStream: SelectedModelStream,
+  model: AvailableModel
+): SelectedModelStream {
+  const contextWindow = model.contextWindowTokens ?? modelStream.model.contextWindow
+  const maxTokens = model.maxOutputTokens ?? modelStream.model.maxTokens
+  if (contextWindow === modelStream.model.contextWindow && maxTokens === modelStream.model.maxTokens) {
+    return modelStream
   }
   return {
-    ...runtime,
+    ...modelStream,
     model: {
-      ...runtime.model,
+      ...modelStream.model,
       contextWindow,
       maxTokens
     }
@@ -240,7 +243,7 @@ export class AiBackendService {
     private readonly codexDiscovery: AgentBackendAdapter,
     private readonly modelAdapter: ModelBackendAdapter,
     private readonly codingPlanAdapter: CodingPlanBackend,
-    private readonly apiRuntimeFactory: ApiRuntimeFactory = createOysterModelRuntime
+    private readonly apiModelStreamFactory: ApiModelStreamFactory = createOysterModelStream
   ) {
     this.unsubscribeDiscovery = codexDiscovery.subscribe(() => void this.refreshCodingPlan())
   }
@@ -285,7 +288,7 @@ export class AiBackendService {
 
   snapshot(): AiBackendSnapshot {
     const apiConnections: AiConnection[] = this.state.connections.map((connection) => {
-      const runtime = this.connectionStates.get(connection.id) ?? { status: 'unverified' as const }
+      const connectionState = this.connectionStates.get(connection.id) ?? { status: 'unverified' as const }
       const models = this.apiModels.get(connection.id) ?? defaultApiModels(connection)
       return {
         id: connection.id,
@@ -294,7 +297,7 @@ export class AiBackendService {
         providerId: connection.providerId,
         displayName: modelDisplayName(connection),
         credentialMode: 'oyster_keychain',
-        status: runtime.status,
+        status: connectionState.status,
         models: models.map((model) => ({
           ...model,
           reasoningEfforts: [...model.reasoningEfforts]
@@ -308,8 +311,8 @@ export class AiBackendService {
           hasApiKey: Boolean(connection.credentialRef),
           reasoningEfforts: reasoningEffortsForModel(connection.providerId, connection.model)
         },
-        errorMessage: runtime.errorMessage,
-        lastCheckedAt: runtime.lastCheckedAt
+        errorMessage: connectionState.errorMessage,
+        lastCheckedAt: connectionState.lastCheckedAt
       }
     })
     return structuredClone({
@@ -637,21 +640,21 @@ export class AiBackendService {
     }
   }
 
-  async withModelRuntime<T>(
+  async withModelStream<T>(
     connectionId: string,
     modelId: string,
-    operation: (runtime: ModelRuntime) => Promise<T>,
+    operation: (modelStream: SelectedModelStream) => Promise<T>,
     options: { trackHealth?: boolean } = {}
   ): Promise<T> {
     const model = this.connectionModel(connectionId, modelId)
     try {
       const result = connectionId === CODEX_CONNECTION_ID
-        ? await operation(runtimeWithModelMetadata(this.codingPlanAdapter.runtime(modelId), model))
+        ? await operation(modelStreamWithMetadata(this.codingPlanAdapter.modelStream(modelId), model))
         : await this.withApiConnection(
             connectionId,
             modelId,
-            (connection, apiKey) => operation(runtimeWithModelMetadata(
-              this.apiRuntimeFactory(connection, apiKey),
+            (connection, apiKey) => operation(modelStreamWithMetadata(
+              this.apiModelStreamFactory(connection, apiKey),
               model
             ))
           )

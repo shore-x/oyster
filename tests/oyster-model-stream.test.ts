@@ -1,7 +1,18 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Type, type Context } from '@earendil-works/pi-ai'
 import type { StoredModelConnection } from '../src/main/ai-backends/model'
-import { createOysterModelRuntime } from '../src/main/knowledge-processing/oyster-model-stream'
+import { createOysterModelStream } from '../src/main/ai-backends/oyster-model-stream'
+
+afterEach(() => vi.unstubAllGlobals())
+
+function modelStream(
+  value: StoredModelConnection,
+  apiKey: string | undefined,
+  fetchImpl: typeof fetch
+) {
+  vi.stubGlobal('fetch', fetchImpl)
+  return createOysterModelStream(value, apiKey)
+}
 
 function connection(
   protocol: StoredModelConnection['protocol'],
@@ -111,13 +122,17 @@ describe('Oyster model Agent stream', () => {
         }
       ])
     }) as typeof fetch
-    const runtime = createOysterModelRuntime(
+    const selected = modelStream(
       connection('openai_chat_completions'),
       'secret-key',
       fetchImpl
     )
 
-    const result = await (await runtime.streamFn(runtime.model, context(), { reasoning: 'high' })).result()
+    const result = await (await selected.streamFn(
+      selected.model,
+      context(),
+      { reasoning: 'high' }
+    )).result()
 
     expect(request).toBeDefined()
     expect(request!.url).toBe('http://localhost:11434/v1/chat/completions')
@@ -125,10 +140,12 @@ describe('Oyster model Agent stream', () => {
     expect(request!.headers.get('authorization')).toBe('Bearer secret-key')
     expect(request!.body).toMatchObject({
       model: 'test-model',
-      max_tokens: 4_096,
       messages: [
         { role: 'system', content: 'SYSTEM INSTRUCTIONS' },
-        { role: 'user', content: 'Maintain this knowledge.' }
+        {
+          role: 'user',
+          content: [{ type: 'text', text: 'Maintain this knowledge.' }]
+        }
       ]
     })
     expect((request!.body.tools as Array<Record<string, unknown>>)).toHaveLength(1)
@@ -163,13 +180,13 @@ describe('Oyster model Agent stream', () => {
         }
       ])
     }) as typeof fetch
-    const runtime = createOysterModelRuntime({
+    const selected = modelStream({
       ...connection('openai_chat_completions', 'openai'),
       model: 'gpt-5-mini'
     }, 'secret-key', fetchImpl)
-    const selectedModel = { ...runtime.model, maxTokens: 16_384 }
+    const selectedModel = { ...selected.model, maxTokens: 16_384 }
 
-    await (await runtime.streamFn(selectedModel, context(), { maxTokens: 6_000 })).result()
+    await (await selected.streamFn(selectedModel, context(), { maxTokens: 6_000 })).result()
 
     expect(request?.body.max_completion_tokens).toBe(6_000)
   })
@@ -196,14 +213,14 @@ describe('Oyster model Agent stream', () => {
         }
       ])
     }) as typeof fetch
-    const runtime = createOysterModelRuntime({
+    const selected = modelStream({
       ...connection('openai_chat_completions', 'openai'),
       model: 'gpt-5-mini'
     }, 'secret-key', fetchImpl)
 
-    await (await runtime.streamFn(runtime.model, context(), { reasoning: 'low' })).result()
+    await (await selected.streamFn(selected.model, context(), { reasoning: 'low' })).result()
 
-    expect(runtime.model.reasoning).toBe(true)
+    expect(selected.model.reasoning).toBe(true)
     expect(request?.body.reasoning_effort).toBe('low')
   })
 
@@ -262,22 +279,25 @@ describe('Oyster model Agent stream', () => {
         }
       ])
     }) as typeof fetch
-    const runtime = createOysterModelRuntime(connection('openai_responses'), undefined, fetchImpl)
+    const selected = modelStream(connection('openai_responses'), undefined, fetchImpl)
 
-    const selectedModel = { ...runtime.model, maxTokens: 12_000 }
-    const result = await (await runtime.streamFn(selectedModel, context(), { maxTokens: 7_000 })).result()
+    const selectedModel = { ...selected.model, maxTokens: 12_000 }
+    const result = await (await selected.streamFn(
+      selectedModel,
+      context(),
+      { maxTokens: 7_000 }
+    )).result()
 
     expect(request).toBeDefined()
     expect(request!.url).toBe('http://localhost:11434/v1/responses')
     expect(request!.headers.has('authorization')).toBe(false)
     expect(request!.body).toMatchObject({
       model: 'test-model',
-      instructions: 'SYSTEM INSTRUCTIONS',
       store: false,
       stream: true,
       max_output_tokens: 7_000
     })
-    expect(JSON.stringify(request!.body.input)).not.toContain('SYSTEM INSTRUCTIONS')
+    expect(JSON.stringify(request!.body.input)).toContain('SYSTEM INSTRUCTIONS')
     expect(result.stopReason).toBe('toolUse')
     expect(result.content).toContainEqual(expect.objectContaining({
       type: 'toolCall',
@@ -293,13 +313,17 @@ describe('Oyster model Agent stream', () => {
       if (signal?.aborted) abort()
       else signal?.addEventListener('abort', abort, { once: true })
     })) as typeof fetch
-    const runtime = createOysterModelRuntime(
+    const selected = modelStream(
       connection('openai_chat_completions'),
       undefined,
       fetchImpl
     )
 
-    const result = await (await runtime.streamFn(runtime.model, context(), { timeoutMs: 10 })).result()
+    const result = await (await selected.streamFn(
+      selected.model,
+      context(),
+      { timeoutMs: 10 }
+    )).result()
 
     expect(result.stopReason).toBe('error')
     expect(result.errorMessage?.toLowerCase()).toContain('timed out')
@@ -338,55 +362,45 @@ describe('Oyster model Agent stream', () => {
         choices: [{ index: 0, delta: {}, finish_reason: 'content_filter' }]
       }
     ])) as typeof fetch
-    const runtime = createOysterModelRuntime(
+    const selected = modelStream(
       connection('openai_chat_completions'),
       undefined,
       fetchImpl
     )
 
-    const result = await (await runtime.streamFn(runtime.model, context())).result()
+    const result = await (await selected.streamFn(selected.model, context())).result()
 
     expect(result.stopReason).toBe('error')
     expect(result.errorMessage).toContain('content_filter')
   })
 
-  it('rejects redirects and oversized responses without following them', async () => {
-    const redirectedFetch: typeof fetch = vi.fn(async () => new Response(null, {
-      status: 307,
-      headers: { location: 'https://attacker.example/collect' }
-    })) as typeof fetch
-    const redirectedRuntime = createOysterModelRuntime(
+  it('forwards Pi provider payload and response hooks', async () => {
+    let request: Awaited<ReturnType<typeof requestDetails>> | undefined
+    let responseStatus: number | undefined
+    const fetchImpl: typeof fetch = vi.fn(async (input, init) => {
+      request = await requestDetails(input, init)
+      return sse([{
+        id: 'chatcmpl-hooks',
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: 'test-model',
+        choices: [{ index: 0, delta: { content: 'done' }, finish_reason: 'stop' }]
+      }])
+    }) as typeof fetch
+    const selected = modelStream(
       connection('openai_chat_completions'),
       'secret-key',
-      redirectedFetch
+      fetchImpl
     )
-    const redirected = await (await redirectedRuntime.streamFn(
-      redirectedRuntime.model,
-      context()
-    )).result()
+    await (await selected.streamFn(selected.model, context(), {
+      maxRetries: 0,
+      headers: { 'x-oyster-extension': 'enabled' },
+      onPayload: (payload) => ({ ...(payload as object), oyster_hook: true }),
+      onResponse: (response) => { responseStatus = response.status }
+    })).result()
 
-    expect(redirected.stopReason).toBe('error')
-    expect(redirected.errorMessage).toContain('重定向')
-    expect(redirectedFetch).toHaveBeenCalledTimes(1)
-
-    const oversizedFetch: typeof fetch = vi.fn(async () => new Response('ignored', {
-      status: 200,
-      headers: {
-        'content-type': 'text/event-stream',
-        'content-length': String(8 * 1_024 * 1_024 + 1)
-      }
-    })) as typeof fetch
-    const oversizedRuntime = createOysterModelRuntime(
-      connection('openai_chat_completions'),
-      undefined,
-      oversizedFetch
-    )
-    const oversized = await (await oversizedRuntime.streamFn(
-      oversizedRuntime.model,
-      context()
-    )).result()
-
-    expect(oversized.stopReason).toBe('error')
-    expect(oversized.errorMessage).toContain('内容过大')
+    expect(request?.headers.get('x-oyster-extension')).toBe('enabled')
+    expect(request?.body).toMatchObject({ oyster_hook: true })
+    expect(responseStatus).toBe(200)
   })
 })

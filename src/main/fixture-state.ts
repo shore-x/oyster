@@ -1,12 +1,12 @@
 import type { DiscoveryStateData } from './discovery/model'
 
-export const FIXTURE_SESSION_CONTENT = [
+export const FIXTURE_SOURCE_CONVERSATION_CONTENT = [
   '{"type":"user","message":"我希望知识加工链路保持简洁，并且每条知识都能回溯到原始证据。"}',
   '{"type":"assistant","message":"可以先发现待调查的名称与指代，再由 Agent 按需展开原始观察并完成裁决。"}',
   '{"type":"user","message":"测试写入必须与正式知识库隔离，且可以随时重复运行。"}'
 ].join('\n')
 
-export const FIXTURE_SESSION_SOURCE_RECORD_ID = 'fixture-session-001'
+export const FIXTURE_SOURCE_CONVERSATION_ID = 'fixture-source-conversation-001'
 
 export function createFixtureState(): DiscoveryStateData {
   return {
@@ -20,12 +20,12 @@ export function createFixtureState(): DiscoveryStateData {
         discoveryState: 'found',
         scanState: 'ready',
         fileCount: 42,
-        sessionCount: 36,
+        conversationCount: 36,
         instructionFileCount: 4,
         totalBytes: 8_808_038,
         invalidFileCount: 2,
-        oldestSessionAt: '2026-05-02T08:20:00.000Z',
-        latestSessionAt: '2026-07-21T13:42:00.000Z',
+        oldestConversationAt: '2026-05-02T08:20:00.000Z',
+        latestConversationAt: '2026-07-21T13:42:00.000Z',
         lastDetectedAt: '2026-07-22T04:00:00.000Z',
         lastScannedAt: '2026-07-22T04:01:00.000Z'
       },
@@ -37,12 +37,12 @@ export function createFixtureState(): DiscoveryStateData {
         discoveryState: 'found',
         scanState: 'scanning',
         fileCount: 22,
-        sessionCount: 20,
+        conversationCount: 20,
         instructionFileCount: 2,
         totalBytes: 4_194_304,
         invalidFileCount: 0,
-        oldestSessionAt: '2026-06-11T09:00:00.000Z',
-        latestSessionAt: '2026-07-22T02:18:00.000Z',
+        oldestConversationAt: '2026-06-11T09:00:00.000Z',
+        latestConversationAt: '2026-07-22T02:18:00.000Z',
         lastDetectedAt: '2026-07-22T04:00:00.000Z',
         lastScannedAt: '2026-07-22T04:01:00.000Z'
       },
@@ -55,7 +55,7 @@ export function createFixtureState(): DiscoveryStateData {
         discoveryState: 'needs_permission',
         scanState: 'idle',
         fileCount: 0,
-        sessionCount: 0,
+        conversationCount: 0,
         instructionFileCount: 0,
         totalBytes: 0,
         invalidFileCount: 0,
@@ -64,7 +64,7 @@ export function createFixtureState(): DiscoveryStateData {
       }
     ],
     records: [{
-      id: FIXTURE_SESSION_SOURCE_RECORD_ID,
+      id: FIXTURE_SOURCE_CONVERSATION_ID,
       sourceId: 'source:claude',
       kind: 'conversation',
       externalId: 'fixture-session-2026-07-21',
@@ -74,15 +74,15 @@ export function createFixtureState(): DiscoveryStateData {
       startedAt: '2026-07-21T13:10:00.000Z',
       endedAt: '2026-07-21T13:42:00.000Z',
       updatedAt: '2026-07-21T13:42:00.000Z',
-      sizeBytes: Buffer.byteLength(FIXTURE_SESSION_CONTENT),
+      sizeBytes: Buffer.byteLength(FIXTURE_SOURCE_CONVERSATION_CONTENT),
       modifiedAt: '2026-07-21T13:42:00.000Z',
       fingerprint: 'a'.repeat(64)
     }],
-    runs: [
+    scans: [
       {
-        id: 'fixture-running-scan',
+        scanId: 'fixture-active-scan',
         sourceId: 'source:pi',
-        state: 'running',
+        status: 'in_progress',
         totalFiles: 14,
         processedFiles: 5,
         totalBytes: 2_873_098,

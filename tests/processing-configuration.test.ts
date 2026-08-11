@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import type { ProcessingConnectionView } from '../src/shared/knowledge-processing'
+import type { AiConnectionView } from '../src/shared/knowledge-processing'
 import {
   backendLabel,
-  connectionCanAttemptRun,
+  connectionCanInvokeAgent,
   providerLabel,
   reasoningLabel,
   runtimeLabel,
   selectedLlmModel
 } from '../src/renderer/src/processing-configuration'
 
-function connection(status: ProcessingConnectionView['status']): ProcessingConnectionView {
+function connection(status: AiConnectionView['status']): AiConnectionView {
   return {
     id: 'coding-plan:openai-codex',
     displayName: 'OpenAI Codex',
@@ -24,7 +24,7 @@ function connection(status: ProcessingConnectionView['status']): ProcessingConne
 
 describe('processing configuration presentation', () => {
   it('resolves the exact model selected by the default LLM binding', () => {
-    const connection: ProcessingConnectionView = {
+    const connection: AiConnectionView = {
       id: 'coding-plan:openai-codex',
       displayName: 'OpenAI Codex',
       backendKind: 'coding_plan',
@@ -45,7 +45,7 @@ describe('processing configuration presentation', () => {
     expect(selectedLlmModel(binding, connection)?.id).toBe('small')
     expect(backendLabel(connection.backendKind)).toBe('Coding Plan')
     expect(providerLabel(connection.providerId)).toBe('OpenAI Codex')
-    expect(runtimeLabel('pi_agent_core')).toBe('Pi Agent Core')
+    expect(runtimeLabel('pi_coding_agent')).toBe('Pi Coding Agent SDK')
     expect(reasoningLabel()).toBe('模型默认')
   })
 
@@ -57,14 +57,14 @@ describe('processing configuration presentation', () => {
     ['needs_auth', false],
     ['authenticating', false],
     ['unsupported', false]
-  ] satisfies Array<[ProcessingConnectionView['status'], boolean]>) (
-    'reports whether a %s connection can attempt a real run',
+  ] satisfies Array<[AiConnectionView['status'], boolean]>) (
+    'reports whether a %s connection can invoke an Agent',
     (status, expected) => {
-      expect(connectionCanAttemptRun(connection(status))).toBe(expected)
+      expect(connectionCanInvokeAgent(connection(status))).toBe(expected)
     }
   )
 
-  it('does not allow a run without a connection', () => {
-    expect(connectionCanAttemptRun(undefined)).toBe(false)
+  it('does not allow an Agent Invocation without a connection', () => {
+    expect(connectionCanInvokeAgent(undefined)).toBe(false)
   })
 })

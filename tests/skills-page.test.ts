@@ -6,7 +6,7 @@ import type {
   ManagedSkillSummary,
   SkillBindingTargetState,
   SkillBindingTargetSummary,
-  SkillDiscoverySnapshot,
+  SkillDiscoveryStateView,
   SkillDocument,
   SkillScope
 } from '../src/shared/skills'
@@ -241,7 +241,7 @@ describe('SkillsPage', () => {
 
   it('shows project scope, original locations and a safe external Markdown preview', () => {
     const selected = skill()
-    const snapshot: SkillDiscoverySnapshot = { skills: [selected], errors: [] }
+    const snapshot: SkillDiscoveryStateView = { skills: [selected], errors: [] }
     externalController.snapshot.mockReturnValue(snapshot)
     externalController.selectedId.mockReturnValue(selected.id)
     externalController.selectedSkill.mockReturnValue(selected)

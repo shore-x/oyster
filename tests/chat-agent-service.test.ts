@@ -12,11 +12,11 @@ import {
   type FauxResponseStep
 } from '@earendil-works/pi-ai'
 import type { AiBackendSnapshot, LlmBinding } from '../src/shared/ai-backends'
-import type { ModelRuntime } from '../src/main/ai-backends/model'
+import type { SelectedModelStream } from '../src/main/ai-backends/model'
 import type { ChatAiBackendPort, ChatConfigurationRepository } from '../src/main/chat/model'
 import { ChatAgentService } from '../src/main/chat/chat-agent-service'
 import { InMemoryChatConfigurationRepository } from '../src/main/chat/chat-configuration-repository'
-import { PiChatSessionRepository } from '../src/main/chat/pi-chat-session-repository'
+import { PiChatConversationRepository } from '../src/main/chat/pi-chat-conversation-repository'
 import {
   DEFAULT_CHAT_AGENT_SYSTEM_PROMPT,
   chatAgentSystemPrompt
@@ -30,13 +30,15 @@ afterEach(async () => {
   await Promise.all(temporaryPaths.splice(0).map((path) => rm(path, { recursive: true, force: true })))
 })
 
-function fauxRuntime(responses: FauxResponseStep[]): { runtime: ModelRuntime; callCount: () => number } {
+function fauxModelStream(
+  responses: FauxResponseStep[]
+): { modelStream: SelectedModelStream; callCount: () => number } {
   const faux = fauxProvider()
   faux.setResponses(responses)
   const models = createModels()
   models.setProvider(faux.provider)
   return {
-    runtime: {
+    modelStream: {
       model: faux.getModel(),
       streamFn: (model, context, options) => models.streamSimple(model, context, options)
     },
@@ -47,8 +49,8 @@ function fauxRuntime(responses: FauxResponseStep[]): { runtime: ModelRuntime; ca
 class FauxAiBackend implements ChatAiBackendPort {
   defaultLlm?: LlmBinding
 
-  constructor(readonly runtime: ModelRuntime) {
-    this.defaultLlm = { connectionId: 'connection:test', modelId: runtime.model.id }
+  constructor(readonly modelStream: SelectedModelStream) {
+    this.defaultLlm = { connectionId: 'connection:test', modelId: modelStream.model.id }
   }
 
   snapshot(): AiBackendSnapshot {
@@ -63,7 +65,7 @@ class FauxAiBackend implements ChatAiBackendPort {
         credentialMode: 'oyster_keychain',
         status: 'ready',
         models: [
-          { id: this.runtime.model.id, displayName: 'Test Model', reasoningEfforts: [] },
+          { id: this.modelStream.model.id, displayName: 'Test Model', reasoningEfforts: [] },
           { id: 'next-default-model', displayName: 'Next Default Model', reasoningEfforts: ['low'] }
         ]
       }],
@@ -71,12 +73,12 @@ class FauxAiBackend implements ChatAiBackendPort {
     }
   }
 
-  async withModelRuntime<T>(
+  async withModelStream<T>(
     _connectionId: string,
     _modelId: string,
-    operation: (runtime: ModelRuntime) => Promise<T>
+    operation: (modelStream: SelectedModelStream) => Promise<T>
   ): Promise<T> {
-    return operation(this.runtime)
+    return operation(this.modelStream)
   }
 }
 
@@ -91,13 +93,13 @@ async function serviceFixture(
   temporaryPaths.push(rootPath)
   const artifactRepositoryPath = join(rootPath, 'artifacts')
   await Promise.all([mkdir(artifactRepositoryPath), mkdir(join(rootPath, 'knowledge'))])
-  const sessions = new PiChatSessionRepository(join(rootPath, 'sessions'))
-  const prepared = fauxRuntime(typeof responses === 'function'
+  const conversations = new PiChatConversationRepository(join(rootPath, 'conversations'))
+  const prepared = fauxModelStream(typeof responses === 'function'
     ? responses({ rootPath, artifactRepositoryPath })
     : responses)
-  const backend = new FauxAiBackend(prepared.runtime)
+  const backend = new FauxAiBackend(prepared.modelStream)
   const service = new ChatAgentService({
-    sessions,
+    conversations,
     configuration,
     aiBackend: backend,
     repositoryPath: rootPath
@@ -106,7 +108,7 @@ async function serviceFixture(
   return {
     rootPath,
     artifactRepositoryPath,
-    sessions,
+    conversations,
     configuration,
     backend,
     service,
@@ -115,35 +117,35 @@ async function serviceFixture(
 }
 
 describe('ChatAgentService', () => {
-  it('captures the current default LLM for each new Session without changing existing Sessions', async () => {
+  it('captures the current default LLM for each new Conversation without changing existing Conversations', async () => {
     const fixture = await serviceFixture([fauxAssistantMessage('Unused.')])
-    const first = await fixture.service.createSession({})
+    const first = await fixture.service.createConversation({})
 
     fixture.backend.defaultLlm = {
       connectionId: 'connection:test',
       modelId: 'next-default-model',
       reasoningEffort: 'low'
     }
-    const second = await fixture.service.createSession({})
+    const second = await fixture.service.createConversation({})
 
     expect(first.binding).toEqual({
       connectionId: 'connection:test',
-      modelId: fixture.runtime.model.id
+      modelId: fixture.modelStream.model.id
     })
     expect(second.binding).toEqual({
       connectionId: 'connection:test',
       modelId: 'next-default-model',
       reasoningEffort: 'low'
     })
-    expect((await fixture.service.readSession(first.id)).binding).toEqual(first.binding)
-    await fixture.sessions.dispose()
+    expect((await fixture.service.readConversation(first.id)).binding).toEqual(first.binding)
+    await fixture.conversations.dispose()
   })
 
   it('freezes the configured prompt and exposes one repository through ordinary coding tools', async () => {
     const customPrompt = 'Use local knowledge and reply briefly.'
     const fixture = await serviceFixture(({ rootPath }) => [
       (context) => {
-        expect(context.systemPrompt).toBe(chatAgentSystemPrompt(customPrompt, rootPath))
+        expect(context.systemPrompt).toContain(chatAgentSystemPrompt(customPrompt, rootPath))
         expect(context.tools?.map((tool) => tool.name)).toEqual([
           'read', 'bash', 'edit', 'write', 'spawn_agent',
           'add_todos', 'complete_todos', 'list_todos'
@@ -155,31 +157,31 @@ describe('ChatAgentService', () => {
     fixture.service.subscribe((event) => events.push(event))
 
     await fixture.service.saveDefaultInstructions({ instructionsOverride: customPrompt })
-    const session = await fixture.service.createSession({})
+    const conversation = await fixture.service.createConversation({})
     await fixture.service.saveDefaultInstructions({ instructionsOverride: null })
-    expect((await fixture.sessions.open(session.id)).binding.systemPrompt).toBe(customPrompt)
+    expect((await fixture.conversations.open(conversation.id)).binding.systemPrompt).toBe(customPrompt)
 
     const detail = await fixture.service.sendMessage({
-      sessionId: session.id,
+      conversationId: conversation.id,
       text: 'Please inspect the repository.'
     })
     expect(fixture.callCount()).toBe(1)
     expect(detail.title).toBe('Please inspect the repository.')
     expect(detail.messages.map((entry) => entry.message.role)).toEqual(['user', 'assistant'])
-    expect(detail.runs).toHaveLength(1)
-    expect(detail.runs[0].modelCalls).toHaveLength(1)
-    expect(detail.runs[0].toolCalls).toEqual([])
+    expect(detail.invocations).toHaveLength(1)
+    expect(detail.invocations[0].modelCalls).toHaveLength(1)
+    expect(detail.invocations[0].toolCalls).toEqual([])
     expect(events).toContainEqual(expect.objectContaining({
-      type: 'run_state_changed',
-      sessionId: session.id,
+      type: 'invocation_state_changed',
+      conversationId: conversation.id,
       status: 'completed'
     }))
     expect(events).toContainEqual(expect.objectContaining({
-      type: 'run_updated',
-      sessionId: session.id,
-      run: expect.objectContaining({ status: 'completed' })
+      type: 'invocation_updated',
+      conversationId: conversation.id,
+      invocation: expect.objectContaining({ status: 'completed' })
     }))
-    const snapshot = await fixture.service.getSnapshot()
+    const snapshot = await fixture.service.getState()
     expect(snapshot.agent).toMatchObject({
       builtInInstructions: DEFAULT_CHAT_AGENT_SYSTEM_PROMPT,
       defaultInstructions: DEFAULT_CHAT_AGENT_SYSTEM_PROMPT,
@@ -194,14 +196,14 @@ describe('ChatAgentService', () => {
       parameters: {
         type: 'object',
         additionalProperties: false,
-        required: ['task'],
-        properties: { task: { type: 'string', minLength: 1 } }
+        required: ['instruction'],
+        properties: { instruction: { type: 'string', minLength: 1 } }
       }
     })
-    await fixture.sessions.dispose()
+    await fixture.conversations.dispose()
   })
 
-  it('delegates to a fresh general Agent context and keeps the child transcript inside the tool result', async () => {
+  it('delegates to a fresh persistent Pi Session without copying its transcript into the tool result', async () => {
     const delegatedTask = 'Read the exact Project P Statement and report its database.'
     const parentOnlyContext = 'PARENT_ONLY_CONTEXT'
     const expectedTools = [
@@ -218,11 +220,11 @@ describe('ChatAgentService', () => {
       (context) => {
         expect(JSON.stringify(context.messages)).toContain(parentOnlyContext)
         return fauxAssistantMessage(fauxToolCall('spawn_agent', {
-          task: delegatedTask
+          instruction: delegatedTask
         }), { stopReason: 'toolUse' })
       },
       (context) => {
-        expect(context.systemPrompt).toBe(chatAgentSystemPrompt(
+        expect(context.systemPrompt).toContain(chatAgentSystemPrompt(
           DEFAULT_CHAT_AGENT_SYSTEM_PROMPT,
           rootPath
         ))
@@ -243,10 +245,10 @@ describe('ChatAgentService', () => {
         return fauxAssistantMessage('Parent accepted the child result.')
       }
     ])
-    const session = await fixture.service.createSession({})
+    const conversation = await fixture.service.createConversation({})
 
     const detail = await fixture.service.sendMessage({
-      sessionId: session.id,
+      conversationId: conversation.id,
       text: `Delegate this without sharing ${parentOnlyContext}.`
     })
 
@@ -266,44 +268,41 @@ describe('ChatAgentService', () => {
       text: 'Child finding: Project P uses SQLite.',
       isError: false,
       details: {
-        runId: expect.any(String),
-        modelId: fixture.runtime.model.id,
-        transcript: expect.any(Array)
+        invocationId: expect.any(String),
+        modelId: fixture.modelStream.model.id,
+        sessionId: expect.any(String)
       }
     })
     if (!spawnResult || spawnResult.role !== 'tool') throw new Error('spawn_agent result was not persisted')
     const details = spawnResult.details as {
-      runId: string
-      transcript: Array<{ role: string }>
+      invocationId: string
+      sessionId: string
     }
-    expect(details.runId).not.toBe(session.id)
-    expect(details.transcript.map((message) => message.role)).toEqual([
-      'user',
-      'assistant'
-    ])
-    expect(JSON.stringify(details.transcript)).not.toContain(parentOnlyContext)
-    expect(detail.runs).toHaveLength(2)
-    const rootRun = detail.runs.find((run) => run.parentRunId === undefined)
-    const childRun = detail.runs.find((run) => run.id === details.runId)
-    expect(rootRun).toMatchObject({
-      formatVersion: 1,
+    expect(details.invocationId).not.toBe(conversation.id)
+    expect(details.sessionId).toBe(details.invocationId)
+    expect(JSON.stringify(details)).not.toContain(parentOnlyContext)
+    expect(detail.invocations).toHaveLength(2)
+    const rootInvocation = detail.invocations.find((invocation) => invocation.parentInvocationId === undefined)
+    const childInvocation = detail.invocations.find((invocation) => invocation.id === details.invocationId)
+    expect(rootInvocation).toMatchObject({
+      formatVersion: 3,
       agentId: 'chat_agent',
       status: 'completed'
     })
-    expect(childRun).toMatchObject({
-      formatVersion: 1,
+    expect(childInvocation).toMatchObject({
+      formatVersion: 3,
       agentId: 'chat_agent',
-      parentRunId: rootRun?.id,
+      parentInvocationId: rootInvocation?.id,
       status: 'completed'
     })
 
-    await fixture.sessions.dispose()
+    await fixture.conversations.dispose()
   })
 
   it('returns a child model failure as a recoverable spawn_agent tool error', async () => {
     const fixture = await serviceFixture([
       fauxAssistantMessage(fauxToolCall('spawn_agent', {
-        task: 'Investigate independently.'
+        instruction: 'Investigate independently.'
       }), { stopReason: 'toolUse' }),
       fauxAssistantMessage('', {
         stopReason: 'error',
@@ -320,10 +319,10 @@ describe('ChatAgentService', () => {
         return fauxAssistantMessage('Parent recovered from the child failure.')
       }
     ])
-    const session = await fixture.service.createSession({})
+    const conversation = await fixture.service.createConversation({})
 
     const detail = await fixture.service.sendMessage({
-      sessionId: session.id,
+      conversationId: conversation.id,
       text: 'Delegate the investigation.'
     })
 
@@ -339,16 +338,16 @@ describe('ChatAgentService', () => {
       role: 'assistant',
       text: 'Parent recovered from the child failure.'
     })
-    const rootRun = detail.runs.find((run) => run.parentRunId === undefined)
-    const childRun = detail.runs.find((run) => run.parentRunId === rootRun?.id)
-    expect(rootRun).toMatchObject({ agentId: 'chat_agent', status: 'completed' })
-    expect(childRun).toMatchObject({
+    const rootInvocation = detail.invocations.find((invocation) => invocation.parentInvocationId === undefined)
+    const childInvocation = detail.invocations.find((invocation) => invocation.parentInvocationId === rootInvocation?.id)
+    expect(rootInvocation).toMatchObject({ agentId: 'chat_agent', status: 'completed' })
+    expect(childInvocation).toMatchObject({
       agentId: 'chat_agent',
       status: 'failed',
       error: expect.stringContaining('child model unavailable')
     })
 
-    await fixture.sessions.dispose()
+    await fixture.conversations.dispose()
   })
 
   it('allows a delegated Agent to delegate again without inheriting either parent transcript', async () => {
@@ -357,14 +356,14 @@ describe('ChatAgentService', () => {
     const parentOnlyContext = 'TOP_LEVEL_ONLY'
     const fixture = await serviceFixture([
       fauxAssistantMessage(fauxToolCall('spawn_agent', {
-        task: parentTask
+        instruction: parentTask
       }), { stopReason: 'toolUse' }),
       (context) => {
         expect(context.messages).toHaveLength(1)
         expect(JSON.stringify(context.messages)).toContain(parentTask)
         expect(JSON.stringify(context.messages)).not.toContain(parentOnlyContext)
         return fauxAssistantMessage(fauxToolCall('spawn_agent', {
-          task: nestedTask
+          instruction: nestedTask
         }), { stopReason: 'toolUse' })
       },
       (context) => {
@@ -385,10 +384,10 @@ describe('ChatAgentService', () => {
         return fauxAssistantMessage('Parent completed the task.')
       }
     ])
-    const session = await fixture.service.createSession({})
+    const conversation = await fixture.service.createConversation({})
 
     const detail = await fixture.service.sendMessage({
-      sessionId: session.id,
+      conversationId: conversation.id,
       text: `Delegate recursively while keeping ${parentOnlyContext} private.`
     })
 
@@ -407,10 +406,13 @@ describe('ChatAgentService', () => {
       text: 'Child combined the grandchild result.',
       isError: false
     })
-    expect(JSON.stringify(spawnResult)).toContain('Grandchild result.')
+    expect(JSON.stringify(spawnResult)).not.toContain('Grandchild result.')
+    expect(spawnResult).toMatchObject({
+      details: { sessionId: expect.any(String) }
+    })
     expect(JSON.stringify(spawnResult)).not.toContain(parentOnlyContext)
 
-    await fixture.sessions.dispose()
+    await fixture.conversations.dispose()
   })
 
   it('starts unrestricted coding tools in the one Oyster Repository', async () => {
@@ -442,10 +444,10 @@ describe('ChatAgentService', () => {
     })
     const events: ChatEvent[] = []
     fixture.service.subscribe((event) => events.push(event))
-    const session = await fixture.service.createSession({})
+    const conversation = await fixture.service.createConversation({})
 
     const detail = await fixture.service.sendMessage({
-      sessionId: session.id,
+      conversationId: conversation.id,
       text: 'Exercise the filesystem tools.'
     })
 
@@ -471,9 +473,9 @@ describe('ChatAgentService', () => {
     expect(toolMessages[4]).toMatchObject({
       text: expect.stringContaining(ARTIFACT_GIT_BINARY_PATH)
     })
-    const latestRunEvent = events
-      .filter((event): event is Extract<ChatEvent, { type: 'run_updated' }> => (
-        event.type === 'run_updated'
+    const latestInvocationEvent = events
+      .filter((event): event is Extract<ChatEvent, { type: 'invocation_updated' }> => (
+        event.type === 'invocation_updated'
       ))
       .at(-1)
     const expectedToolCalls = [
@@ -483,20 +485,20 @@ describe('ChatAgentService', () => {
       ['write', 'completed', false],
       ['bash', 'completed', false]
     ]
-    expect(latestRunEvent?.run.status).toBe('completed')
-    expect(latestRunEvent?.run.toolCalls.map((call) => [
+    expect(latestInvocationEvent?.invocation.status).toBe('completed')
+    expect(latestInvocationEvent?.invocation.toolCalls.map((call) => [
       call.name,
       call.status,
       call.isError
     ])).toEqual(expectedToolCalls)
-    expect(detail.runs.at(-1)?.toolCalls.map((call) => [
+    expect(detail.invocations.at(-1)?.toolCalls.map((call) => [
       call.name,
       call.status,
       call.isError
     ])).toEqual(expectedToolCalls)
 
     fixture.service.dispose()
-    await fixture.sessions.dispose()
+    await fixture.conversations.dispose()
   })
 
   it('does not impose a model-call or tool-call quota', async () => {
@@ -505,25 +507,25 @@ describe('ChatAgentService', () => {
       { stopReason: 'toolUse' }
     ))
     const fixture = await serviceFixture([...toolCalls, fauxAssistantMessage('Finished.')])
-    const session = await fixture.service.createSession({})
-    const detail = await fixture.service.sendMessage({ sessionId: session.id, text: 'Search widely.' })
+    const conversation = await fixture.service.createConversation({})
+    const detail = await fixture.service.sendMessage({ conversationId: conversation.id, text: 'Search widely.' })
 
     expect(fixture.callCount()).toBe(13)
     expect(detail.messages.filter((entry) => (
       entry.message.role === 'tool' && entry.message.toolName === 'list_todos'
     ))).toHaveLength(12)
-    await fixture.sessions.dispose()
+    await fixture.conversations.dispose()
   })
 
   it('requires a valid default LLM without requiring a prior connection test', async () => {
     const fixture = await serviceFixture([fauxAssistantMessage('Unused.')])
     fixture.backend.defaultLlm = undefined
-    await expect(fixture.service.createSession({})).rejects.toThrow('配置默认 LLM')
-    fixture.backend.defaultLlm = { connectionId: 'missing', modelId: fixture.runtime.model.id }
-    await expect(fixture.service.createSession({})).rejects.toThrow('不存在')
+    await expect(fixture.service.createConversation({})).rejects.toThrow('配置默认 LLM')
+    fixture.backend.defaultLlm = { connectionId: 'missing', modelId: fixture.modelStream.model.id }
+    await expect(fixture.service.createConversation({})).rejects.toThrow('不存在')
     fixture.backend.defaultLlm = { connectionId: 'connection:test', modelId: 'missing' }
-    await expect(fixture.service.createSession({})).rejects.toThrow('不可用')
-    await fixture.sessions.dispose()
+    await expect(fixture.service.createConversation({})).rejects.toThrow('不可用')
+    await fixture.conversations.dispose()
   })
 
   it('keeps the active default unchanged when configuration persistence fails', async () => {
@@ -536,31 +538,31 @@ describe('ChatAgentService', () => {
     await expect(fixture.service.saveDefaultInstructions({
       instructionsOverride: 'This must not become active.'
     })).rejects.toThrow('disk unavailable')
-    expect((await fixture.service.getSnapshot()).agent).toMatchObject({
+    expect((await fixture.service.getState()).agent).toMatchObject({
       defaultInstructions: DEFAULT_CHAT_AGENT_SYSTEM_PROMPT,
       isDefaultCustomized: false
     })
 
-    await fixture.sessions.dispose()
+    await fixture.conversations.dispose()
   })
 
-  it('propagates Session cancellation into an active child Agent run', async () => {
+  it('propagates Conversation cancellation into an active child Agent invocation', async () => {
     const rootPath = await mkdtemp(join(tmpdir(), 'oyster-chat-cancel-'))
     temporaryPaths.push(rootPath)
-    const sessions = new PiChatSessionRepository(join(rootPath, 'sessions'))
+    const conversations = new PiChatConversationRepository(join(rootPath, 'conversations'))
     const model = fauxProvider().getModel()
     let modelCalls = 0
     let childSignal: AbortSignal | undefined
     let markChildStarted: (() => void) | undefined
     const childStarted = new Promise<void>((resolve) => { markChildStarted = resolve })
-    const runtime: ModelRuntime = {
+    const modelStream: SelectedModelStream = {
       model,
       streamFn: (requestedModel, _context, options) => {
         modelCalls++
         const stream = createAssistantMessageEventStream()
         if (modelCalls === 1) {
           stream.end(fauxAssistantMessage(fauxToolCall('spawn_agent', {
-            task: 'Wait independently until cancelled.'
+            instruction: 'Wait independently until cancelled.'
           }), { stopReason: 'toolUse' }))
           return stream
         }
@@ -594,33 +596,33 @@ describe('ChatAgentService', () => {
       }
     }
     const service = new ChatAgentService({
-      sessions,
+      conversations,
       configuration: new InMemoryChatConfigurationRepository(),
-      aiBackend: new FauxAiBackend(runtime),
+      aiBackend: new FauxAiBackend(modelStream),
       repositoryPath: rootPath
     })
     await service.initialize()
-    const session = await service.createSession({})
+    const conversation = await service.createConversation({})
     const events: ChatEvent[] = []
     service.subscribe((event) => {
       events.push(event)
     })
 
-    const send = service.sendMessage({ sessionId: session.id, text: 'Delegate a wait.' })
+    const send = service.sendMessage({ conversationId: conversation.id, text: 'Delegate a wait.' })
     await Promise.race([
       childStarted,
-      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('child run did not start')), 500))
+      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('child invocation did not start')), 500))
     ])
-    await service.cancelRun({ sessionId: session.id })
+    await service.cancelInvocation({ conversationId: conversation.id })
     await expect(Promise.race([
       send,
-      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('run did not cancel')), 500))
+      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('invocation did not cancel')), 500))
     ])).rejects.toThrow('取消')
     expect(childSignal?.aborted).toBe(true)
     expect(events).toContainEqual(expect.objectContaining({
-      type: 'run_state_changed',
+      type: 'invocation_state_changed',
       status: 'cancelled'
     }))
-    await sessions.dispose()
+    await conversations.dispose()
   })
 })

@@ -1,96 +1,96 @@
 import { randomUUID } from 'node:crypto'
 import {
-  PROCESSING_STAGE_IDS,
+  KNOWLEDGE_AGENT_IDS,
+  type AgentInvocationOrigin,
+  type AgentInvocationSummary,
+  type AiConnectionView,
+  type KnowledgeAgentBinding,
+  type KnowledgeAgentId,
   type KnowledgeMaintenanceResult,
-  type KnowledgeProcessingDebugTrace,
-  type KnowledgeProcessingSnapshot,
+  type KnowledgeProcessingStateView,
   type KnowledgeReviewResult,
-  type ProcessingConnectionView,
-  type ProcessingDebugTraceOrigin,
-  type ProcessingExecutionSummary,
-  type ProcessingStageId,
-  type SaveProcessingDefaultInstructionsInput,
-  type SaveProcessingStageInput
+  type LiveAgentInvocationView,
+  type SaveKnowledgeAgentDefaultInstructionsInput,
+  type SaveKnowledgeAgentInput
 } from '../../shared/knowledge-processing'
 import type { AiBackendSnapshot, AiConnection, ReasoningEffort } from '../../shared/ai-backends'
-import type { AgentRunRecord } from '../../shared/agent-runtime'
+import type {
+  AgentInvocationDebugRecord,
+  AgentInvocationRecord
+} from '../../shared/agent-runtime'
 import type { AgentObservation, CanonicalActivity, RawEvidence } from '../observation/model'
-import { parseAgentRunRecord } from '../agent-runtime/agent-run-record'
+import {
+  parseAgentInvocationDebugRecord,
+  parseAgentInvocationRecord
+} from '../agent-runtime/agent-invocation-record'
 import type {
   AiBackendPort,
   KnowledgeMaintainerRuntime,
-  KnowledgeProcessingRepository,
-  KnowledgeProcessingStateData,
+  KnowledgeProcessingConfigurationData,
+  KnowledgeProcessingConfigurationRepository,
+  KnowledgeProcessingStateListener,
   KnowledgeReviewerRuntime,
-  ProcessingSnapshotListener,
-  StoredProcessingStage
+  StoredKnowledgeAgent
 } from './model'
-import { PROCESSING_STAGE_DEFINITIONS, stageDefinition } from './prompts'
+import { KNOWLEDGE_AGENT_DEFINITIONS, knowledgeAgentDefinition } from './prompts'
 import {
   activitySegmentCharacterLimit,
-  planKnowledgeRunWorkspace
-} from './run-workspace'
+  planKnowledgeTaskWorkspace
+} from './task-workspace'
 import {
-  ProcessingRepository,
-  type ProcessingRun
-} from './processing-repository'
+  KnowledgeTaskWorkspaceRepository,
+  type KnowledgeTaskWorkspace
+} from './knowledge-task-workspace-repository'
 
 const MAX_SOURCE_REF_CHARACTERS = 512
-const MAX_DEBUG_TRACE_ERROR_CHARACTERS = 2 * 1_024
+const MAX_LIVE_ERROR_CHARACTERS = 2 * 1_024
 
-export interface ProcessingStageRunBinding {
-  connectionId: string
-  modelId: string
-  instructions: string
-  reasoningEffort?: ReasoningEffort
+export interface AgentInvocationContext {
+  invocationId: string
+  origin: AgentInvocationOrigin
 }
 
-export interface ProcessingDebugTraceContext {
-  id: string
-  origin: ProcessingDebugTraceOrigin
-}
-
-export interface KnowledgeMaintenanceRunOptions {
-  binding?: ProcessingStageRunBinding
+export interface KnowledgeMaintenanceInvocationOptions {
+  binding?: KnowledgeAgentBinding
   agent?: KnowledgeMaintainerRuntime
-  run?: ProcessingRun
-  processingRunId?: string
-  previousRevision?: string
-  debugTrace?: ProcessingDebugTraceContext
-  onRunCreated?: (run: ProcessingRun) => void
+  workspace?: KnowledgeTaskWorkspace
+  taskId?: string
+  previousRepositoryRevision?: string
+  invocation?: AgentInvocationContext
+  onWorkspaceCreated?: (workspace: KnowledgeTaskWorkspace) => void
 }
 
-export interface KnowledgeReviewRunOptions {
-  binding?: ProcessingStageRunBinding
+export interface KnowledgeReviewInvocationOptions {
+  binding?: KnowledgeAgentBinding
   agent?: KnowledgeReviewerRuntime
-  debugTrace?: ProcessingDebugTraceContext
+  invocation?: AgentInvocationContext
 }
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function boundedDebugText(value: string, maximum: number): string {
-  return value.length <= maximum ? value : `${value.slice(0, maximum - 1)}…`
+function boundedError(error: unknown): string {
+  const value = errorText(error)
+  return value.length <= MAX_LIVE_ERROR_CHARACTERS
+    ? value
+    : `${value.slice(0, MAX_LIVE_ERROR_CHARACTERS - 1)}…`
 }
 
-function debugError(error: unknown): string {
-  return boundedDebugText(errorText(error), MAX_DEBUG_TRACE_ERROR_CHARACTERS)
-}
-
-function traceTerminalStatus(signal: AbortSignal): 'failed' | 'cancelled' {
+function terminalStatus(signal: AbortSignal): 'failed' | 'cancelled' {
   return signal.aborted ? 'cancelled' : 'failed'
 }
 
-function isStageId(value: unknown): value is ProcessingStageId {
-  return typeof value === 'string' && PROCESSING_STAGE_IDS.includes(value as ProcessingStageId)
+function isKnowledgeAgentId(value: unknown): value is KnowledgeAgentId {
+  return typeof value === 'string' && KNOWLEDGE_AGENT_IDS.includes(value as KnowledgeAgentId)
 }
 
-function defaultInstructions(stageId: ProcessingStageId, stored?: StoredProcessingStage): string {
-  return stored?.defaultInstructionsOverride ?? stageDefinition(stageId).defaultInstructions
+function defaultInstructions(agentId: KnowledgeAgentId, stored?: StoredKnowledgeAgent): string {
+  return stored?.defaultInstructionsOverride
+    ?? knowledgeAgentDefinition(agentId).defaultInstructions
 }
 
-function processingConnections(snapshot: AiBackendSnapshot): ProcessingConnectionView[] {
+function connectionViews(snapshot: AiBackendSnapshot): AiConnectionView[] {
   return snapshot.connections.flatMap((connection) => {
     if (!connection.models.length) return []
     return [{
@@ -112,7 +112,7 @@ function processingConnections(snapshot: AiBackendSnapshot): ProcessingConnectio
   })
 }
 
-function selectedModel(connection: ProcessingConnectionView | undefined, modelId: string | undefined) {
+function selectedModel(connection: AiConnectionView | undefined, modelId: string | undefined) {
   return connection?.models.find((model) => model.id === modelId)
 }
 
@@ -120,6 +120,12 @@ function normalizeAttention(value: unknown): string | undefined {
   if (value === undefined || value === null || value === '') return undefined
   if (typeof value !== 'string') throw new Error('关注点格式无效')
   return value.trim() || undefined
+}
+
+function assertObservation(observation: AgentObservation): void {
+  const { rawEvidence, canonicalActivity } = observation
+  assertRawEvidence(rawEvidence)
+  assertCanonicalActivity(canonicalActivity, rawEvidence)
 }
 
 function assertRawEvidence(evidence: RawEvidence): void {
@@ -166,54 +172,54 @@ function assertCanonicalActivity(activity: CanonicalActivity, evidence: RawEvide
   }
 }
 
-function executionSummary(
+function invocationSummary(
   connection: AiConnection,
   modelId: string,
   modelCallCount: number,
   toolCalls: string[],
   reasoningEffort?: ReasoningEffort
-): ProcessingExecutionSummary {
+): AgentInvocationSummary {
   return {
     connectionId: connection.id,
     connectionName: connection.displayName,
     backendKind: connection.backendKind,
     providerId: connection.providerId,
     model: modelId,
-    runtime: 'pi_agent_core',
+    runtime: 'pi_coding_agent',
     modelCallCount,
     toolCalls,
     ...(reasoningEffort ? { reasoningEffort } : {})
   }
 }
 
-function runView(run: ProcessingRun) {
+function workspaceView(workspace: KnowledgeTaskWorkspace) {
   return {
-    id: run.id,
-    repositoryPath: run.repositoryPath,
-    runPath: run.runPath,
-    taskPath: run.taskPath,
-    workPath: run.workPath,
-    inputPath: run.inputPath,
-    workspaceRevision: run.workspaceRevision,
-    branchName: run.branchName,
-    targetBranch: run.targetBranch,
-    baseRevision: run.baseRevision
+    taskId: workspace.taskId,
+    repositoryPath: workspace.repositoryPath,
+    workspacePath: workspace.workspacePath,
+    briefPath: workspace.briefPath,
+    progressPath: workspace.progressPath,
+    inputPath: workspace.inputPath,
+    workspaceRevision: workspace.workspaceRevision,
+    branchName: workspace.branchName,
+    targetBranch: workspace.targetBranch,
+    baseRepositoryRevision: workspace.baseRepositoryRevision
   }
 }
 
 export class KnowledgeProcessingService {
-  private state: KnowledgeProcessingStateData = { stages: [] }
+  private state: KnowledgeProcessingConfigurationData = { agents: [] }
   private configurationError?: string
   private mutationQueue: Promise<void> = Promise.resolve()
-  private readonly listeners = new Set<ProcessingSnapshotListener>()
-  private readonly activeRuns = new Map<ProcessingStageId, AbortController>()
-  private readonly debugTraces = new Map<string, KnowledgeProcessingDebugTrace>()
+  private readonly listeners = new Set<KnowledgeProcessingStateListener>()
+  private readonly activeInvocations = new Map<KnowledgeAgentId, AbortController>()
+  private readonly liveInvocations = new Map<string, LiveAgentInvocationView>()
   private readonly unsubscribeAiBackend: () => void
 
   constructor(
-    private readonly repository: KnowledgeProcessingRepository,
+    private readonly configuration: KnowledgeProcessingConfigurationRepository,
     private readonly aiBackend: AiBackendPort,
-    private readonly processingRepository: ProcessingRepository,
+    private readonly workspaces: KnowledgeTaskWorkspaceRepository,
     private readonly maintainer: KnowledgeMaintainerRuntime,
     private readonly reviewer: KnowledgeReviewerRuntime
   ) {
@@ -222,21 +228,21 @@ export class KnowledgeProcessingService {
 
   async initialize(): Promise<void> {
     try {
-      this.state = await this.repository.load()
+      this.state = await this.configuration.load()
       this.configurationError = undefined
     } catch (error) {
-      this.state = { stages: [] }
+      this.state = { agents: [] }
       this.configurationError = `知识加工配置无法读取：${errorText(error)}`
     }
-    await this.processingRepository.initialize()
+    await this.workspaces.initialize()
   }
 
-  snapshot(): KnowledgeProcessingSnapshot {
-    const backendSnapshot = this.aiBackend.snapshot()
-    const connections = processingConnections(backendSnapshot)
+  stateView(): KnowledgeProcessingStateView {
+    const backend = this.aiBackend.snapshot()
+    const connections = connectionViews(backend)
     return structuredClone({
-      stages: PROCESSING_STAGE_DEFINITIONS.map((definition) => {
-        const stored = this.state.stages.find((candidate) => candidate.stageId === definition.id)
+      agents: KNOWLEDGE_AGENT_DEFINITIONS.map((definition) => {
+        const stored = this.state.agents.find((candidate) => candidate.agentId === definition.id)
         const configuredDefault = defaultInstructions(definition.id, stored)
         return {
           id: definition.id,
@@ -255,17 +261,11 @@ export class KnowledgeProcessingService {
         }
       }),
       connections,
-      ...(backendSnapshot.defaultLlm ? { defaultLlm: { ...backendSnapshot.defaultLlm } } : {}),
-      runningStageIds: [...this.activeRuns.keys()],
-      debugTraces: [...this.debugTraces.values()],
-      configurationError: this.configurationError
+      ...(backend.defaultLlm ? { defaultLlm: { ...backend.defaultLlm } } : {}),
+      activeAgentIds: [...this.activeInvocations.keys()],
+      liveInvocations: [...this.liveInvocations.values()],
+      ...(this.configurationError ? { configurationError: this.configurationError } : {})
     })
-  }
-
-  private assertConfigurationWritable(): void {
-    if (this.configurationError) {
-      throw new Error('知识加工配置当前不可修改；请先修复配置文件并重新启动 Oyster')
-    }
   }
 
   private enqueueMutation<T>(operation: () => Promise<T>): Promise<T> {
@@ -274,47 +274,55 @@ export class KnowledgeProcessingService {
     return result
   }
 
-  saveStage(input: SaveProcessingStageInput): Promise<KnowledgeProcessingSnapshot> {
+  private assertConfigurationWritable(): void {
+    if (this.configurationError) {
+      throw new Error('知识加工配置当前不可修改；请先修复配置文件并重新启动 Oyster')
+    }
+  }
+
+  saveAgent(input: SaveKnowledgeAgentInput): Promise<KnowledgeProcessingStateView> {
     return this.enqueueMutation(async () => {
       this.assertConfigurationWritable()
-      if (!input || typeof input !== 'object' || !isStageId(input.stageId)) {
-        throw new Error('未知的知识加工阶段')
+      if (!input || typeof input !== 'object' || !isKnowledgeAgentId(input.agentId)) {
+        throw new Error('未知的知识 Agent')
       }
       if (input.instructionsOverride !== null && typeof input.instructionsOverride !== 'string') {
         throw new Error('System Prompt 配置无效')
       }
-      const current = this.state.stages.find((stage) => stage.stageId === input.stageId)
+      const current = this.state.agents.find((agent) => agent.agentId === input.agentId)
       const normalized = input.instructionsOverride?.trim()
-      if (input.instructionsOverride !== null && !normalized) throw new Error('System Prompt 不能为空')
-      const instructionsOverride = normalized === defaultInstructions(input.stageId, current)
+      if (input.instructionsOverride !== null && !normalized) {
+        throw new Error('System Prompt 不能为空')
+      }
+      const instructionsOverride = normalized === defaultInstructions(input.agentId, current)
         ? undefined
         : normalized
-      const next: StoredProcessingStage = {
-        stageId: input.stageId,
+      const next: StoredKnowledgeAgent = {
+        agentId: input.agentId,
         ...(current?.defaultInstructionsOverride
           ? { defaultInstructionsOverride: current.defaultInstructionsOverride }
           : {}),
         ...(instructionsOverride ? { instructionsOverride } : {})
       }
       this.state = {
-        stages: [
-          ...this.state.stages.filter((stage) => stage.stageId !== input.stageId),
+        agents: [
+          ...this.state.agents.filter((agent) => agent.agentId !== input.agentId),
           next
         ]
       }
-      await this.repository.save(this.state)
+      await this.configuration.save(this.state)
       this.emit()
-      return this.snapshot()
+      return this.stateView()
     })
   }
 
-  saveDefaultInstructions(
-    input: SaveProcessingDefaultInstructionsInput
-  ): Promise<KnowledgeProcessingSnapshot> {
+  saveAgentDefaultInstructions(
+    input: SaveKnowledgeAgentDefaultInstructionsInput
+  ): Promise<KnowledgeProcessingStateView> {
     return this.enqueueMutation(async () => {
       this.assertConfigurationWritable()
-      if (!input || typeof input !== 'object' || !isStageId(input.stageId)) {
-        throw new Error('未知的知识加工阶段')
+      if (!input || typeof input !== 'object' || !isKnowledgeAgentId(input.agentId)) {
+        throw new Error('未知的知识 Agent')
       }
       if (input.instructionsOverride !== null && typeof input.instructionsOverride !== 'string') {
         throw new Error('默认 System Prompt 配置无效')
@@ -323,33 +331,33 @@ export class KnowledgeProcessingService {
       if (input.instructionsOverride !== null && !normalized) {
         throw new Error('默认 System Prompt 不能为空')
       }
-      const configuredDefault = normalized === stageDefinition(input.stageId).defaultInstructions
+      const configuredDefault = normalized === knowledgeAgentDefinition(input.agentId).defaultInstructions
         ? undefined
         : normalized
-      const current = this.state.stages.find((stage) => stage.stageId === input.stageId)
-      const next: StoredProcessingStage = {
-        stageId: input.stageId,
+      const current = this.state.agents.find((agent) => agent.agentId === input.agentId)
+      const next: StoredKnowledgeAgent = {
+        agentId: input.agentId,
         ...(configuredDefault ? { defaultInstructionsOverride: configuredDefault } : {}),
         ...(current?.instructionsOverride ? { instructionsOverride: current.instructionsOverride } : {})
       }
       this.state = {
-        stages: [
-          ...this.state.stages.filter((stage) => stage.stageId !== input.stageId),
+        agents: [
+          ...this.state.agents.filter((agent) => agent.agentId !== input.agentId),
           next
         ]
       }
-      await this.repository.save(this.state)
+      await this.configuration.save(this.state)
       this.emit()
-      return this.snapshot()
+      return this.stateView()
     })
   }
 
-  private configuredStage(stageId: ProcessingStageId): ProcessingStageRunBinding {
-    const stored = this.state.stages.find((candidate) => candidate.stageId === stageId)
-    const backendSnapshot = this.aiBackend.snapshot()
-    const binding = backendSnapshot.defaultLlm
+  agentBinding(agentId: KnowledgeAgentId): KnowledgeAgentBinding {
+    const stored = this.state.agents.find((candidate) => candidate.agentId === agentId)
+    const backend = this.aiBackend.snapshot()
+    const binding = backend.defaultLlm
     if (!binding) throw new Error('请先在 AI 后端页面配置默认 LLM')
-    const connection = processingConnections(backendSnapshot)
+    const connection = connectionViews(backend)
       .find((candidate) => candidate.id === binding.connectionId)
     if (!connection) throw new Error('默认 LLM 的 Connection 当前不可用')
     const model = selectedModel(connection, binding.modelId)
@@ -357,243 +365,279 @@ export class KnowledgeProcessingService {
     if (binding.reasoningEffort && !model.reasoningEfforts.includes(binding.reasoningEffort)) {
       throw new Error('默认 LLM 的思考强度不再受当前 Model 支持')
     }
-    return {
+    return structuredClone({
       connectionId: binding.connectionId,
       modelId: model.id,
-      instructions: stored?.instructionsOverride ?? defaultInstructions(stageId, stored),
+      instructions: stored?.instructionsOverride ?? defaultInstructions(agentId, stored),
       ...(binding.reasoningEffort ? { reasoningEffort: binding.reasoningEffort } : {})
-    }
+    })
   }
 
-  runBinding(stageId: ProcessingStageId): ProcessingStageRunBinding {
-    return structuredClone(this.configuredStage(stageId))
-  }
-
-  private beginRun(stageId: ProcessingStageId): AbortController {
-    if (this.activeRuns.size) throw new Error('另一个知识加工角色正在运行')
+  private beginInvocation(agentId: KnowledgeAgentId): AbortController {
+    if (this.activeInvocations.size) throw new Error('另一个知识 Agent 正在执行')
     const controller = new AbortController()
-    this.activeRuns.set(stageId, controller)
+    this.activeInvocations.set(agentId, controller)
     this.emit()
     return controller
   }
 
-  private finishRun(stageId: ProcessingStageId, controller: AbortController): void {
-    if (this.activeRuns.get(stageId) === controller) this.activeRuns.delete(stageId)
+  private finishInvocation(agentId: KnowledgeAgentId, controller: AbortController): void {
+    if (this.activeInvocations.get(agentId) === controller) {
+      this.activeInvocations.delete(agentId)
+    }
     this.emit()
   }
 
-  private recordAgentRun(context: ProcessingDebugTraceContext, run: AgentRunRecord): void {
-    const parsed = parseAgentRunRecord(run, context.id)
-    this.debugTraces.set(context.id, { origin: context.origin, run: parsed })
+  private recordInvocation(
+    context: AgentInvocationContext,
+    debugRecord: AgentInvocationDebugRecord
+  ): void {
+    const parsed = parseAgentInvocationDebugRecord(debugRecord, context.invocationId)
+    this.liveInvocations.set(context.invocationId, { origin: context.origin, invocation: parsed })
     this.emit()
   }
 
-  clearDebugTraces(origin: ProcessingDebugTraceOrigin): void {
+  private settleInvocation(
+    context: AgentInvocationContext,
+    invocation: AgentInvocationRecord
+  ): void {
+    const parsed = parseAgentInvocationRecord(invocation, context.invocationId)
+    const view = this.liveInvocations.get(context.invocationId)
+    if (!view || view.origin !== context.origin) return
+    Object.assign(view.invocation, parsed)
+    this.emit()
+  }
+
+  clearLiveInvocations(origin: AgentInvocationOrigin): void {
     let changed = false
-    for (const [runId, trace] of this.debugTraces) {
-      if (trace.origin !== origin) continue
-      this.debugTraces.delete(runId)
+    for (const [invocationId, view] of this.liveInvocations) {
+      if (view.origin !== origin) continue
+      this.liveInvocations.delete(invocationId)
       changed = true
     }
     if (changed) this.emit()
   }
 
-  private failDebugTrace(
-    context: ProcessingDebugTraceContext,
+  private failLiveInvocation(
+    context: AgentInvocationContext,
     status: 'failed' | 'cancelled',
     error: unknown
   ): void {
-    const trace = this.debugTraces.get(context.id)
-    if (!trace || trace.origin !== context.origin || trace.run.status !== 'running') return
+    const view = this.liveInvocations.get(context.invocationId)
+    if (
+      !view
+      || view.origin !== context.origin
+      || view.invocation.status !== 'in_progress'
+    ) return
     const completedAt = new Date().toISOString()
-    trace.run.status = status
-    trace.run.completedAt = completedAt
-    trace.run.durationMs = Math.max(
+    view.invocation.status = status
+    view.invocation.completedAt = completedAt
+    view.invocation.durationMs = Math.max(
       0,
-      new Date(completedAt).getTime() - new Date(trace.run.startedAt).getTime()
+      new Date(completedAt).getTime() - new Date(view.invocation.startedAt).getTime()
     )
-    trace.run.error = status === 'cancelled' ? '知识加工运行已取消' : debugError(error)
+    view.invocation.error = status === 'cancelled'
+      ? '知识 Agent Invocation 已取消'
+      : boundedError(error)
     this.emit()
   }
 
-  agentRunSnapshot(context: ProcessingDebugTraceContext): AgentRunRecord | undefined {
-    const trace = this.debugTraces.get(context.id)
-    return trace?.origin === context.origin ? structuredClone(trace.run) : undefined
+  invocationRecord(context: AgentInvocationContext): AgentInvocationRecord | undefined {
+    const view = this.liveInvocations.get(context.invocationId)
+    return view?.origin === context.origin
+      ? parseAgentInvocationRecord(view.invocation)
+      : undefined
   }
 
-  async runKnowledgeMaintenance(
+  async executeMaintenance(
     observation: AgentObservation,
     sourceRef: string,
     attention?: string,
-    options: KnowledgeMaintenanceRunOptions = {}
+    options: KnowledgeMaintenanceInvocationOptions = {}
   ): Promise<KnowledgeMaintenanceResult> {
-    const { rawEvidence, canonicalActivity } = observation
-    assertRawEvidence(rawEvidence)
-    assertCanonicalActivity(canonicalActivity, rawEvidence)
+    assertObservation(observation)
     if (!sourceRef.trim() || sourceRef.length > MAX_SOURCE_REF_CHARACTERS) {
       throw new Error('Raw Evidence sourceRef 无效')
     }
     const normalizedAttention = normalizeAttention(attention)
-    const stage = options.binding ?? this.configuredStage('knowledge_maintenance_agent')
-    const connection = this.aiBackend.snapshot().connections.find((item) => item.id === stage.connectionId)
+    const binding = options.binding ?? this.agentBinding('knowledge_maintainer')
+    const connection = this.aiBackend.snapshot().connections.find(
+      (item) => item.id === binding.connectionId
+    )
     if (!connection) throw new Error('已配置的 Connection 不再可用')
-    const debugTrace = options.debugTrace ?? { id: randomUUID(), origin: 'stage_debug' }
-    if (!options.debugTrace) this.clearDebugTraces(debugTrace.origin)
-    const controller = this.beginRun('knowledge_maintenance_agent')
+    const invocation = options.invocation ?? {
+      invocationId: randomUUID(),
+      origin: 'agent_preview' as const
+    }
+    if (!options.invocation) this.clearLiveInvocations(invocation.origin)
+    const controller = this.beginInvocation('knowledge_maintainer')
     const startedAt = Date.now()
     try {
-      return await this.aiBackend.withModelRuntime(
-        stage.connectionId,
-        stage.modelId,
-        async (runtime) => {
+      return await this.aiBackend.withModelStream(
+        binding.connectionId,
+        binding.modelId,
+        async (modelStream) => {
           if (
-            canonicalActivity.attachments.some((attachment) => attachment.mimeType.startsWith('image/'))
-            && !runtime.model.input?.includes('image')
+            observation.canonicalActivity.attachments.some(
+              (attachment) => attachment.mimeType.startsWith('image/')
+            )
+            && !modelStream.model.input?.includes('image')
           ) throw new Error('所选 Maintainer Model 不支持图片输入')
-          const processingRunId = options.run?.id ?? options.processingRunId ?? debugTrace.id
-          const workspace = planKnowledgeRunWorkspace(
+          const taskId = options.workspace?.taskId ?? options.taskId ?? randomUUID()
+          const workspacePlan = planKnowledgeTaskWorkspace(
             observation,
             sourceRef,
-            activitySegmentCharacterLimit(runtime.model.contextWindow)
+            activitySegmentCharacterLimit(modelStream.model.contextWindow)
           )
-          const workOrder = {
-            id: processingRunId,
+          const workspaceInput = {
+            taskId,
             sourceRef,
             attention: normalizedAttention,
-            workspace
+            workspace: workspacePlan
           }
-          const processingRun = options.run
-            ?? await this.processingRepository.createRun(workOrder)
-          if (!options.run) options.onRunCreated?.(processingRun)
-          const previousRevision = options.previousRevision ?? processingRun.baseRevision
-          await this.processingRepository.assertAgentStart(
-            processingRun,
-            previousRevision,
-            workOrder,
-            !options.run
+          const workspace = options.workspace
+            ?? await this.workspaces.createWorkspace(workspaceInput)
+          if (!options.workspace) options.onWorkspaceCreated?.(workspace)
+          const previousRepositoryRevision = options.previousRepositoryRevision
+            ?? workspace.baseRepositoryRevision
+          await this.workspaces.assertAgentStart(
+            workspace,
+            previousRepositoryRevision,
+            workspaceInput,
+            !options.workspace
           )
-          const result = await (options.agent ?? this.maintainer).run({
-            runtime,
-            systemPrompt: stage.instructions,
-            run: processingRun,
-            previousRevision,
-            reasoningEffort: stage.reasoningEffort,
-            runId: debugTrace.id,
-            onRunUpdate: (run) => this.recordAgentRun(debugTrace, run),
+          const result = await (options.agent ?? this.maintainer).invoke({
+            modelStream,
+            systemPrompt: binding.instructions,
+            workspace,
+            previousRepositoryRevision,
+            reasoningEffort: binding.reasoningEffort,
+            invocationId: invocation.invocationId,
+            onInvocationUpdate: (record) => this.recordInvocation(invocation, record),
             signal: controller.signal
           })
-          const handoff = await this.processingRepository.recordMaintainerHandoff(
-            processingRun,
-            previousRevision
+          const handoff = await this.workspaces.recordMaintainerHandoff(
+            workspace,
+            previousRepositoryRevision
           )
-          this.recordAgentRun(debugTrace, result.run)
+          this.settleInvocation(invocation, result.invocation)
           return {
-            stageId: 'knowledge_maintenance_agent' as const,
+            agentId: 'knowledge_maintainer' as const,
             sourceRef,
-            activitySegmentCount: workspace.activitySegmentCount,
-            run: runView(processingRun),
-            previousRevision,
-            revision: handoff.revision,
+            activitySegmentCount: workspacePlan.activitySegmentCount,
+            workspace: workspaceView(workspace),
+            previousRepositoryRevision: handoff.previousRepositoryRevision,
+            candidateRepositoryRevision: handoff.candidateRepositoryRevision,
             changedPaths: handoff.changedPaths,
-            agentRunId: result.run.id,
+            agentInvocationId: result.invocation.id,
             durationMs: Date.now() - startedAt,
             completedAt: new Date().toISOString(),
-            execution: executionSummary(
+            invocation: invocationSummary(
               connection,
-              stage.modelId,
+              binding.modelId,
               result.modelCallCount,
               result.toolCalls,
-              stage.reasoningEffort
+              binding.reasoningEffort
             )
           }
         },
         { trackHealth: true }
       )
     } catch (error) {
-      this.failDebugTrace(debugTrace, traceTerminalStatus(controller.signal), error)
+      this.failLiveInvocation(invocation, terminalStatus(controller.signal), error)
       throw error
     } finally {
-      this.finishRun('knowledge_maintenance_agent', controller)
+      this.finishInvocation('knowledge_maintainer', controller)
     }
   }
 
-  async runKnowledgeReview(
-    run: ProcessingRun,
-    reviewedRevision: string,
-    options: KnowledgeReviewRunOptions = {}
+  async executeReview(
+    workspace: KnowledgeTaskWorkspace,
+    reviewedRepositoryRevision: string,
+    options: KnowledgeReviewInvocationOptions = {}
   ): Promise<KnowledgeReviewResult> {
-    const stage = options.binding ?? this.configuredStage('knowledge_reviewer_agent')
-    const connection = this.aiBackend.snapshot().connections.find((item) => item.id === stage.connectionId)
+    const binding = options.binding ?? this.agentBinding('knowledge_reviewer')
+    const connection = this.aiBackend.snapshot().connections.find(
+      (item) => item.id === binding.connectionId
+    )
     if (!connection) throw new Error('已配置的 Connection 不再可用')
-    const debugTrace = options.debugTrace ?? { id: randomUUID(), origin: 'stage_debug' }
-    if (!options.debugTrace) this.clearDebugTraces(debugTrace.origin)
-    const controller = this.beginRun('knowledge_reviewer_agent')
+    const invocation = options.invocation ?? {
+      invocationId: randomUUID(),
+      origin: 'agent_preview' as const
+    }
+    if (!options.invocation) this.clearLiveInvocations(invocation.origin)
+    const controller = this.beginInvocation('knowledge_reviewer')
     const startedAt = Date.now()
     try {
-      return await this.aiBackend.withModelRuntime(
-        stage.connectionId,
-        stage.modelId,
-        async (runtime) => {
-          await this.processingRepository.assertAgentStart(run, reviewedRevision)
-          const result = await (options.agent ?? this.reviewer).run({
-            runtime,
-            systemPrompt: stage.instructions,
-            run,
-            reviewedRevision,
-            reasoningEffort: stage.reasoningEffort,
-            runId: debugTrace.id,
-            onRunUpdate: (run) => this.recordAgentRun(debugTrace, run),
+      return await this.aiBackend.withModelStream(
+        binding.connectionId,
+        binding.modelId,
+        async (modelStream) => {
+          await this.workspaces.assertAgentStart(workspace, reviewedRepositoryRevision)
+          const result = await (options.agent ?? this.reviewer).invoke({
+            modelStream,
+            systemPrompt: binding.instructions,
+            workspace,
+            reviewedRepositoryRevision,
+            reasoningEffort: binding.reasoningEffort,
+            invocationId: invocation.invocationId,
+            onInvocationUpdate: (record) => this.recordInvocation(invocation, record),
             signal: controller.signal
           })
-          const outcome = await this.processingRepository.recordReviewerOutcome(run, reviewedRevision)
-          this.recordAgentRun(debugTrace, result.run)
+          const decision = await this.workspaces.recordReviewDecision(
+            workspace,
+            reviewedRepositoryRevision
+          )
+          this.settleInvocation(invocation, result.invocation)
           return {
-            stageId: 'knowledge_reviewer_agent' as const,
-            outcome: outcome.kind,
-            reviewedRevision,
-            revision: outcome.revision,
-            changedPaths: outcome.kind === 'changes_requested' ? outcome.changedPaths : [],
-            markerPaths: outcome.kind === 'changes_requested' ? outcome.markerPaths : [],
-            agentRunId: result.run.id,
+            agentId: 'knowledge_reviewer' as const,
+            decision: decision.kind,
+            reviewedRepositoryRevision: decision.reviewedRepositoryRevision,
+            candidateRepositoryRevision: decision.candidateRepositoryRevision,
+            changedPaths: decision.kind === 'changes_requested' ? decision.changedPaths : [],
+            markerPaths: decision.kind === 'changes_requested' ? decision.markerPaths : [],
+            agentInvocationId: result.invocation.id,
             durationMs: Date.now() - startedAt,
             completedAt: new Date().toISOString(),
-            execution: executionSummary(
+            invocation: invocationSummary(
               connection,
-              stage.modelId,
+              binding.modelId,
               result.modelCallCount,
               result.toolCalls,
-              stage.reasoningEffort
+              binding.reasoningEffort
             )
           }
         },
         { trackHealth: true }
       )
     } catch (error) {
-      this.failDebugTrace(debugTrace, traceTerminalStatus(controller.signal), error)
+      this.failLiveInvocation(invocation, terminalStatus(controller.signal), error)
       throw error
     } finally {
-      this.finishRun('knowledge_reviewer_agent', controller)
+      this.finishInvocation('knowledge_reviewer', controller)
     }
   }
 
-  cancelRun(stageId: ProcessingStageId): void {
-    if (!isStageId(stageId)) throw new Error('未知的知识加工阶段')
-    this.activeRuns.get(stageId)?.abort(new Error('用户取消了运行'))
+  cancelAgentInvocation(agentId: KnowledgeAgentId): void {
+    if (!isKnowledgeAgentId(agentId)) throw new Error('未知的知识 Agent')
+    this.activeInvocations.get(agentId)?.abort(new Error('用户取消了 Agent Invocation'))
   }
 
-  subscribe(listener: ProcessingSnapshotListener): () => void {
+  subscribe(listener: KnowledgeProcessingStateListener): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
   }
 
   private emit(): void {
-    const snapshot = this.snapshot()
-    for (const listener of this.listeners) listener(snapshot)
+    const state = this.stateView()
+    for (const listener of this.listeners) listener(state)
   }
 
   dispose(): void {
-    for (const controller of this.activeRuns.values()) controller.abort(new Error('Oyster 正在退出'))
-    this.activeRuns.clear()
+    for (const controller of this.activeInvocations.values()) {
+      controller.abort(new Error('Oyster 正在退出'))
+    }
+    this.activeInvocations.clear()
     this.unsubscribeAiBackend()
     this.listeners.clear()
   }

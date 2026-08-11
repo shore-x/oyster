@@ -1,75 +1,34 @@
-import {
-  Agent,
-  type AgentTool,
-  type StreamFn
-} from '@earendil-works/pi-agent-core'
-import {
-  createAssistantMessageEventStream,
-  type Api,
-  type AssistantMessage,
-  type Model,
-  type Usage
-} from '@earendil-works/pi-ai'
-import { createCodingTools } from '@earendil-works/pi-coding-agent'
+import { join } from 'node:path'
 import {
   ModelConnectionFailureError,
   ModelOutputTruncatedError,
-  type ModelRuntime
+  type SelectedModelStream
 } from '../ai-backends/model'
 import {
-  createPiContextCompactor,
-  PiContextCompactionOutputError,
-  PiContextWindowError
-} from '../agent-runtime/pi-context-compactor'
-import {
-  convertPiAgentMessages,
-  createPiAgentRuntime
-} from '../agent-runtime/pi-agent-runtime'
-import { createArtifactGitEnvironment } from '../artifacts/git-runtime'
+  createPiCodingAgentInvocation,
+  piCodingAgentFinalAssistant,
+  promptPiCodingAgent,
+  SessionManager
+} from '../agent-runtime/pi-coding-agent-runtime'
 import { REASONING_EFFORTS } from '../../shared/ai-backends'
-import type { AgentRunRecord } from '../../shared/agent-runtime'
+import type { AgentInvocationDebugRecord } from '../../shared/agent-runtime'
+import {
+  InMemoryAgentDebugStore,
+  type AgentDebugStore
+} from '../agent-runtime/agent-debug-store'
 import {
   REVIEW_MARKER_COMMENT,
   REVIEW_MARKER_END,
   REVIEW_MARKER_START,
-  type ProcessingRun
-} from './processing-repository'
+  type KnowledgeTaskWorkspace
+} from './knowledge-task-workspace-repository'
 import type {
-  KnowledgeMaintainerRunInput,
+  KnowledgeMaintainerInvocationInput,
   KnowledgeMaintainerRuntime,
-  KnowledgeReviewerRunInput,
+  KnowledgeReviewerInvocationInput,
   KnowledgeReviewerRuntime,
-  RepositoryAgentRunResult
+  RepositoryAgentInvocationResult
 } from './model'
-
-function emptyUsage(): Usage {
-  return {
-    input: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-    totalTokens: 0,
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
-  }
-}
-
-function failedModelStream(model: Model<Api>, message: string) {
-  const stream = createAssistantMessageEventStream()
-  const output: AssistantMessage = {
-    role: 'assistant',
-    content: [],
-    api: model.api,
-    provider: model.provider,
-    model: model.id,
-    usage: emptyUsage(),
-    stopReason: 'error',
-    errorMessage: message,
-    timestamp: Date.now()
-  }
-  stream.push({ type: 'error', reason: 'error', error: output })
-  stream.end(output)
-  return stream
-}
 
 function asError(error: unknown, fallback: string): Error {
   if (error instanceof Error) return error
@@ -77,174 +36,146 @@ function asError(error: unknown, fallback: string): Error {
   return new Error(fallback)
 }
 
-function validateBaseInput(input: KnowledgeMaintainerRunInput | KnowledgeReviewerRunInput): void {
+function validateBaseInput(input: KnowledgeMaintainerInvocationInput | KnowledgeReviewerInvocationInput): void {
   if (!input.systemPrompt.trim()) throw new Error('Agent System Prompt 不能为空')
   if (input.reasoningEffort && !REASONING_EFFORTS.includes(input.reasoningEffort)) {
     throw new Error('思考强度无效')
   }
   if (
-    !input.run?.repositoryPath
-    || !input.run.runPath
-    || !input.run.taskPath
-    || !input.run.workPath
-    || !input.run.inputPath
-    || !input.run.branchName
+    !input.workspace?.repositoryPath
+    || !input.workspace.workspacePath
+    || !input.workspace.briefPath
+    || !input.workspace.progressPath
+    || !input.workspace.inputPath
+    || !input.workspace.branchName
   ) {
-    throw new Error('Processing Run 无效')
+    throw new Error('Processing Task 无效')
   }
   input.signal.throwIfAborted()
 }
 
-function codingTools(run: ProcessingRun): AgentTool[] {
-  return createCodingTools(run.runPath, {
-    read: {
-      autoResizeImages: false
-    },
-    bash: {
-      spawnHook: (context) => ({
-        ...context,
-        env: createArtifactGitEnvironment(context.env)
-      })
-    }
-  })
-}
-
-interface RunRepositoryAgentInput {
-  agentId: 'knowledge_maintenance_agent' | 'knowledge_reviewer_agent'
-  runtime: ModelRuntime
+interface InvokeRepositoryAgentInput {
+  agentId: 'knowledge_maintainer' | 'knowledge_reviewer'
+  modelStream: SelectedModelStream
   systemPrompt: string
   taskPrompt: string
-  reasoningEffort?: KnowledgeMaintainerRunInput['reasoningEffort']
-  runId: string
-  onRunUpdate?: (run: AgentRunRecord) => void
+  workspace: KnowledgeTaskWorkspace
+  reasoningEffort?: KnowledgeMaintainerInvocationInput['reasoningEffort']
+  invocationId: string
+  onInvocationUpdate?: (record: AgentInvocationDebugRecord) => void
   signal: AbortSignal
-  tools: AgentTool[]
 }
 
-async function runRepositoryAgent(input: RunRepositoryAgentInput): Promise<RepositoryAgentRunResult> {
-  let compactionError: Error | undefined
-  const agentRuntime = createPiAgentRuntime({
+async function invokeRepositoryAgent(
+  input: InvokeRepositoryAgentInput,
+  debugStore: AgentDebugStore
+): Promise<RepositoryAgentInvocationResult> {
+  const piSessionManager = SessionManager.create(
+    input.workspace.workspacePath,
+    join(input.workspace.workspacePath, 'pi-sessions'),
+    { id: input.invocationId }
+  )
+  const invocation = await createPiCodingAgentInvocation({
     agentId: input.agentId,
-    run: { runId: input.runId, onUpdate: input.onRunUpdate }
-  })
-  const guardedStreamFn: StreamFn = async (model, context, options) => {
-    try {
-      return await input.runtime.streamFn(model, context, options)
-    } catch (error) {
-      return failedModelStream(model, asError(error, '模型 Runtime 调用失败').message)
-    }
-  }
-  const thinkingLevel = input.runtime.model.reasoning ? (input.reasoningEffort ?? 'off') : 'off'
-  const compactContext = createPiContextCompactor({
-    model: input.runtime.model,
-    streamFn: agentRuntime.run.wrapStreamFn(guardedStreamFn, 'context_compaction'),
+    invocationId: input.invocationId,
+    onInvocationUpdate: input.onInvocationUpdate,
+    modelStream: input.modelStream,
+    cwd: input.workspace.workspacePath,
+    // Resources are disabled, but an explicit non-global directory keeps every Pi path bounded.
+    agentDir: join(input.workspace.workspacePath, '.pi-runtime'),
     systemPrompt: input.systemPrompt,
-    tools: input.tools,
-    thinkingLevel
+    reasoningEffort: input.reasoningEffort,
+    piSessionManager,
+    debugStore,
+    resourceMode: 'disabled',
+    tools: ['read', 'bash', 'edit', 'write'],
+    todoTools: false
   })
-  const agent = new Agent({
-    initialState: {
-      systemPrompt: input.systemPrompt,
-      model: input.runtime.model,
-      thinkingLevel,
-      tools: input.tools
-    },
-    streamFn: agentRuntime.run.wrapStreamFn(guardedStreamFn),
-    convertToLlm: convertPiAgentMessages,
-    transformContext: async (messages, signal) => {
-      try {
-        return await compactContext(messages, signal)
-      } catch (error) {
-        compactionError = asError(error, 'Context compaction failed')
-        throw compactionError
-      }
-    },
-    toolExecution: 'sequential'
-  })
-  const detachRuntime = agentRuntime.attach(agent)
-  const abortAgent = (): void => agent.abort()
-  input.signal.addEventListener('abort', abortAgent, { once: true })
   try {
-    const active = agent.prompt(input.taskPrompt)
-    if (input.signal.aborted) agent.abort()
-    await active
-    if (input.signal.aborted) throw asError(input.signal.reason, 'Agent 运行已取消')
-    if (
-      compactionError instanceof PiContextWindowError
-      || compactionError instanceof PiContextCompactionOutputError
-    ) throw compactionError
-    if (compactionError) throw new ModelConnectionFailureError(compactionError)
-    if (agent.state.errorMessage) {
-      throw new ModelConnectionFailureError(new Error(`Agent 模型调用失败：${agent.state.errorMessage}`))
-    }
-    const finalMessage = [...agent.state.messages].reverse().find((message) => message.role === 'assistant')
+    await promptPiCodingAgent(invocation, input.taskPrompt, input.signal, 'Knowledge Agent')
+    if (input.signal.aborted) throw asError(input.signal.reason, 'Agent Invocation 已取消')
+    const finalMessage = piCodingAgentFinalAssistant(invocation)
     if (finalMessage?.stopReason === 'length') {
-      throw new ModelOutputTruncatedError('Agent 最终模型输出达到长度上限，运行结果不完整')
+      throw new ModelOutputTruncatedError('Agent 最终模型输出达到长度上限，Invocation 结果不完整')
+    }
+    if (finalMessage?.stopReason === 'error') {
+      throw new ModelConnectionFailureError(new Error(
+        finalMessage?.errorMessage
+          || invocation.session.state.errorMessage
+          || 'Agent 模型调用失败'
+      ))
     }
     if (!finalMessage || finalMessage.stopReason !== 'stop') throw new Error('Agent 未正常自然结束')
-    const run = agentRuntime.run.complete('completed')
+    const debug = invocation.recorder.complete('completed')
     return {
-      run,
-      modelCallCount: run.modelCalls.length,
-      toolCalls: run.toolCalls.map((call) => call.name)
+      invocation: invocation.recorder.invocationRecord(),
+      modelCallCount: debug.modelCalls.length,
+      toolCalls: debug.toolCalls.map((call) => call.name)
     }
   } catch (error) {
-    agentRuntime.run.complete(input.signal.aborted ? 'cancelled' : 'failed', error)
+    invocation.recorder.complete(input.signal.aborted ? 'cancelled' : 'failed', error)
+    if (piCodingAgentFinalAssistant(invocation)?.stopReason === 'error'
+      && !(error instanceof ModelConnectionFailureError)) {
+      throw new ModelConnectionFailureError(error)
+    }
     throw error
   } finally {
-    input.signal.removeEventListener('abort', abortAgent)
-    detachRuntime()
+    invocation.dispose()
   }
 }
 
-function maintainerTaskPrompt(_input: KnowledgeMaintainerRunInput): string {
+function maintainerTaskPrompt(_input: KnowledgeMaintainerInvocationInput): string {
   return [
-    'The current working directory is this Knowledge Processing Run workspace.',
-    'Read TASK.md and WORK.md with the ordinary read tool, then carry out the Maintainer responsibility described by your System Prompt. All task-specific input is available as files in this workspace.'
+    'The current working directory is this Knowledge Processing Task workspace.',
+    'Read BRIEF.md and PROGRESS.md with the ordinary read tool, then carry out the Maintainer responsibility described by your System Prompt. All task-specific input is available as files in this workspace.'
   ].join('\n\n')
 }
 
-function reviewerTaskPrompt(_input: KnowledgeReviewerRunInput): string {
+function reviewerTaskPrompt(_input: KnowledgeReviewerInvocationInput): string {
   return [
-    'The current working directory is this Knowledge Processing Run workspace.',
-    'Read TASK.md and WORK.md with the ordinary read tool, then carry out the Reviewer responsibility described by your System Prompt. The latest Maintainer handoff in WORK.md identifies the exact candidate revision.'
+    'The current working directory is this Knowledge Processing Task workspace.',
+    'Read BRIEF.md and PROGRESS.md with the ordinary read tool, then carry out the Reviewer responsibility described by your System Prompt. The latest Maintainer handoff in PROGRESS.md identifies the exact candidate revision.'
   ].join('\n\n')
 }
 
 export class PiKnowledgeMaintainerAgent implements KnowledgeMaintainerRuntime {
-  async run(input: KnowledgeMaintainerRunInput): Promise<RepositoryAgentRunResult> {
+  constructor(private readonly debugStore: AgentDebugStore = new InMemoryAgentDebugStore()) {}
+
+  async invoke(input: KnowledgeMaintainerInvocationInput): Promise<RepositoryAgentInvocationResult> {
     validateBaseInput(input)
-    return runRepositoryAgent({
-      agentId: 'knowledge_maintenance_agent',
-      runtime: input.runtime,
+    return invokeRepositoryAgent({
+      agentId: 'knowledge_maintainer',
+      modelStream: input.modelStream,
       systemPrompt: input.systemPrompt,
       taskPrompt: maintainerTaskPrompt(input),
+      workspace: input.workspace,
       reasoningEffort: input.reasoningEffort,
-      runId: input.runId,
-      onRunUpdate: input.onRunUpdate,
-      signal: input.signal,
-      tools: codingTools(input.run)
-    })
+      invocationId: input.invocationId,
+      onInvocationUpdate: input.onInvocationUpdate,
+      signal: input.signal
+    }, this.debugStore)
   }
 }
 
 export class PiKnowledgeReviewerAgent implements KnowledgeReviewerRuntime {
-  async run(input: KnowledgeReviewerRunInput): Promise<RepositoryAgentRunResult> {
+  constructor(private readonly debugStore: AgentDebugStore = new InMemoryAgentDebugStore()) {}
+
+  async invoke(input: KnowledgeReviewerInvocationInput): Promise<RepositoryAgentInvocationResult> {
     validateBaseInput(input)
-    if (!/^[a-f0-9]{40,64}$/i.test(input.reviewedRevision)) {
+    if (!/^[a-f0-9]{40,64}$/i.test(input.reviewedRepositoryRevision)) {
       throw new Error('Reviewer revision 无效')
     }
-    return runRepositoryAgent({
-      agentId: 'knowledge_reviewer_agent',
-      runtime: input.runtime,
+    return invokeRepositoryAgent({
+      agentId: 'knowledge_reviewer',
+      modelStream: input.modelStream,
       systemPrompt: input.systemPrompt,
       taskPrompt: reviewerTaskPrompt(input),
+      workspace: input.workspace,
       reasoningEffort: input.reasoningEffort,
-      runId: input.runId,
-      onRunUpdate: input.onRunUpdate,
-      signal: input.signal,
-      tools: codingTools(input.run)
-    })
+      invocationId: input.invocationId,
+      onInvocationUpdate: input.onInvocationUpdate,
+      signal: input.signal
+    }, this.debugStore)
   }
 }
 

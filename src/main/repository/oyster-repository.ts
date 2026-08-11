@@ -5,9 +5,9 @@ import { runArtifactGit } from '../artifacts/git-runtime'
 export const OYSTER_TARGET_BRANCH = 'main'
 export const KNOWLEDGE_DIRECTORY = 'knowledge'
 export const ARTIFACTS_DIRECTORY = 'artifacts'
-export const RUNS_DIRECTORY = 'runs'
+export const TASKS_DIRECTORY = 'tasks'
 
-const INITIAL_GITIGNORE = `/${RUNS_DIRECTORY}/\n`
+const INITIAL_GITIGNORE = `/${TASKS_DIRECTORY}/\n`
 
 async function isMissing(error: unknown): Promise<boolean> {
   return (error as NodeJS.ErrnoException).code === 'ENOENT'
@@ -18,13 +18,13 @@ export class OysterRepository {
   readonly rootPath: string
   readonly knowledgePath: string
   readonly artifactsPath: string
-  readonly runsPath: string
+  readonly tasksPath: string
 
   constructor(rootPath: string) {
     this.rootPath = resolve(rootPath)
     this.knowledgePath = join(this.rootPath, KNOWLEDGE_DIRECTORY)
     this.artifactsPath = join(this.rootPath, ARTIFACTS_DIRECTORY)
-    this.runsPath = join(this.rootPath, RUNS_DIRECTORY)
+    this.tasksPath = join(this.rootPath, TASKS_DIRECTORY)
   }
 
   private async assertRealRoot(): Promise<void> {
@@ -76,12 +76,12 @@ export class OysterRepository {
     await Promise.all([
       mkdir(this.knowledgePath, { recursive: true }),
       mkdir(this.artifactsPath, { recursive: true }),
-      mkdir(this.runsPath, { recursive: true })
+      mkdir(this.tasksPath, { recursive: true })
     ])
     await Promise.all([
       this.assertManagedDirectory(this.knowledgePath, KNOWLEDGE_DIRECTORY),
       this.assertManagedDirectory(this.artifactsPath, ARTIFACTS_DIRECTORY),
-      this.assertManagedDirectory(this.runsPath, RUNS_DIRECTORY)
+      this.assertManagedDirectory(this.tasksPath, TASKS_DIRECTORY)
     ])
 
     if (!await this.hasHead()) {
@@ -102,7 +102,7 @@ export class OysterRepository {
     const gitignorePath = join(this.rootPath, '.gitignore')
     try {
       const current = await readFile(gitignorePath, 'utf8')
-      if (!current.split(/\r?\n/).includes(`/${RUNS_DIRECTORY}/`)) {
+      if (!current.split(/\r?\n/).includes(`/${TASKS_DIRECTORY}/`)) {
         await writeFile(gitignorePath, `${current}${current.endsWith('\n') ? '' : '\n'}${INITIAL_GITIGNORE}`)
       }
     } catch (error) {

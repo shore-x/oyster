@@ -7,29 +7,32 @@ import type {
   ModelProtocol,
   ReasoningEffort
 } from './ai-backends'
-import type { AvailableSessionSummary } from './discovery'
+import type {
+  SourceConversationSummary,
+  SourceSnapshotRef
+} from './discovery'
 import type { KnowledgeStatement } from './knowledge'
 import type {
-  AgentRunRecord,
+  AgentInvocationDebugRecord,
+  AgentInvocationRecord,
   SerializableJsonValue
 } from './agent-runtime'
 
-export const PROCESSING_STAGE_IDS = [
-  'knowledge_maintenance_agent',
-  'knowledge_reviewer_agent'
+export const KNOWLEDGE_AGENT_IDS = [
+  'knowledge_maintainer',
+  'knowledge_reviewer'
 ] as const
-export type ProcessingStageId = (typeof PROCESSING_STAGE_IDS)[number]
-export type ProcessingRuntime = 'pi_agent_core'
+export type KnowledgeAgentId = (typeof KNOWLEDGE_AGENT_IDS)[number]
+export type KnowledgeAgentRuntimeKind = 'pi_coding_agent'
 
-export interface ProcessingToolView {
+export interface AgentToolDefinitionView {
   name: string
   label: string
   description: string
-  /** JSON-safe projection of the exact parameter schema supplied to the model. */
   parameters: { [key: string]: SerializableJsonValue }
 }
 
-export interface ProcessingConnectionView {
+export interface AiConnectionView {
   id: string
   displayName: string
   backendKind: AiBackendKind
@@ -43,15 +46,15 @@ export interface ProcessingConnectionView {
   defaultModelId?: string
 }
 
-export interface ProcessingStageView {
-  id: ProcessingStageId
+export interface KnowledgeAgentDefinitionView {
+  id: KnowledgeAgentId
   displayName: string
   description: string
   inputDescription: string
   outputDescription: string
-  runtime: ProcessingRuntime
+  runtime: KnowledgeAgentRuntimeKind
   capabilities: string[]
-  tools: ProcessingToolView[]
+  tools: AgentToolDefinitionView[]
   builtInInstructions: string
   defaultInstructions: string
   effectiveInstructions: string
@@ -59,116 +62,122 @@ export interface ProcessingStageView {
   isCustomized: boolean
 }
 
-export interface KnowledgeProcessingSnapshot {
-  stages: ProcessingStageView[]
-  connections: ProcessingConnectionView[]
+export interface KnowledgeProcessingStateView {
+  agents: KnowledgeAgentDefinitionView[]
+  connections: AiConnectionView[]
   defaultLlm?: LlmBinding
-  runningStageIds: ProcessingStageId[]
-  debugTraces: KnowledgeProcessingDebugTrace[]
+  activeAgentIds: KnowledgeAgentId[]
+  liveInvocations: LiveAgentInvocationView[]
   configurationError?: string
 }
 
-export type ProcessingDebugTraceOrigin = 'stage_debug' | 'full_chain'
+export type AgentInvocationOrigin = 'agent_preview' | 'knowledge_task'
 
-export interface KnowledgeProcessingDebugTrace {
-  origin: ProcessingDebugTraceOrigin
-  run: AgentRunRecord
+export interface LiveAgentInvocationView {
+  origin: AgentInvocationOrigin
+  invocation: AgentInvocationDebugRecord
 }
 
-export interface SaveProcessingStageInput {
-  stageId: ProcessingStageId
+export interface SaveKnowledgeAgentInput {
+  agentId: KnowledgeAgentId
   instructionsOverride: string | null
 }
 
-export interface SaveProcessingDefaultInstructionsInput {
-  stageId: ProcessingStageId
+export interface SaveKnowledgeAgentDefaultInstructionsInput {
+  agentId: KnowledgeAgentId
   instructionsOverride: string | null
 }
 
-/** Selects one immutable external Session revision for a Maintainer run. */
-export interface RunKnowledgeMaintenanceInput {
-  sourceRecordId: string
-  expectedRevision: string
+export interface StartKnowledgeAgentPreviewInput extends SourceSnapshotRef {
   attention?: string
 }
 
-export type RunKnowledgeFullChainInput = RunKnowledgeMaintenanceInput
+export type StartKnowledgeTaskInput = StartKnowledgeAgentPreviewInput
 
-export type SessionSelectionFailureReason = 'unavailable' | 'changed' | 'unreadable'
+export type SourceSnapshotSelectionFailureReason = 'unavailable' | 'changed' | 'unreadable'
 
-export interface SessionRunRejected {
-  status: 'session_rejected'
-  reason: SessionSelectionFailureReason
+export interface SourceSnapshotRejected {
+  status: 'source_snapshot_rejected'
+  reason: SourceSnapshotSelectionFailureReason
   message: string
 }
 
-export interface SessionRunCompleted<Result> {
+export interface SourceSnapshotOperationCompleted<Result> {
   status: 'completed'
   result: Result
 }
 
-export type SessionRunResponse<Result> = SessionRunCompleted<Result> | SessionRunRejected
+export type SourceSnapshotOperationResult<Result> =
+  | SourceSnapshotOperationCompleted<Result>
+  | SourceSnapshotRejected
 
-export interface ProcessingExecutionSummary {
+export interface AgentInvocationSummary {
   connectionId: string
   connectionName: string
   backendKind: AiBackendKind
   providerId: AiProviderId
   model: string
-  runtime: ProcessingRuntime
+  runtime: KnowledgeAgentRuntimeKind
   modelCallCount: number
   toolCalls: string[]
   reasoningEffort?: ReasoningEffort
 }
 
-export interface ProcessingRunView {
-  id: string
+export interface KnowledgeTaskWorkspaceView {
+  taskId: string
   repositoryPath: string
-  runPath: string
-  taskPath: string
-  workPath: string
+  workspacePath: string
+  briefPath: string
+  progressPath: string
   inputPath: string
   workspaceRevision: string
   branchName: string
   targetBranch: string
-  baseRevision: string
+  baseRepositoryRevision: string
 }
 
 export interface KnowledgeMaintenanceResult {
-  stageId: 'knowledge_maintenance_agent'
+  agentId: 'knowledge_maintainer'
   sourceRef: string
   activitySegmentCount: number
-  run: ProcessingRunView
-  previousRevision: string
-  revision: string
+  workspace: KnowledgeTaskWorkspaceView
+  previousRepositoryRevision: string
+  candidateRepositoryRevision: string
   changedPaths: string[]
-  agentRunId: string
+  agentInvocationId: string
   durationMs: number
   completedAt: string
-  execution: ProcessingExecutionSummary
+  invocation: AgentInvocationSummary
 }
 
 export interface KnowledgeReviewResult {
-  stageId: 'knowledge_reviewer_agent'
-  outcome: 'changes_requested' | 'approved'
-  reviewedRevision: string
-  revision: string
+  agentId: 'knowledge_reviewer'
+  decision: 'changes_requested' | 'approved'
+  reviewedRepositoryRevision: string
+  candidateRepositoryRevision: string
   changedPaths: string[]
   markerPaths: string[]
-  agentRunId: string
+  agentInvocationId: string
   durationMs: number
   completedAt: string
-  execution: ProcessingExecutionSummary
+  invocation: AgentInvocationSummary
 }
 
-export interface KnowledgeFullChainResult {
-  runId: string
-  session: AvailableSessionSummary
+export interface KnowledgeTaskRound {
+  roundId: string
+  sequence: number
+  maintenance: KnowledgeMaintenanceResult
+  review: KnowledgeReviewResult
+}
+
+export interface KnowledgeTaskResult {
+  taskId: string
+  sourceConversation: SourceConversationSummary
+  sourceSnapshot: SourceSnapshotRef
   sourceRef: string
-  run: ProcessingRunView
-  maintenanceRuns: KnowledgeMaintenanceResult[]
-  reviewRuns: KnowledgeReviewResult[]
-  approvedRevision: string
+  workspace: KnowledgeTaskWorkspaceView
+  rounds: KnowledgeTaskRound[]
+  approvedRepositoryRevision: string
   changedPaths: string[]
   knowledge: KnowledgeStatement[]
   artifactPaths: string[]
@@ -176,62 +185,66 @@ export interface KnowledgeFullChainResult {
   completedAt: string
 }
 
-export interface KnowledgeFullChainStageSnapshot {
+export interface KnowledgeAgentBinding {
   connectionId: string
   modelId: string
   instructions: string
   reasoningEffort?: ReasoningEffort
 }
 
-export interface KnowledgeFullChainRunRecord {
-  formatVersion: 8
-  runId: string
-  status: Exclude<AgentRunRecord['status'], 'running'>
+export interface KnowledgeTaskRecord {
+  formatVersion: 1
+  taskId: string
+  status: 'completed' | 'failed' | 'cancelled'
   startedAt: string
   completedAt: string
   durationMs: number
-  input: RunKnowledgeFullChainInput
-  /** Available after the selected external Session revision has been resolved. */
-  session?: AvailableSessionSummary
+  input: StartKnowledgeTaskInput
+  sourceConversation?: SourceConversationSummary
   configuration: {
-    maintainer: KnowledgeFullChainStageSnapshot
-    reviewer: KnowledgeFullChainStageSnapshot
+    maintainer: KnowledgeAgentBinding
+    reviewer: KnowledgeAgentBinding
   }
-  agentRuns: AgentRunRecord[]
-  result?: KnowledgeFullChainResult
+  agentInvocations: AgentInvocationRecord[]
+  result?: KnowledgeTaskResult
   error?: string
 }
 
-export interface KnowledgeFullChainRunSummary {
-  runId: string
-  status: KnowledgeFullChainRunRecord['status']
+/** Read model that joins a small Task record with separately stored debug data. */
+export interface KnowledgeTaskDetail extends KnowledgeTaskRecord {
+  invocationDebugRecords: AgentInvocationDebugRecord[]
+}
+
+export interface KnowledgeTaskSummary {
+  taskId: string
+  status: KnowledgeTaskRecord['status']
   completedAt: string
   durationMs: number
-  sessionTitle?: string
+  sourceConversationTitle?: string
   sourceDisplayName?: string
   projectPath?: string
   statementCount: number
   maintainerModel: string
-  agentRunCount: number
+  agentInvocationCount: number
   modelCallCount: number
   error?: string
 }
 
 export interface KnowledgeProcessingApi {
-  getSnapshot(): Promise<KnowledgeProcessingSnapshot>
-  saveStage(input: SaveProcessingStageInput): Promise<KnowledgeProcessingSnapshot>
-  saveDefaultInstructions(
-    input: SaveProcessingDefaultInstructionsInput
-  ): Promise<KnowledgeProcessingSnapshot>
-  runKnowledgeMaintenance(
-    input: RunKnowledgeMaintenanceInput
-  ): Promise<SessionRunResponse<KnowledgeMaintenanceResult>>
-  runFullChain(
-    input: RunKnowledgeFullChainInput
-  ): Promise<SessionRunResponse<KnowledgeFullChainResult>>
-  listFullChainRuns(): Promise<KnowledgeFullChainRunSummary[]>
-  readFullChainRun(runId: string): Promise<KnowledgeFullChainRunRecord | undefined>
-  cancelFullChain(): Promise<void>
-  cancelRun(stageId: ProcessingStageId): Promise<void>
-  subscribe(listener: (snapshot: KnowledgeProcessingSnapshot) => void): () => void
+  getState(): Promise<KnowledgeProcessingStateView>
+  saveAgent(input: SaveKnowledgeAgentInput): Promise<KnowledgeProcessingStateView>
+  saveAgentDefaultInstructions(
+    input: SaveKnowledgeAgentDefaultInstructionsInput
+  ): Promise<KnowledgeProcessingStateView>
+  previewKnowledgeMaintainer(
+    input: StartKnowledgeAgentPreviewInput
+  ): Promise<SourceSnapshotOperationResult<KnowledgeMaintenanceResult>>
+  startKnowledgeTask(
+    input: StartKnowledgeTaskInput
+  ): Promise<SourceSnapshotOperationResult<KnowledgeTaskResult>>
+  listKnowledgeTasks(): Promise<KnowledgeTaskSummary[]>
+  readKnowledgeTask(taskId: string): Promise<KnowledgeTaskDetail | undefined>
+  cancelKnowledgeTask(): Promise<void>
+  cancelAgentPreview(agentId: KnowledgeAgentId): Promise<void>
+  subscribe(listener: (state: KnowledgeProcessingStateView) => void): () => void
 }

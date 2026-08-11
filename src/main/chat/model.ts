@@ -1,13 +1,16 @@
-import type { Session } from '@earendil-works/pi-agent-core'
+import type { SessionManager } from '@earendil-works/pi-coding-agent'
 import type { AiBackendSnapshot } from '../../shared/ai-backends'
 import type {
   ChatEvent,
-  ChatSessionBinding,
-  ChatSessionDetail,
-  ChatSessionSummary
+  ChatConversationBinding,
+  ChatConversationDetail,
+  ChatConversationSummary
 } from '../../shared/chat'
-import type { ModelRuntime } from '../ai-backends/model'
-import type { AgentRunRecord } from '../../shared/agent-runtime'
+import type { SelectedModelStream } from '../ai-backends/model'
+import type {
+  AgentInvocationDebugRecord,
+  AgentInvocationRecord
+} from '../../shared/agent-runtime'
 
 export interface ChatConfigurationStateData {
   defaultInstructionsOverride?: string
@@ -18,42 +21,46 @@ export interface ChatConfigurationRepository {
   save(state: ChatConfigurationStateData): Promise<void>
 }
 
-export interface PersistedChatSession {
-  session: Session
-  binding: ChatSessionBinding
+export interface PersistedChatConversation {
+  id: string
+  piSessionManager: SessionManager
+  binding: ChatConversationBinding
 }
 
-export interface ChatSessionRepository {
-  create(binding: ChatSessionBinding, title?: string): Promise<PersistedChatSession>
-  open(sessionId: string): Promise<PersistedChatSession>
-  list(): Promise<ChatSessionSummary[]>
-  detail(sessionId: string, running?: boolean): Promise<ChatSessionDetail>
-  delete(sessionId: string): Promise<void>
+export interface ChatConversationRepository {
+  create(binding: ChatConversationBinding, title?: string): Promise<PersistedChatConversation>
+  open(conversationId: string): Promise<PersistedChatConversation>
+  list(): Promise<ChatConversationSummary[]>
+  detail(conversationId: string, hasActiveInvocation?: boolean): Promise<ChatConversationDetail>
+  setTitle(conversationId: string, title: string): Promise<void>
+  appendInvocation(conversationId: string, record: AgentInvocationDebugRecord): Promise<void>
+  delete(conversationId: string): Promise<void>
 }
 
 export interface ChatAiBackendPort {
   snapshot(): AiBackendSnapshot
-  withModelRuntime<T>(
+  withModelStream<T>(
     connectionId: string,
     modelId: string,
-    operation: (runtime: ModelRuntime) => Promise<T>,
+    operation: (modelStream: SelectedModelStream) => Promise<T>,
     options?: { trackHealth?: boolean }
   ): Promise<T>
 }
 
-export interface PiChatAgentRunInput {
-  sessionId: string
-  session: Session
-  binding: ChatSessionBinding
-  runtime: ModelRuntime
+export interface PiChatAgentInvocationInput {
+  conversationId: string
+  rootInvocationId: string
+  piSessionManager: SessionManager
+  binding: ChatConversationBinding
+  modelStream: SelectedModelStream
   text: string
-  /** Host-owned initial work items bound to this Agent run, not transcript messages. */
+  /** Host-owned initial work items bound to this Agent Invocation, not transcript messages. */
   initialTodos?: readonly string[]
   signal: AbortSignal
-  onRunUpdate?: (run: AgentRunRecord) => void
-  onEvent?: (event: Exclude<ChatEvent, { type: 'snapshot_changed' | 'run_state_changed' }>) => void
+  onInvocationUpdate?: (record: AgentInvocationDebugRecord) => void
+  onEvent?: (event: Extract<ChatEvent, { type: 'message_appended' }>) => void
 }
 
 export interface ChatAgentRuntime {
-  run(input: PiChatAgentRunInput): Promise<void>
+  invoke(input: PiChatAgentInvocationInput): Promise<void>
 }

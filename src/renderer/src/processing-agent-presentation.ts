@@ -1,5 +1,5 @@
 export function processingAgentDisplayName(agentId: string): string {
-  if (agentId === 'knowledge_maintenance_agent') return 'Maintainer'
-  if (agentId === 'knowledge_reviewer_agent') return 'Reviewer'
+  if (agentId === 'knowledge_maintainer') return 'Maintainer'
+  if (agentId === 'knowledge_reviewer') return 'Reviewer'
   return agentId
 }

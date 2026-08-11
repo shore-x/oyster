@@ -3,10 +3,10 @@ import { homedir } from 'node:os'
 import type {
   AgentSource,
   AgentType,
-  AvailableSessionSummary,
-  DiscoverySnapshot,
-  SessionCatalogSnapshot,
-  ScanRun,
+  SourceConversationSummary,
+  DiscoveryStateView,
+  SourceConversationCatalogView,
+  DiscoveryScan,
   SourceRecord,
   SourceRecordKind
 } from '../../shared/discovery'
@@ -20,34 +20,34 @@ import type {
   SourceRecordCandidate
 } from './model'
 import {
-  SourceSessionRevisionChangedError,
-  SourceSessionUnavailableError,
+  SourceConversationRevisionChangedError,
+  SourceConversationUnavailableError,
   type SourceEvidenceReader,
   type SourceEvidenceReadResult
 } from './source-evidence-reader'
 import type { CanonicalActivity, RawEvidence } from '../observation/model'
 
-type SnapshotListener = (snapshot: DiscoverySnapshot) => void
-type SessionCatalogListener = (snapshot: SessionCatalogSnapshot) => void
+type DiscoveryStateListener = (state: DiscoveryStateView) => void
+type SourceConversationCatalogListener = (state: SourceConversationCatalogView) => void
 
-interface ActiveOperation {
-  runId: string
+interface ActiveScan {
+  scanId: string
   controller: AbortController
   task?: Promise<void>
 }
 
 interface DiscoveryServiceOptions {
-  recoverInterruptedRuns?: boolean
+  recoverInterruptedScans?: boolean
 }
 
-export interface ReadAvailableSessionInput {
-  sourceRecordId: string
-  expectedRevision: string
+export interface ReadSourceSnapshotInput {
+  sourceConversationId: string
+  sourceRevision: string
 }
 
-export interface AvailableSessionEvidence {
-  sourceRecordId: string
-  revision: string
+export interface SourceSnapshotEvidence {
+  sourceConversationId: string
+  sourceRevision: string
   contentHash: string
   sizeBytes: number
   rawEvidence: RawEvidence
@@ -73,7 +73,7 @@ function fingerprint(sourceId: string, candidate: SourceRecordCandidate): string
     .digest('hex')
 }
 
-function sourceRecordId(sourceId: string, kind: SourceRecordKind, externalId: string): string {
+function sourceConversationId(sourceId: string, kind: SourceRecordKind, externalId: string): string {
   const key = kind === 'conversation' ? `${sourceId}\0${externalId}` : `${sourceId}\0${kind}\0${externalId}`
   return createHash('sha256').update(key).digest('hex').slice(0, 32)
 }
@@ -86,23 +86,23 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && (error.name === 'AbortError' || error.message.includes('aborted'))
 }
 
-function sessionSummary(
+function sourceConversationSummary(
   record: SourceRecord,
   source: AgentSource
-): AvailableSessionSummary {
+): SourceConversationSummary {
   return {
-    sourceRecordId: record.id,
+    sourceConversationId: record.id,
     sourceId: source.id,
     agentType: source.agentType,
     sourceDisplayName: source.displayName,
-    externalId: record.externalId,
+    providerConversationId: record.externalId,
     title: record.title,
     projectPath: record.projectPath,
     startedAt: record.startedAt,
     endedAt: record.endedAt,
     updatedAt: record.updatedAt,
     sizeBytes: record.sizeBytes,
-    revision: record.fingerprint
+    sourceRevision: record.fingerprint
   }
 }
 
@@ -113,7 +113,7 @@ function sourceRecord(
 ): SourceRecord {
   const nextFingerprint = fingerprint(sourceId, candidate)
   return {
-    id: sourceRecordId(sourceId, candidate.kind, candidate.externalId),
+    id: sourceConversationId(sourceId, candidate.kind, candidate.externalId),
     sourceId,
     kind: candidate.kind,
     externalId: candidate.externalId,
@@ -132,24 +132,24 @@ function sourceRecord(
   }
 }
 
-function assertSessionReference(input: { sourceRecordId: string; expectedRevision: string }): void {
+function assertSourceSnapshotRef(input: { sourceConversationId: string; sourceRevision: string }): void {
   if (
-    typeof input.sourceRecordId !== 'string'
-    || input.sourceRecordId.length === 0
-    || input.sourceRecordId.length > 256
+    typeof input.sourceConversationId !== 'string'
+    || input.sourceConversationId.length === 0
+    || input.sourceConversationId.length > 256
   ) {
-    throw new Error('Invalid Session source record ID')
+    throw new Error('Invalid source conversation ID')
   }
-  if (!/^[a-f0-9]{64}$/i.test(input.expectedRevision)) {
-    throw new Error('Invalid Session revision')
+  if (!/^[a-f0-9]{64}$/i.test(input.sourceRevision)) {
+    throw new Error('Invalid source revision')
   }
 }
 
 export class DiscoveryService {
-  private state: DiscoveryStateData = { sources: [], records: [], runs: [] }
-  private readonly listeners = new Set<SnapshotListener>()
-  private readonly sessionCatalogListeners = new Set<SessionCatalogListener>()
-  private readonly activeOperations = new Map<string, ActiveOperation>()
+  private state: DiscoveryStateData = { sources: [], records: [], scans: [] }
+  private readonly listeners = new Set<DiscoveryStateListener>()
+  private readonly sourceConversationCatalogListeners = new Set<SourceConversationCatalogListener>()
+  private readonly activeScans = new Map<string, ActiveScan>()
   private readonly adapterByType = new Map<AgentType, AgentHistoryAdapter>()
   private detectionContext: DetectionContext
 
@@ -164,7 +164,7 @@ export class DiscoveryService {
     for (const adapter of adapters) this.adapterByType.set(adapter.agentType, adapter)
   }
 
-  async initialize(): Promise<DiscoverySnapshot> {
+  async initialize(): Promise<DiscoveryStateView> {
     this.state = await this.repository.load()
     const stamp = now()
 
@@ -178,7 +178,7 @@ export class DiscoveryService {
         discoveryState: 'not_found',
         scanState: 'idle',
         fileCount: 0,
-        sessionCount: 0,
+        conversationCount: 0,
         instructionFileCount: 0,
         totalBytes: 0,
         invalidFileCount: 0
@@ -187,12 +187,12 @@ export class DiscoveryService {
 
     for (const source of this.state.sources) source.instructionFileCount ??= 0
 
-    if (this.options.recoverInterruptedRuns !== false) {
-      for (const run of this.state.runs) {
-        if (run.state !== 'running' && run.state !== 'queued') continue
-        run.state = 'interrupted'
-        run.finishedAt = stamp
-        run.errorMessage = '应用在任务完成前退出'
+    if (this.options.recoverInterruptedScans !== false) {
+      for (const scan of this.state.scans) {
+        if (scan.status !== 'in_progress' && scan.status !== 'queued') continue
+        scan.status = 'interrupted'
+        scan.completedAt = stamp
+        scan.errorMessage = '应用在任务完成前退出'
       }
       for (const source of this.state.sources) {
         if (source.scanState === 'scanning') source.scanState = 'idle'
@@ -200,22 +200,22 @@ export class DiscoveryService {
     }
 
     await this.persist()
-    return this.snapshot()
+    return this.stateView()
   }
 
-  snapshot(): DiscoverySnapshot {
+  stateView(): DiscoveryStateView {
     const sourceOrder = new Map(AGENT_TYPES.map((type, index) => [type, index]))
     return clone({
       sources: [...this.state.sources].sort(
         (left, right) => (sourceOrder.get(left.agentType) ?? 99) - (sourceOrder.get(right.agentType) ?? 99)
       ),
-      runs: [...this.state.runs]
+      scans: [...this.state.scans]
         .sort((left, right) => (right.startedAt || '').localeCompare(left.startedAt || ''))
         .slice(0, 30)
     })
   }
 
-  sessionCatalogSnapshot(): SessionCatalogSnapshot {
+  sourceConversationCatalogView(): SourceConversationCatalogView {
     const failedSources = this.state.sources.filter((source) => (
       source.discoveryState === 'error' || source.scanState === 'error'
     ))
@@ -224,8 +224,8 @@ export class DiscoveryService {
       .sort()
       .at(-1)
     return clone({
-      sessions: this.listAvailableSessions(),
-      state: this.activeOperations.size > 0
+      conversations: this.listSourceConversations(),
+      status: this.activeScans.size > 0
         ? 'refreshing'
         : failedSources.length > 0
           ? 'error'
@@ -234,47 +234,47 @@ export class DiscoveryService {
       ...(failedSources.length > 0
         ? {
             errorMessage: failedSources
-              .map((source) => `${source.displayName}: ${source.errorMessage || 'Session 扫描失败'}`)
+              .map((source) => `${source.displayName}: ${source.errorMessage || 'Source Conversation 扫描失败'}`)
               .join('\n')
           }
         : {})
     })
   }
 
-  listAvailableSessions(): AvailableSessionSummary[] {
+  listSourceConversations(): SourceConversationSummary[] {
     return this.state.records
       .filter((record) => record.kind === 'conversation')
-      .flatMap<AvailableSessionSummary>((record) => {
+      .flatMap<SourceConversationSummary>((record) => {
         const source = this.state.sources.find((candidate) => candidate.id === record.sourceId)
         if (
           !source
           || source.discoveryState !== 'found'
           || source.scanState === 'error'
         ) return []
-        return [sessionSummary(record, source)]
+        return [sourceConversationSummary(record, source)]
       })
       .sort((left, right) => {
         const leftDate = left.endedAt || left.updatedAt || left.startedAt || ''
         const rightDate = right.endedAt || right.updatedAt || right.startedAt || ''
-        return rightDate.localeCompare(leftDate) || left.sourceRecordId.localeCompare(right.sourceRecordId)
+        return rightDate.localeCompare(leftDate) || left.sourceConversationId.localeCompare(right.sourceConversationId)
       })
-      .map((session) => clone(session))
+      .map((conversation) => clone(conversation))
   }
 
-  async readAvailableSession(
-    input: ReadAvailableSessionInput,
+  async readSourceSnapshot(
+    input: ReadSourceSnapshotInput,
     maxBytes?: number
-  ): Promise<AvailableSessionEvidence> {
-    assertSessionReference(input)
-    const record = this.state.records.find((candidate) => candidate.id === input.sourceRecordId)
+  ): Promise<SourceSnapshotEvidence> {
+    assertSourceSnapshotRef(input)
+    const record = this.state.records.find((candidate) => candidate.id === input.sourceConversationId)
     if (!record || record.kind !== 'conversation') {
-      throw new SourceSessionUnavailableError()
+      throw new SourceConversationUnavailableError()
     }
-    if (record.fingerprint !== input.expectedRevision) {
-      throw new SourceSessionRevisionChangedError()
+    if (record.fingerprint !== input.sourceRevision) {
+      throw new SourceConversationRevisionChangedError()
     }
     const source = this.state.sources.find((candidate) => candidate.id === record.sourceId)
-    if (!source) throw new SourceSessionUnavailableError()
+    if (!source) throw new SourceConversationUnavailableError()
     const adapter = this.requireAdapter(source.agentType)
     let currentRecord = record
     let evidence: SourceEvidenceReadResult
@@ -282,20 +282,20 @@ export class DiscoveryService {
       evidence = await this.readRecordEvidence(source, adapter, currentRecord, maxBytes)
     } catch (error) {
       if (
-        !(error instanceof SourceSessionUnavailableError)
-        && !(error instanceof SourceSessionRevisionChangedError)
+        !(error instanceof SourceConversationUnavailableError)
+        && !(error instanceof SourceConversationRevisionChangedError)
       ) {
         throw error
       }
 
       const refreshed = await this.refreshConversationRecord(source, adapter, currentRecord)
-      if (!refreshed.record) throw new SourceSessionUnavailableError()
+      if (!refreshed.record) throw new SourceConversationUnavailableError()
       currentRecord = refreshed.record
-      if (currentRecord.fingerprint !== input.expectedRevision) {
-        throw new SourceSessionRevisionChangedError(
+      if (currentRecord.fingerprint !== input.sourceRevision) {
+        throw new SourceConversationRevisionChangedError(
           refreshed.grew
-            ? 'The source Session has grown since it was selected; retry with the refreshed Session revision'
-            : 'The source Session revision has changed'
+            ? 'The source conversation has grown since it was selected; retry with the refreshed source revision'
+            : 'The source conversation revision has changed'
         )
       }
       evidence = await this.readRecordEvidence(source, adapter, currentRecord, maxBytes)
@@ -303,8 +303,8 @@ export class DiscoveryService {
     const content = new TextDecoder('utf-8', { fatal: true }).decode(evidence.content)
     const observation = adapter.createObservation(content)
     return {
-      sourceRecordId: currentRecord.id,
-      revision: currentRecord.fingerprint,
+      sourceConversationId: currentRecord.id,
+      sourceRevision: currentRecord.fingerprint,
       contentHash: evidence.contentHash,
       sizeBytes: evidence.sizeBytes,
       ...observation
@@ -318,7 +318,7 @@ export class DiscoveryService {
     maxBytes?: number
   ): Promise<SourceEvidenceReadResult> {
     return this.sourceEvidenceReader.read({
-      sourceRecordId: record.id,
+      sourceConversationId: record.id,
       absolutePath: adapter.resolveRecordPath(source.rootPath, record),
       expectedSizeBytes: record.sizeBytes,
       expectedModifiedAt: record.modifiedAt,
@@ -342,23 +342,23 @@ export class DiscoveryService {
       this.state.records = this.state.records.filter((record) => record.id !== previous.id)
       this.updateSourceRecordSummary(source)
       await this.persistAndEmit()
-      this.emitSessionCatalog()
+      this.emitSourceConversationCatalog()
       return { grew: false }
     }
     if (candidate.kind !== 'conversation' || candidate.externalId !== previous.externalId) {
-      throw new Error(`History adapter returned the wrong Session while refreshing ${previous.externalId}`)
+      throw new Error(`History adapter returned the wrong conversation while refreshing ${previous.externalId}`)
     }
 
     const previousSizeBytes = current?.sizeBytes ?? previous.sizeBytes
     const next = sourceRecord(source.id, candidate, current)
     if (next.id !== previous.id) {
-      throw new Error(`History adapter changed the stable Session identity for ${previous.externalId}`)
+      throw new Error(`History adapter changed the stable conversation identity for ${previous.externalId}`)
     }
     if (current) Object.assign(current, next)
     else this.state.records.push(next)
     this.updateSourceRecordSummary(source)
     await this.persistAndEmit()
-    this.emitSessionCatalog()
+    this.emitSourceConversationCatalog()
     return {
       record: current ?? next,
       grew: next.sizeBytes > previousSizeBytes
@@ -369,33 +369,33 @@ export class DiscoveryService {
     const records = this.currentRecords(source.id)
     const conversations = records.filter((record) => record.kind === 'conversation')
     source.fileCount = records.length + source.invalidFileCount
-    source.sessionCount = conversations.length
+    source.conversationCount = conversations.length
     source.instructionFileCount = records.length - conversations.length
     source.totalBytes = records.reduce((total, record) => total + record.sizeBytes, 0)
     const dates = conversations
       .map((record) => record.startedAt || record.modifiedAt)
       .sort()
-    source.oldestSessionAt = dates[0]
-    source.latestSessionAt = dates.at(-1)
+    source.oldestConversationAt = dates[0]
+    source.latestConversationAt = dates.at(-1)
   }
 
-  subscribe(listener: SnapshotListener): () => void {
+  subscribe(listener: DiscoveryStateListener): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
   }
 
-  subscribeSessionCatalog(listener: SessionCatalogListener): () => void {
-    this.sessionCatalogListeners.add(listener)
-    return () => this.sessionCatalogListeners.delete(listener)
+  subscribeSourceConversationCatalog(listener: SourceConversationCatalogListener): () => void {
+    this.sourceConversationCatalogListeners.add(listener)
+    return () => this.sourceConversationCatalogListeners.delete(listener)
   }
 
-  async refreshSessionCatalog(): Promise<SessionCatalogSnapshot> {
+  async refreshSourceConversationCatalog(): Promise<SourceConversationCatalogView> {
     await this.detectAgents()
     await this.waitForIdle()
-    return this.sessionCatalogSnapshot()
+    return this.sourceConversationCatalogView()
   }
 
-  async detectAgents(): Promise<DiscoverySnapshot> {
+  async detectAgents(): Promise<DiscoveryStateView> {
     await Promise.all(
       this.state.sources.map(async (source) => {
         const adapter = this.adapterByType.get(source.agentType)
@@ -416,29 +416,29 @@ export class DiscoveryService {
       })
     )
     await this.persistAndEmit()
-    this.emitSessionCatalog()
+    this.emitSourceConversationCatalog()
 
     for (const source of this.state.sources) {
-      if (source.discoveryState === 'found' && !this.activeOperations.has(source.id)) {
+      if (source.discoveryState === 'found' && !this.activeScans.has(source.id)) {
         await this.scanSource(source.id)
       }
     }
-    return this.snapshot()
+    return this.stateView()
   }
 
-  async setSourceRoot(sourceId: string, rootPath: string): Promise<DiscoverySnapshot> {
+  async chooseSourceRoot(sourceId: string, rootPath: string): Promise<DiscoveryStateView> {
     const source = this.requireSource(sourceId)
-    if (this.activeOperations.has(sourceId)) return this.snapshot()
+    if (this.activeScans.has(sourceId)) return this.stateView()
     const adapter = this.requireAdapter(source.agentType)
     source.rootPath = rootPath
     source.scanState = 'idle'
     source.fileCount = 0
-    source.sessionCount = 0
+    source.conversationCount = 0
     source.instructionFileCount = 0
     source.totalBytes = 0
     source.invalidFileCount = 0
-    source.oldestSessionAt = undefined
-    source.latestSessionAt = undefined
+    source.oldestConversationAt = undefined
+    source.latestConversationAt = undefined
     source.lastScannedAt = undefined
     this.state.records = this.state.records.filter((record) => record.sourceId !== sourceId)
 
@@ -454,18 +454,18 @@ export class DiscoveryService {
           ? 'found'
           : 'not_found'
     await this.persistAndEmit()
-    this.emitSessionCatalog()
-    return this.snapshot()
+    this.emitSourceConversationCatalog()
+    return this.stateView()
   }
 
-  async scanSource(sourceId: string): Promise<DiscoverySnapshot> {
+  async scanSource(sourceId: string): Promise<DiscoveryStateView> {
     const source = this.requireSource(sourceId)
-    if (source.discoveryState !== 'found' || this.activeOperations.has(sourceId)) return this.snapshot()
+    if (source.discoveryState !== 'found' || this.activeScans.has(sourceId)) return this.stateView()
 
-    const run: ScanRun = {
-      id: randomUUID(),
+    const scan: DiscoveryScan = {
+      scanId: randomUUID(),
       sourceId,
-      state: 'running',
+      status: 'in_progress',
       totalFiles: 0,
       processedFiles: 0,
       totalBytes: 0,
@@ -475,38 +475,38 @@ export class DiscoveryService {
     }
     source.scanState = 'scanning'
     source.errorMessage = undefined
-    this.addRun(run)
-    const operation: ActiveOperation = { runId: run.id, controller: new AbortController() }
-    this.activeOperations.set(sourceId, operation)
+    this.addScan(scan)
+    const operation: ActiveScan = { scanId: scan.scanId, controller: new AbortController() }
+    this.activeScans.set(sourceId, operation)
     const started = this.persistAndEmit()
     operation.task = started.then(async () => {
-      this.emitSessionCatalog()
-      await this.performScan(source, run, operation.controller.signal)
+      this.emitSourceConversationCatalog()
+      await this.performScan(source, scan, operation.controller.signal)
     })
     await started
-    return this.snapshot()
+    return this.stateView()
   }
 
-  async cancelRun(runId: string): Promise<DiscoverySnapshot> {
-    const entry = [...this.activeOperations.values()].find((operation) => operation.runId === runId)
-    const run = this.state.runs.find((candidate) => candidate.id === runId)
-    if (!entry || !run) return this.snapshot()
-    run.state = 'cancelled'
-    run.finishedAt = now()
+  async cancelScan(scanId: string): Promise<DiscoveryStateView> {
+    const entry = [...this.activeScans.values()].find((operation) => operation.scanId === scanId)
+    const scan = this.state.scans.find((candidate) => candidate.scanId === scanId)
+    if (!entry || !scan) return this.stateView()
+    scan.status = 'cancelled'
+    scan.completedAt = now()
     entry.controller.abort()
     await this.persistAndEmit()
-    return this.snapshot()
+    return this.stateView()
   }
 
   async waitForIdle(sourceId?: string): Promise<void> {
-    const tasks = [...this.activeOperations.entries()]
+    const tasks = [...this.activeScans.entries()]
       .filter(([id]) => !sourceId || id === sourceId)
       .map(([, operation]) => operation.task)
       .filter((task): task is Promise<void> => Boolean(task))
     await Promise.all(tasks)
   }
 
-  private async performScan(source: AgentSource, run: ScanRun, signal: AbortSignal): Promise<void> {
+  private async performScan(source: AgentSource, scan: DiscoveryScan, signal: AbortSignal): Promise<void> {
     const adapter = this.requireAdapter(source.agentType)
     const previousRecords = this.currentRecords(source.id)
     const scannedRecords: SourceRecord[] = []
@@ -516,27 +516,27 @@ export class DiscoveryService {
     try {
       for await (const entry of adapter.scan(source.rootPath, signal, this.detectionContext)) {
         signal.throwIfAborted()
-        run.totalFiles += 1
-        run.processedFiles += 1
+        scan.totalFiles += 1
+        scan.processedFiles += 1
         const bytes = entry.kind === 'record' ? entry.candidate.sizeBytes : entry.sizeBytes
-        run.totalBytes += bytes
-        run.processedBytes += bytes
+        scan.totalBytes += bytes
+        scan.processedBytes += bytes
         if (entry.kind === 'invalid') {
-          run.invalidFiles += 1
+          scan.invalidFiles += 1
         } else {
           const candidate = entry.candidate
-          const id = sourceRecordId(source.id, candidate.kind, candidate.externalId)
+          const id = sourceConversationId(source.id, candidate.kind, candidate.externalId)
           const existing = previousRecords.find((record) => record.id === id)
           const record = sourceRecord(source.id, candidate, existing)
           scannedRecords.push(record)
 
           if (candidate.kind === 'conversation') {
-            const sessionDate = candidate.startedAt || candidate.modifiedAt
-            if (!oldest || sessionDate < oldest) oldest = sessionDate
-            if (!latest || sessionDate > latest) latest = sessionDate
+            const conversationDate = candidate.startedAt || candidate.modifiedAt
+            if (!oldest || conversationDate < oldest) oldest = conversationDate
+            if (!latest || conversationDate > latest) latest = conversationDate
           }
         }
-        if (run.processedFiles % 25 === 0) this.emit()
+        if (scan.processedFiles % 25 === 0) this.emit()
       }
 
       this.state.records = [
@@ -544,33 +544,33 @@ export class DiscoveryService {
         ...scannedRecords
       ]
       const currentRecords = scannedRecords
-      source.fileCount = run.totalFiles
-      source.sessionCount = currentRecords.filter((record) => record.kind === 'conversation').length
+      source.fileCount = scan.totalFiles
+      source.conversationCount = currentRecords.filter((record) => record.kind === 'conversation').length
       source.instructionFileCount = currentRecords.filter(
         (record) => record.kind === 'human_instruction'
       ).length
       source.totalBytes = currentRecords.reduce((total, record) => total + record.sizeBytes, 0)
-      source.invalidFileCount = run.invalidFiles
-      source.oldestSessionAt = oldest
-      source.latestSessionAt = latest
+      source.invalidFileCount = scan.invalidFiles
+      source.oldestConversationAt = oldest
+      source.latestConversationAt = latest
       source.lastScannedAt = now()
       source.scanState = 'ready'
       source.errorMessage = undefined
-      run.state = 'completed'
-      run.finishedAt = now()
+      scan.status = 'completed'
+      scan.completedAt = now()
     } catch (error) {
       const cancelled = signal.aborted || isAbortError(error)
-      run.state = cancelled ? 'cancelled' : 'failed'
-      run.finishedAt = now()
-      run.errorMessage = cancelled ? undefined : errorMessage(error)
+      scan.status = cancelled ? 'cancelled' : 'failed'
+      scan.completedAt = now()
+      scan.errorMessage = cancelled ? undefined : errorMessage(error)
       source.scanState = cancelled ? 'idle' : 'error'
       source.errorMessage = cancelled ? undefined : errorMessage(error)
       const code = (error as NodeJS.ErrnoException).code
       if (code === 'EACCES' || code === 'EPERM') source.discoveryState = 'needs_permission'
     } finally {
-      this.activeOperations.delete(source.id)
+      this.activeScans.delete(source.id)
       await this.persistAndEmit()
-      this.emitSessionCatalog()
+      this.emitSourceConversationCatalog()
     }
   }
 
@@ -578,9 +578,9 @@ export class DiscoveryService {
     return this.state.records.filter((record) => record.sourceId === sourceId)
   }
 
-  private addRun(run: ScanRun): void {
-    this.state.runs.unshift(run)
-    if (this.state.runs.length > 60) this.state.runs.length = 60
+  private addScan(scan: DiscoveryScan): void {
+    this.state.scans.unshift(scan)
+    if (this.state.scans.length > 60) this.state.scans.length = 60
   }
 
   private requireSource(sourceId: string): AgentSource {
@@ -605,12 +605,12 @@ export class DiscoveryService {
   }
 
   private emit(): void {
-    const snapshot = this.snapshot()
-    for (const listener of this.listeners) listener(snapshot)
+    const state = this.stateView()
+    for (const listener of this.listeners) listener(state)
   }
 
-  private emitSessionCatalog(): void {
-    const snapshot = this.sessionCatalogSnapshot()
-    for (const listener of this.sessionCatalogListeners) listener(snapshot)
+  private emitSourceConversationCatalog(): void {
+    const state = this.sourceConversationCatalogView()
+    for (const listener of this.sourceConversationCatalogListeners) listener(state)
   }
 }

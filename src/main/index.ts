@@ -3,7 +3,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { discoveryChannels } from '../shared/channels'
-import type { DiscoverySnapshot, SessionCatalogSnapshot } from '../shared/discovery'
+import type { DiscoveryStateView, SourceConversationCatalogView } from '../shared/discovery'
 import { AiBackendService } from './ai-backends/ai-backend-service'
 import { CodexAgentAdapter } from './ai-backends/codex-adapter'
 import { KeychainCredentialStore } from './ai-backends/credential-store'
@@ -23,30 +23,31 @@ import {
 import { InMemoryDiscoveryRepository, JsonDiscoveryRepository } from './discovery/repository'
 import {
   createFixtureState,
-  FIXTURE_SESSION_SOURCE_RECORD_ID,
-  FIXTURE_SESSION_CONTENT
+  FIXTURE_SOURCE_CONVERSATION_ID,
+  FIXTURE_SOURCE_CONVERSATION_CONTENT
 } from './fixture-state'
 import {
   createFixtureKnowledgeProcessingService
 } from './knowledge-processing/fixture'
 import {
-  KnowledgeFullChainService
-} from './knowledge-processing/full-chain-service'
-import { FileKnowledgeFullChainRunRepository } from './knowledge-processing/full-chain-run-repository'
+  KnowledgeTaskService
+} from './knowledge-processing/knowledge-task-service'
+import { FileKnowledgeTaskHistory } from './knowledge-processing/knowledge-task-history'
 import { registerKnowledgeProcessingIpc } from './knowledge-processing/ipc'
 import { KnowledgeProcessingService } from './knowledge-processing/knowledge-processing-service'
 import {
   PiKnowledgeMaintainerAgent,
   PiKnowledgeReviewerAgent
 } from './knowledge-processing/pi-collaboration-agents'
-import { ProcessingRepository } from './knowledge-processing/processing-repository'
-import { JsonKnowledgeProcessingRepository } from './knowledge-processing/repository'
+import { KnowledgeTaskWorkspaceRepository } from './knowledge-processing/knowledge-task-workspace-repository'
+import { JsonKnowledgeProcessingConfigurationRepository } from './knowledge-processing/repository'
 import { FileKnowledgeStore } from './knowledge-store/file-knowledge-store'
 import { registerKnowledgeIpc } from './knowledge-store/ipc'
 import { ChatAgentService } from './chat/chat-agent-service'
 import { JsonChatConfigurationRepository } from './chat/chat-configuration-repository'
 import { registerChatIpc } from './chat/ipc'
-import { PiChatSessionRepository } from './chat/pi-chat-session-repository'
+import { PiChatConversationRepository } from './chat/pi-chat-conversation-repository'
+import { PiChatAgent } from './chat/pi-chat-agent'
 import { ArtifactService } from './artifacts/artifact-repository'
 import { runArtifactGit } from './artifacts/git-runtime'
 import { registerArtifactIpc } from './artifacts/ipc'
@@ -56,16 +57,19 @@ import { SkillDiscoveryService } from './skills/skill-discovery-service'
 import { OysterRepository } from './repository/oyster-repository'
 import { FolderBrowserService } from './folder-browser/folder-browser-service'
 import { registerFolderBrowserIpc } from './folder-browser/ipc'
+import { FileAgentDebugStore, type AgentDebugStore } from './agent-runtime/agent-debug-store'
+import { PiExtensionConfigurationService } from './agent-runtime/pi-extension-configuration-service'
+import { registerPiExtensionConfigurationIpc } from './agent-runtime/pi-extension-configuration-ipc'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 let mainWindow: BrowserWindow | undefined
 let aiBackendService: AiBackendService | undefined
 let knowledgeProcessingService: KnowledgeProcessingService | undefined
-let knowledgeFullChainService: KnowledgeFullChainService | undefined
-let knowledgeFullChainRunRepository: FileKnowledgeFullChainRunRepository | undefined
+let knowledgeTaskService: KnowledgeTaskService | undefined
+let knowledgeTaskHistory: FileKnowledgeTaskHistory | undefined
 let knowledgeStore: FileKnowledgeStore | undefined
 let chatAgentService: ChatAgentService | undefined
-let chatSessionRepository: PiChatSessionRepository | undefined
+let chatConversationRepository: PiChatConversationRepository | undefined
 
 function fixtureMode(): boolean {
   return process.env.OYSTER_FIXTURE_MODE === '1'
@@ -81,8 +85,8 @@ function createService(): DiscoveryService {
     : new JsonDiscoveryRepository(join(app.getPath('userData'), 'discovery-state.json'))
   const evidenceReader = useFixtures
     ? new MemorySourceEvidenceReader([{
-        sourceRecordId: FIXTURE_SESSION_SOURCE_RECORD_ID,
-        content: FIXTURE_SESSION_CONTENT
+        sourceConversationId: FIXTURE_SOURCE_CONVERSATION_ID,
+        content: FIXTURE_SOURCE_CONVERSATION_CONTENT
       }])
     : new FileSourceEvidenceReader()
   return new DiscoveryService(
@@ -90,7 +94,7 @@ function createService(): DiscoveryService {
     evidenceReader,
     createDefaultAdapters(),
     createDetectionContext(app.getPath('home')),
-    { recoverInterruptedRuns: !useFixtures }
+    { recoverInterruptedScans: !useFixtures }
   )
 }
 
@@ -165,17 +169,17 @@ async function initializeFixtureKnowledge(store: FileKnowledgeStore): Promise<vo
     {
       path: 'oyster-processing.md',
       title: 'Oyster 知识加工链路',
-      content: 'Harness 在统一 Repository 中创建 processing branch 与独立 Run 工作空间，让 [[Knowledge Maintenance Agent|知识维护 Agent]] 和 Reviewer 通过文件工作状态与 commit 交替工作；固定的 [[Raw Evidence|原始证据]] 输入视图保存在该 Run 中，测试结果保持未合并。'
+      content: 'Harness 在统一 Repository 中创建 Knowledge Processing Task 与独立 Task Workspace，让 [[Knowledge Maintenance Agent|知识维护 Agent]] 和 Reviewer 通过 PROGRESS.md 与 commit 交替工作；固定的 [[Raw Evidence|原始证据]] 输入视图保存在该 Task 中，测试结果保持未合并。'
     },
     {
       path: 'knowledge-maintainer.md',
       title: 'Knowledge Maintenance Agent',
-      content: '从独立 Run 工作空间读取 TASK.md、WORK.md 与文件化 Canonical Activity，按需回溯[[Raw Evidence|原始证据]]，直接维护 Knowledge/Artifact 文件并创建普通 Git commit。'
+      content: '从独立 Task Workspace 读取 BRIEF.md、PROGRESS.md 与文件化 Canonical Activity，按需回溯[[Raw Evidence|原始证据]]，直接维护 Knowledge/Artifact 文件并创建普通 Git commit。'
     },
     {
       path: 'raw-evidence.md',
       title: 'Raw Evidence',
-      content: '外部 Agent Session 的确定版本材料。Host 为一次知识加工 Run 生成固定的文件输入视图与 Canonical Activity，供 [[Knowledge Maintenance Agent]] 用普通文件工具有界读取和精确回查。'
+      content: '外部 Source Conversation 的确定版本材料。Host 为一次 Knowledge Processing Task 生成固定的 Source Snapshot 文件视图与 Canonical Activity，供 [[Knowledge Maintenance Agent]] 用普通文件工具有界读取和精确回查。'
     },
     {
       path: 'skill-activation.md',
@@ -201,8 +205,8 @@ function createSkillDiscoveryService(discovery: DiscoveryService): SkillDiscover
   const context = createDetectionContext(homeDirectory, useFixtures ? {} : process.env)
   const projectPaths = () => useFixtures
     ? [join(homeDirectory, 'projects', 'oyster')]
-    : discovery.listAvailableSessions().flatMap((session) => (
-        session.projectPath ? [session.projectPath] : []
+    : discovery.listSourceConversations().flatMap((conversation) => (
+        conversation.projectPath ? [conversation.projectPath] : []
       ))
   const adminRoot = useFixtures
     ? join(homeDirectory, 'etc', 'codex', 'skills')
@@ -220,58 +224,69 @@ function createManagedSkillService(repository: ArtifactService): ManagedSkillSer
 
 function createKnowledgeProcessingService(
   aiBackend: AiBackendService,
-  processingRepository: ProcessingRepository
+  processingRepository: KnowledgeTaskWorkspaceRepository,
+  debugStore: AgentDebugStore
 ): KnowledgeProcessingService {
-  if (fixtureMode()) return createFixtureKnowledgeProcessingService(aiBackend, processingRepository)
+  if (fixtureMode()) {
+    return createFixtureKnowledgeProcessingService(aiBackend, processingRepository, debugStore)
+  }
   return new KnowledgeProcessingService(
-    new JsonKnowledgeProcessingRepository(join(app.getPath('userData'), 'knowledge-processing.json')),
+    new JsonKnowledgeProcessingConfigurationRepository(
+      join(app.getPath('userData'), 'knowledge-processing.json')
+    ),
     aiBackend,
     processingRepository,
-    new PiKnowledgeMaintainerAgent(),
-    new PiKnowledgeReviewerAgent()
+    new PiKnowledgeMaintainerAgent(debugStore),
+    new PiKnowledgeReviewerAgent(debugStore)
   )
 }
 
 function registerIpc(service: DiscoveryService): void {
-  ipcMain.handle(discoveryChannels.getSnapshot, () => service.snapshot())
+  ipcMain.handle(discoveryChannels.getState, () => service.stateView())
   ipcMain.handle(
-    discoveryChannels.getSessionCatalog,
-    () => service.sessionCatalogSnapshot()
+    discoveryChannels.getSourceConversationCatalog,
+    () => service.sourceConversationCatalogView()
   )
   ipcMain.handle(
-    discoveryChannels.refreshSessionCatalog,
-    () => service.refreshSessionCatalog()
+    discoveryChannels.refreshSourceConversationCatalog,
+    () => service.refreshSourceConversationCatalog()
   )
   ipcMain.handle(discoveryChannels.detectAgents, () => service.detectAgents())
   ipcMain.handle(discoveryChannels.scanSource, (_event, sourceId: string) => service.scanSource(sourceId))
-  ipcMain.handle(discoveryChannels.cancelRun, (_event, runId: string) => service.cancelRun(runId))
+  ipcMain.handle(discoveryChannels.cancelScan, (_event, scanId: string) => service.cancelScan(scanId))
   ipcMain.handle(discoveryChannels.chooseSourceRoot, async (_event, sourceId: string) => {
     const owner = BrowserWindow.getFocusedWindow() || mainWindow
-    const source = service.snapshot().sources.find((candidate) => candidate.id === sourceId)
+    const source = service.stateView().sources.find((candidate) => candidate.id === sourceId)
     const defaultPath = await nearestExistingDirectory(source?.rootPath || app.getPath('home'), app.getPath('home'))
     const result = await dialog.showOpenDialog(owner!, {
       title: '选择历史记录目录',
       defaultPath,
       properties: ['openDirectory']
     })
-    if (result.canceled || !result.filePaths[0]) return service.snapshot()
-    return service.setSourceRoot(sourceId, result.filePaths[0])
+    if (result.canceled || !result.filePaths[0]) return service.stateView()
+    return service.chooseSourceRoot(sourceId, result.filePaths[0])
   })
 
-  service.subscribe((snapshot: DiscoverySnapshot) => {
+  service.subscribe((state: DiscoveryStateView) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send(discoveryChannels.snapshot, snapshot)
+      mainWindow.webContents.send(discoveryChannels.state, state)
     }
   })
-  service.subscribeSessionCatalog((snapshot: SessionCatalogSnapshot) => {
+  service.subscribeSourceConversationCatalog((catalog: SourceConversationCatalogView) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send(discoveryChannels.sessionCatalogSnapshot, snapshot)
+      mainWindow.webContents.send(discoveryChannels.sourceConversationCatalog, catalog)
     }
   })
 }
 
 async function captureFixture(window: BrowserWindow, capturePath: string): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 700))
+  const defaultPage = await window.webContents.executeJavaScript(`(() => {
+    const chat = document.querySelector('[data-testid="page-chat"]')
+    return chat && !chat.hidden ? 'chat' : 'unknown'
+  })()`)
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-sources"]')?.click()`)
+  await new Promise((resolve) => setTimeout(resolve, 80))
   const image = await window.webContents.capturePage()
   await mkdir(dirname(capturePath), { recursive: true })
   await writeFile(capturePath, image.toPNG())
@@ -315,9 +330,12 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       sourceDetailCount: sourceDetails.length,
       sourceSummary,
       defaultBodyText,
-      bodyText: page.innerText
+      bodyText: page.innerText,
+      documentScrollY: window.scrollY,
+      bodyOverflow: bodyStyle.overflow
     }
   })()`)
+  semantics.defaultPage = defaultPage
 
   window.setSize(1160, 680)
   await new Promise((resolve) => setTimeout(resolve, 80))
@@ -579,9 +597,9 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const referenceLayoutSignature = () => JSON.stringify({
       width: referenceViewport?.getAttribute('data-layout-width'),
       height: referenceViewport?.getAttribute('data-scene-height'),
-      nodes: Array.from(referenceGraph?.querySelectorAll('.knowledge-local-graph__node') ?? []).map((node) => (
-        [node.dataset.title, node.style.left, node.style.top]
-      ))
+      nodes: Array.from(referenceGraph?.querySelectorAll('.knowledge-local-graph__node') ?? [])
+        .filter((node) => Number(node.dataset.distance) < 2)
+        .map((node) => [node.dataset.title, node.style.left, node.style.top])
     })
     const referenceLayoutBeforeOverflow = referenceLayoutSignature()
     const referenceViewportWidthBeforeOverflow = referenceViewport?.clientWidth ?? 0
@@ -831,19 +849,19 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   await new Promise((resolve) => setTimeout(resolve, 200))
   const processingImage = await window.webContents.capturePage()
   await writeFile(join(dirname(capturePath), 'knowledge-processing.png'), processingImage.toPNG())
-  const fullChainSemantics = await window.webContents.executeJavaScript(`(() => {
+  const knowledgeTaskSemantics = await window.webContents.executeJavaScript(`(() => {
     const page = document.querySelector('[data-testid="page-knowledge-processing"]')
-    const select = page.querySelector('[data-testid="full-chain-session-select"]')
-    const initialButton = page.querySelector('[data-testid="run-full-chain"]')
+    const select = page.querySelector('[data-testid="knowledge-task-source-conversation-select"]')
+    const initialButton = page.querySelector('[data-testid="start-knowledge-task"]')
     const result = {
-      fullChainSelected: page.querySelector('[data-testid="processing-view-full-chain"]')?.getAttribute('aria-selected'),
-      workspaceExists: Boolean(page.querySelector('[data-testid="full-chain-workspace"]')),
-      sessionOptionCount: select?.options.length,
-      refreshSessionsButtonExists: Boolean(page.querySelector('[data-testid="refresh-full-chain-sessions"]')),
-      fullChainButtonExists: Boolean(initialButton),
-      fullChainButtonDisabled: initialButton?.disabled,
-      initialDisabledReason: page.querySelector('[data-testid="full-chain-disabled-reason"]')?.textContent?.trim(),
-      modelSummary: page.querySelector('.chain-test__models')?.textContent?.trim(),
+      knowledgeTaskSelected: page.querySelector('[data-testid="processing-view-knowledge-task"]')?.getAttribute('aria-selected'),
+      workspaceExists: Boolean(page.querySelector('[data-testid="knowledge-task-workspace"]')),
+      sourceConversationOptionCount: select?.options.length,
+      refreshSourceConversationsButtonExists: Boolean(page.querySelector('[data-testid="refresh-knowledge-task-source-conversations"]')),
+      knowledgeTaskButtonExists: Boolean(initialButton),
+      knowledgeTaskButtonDisabled: initialButton?.disabled,
+      initialDisabledReason: page.querySelector('[data-testid="knowledge-task-disabled-reason"]')?.textContent?.trim(),
+      modelSummary: page.querySelector('.knowledge-task__models')?.textContent?.trim(),
       bodyText: page.innerText,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
     }
@@ -853,86 +871,87 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     }
     return new Promise((resolve) => requestAnimationFrame(() => resolve({
       ...result,
-      selectedSession: select?.value,
-      selectedSessionDetails: {
-        title: page.querySelector('[data-testid="full-chain-session-meta-title"]')?.textContent?.trim(),
-        timeRange: page.querySelector('[data-testid="full-chain-session-meta-time-range"]')?.textContent?.trim(),
-        size: page.querySelector('[data-testid="full-chain-session-meta-size"]')?.textContent?.trim(),
-        project: page.querySelector('[data-testid="full-chain-session-meta-project"]')?.textContent?.trim()
+      selectedSourceConversation: select?.value,
+      selectedSourceConversationDetails: {
+        title: page.querySelector('[data-testid="knowledge-task-source-conversation-meta-title"]')?.textContent?.trim(),
+        timeRange: page.querySelector('[data-testid="knowledge-task-source-conversation-meta-time-range"]')?.textContent?.trim(),
+        size: page.querySelector('[data-testid="knowledge-task-source-conversation-meta-size"]')?.textContent?.trim(),
+        project: page.querySelector('[data-testid="knowledge-task-source-conversation-meta-project"]')?.textContent?.trim()
       },
-      fullChainButtonEnabledAfterSelection: page.querySelector('[data-testid="run-full-chain"]')?.disabled === false,
-      readyReason: page.querySelector('[data-testid="full-chain-disabled-reason"]')?.textContent?.trim()
+      knowledgeTaskButtonEnabledAfterSelection: page.querySelector('[data-testid="start-knowledge-task"]')?.disabled === false,
+      readyReason: page.querySelector('[data-testid="knowledge-task-disabled-reason"]')?.textContent?.trim()
     })))
   })()`)
-  const fullChainRunSemantics = await window.webContents.executeJavaScript(`(async () => {
+  const knowledgeTaskActivitySemantics = await window.webContents.executeJavaScript(`(async () => {
     const page = document.querySelector('[data-testid="page-knowledge-processing"]')
-    page.querySelector('[data-testid="run-full-chain"]')?.click()
+    page.querySelector('[data-testid="start-knowledge-task"]')?.click()
     let liveUpdatePreservesTool = false
     let liveUpdateKeepsScroll = false
     let liveToolPayloadVisible = false
     let liveDeadline = Date.now() + 2_000
-    while (!page.querySelector('[data-testid="open-full-chain-activity"]') && Date.now() < liveDeadline) {
+    while (!page.querySelector('[data-testid="open-knowledge-task-activity"]') && Date.now() < liveDeadline) {
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
-    page.querySelector('[data-testid="open-full-chain-activity"]')?.click()
+    page.querySelector('[data-testid="open-knowledge-task-activity"]')?.click()
     liveDeadline = Date.now() + 2_000
-    while (!page.querySelector('[data-testid="full-chain-activity-detail"] .agent-trace-tool') && Date.now() < liveDeadline) {
+    while (!page.querySelector('[data-testid="knowledge-task-activity-detail"] .agent-activity-tool') && Date.now() < liveDeadline) {
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
-    const liveDetail = page.querySelector('[data-testid="full-chain-activity-detail"]')
-    const liveTool = liveDetail?.querySelector('.agent-trace-tool')
-    const initialLiveToolCount = liveDetail?.querySelectorAll('.agent-trace-tool').length ?? 0
+    const liveDetail = page.querySelector('[data-testid="knowledge-task-activity-detail"]')
+    const liveScroll = page.querySelector('.knowledge-task__inspector-content')
+    const liveTool = liveDetail?.querySelector('.agent-activity-tool')
+    const initialLiveToolCount = liveDetail?.querySelectorAll('.agent-activity-tool').length ?? 0
     const liveSpacer = document.createElement('div')
     liveSpacer.style.height = '900px'
     liveDetail?.prepend(liveSpacer)
     liveTool?.scrollIntoView({ block: 'center' })
     await new Promise((resolve) => requestAnimationFrame(resolve))
-    liveTool?.querySelector('.agent-trace-tool__toggle')?.click()
+    liveTool?.querySelector('.agent-activity-tool__toggle')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
-    const liveScrollBefore = window.scrollY
+    const liveScrollBefore = liveScroll?.scrollTop ?? 0
     liveDeadline = Date.now() + 2_000
     while (
-      (liveDetail?.querySelectorAll('.agent-trace-tool').length ?? 0) <= initialLiveToolCount
+      (liveDetail?.querySelectorAll('.agent-activity-tool').length ?? 0) <= initialLiveToolCount
       && Date.now() < liveDeadline
     ) await new Promise((resolve) => setTimeout(resolve, 10))
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
     const currentLiveTool = liveDetail?.querySelector('[data-tool-call-id="' + liveTool?.dataset.toolCallId + '"]')
     liveUpdatePreservesTool = Boolean(liveTool && currentLiveTool === liveTool)
-    liveUpdateKeepsScroll = liveScrollBefore > 0 && Math.abs(window.scrollY - liveScrollBefore) < 1
-    liveToolPayloadVisible = currentLiveTool?.querySelector('.agent-trace-tool__payloads')?.hidden === false
+    liveUpdateKeepsScroll = liveScrollBefore > 0 && Math.abs((liveScroll?.scrollTop ?? 0) - liveScrollBefore) < 1
+    liveToolPayloadVisible = currentLiveTool?.querySelector('.agent-activity-tool__payloads')?.hidden === false
     liveSpacer.remove()
-    page.querySelector('[data-testid="full-chain-detail-back"]')?.click()
+    page.querySelector('[data-testid="knowledge-task-detail-back"]')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
     const deadline = Date.now() + 5_000
-    let runningStateVisible = true
+    let inProgressStateVisible = true
     while (Date.now() < deadline) {
-      runningStateVisible ||= !page.querySelector('[data-testid="run-full-chain"]')
-      const completed = Boolean(page.querySelector('[data-testid="full-chain-run-result"]'))
+      inProgressStateVisible ||= !page.querySelector('[data-testid="start-knowledge-task"]')
+      const completed = Boolean(page.querySelector('[data-testid="knowledge-task-result"]'))
       const error = page.querySelector('.page-error')?.textContent?.trim()
       if (completed || error) {
-        if (error) return { completed, runningStateVisible, error }
-        const overviewHasTraceExplorer = Boolean(page.querySelector('[data-testid="agent-run-view"]'))
-        const summaryStatementCount = page.querySelector('[data-testid="full-chain-result-statement-count"]')?.textContent?.trim()
-        page.querySelector('[data-testid="open-full-chain-activity"]')?.click()
+        if (error) return { completed, inProgressStateVisible, error }
+        const overviewHasActivityExplorer = Boolean(page.querySelector('[data-testid="agent-invocation-view"]'))
+        const summaryStatementCount = page.querySelector('[data-testid="knowledge-task-result-statement-count"]')?.textContent?.trim()
+        page.querySelector('[data-testid="open-knowledge-task-activity"]')?.click()
         await new Promise((resolve) => requestAnimationFrame(resolve))
-        const traceExplorerExists = Boolean(page.querySelector('[data-testid="agent-run-view"]'))
-        const runSelectorText = page.querySelector('.agent-run-collection__selector')?.textContent
-        const selectedAgentName = page.querySelector('.agent-run-view__summary > div:first-child strong')?.textContent?.trim()
-        const traceEventCount = page.querySelectorAll('.agent-trace-message, .agent-trace-tool, .agent-trace-model-activity').length
-        const tool = page.querySelector('.agent-trace-tool')
+        const activityExplorerExists = Boolean(page.querySelector('[data-testid="agent-invocation-view"]'))
+        const invocationSelectorText = page.querySelector('.agent-invocation-collection__selector')?.textContent
+        const selectedAgentName = page.querySelector('.agent-invocation-view__summary > div:first-child strong')?.textContent?.trim()
+        const activityEventCount = page.querySelectorAll('.agent-activity-message, .agent-activity-tool, .agent-activity-model-activity').length
+        const tool = page.querySelector('.agent-activity-tool')
         if (tool) tool.open = true
         await new Promise((resolve) => requestAnimationFrame(resolve))
         const toolText = tool?.textContent
         const toolInput = tool?.querySelectorAll('pre')[0]?.textContent
         const toolOutput = tool?.querySelectorAll('pre')[1]?.textContent
-        page.querySelector('[data-testid="full-chain-detail-back"]')?.click()
+        page.querySelector('[data-testid="knowledge-task-detail-back"]')?.click()
         await new Promise((resolve) => requestAnimationFrame(resolve))
-        page.querySelector('[data-testid="open-full-chain-result"]')?.click()
+        page.querySelector('[data-testid="open-knowledge-task-result"]')?.click()
         await new Promise((resolve) => requestAnimationFrame(resolve))
-        const resultDetailExists = Boolean(page.querySelector('[data-testid="full-chain-result-detail"]'))
+        const resultDetailExists = Boolean(page.querySelector('[data-testid="knowledge-task-result-detail"]'))
         const statementCount = page.querySelectorAll('.knowledge-browser--collaboration .knowledge-browser__item').length
-        const gitResultText = page.querySelector('[data-testid="full-chain-git-result"]')?.textContent
-        const changedPathCount = page.querySelectorAll('.chain-test__candidates code').length
+        const gitResultText = page.querySelector('[data-testid="knowledge-task-git-result"]')?.textContent
+        const changedPathCount = page.querySelectorAll('.knowledge-task__candidates code').length
         const collaborationInitialTitle = page.querySelector('.knowledge-browser--collaboration [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
         const collaborationLink = page.querySelector('.knowledge-browser--collaboration .knowledge-statement-link > a')
         collaborationLink?.dispatchEvent(new MouseEvent('mouseenter'))
@@ -959,20 +978,20 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
         await new Promise((resolve) => requestAnimationFrame(resolve))
         const collaborationTitleAfterForward = page.querySelector('.knowledge-browser--collaboration [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
         const bodyText = page.innerText
-        page.querySelector('[data-testid="full-chain-result-back"]')?.click()
+        page.querySelector('[data-testid="knowledge-task-result-back"]')?.click()
         await new Promise((resolve) => requestAnimationFrame(resolve))
         return {
           completed,
-          runningStateVisible,
+          inProgressStateVisible,
           liveUpdatePreservesTool,
           liveUpdateKeepsScroll,
           liveToolPayloadVisible,
-          overviewHasTraceExplorer,
+          overviewHasActivityExplorer,
           summaryStatementCount,
-          traceExplorerExists,
-          runSelectorText,
+          activityExplorerExists,
+          invocationSelectorText,
           selectedAgentName,
-          traceEventCount,
+          activityEventCount,
           toolText,
           toolInput,
           toolOutput,
@@ -989,53 +1008,54 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
           collaborationOverflowAfterBack,
           collaborationForwardAvailable,
           collaborationTitleAfterForward,
-          returnedToOverview: Boolean(page.querySelector('[data-testid="full-chain-session-select"]')),
+          returnedToOverview: Boolean(page.querySelector('[data-testid="knowledge-task-source-conversation-select"]')),
           bodyText
         }
       }
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
-    return { completed: false, runningStateVisible, error: 'Timed out waiting for full-chain result' }
+    return { completed: false, inProgressStateVisible, error: 'Timed out waiting for knowledge-task result' }
   })()`)
   const processingHistorySemantics = await window.webContents.executeJavaScript(`(async () => {
     const page = document.querySelector('[data-testid="page-knowledge-processing"]')
     page.querySelector('[data-testid="processing-view-history"]')?.click()
     let deadline = Date.now() + 2_000
-    while (!page.querySelector('.processing-history-run') && Date.now() < deadline) {
+    while (!page.querySelector('.processing-history-task') && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
-    const run = page.querySelector('.processing-history-run')
-    const listText = page.querySelector('[data-testid="processing-run-history"]')?.innerText
-    run?.querySelector('[data-testid^="open-history-result-"]')?.click()
+    const taskCard = page.querySelector('.processing-history-task')
+    const listText = page.querySelector('[data-testid="knowledge-task-history"]')?.innerText
+    taskCard?.querySelector('[data-testid^="open-history-result-"]')?.click()
     deadline = Date.now() + 2_000
-    while (!page.querySelector('[data-testid="history-run-result-detail"]') && Date.now() < deadline) {
+    while (!page.querySelector('[data-testid="history-task-result-detail"]') && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
-    const resultDetailExists = Boolean(page.querySelector('[data-testid="history-run-result-detail"]'))
-    const sharedBrowserExists = Boolean(page.querySelector('[data-testid="history-run-result-detail"] [data-testid="knowledge-statement-browser"]'))
-    const importButton = page.querySelector('[data-testid="import-history-run"]')
-    const historyLink = page.querySelector('[data-testid="history-run-result-detail"] .knowledge-statement-link > a')
-    const historyInitialTitle = page.querySelector('[data-testid="history-run-result-detail"] [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
+    const resultDetailExists = Boolean(page.querySelector('[data-testid="history-task-result-detail"]'))
+    const sharedBrowserExists = Boolean(page.querySelector('[data-testid="history-task-result-detail"] [data-testid="knowledge-statement-browser"]'))
+    const importButton = page.querySelector('[data-testid="import-history-task"]')
+    const historyLink = page.querySelector('[data-testid="history-task-result-detail"] .knowledge-statement-link > a')
+    const historyInitialTitle = page.querySelector('[data-testid="history-task-result-detail"] [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
     historyLink?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
-    const historyLinkedTitle = page.querySelector('[data-testid="history-run-result-detail"] [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
-    page.querySelector('[data-testid="history-run-result-detail"] [data-testid="statement-nav-back"]')?.click()
+    const historyLinkedTitle = page.querySelector('[data-testid="history-task-result-detail"] [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
+    page.querySelector('[data-testid="history-task-result-detail"] [data-testid="statement-nav-back"]')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
-    const historyTitleAfterBack = page.querySelector('[data-testid="history-run-result-detail"] [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
+    const historyTitleAfterBack = page.querySelector('[data-testid="history-task-result-detail"] [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
     const overflowAfterStatementBack = document.documentElement.scrollWidth > document.documentElement.clientWidth
-    page.querySelector('[data-testid="history-run-result-back"]')?.click()
+    page.querySelector('[data-testid="history-task-result-back"]')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
-    page.querySelector('.processing-history-run [data-testid^="open-history-activity-"]')?.click()
+    page.querySelector('.processing-history-task [data-testid^="open-history-activity-"]')?.click()
     deadline = Date.now() + 2_000
-    while (!page.querySelector('[data-testid="history-run-activity-detail"]') && Date.now() < deadline) {
+    while (!page.querySelector('[data-testid="history-task-activity-detail"]') && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
-    const activityDetailExists = Boolean(page.querySelector('[data-testid="history-run-activity-detail"]'))
-    const traceEventCount = page.querySelectorAll('[data-testid="history-run-activity-detail"] .agent-trace-message, [data-testid="history-run-activity-detail"] .agent-trace-tool, [data-testid="history-run-activity-detail"] .agent-trace-model-activity').length
-    const activityDetail = page.querySelector('[data-testid="history-run-activity-detail"]')
-    const traceText = page.querySelector('[data-testid="history-run-activity-detail"]')?.textContent
-    const runSelectorText = page.querySelector('.agent-run-collection__selector')?.textContent
-    const tool = activityDetail?.querySelector('.agent-trace-tool')
+    const activityDetailExists = Boolean(page.querySelector('[data-testid="history-task-activity-detail"]'))
+    const activityEventCount = page.querySelectorAll('[data-testid="history-task-activity-detail"] .agent-activity-message, [data-testid="history-task-activity-detail"] .agent-activity-tool, [data-testid="history-task-activity-detail"] .agent-activity-model-activity').length
+    const activityDetail = page.querySelector('[data-testid="history-task-activity-detail"]')
+    const activityScroll = page.querySelector('.processing-history__inspector-content')
+    const activityText = page.querySelector('[data-testid="history-task-activity-detail"]')?.textContent
+    const invocationSelectorText = page.querySelector('.agent-invocation-collection__selector')?.textContent
+    const tool = activityDetail?.querySelector('.agent-activity-tool')
     const toolStyle = tool ? getComputedStyle(tool) : undefined
     const toolIsUnboxed = Boolean(toolStyle
       && (toolStyle.backgroundColor === 'rgba(0, 0, 0, 0)' || toolStyle.backgroundColor === 'transparent')
@@ -1045,17 +1065,17 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     activityDetail?.prepend(spacer)
     tool?.scrollIntoView({ block: 'center' })
     await new Promise((resolve) => requestAnimationFrame(resolve))
-    const toolScrollBefore = window.scrollY
-    tool?.querySelector('.agent-trace-tool__toggle')?.click()
+    const toolScrollBefore = activityScroll?.scrollTop ?? 0
+    tool?.querySelector('.agent-activity-tool__toggle')?.click()
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-    const toolScrollAfter = window.scrollY
-    const toolPayloadVisible = tool?.querySelector('.agent-trace-tool__payloads')?.hidden === false
+    const toolScrollAfter = activityScroll?.scrollTop ?? 0
+    const toolPayloadVisible = tool?.querySelector('.agent-activity-tool__payloads')?.hidden === false
     spacer.remove()
-    window.scrollTo(0, 0)
-    page.querySelector('[data-testid="history-run-activity-back"]')?.click()
+    if (activityScroll) activityScroll.scrollTop = 0
+    page.querySelector('[data-testid="history-task-activity-back"]')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
     return {
-      runCount: page.querySelectorAll('.processing-history-run').length,
+      taskCount: page.querySelectorAll('.processing-history-task').length,
       listText,
       resultDetailExists,
       sharedBrowserExists,
@@ -1065,9 +1085,9 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       historyTitleAfterBack,
       overflowAfterStatementBack,
       activityDetailExists,
-      traceEventCount,
-      traceText,
-      runSelectorText,
+      activityEventCount,
+      activityText,
+      invocationSelectorText,
       toolExpansionKeepsScroll: toolScrollBefore > 0 && Math.abs(toolScrollAfter - toolScrollBefore) < 1,
       toolPayloadVisible,
       toolIsUnboxed,
@@ -1078,12 +1098,12 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     ?.listStatements()
     .map((statement) => statement.title)
     .sort()
-  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="processing-view-stage-debug"]').click()`)
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="processing-view-agent-preview"]').click()`)
   await new Promise((resolve) => setTimeout(resolve, 120))
-  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="processing-maintainer-session"]')?.scrollIntoView({ block: 'center' })`)
+  await window.webContents.executeJavaScript(`document.querySelector('[data-testid="maintainer-source-conversation-select"]')?.scrollIntoView({ block: 'center' })`)
   await new Promise((resolve) => setTimeout(resolve, 80))
-  const stageDebugImage = await window.webContents.capturePage()
-  await writeFile(join(dirname(capturePath), 'knowledge-processing-stage-debug.png'), stageDebugImage.toPNG())
+  const agentPreviewImage = await window.webContents.capturePage()
+  await writeFile(join(dirname(capturePath), 'knowledge-agent-preview.png'), agentPreviewImage.toPNG())
   const processingSemantics = await window.webContents.executeJavaScript(`(() => {
     const page = document.querySelector('[data-testid="page-knowledge-processing"]')
     const prompts = Array.from(page.querySelectorAll('[data-testid^="processing-instructions-"]'))
@@ -1091,21 +1111,21 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const buttons = Array.from(page.querySelectorAll('button'))
     return {
       title: page.querySelector('h1')?.textContent,
-      stageCount: page.querySelectorAll('[data-testid="processing-stage-knowledge_maintenance_agent"]').length,
+      agentDefinitionCount: page.querySelectorAll('[data-testid="knowledge-agent-knowledge_maintainer"]').length,
       promptCount: prompts.length,
       promptValues: prompts.map((prompt) => prompt.value),
       badgeValues: badges.map((badge) => badge.textContent?.trim()),
       configurationText: Array.from(page.querySelectorAll('[data-testid^="processing-config-"]')).map((node) => node.textContent?.trim()),
-      maintainerSessionOptionCount: page.querySelector('[data-testid="processing-maintainer-session"]')?.options.length,
-      maintainerSessionValue: page.querySelector('[data-testid="processing-maintainer-session"]')?.value,
+      maintainerSourceConversationOptionCount: page.querySelector('[data-testid="maintainer-source-conversation-select"]')?.options.length,
+      maintainerSourceConversationValue: page.querySelector('[data-testid="maintainer-source-conversation-select"]')?.value,
       maintainerReadyReason: page.querySelector('[data-testid="maintainer-disabled-reason"]')?.textContent?.trim(),
-      maintainerButtonExists: Boolean(page.querySelector('[data-testid="run-maintainer"]')),
-      maintainerDisabled: page.querySelector('[data-testid="run-maintainer"]')?.disabled,
+      maintainerButtonExists: Boolean(page.querySelector('[data-testid="preview-maintainer"]')),
+      maintainerDisabled: page.querySelector('[data-testid="preview-maintainer"]')?.disabled,
       resultCount: page.querySelectorAll('[data-testid^="processing-result-"]').length,
       buttonCount: buttons.length,
       sharedButtonCount: page.querySelectorAll('.ui-button').length,
       tabButtonCount: page.querySelectorAll('button[role="tab"]').length,
-      chainStatementButtonCount: page.querySelectorAll('.knowledge-browser--collaboration .knowledge-browser__item').length,
+      taskStatementButtonCount: page.querySelectorAll('.knowledge-browser--collaboration .knowledge-browser__item').length,
       buttonIconCount: buttons.filter((button) => button.querySelector('.ui-button__icon .ui-icon')?.childElementCount > 0).length,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
       bodyText: page.innerText
@@ -1113,9 +1133,9 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   })()`)
   const promptRestoreSemantics = await window.webContents.executeJavaScript(`(() => {
     const page = document.querySelector('[data-testid="page-knowledge-processing"]')
-    const editor = page.querySelector('[data-testid="processing-instructions-knowledge_maintenance_agent"]')
-    const badge = page.querySelector('[data-testid="processing-prompt-badge-knowledge_maintenance_agent"]')
-    const restore = page.querySelector('[data-testid="restore-processing-instructions-knowledge_maintenance_agent"]')
+    const editor = page.querySelector('[data-testid="processing-instructions-knowledge_maintainer"]')
+    const badge = page.querySelector('[data-testid="processing-prompt-badge-knowledge_maintainer"]')
+    const restore = page.querySelector('[data-testid="restore-processing-instructions-knowledge_maintainer"]')
     const original = editor.value
     editor.value = original + '\\n未保存的测试草稿'
     editor.dispatchEvent(new Event('input', { bubbles: true }))
@@ -1132,37 +1152,37 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   })()`)
   await window.webContents.executeJavaScript(`(async () => {
     const page = document.querySelector('[data-testid="page-knowledge-processing"]')
-    const button = page.querySelector('[data-testid="run-maintainer"]')
+    const button = page.querySelector('[data-testid="preview-maintainer"]')
     button?.click()
     const deadline = Date.now() + 5_000
     while (Date.now() < deadline) {
-      if (page.querySelector('[data-testid="processing-result-knowledge_maintenance_agent"]')) return
+      if (page.querySelector('[data-testid="processing-result-knowledge_maintainer"]')) return
       if (page.querySelector('.page-error')) return
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
   })()`)
-  const traceSemantics = await window.webContents.executeJavaScript(`(() => {
+  const agentPreviewActivitySemantics = await window.webContents.executeJavaScript(`(() => {
     const page = document.querySelector('[data-testid="page-knowledge-processing"]')
-    const stageTraces = Array.from(page.querySelectorAll('.processing-stage [data-testid="processing-debug-trace"]'))
-    const result = page.querySelector('[data-testid="processing-result-knowledge_maintenance_agent"]')
+    const agentPreviewPanels = Array.from(page.querySelectorAll('.knowledge-agent [data-testid="agent-preview-invocation"]'))
+    const result = page.querySelector('[data-testid="processing-result-knowledge_maintainer"]')
     result?.scrollIntoView({ block: 'center' })
     return {
-      panelCount: stageTraces.length,
-      maintenanceEventCount: page.querySelectorAll('.processing-stage .agent-trace-message, .processing-stage .agent-trace-tool, .processing-stage .agent-trace-model-activity').length,
-      modelCallAction: Boolean(page.querySelector('.processing-stage .agent-trace-message--assistant button')),
-      agentName: page.querySelector('.processing-stage .agent-run-view__compact-header strong')?.textContent?.trim(),
+      panelCount: agentPreviewPanels.length,
+      maintenanceEventCount: page.querySelectorAll('.knowledge-agent .agent-activity-message, .knowledge-agent .agent-activity-tool, .knowledge-agent .agent-activity-model-activity').length,
+      modelCallAction: Boolean(page.querySelector('.knowledge-agent .agent-activity-message--assistant button')),
+      agentName: page.querySelector('.knowledge-agent .agent-invocation-view__compact-header strong')?.textContent?.trim(),
       resultText: result?.textContent,
       bodyText: page.innerText,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
     }
   })()`)
   await new Promise((resolve) => setTimeout(resolve, 80))
-  await window.webContents.executeJavaScript(`document.querySelector('.processing-stage [data-testid="processing-debug-trace"]')?.scrollIntoView({ block: 'center' })`)
+  await window.webContents.executeJavaScript(`document.querySelector('.knowledge-agent [data-testid="agent-preview-invocation"]')?.scrollIntoView({ block: 'center' })`)
   await new Promise((resolve) => setTimeout(resolve, 80))
-  const maintenanceTraceImage = await window.webContents.capturePage()
+  const maintainerInvocationImage = await window.webContents.capturePage()
   await writeFile(
-    join(dirname(capturePath), 'knowledge-processing-trace-maintenance.png'),
-    maintenanceTraceImage.toPNG()
+    join(dirname(capturePath), 'knowledge-processing-maintainer-invocation.png'),
+    maintainerInvocationImage.toPNG()
   )
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-ai-backends"]').click()`)
   await new Promise((resolve) => setTimeout(resolve, 120))
@@ -1187,7 +1207,8 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   const aiSemantics = await window.webContents.executeJavaScript(`(() => {
     const page = document.querySelector('[data-testid="page-ai-backends"]')
     const agent = {
-      title: page.querySelector('h1')?.textContent,
+      title: document.querySelector('[data-testid="settings-tab-ai-backends"]')?.textContent?.trim(),
+      nestedInSettings: Boolean(page.closest('[data-testid="page-settings"]')),
       backendKind: page.querySelector('[data-testid="backend-kind-select"]')?.value,
       provider: page.querySelector('[data-testid="provider-select"]')?.value,
       codexCards: page.querySelectorAll('[data-testid="codex-runtime-card"]').length,
@@ -1229,10 +1250,10 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     while (page.querySelectorAll('.agent-config-role').length < 3 && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
-    const title = page.querySelector('h1')?.textContent?.trim()
+    const title = document.querySelector('[data-testid="settings-tab-agents"]')?.textContent?.trim()
     const roleCount = page.querySelectorAll('.agent-config-role').length
 
-    page.querySelector('[data-testid="agent-config-role-knowledge_maintenance_agent"]')?.click()
+    page.querySelector('[data-testid="agent-config-role-knowledge_maintainer"]')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
     page.querySelector('[data-testid="agent-config-tab-tools"]')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
@@ -1265,15 +1286,15 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     document.querySelector('[data-testid="nav-knowledge-processing"]')?.click()
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
     const processingPage = document.querySelector('[data-testid="page-knowledge-processing"]')
-    processingPage.querySelector('[data-testid="processing-view-stage-debug"]')?.click()
-    processingPage.querySelector('[data-testid="processing-stage-tab-knowledge_maintenance_agent"]')?.click()
+    processingPage.querySelector('[data-testid="processing-view-agent-preview"]')?.click()
+    processingPage.querySelector('[data-testid="knowledge-agent-tab-knowledge_maintainer"]')?.click()
     deadline = Date.now() + 2_000
     while (
-      !processingPage.querySelector('[data-testid="processing-instructions-knowledge_maintenance_agent"]')?.value?.includes('Configured default from Agent configuration UI.')
+      !processingPage.querySelector('[data-testid="processing-instructions-knowledge_maintainer"]')?.value?.includes('Configured default from Agent configuration UI.')
       && Date.now() < deadline
     ) await new Promise((resolve) => setTimeout(resolve, 25))
     const processingPromptUsesConfiguredDefault = processingPage
-      .querySelector('[data-testid="processing-instructions-knowledge_maintenance_agent"]')
+      .querySelector('[data-testid="processing-instructions-knowledge_maintainer"]')
       ?.value?.includes('Configured default from Agent configuration UI.')
 
     document.querySelector('[data-testid="nav-agent-configuration"]')?.click()
@@ -1287,7 +1308,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     const restoredBadge = page.querySelector('.agent-config-detail__header .processing-mode-badge')?.textContent?.trim()
     const restoredPrompt = page.querySelector('[data-testid="agent-default-prompt-editor"]')?.value
 
-    page.querySelector('[data-testid="agent-config-role-knowledge_reviewer_agent"]')?.click()
+    page.querySelector('[data-testid="agent-config-role-knowledge_reviewer"]')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
     page.querySelector('[data-testid="agent-config-tab-tools"]')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
@@ -1329,11 +1350,12 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     ) await new Promise((resolve) => setTimeout(resolve, 25))
     const chatRestoredPrompt = page.querySelector('[data-testid="agent-default-prompt-editor"]')?.value
 
-    page.querySelector('[data-testid="agent-config-role-knowledge_maintenance_agent"]')?.click()
+    page.querySelector('[data-testid="agent-config-role-knowledge_maintainer"]')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
 
     return {
       title,
+      nestedInSettings: Boolean(page.closest('[data-testid="page-settings"]')),
       roleCount,
       maintenanceToolNames,
       toolsReadOnlyCopy,
@@ -1383,46 +1405,48 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     page.querySelector('[data-testid="chat-send"]')?.click()
     deadline = Date.now() + 5_000
     while (
-      !page.querySelector('.agent-trace-message--assistant')?.textContent?.includes('Fixture 对话 Agent')
+      !page.querySelector('.agent-activity-message--assistant')?.textContent?.includes('Fixture 对话 Agent')
       && !page.querySelector('.page-error')
       && Date.now() < deadline
     ) await new Promise((resolve) => setTimeout(resolve, 25))
-    const modelCallButton = page.querySelector('.agent-trace-message--assistant button')
+    const modelCallButton = page.querySelector('.agent-activity-message--assistant button')
     const messages = page.querySelector('.chat-messages')
     const messageScrollHeightBeforeInspector = messages?.scrollHeight
     modelCallButton?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
     const modelCallInspector = page.querySelector('[data-testid="agent-model-call-inspector"]')
-    const inspectorPanel = page.querySelector('[data-testid="agent-run-inspector"]')
+    const inspectorPanel = page.querySelector('[data-testid="agent-invocation-inspector"]')
     const inspectorBounds = inspectorPanel?.getBoundingClientRect()
     const inspectorPosition = inspectorPanel ? getComputedStyle(inspectorPanel).position : undefined
     const messageHeightStable = messages?.scrollHeight === messageScrollHeightBeforeInspector
     const modelCallContext = page.querySelector('[data-testid="agent-model-call-context"]')?.textContent
     const overflowWithInspector = document.documentElement.scrollWidth > document.documentElement.clientWidth
-    page.querySelector('.agent-run-view__close')?.click()
+    page.querySelector('.agent-invocation-view__close')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
     const workspace = page.querySelector('.chat-workspace')?.getBoundingClientRect()
-    const timelineStyle = page.querySelector('.agent-trace-timeline')
-      ? getComputedStyle(page.querySelector('.agent-trace-timeline'))
+    const timelineStyle = page.querySelector('.agent-activity-timeline')
+      ? getComputedStyle(page.querySelector('.agent-activity-timeline'))
       : undefined
-    const assistantStyle = page.querySelector('.agent-trace-message__text')
-      ? getComputedStyle(page.querySelector('.agent-trace-message__text'))
+    const assistantStyle = page.querySelector('.agent-activity-message__text')
+      ? getComputedStyle(page.querySelector('.agent-activity-message__text'))
       : undefined
     const messagesStyle = messages ? getComputedStyle(messages) : undefined
     return {
       title: page.querySelector('h1')?.textContent?.trim(),
-      sessionCount: page.querySelectorAll('.chat-session').length,
+      conversationCount: page.querySelectorAll('.chat-conversation-item').length,
       selectedModel,
       binding: page.querySelector('[data-testid="chat-current-binding"]')?.textContent?.trim(),
-      userText: page.querySelector('.agent-trace-message--user')?.textContent?.trim(),
-      assistantText: page.querySelector('.agent-trace-message--assistant')?.textContent?.trim(),
-      assistantStrongText: page.querySelector('.agent-trace-message--assistant .agent-trace-message__text strong')?.textContent?.trim(),
-      assistantListItems: page.querySelectorAll('.agent-trace-message--assistant li').length,
-      runViewCount: page.querySelectorAll('[data-testid="agent-run-view"]').length,
+      userText: page.querySelector('.agent-activity-message--user')?.textContent?.trim(),
+      assistantText: page.querySelector('.agent-activity-message--assistant')?.textContent?.trim(),
+      assistantStrongText: page.querySelector('.agent-activity-message--assistant .agent-activity-message__text strong')?.textContent?.trim(),
+      assistantListItems: page.querySelectorAll('.agent-activity-message--assistant li').length,
+      invocationViewCount: page.querySelectorAll('[data-testid="agent-invocation-view"]').length,
       modelCallAction: Boolean(modelCallButton),
       modelCallInspector: Boolean(modelCallInspector),
       modelCallContext,
       inspectorPosition,
+      inspectorRole: inspectorPanel?.getAttribute('role'),
+      inspectorModal: inspectorPanel?.getAttribute('aria-modal'),
       inspectorWithinViewport: Boolean(inspectorBounds
         && inspectorBounds.top >= 52
         && inspectorBounds.right <= window.innerWidth
@@ -1432,6 +1456,9 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       messageFontSize: assistantStyle?.fontSize,
       messageLineHeight: assistantStyle?.lineHeight,
       messagePaddingTop: messagesStyle?.paddingTop,
+      conversationOverflowY: getComputedStyle(page.querySelector('.chat-conversations__list')).overflowY,
+      messagesOverflowY: messagesStyle?.overflowY,
+      documentScrollY: window.scrollY,
       overflowWithInspector,
       composerVisible: Boolean(composer),
       pageError: page.querySelector('.page-error')?.textContent?.trim(),
@@ -1534,7 +1561,9 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
         .map((element) => element.textContent?.trim()),
       markdownHeading: page?.querySelector('[data-testid="folder-browser-markdown"] h1')?.textContent?.trim(),
       pageError: page?.querySelector('.page-error')?.textContent?.trim(),
-      overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth
+      overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      fileTabSelected: document.querySelector('[data-testid="artifacts-tab-files"]')?.getAttribute('aria-selected'),
+      nestedInArtifacts: Boolean(page?.closest('[data-testid="page-artifacts"]'))
     }
   })()`)
   const artifactBrowserImage = await window.webContents.capturePage()
@@ -1571,8 +1600,8 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   const processingStateAfterNavigation = await window.webContents.executeJavaScript(`(() => {
     const page = document.querySelector('[data-testid="page-knowledge-processing"]')
     return {
-      selectedSession: page.querySelector('[data-testid="full-chain-session-select"]')?.value,
-      stageDebugSelected: page.querySelector('[data-testid="processing-view-stage-debug"]')?.getAttribute('aria-selected')
+      selectedSourceConversation: page.querySelector('[data-testid="knowledge-task-source-conversation-select"]')?.value,
+      agentPreviewSelected: page.querySelector('[data-testid="processing-view-agent-preview"]')?.getAttribute('aria-selected')
     }
   })()`)
   await writeFile(
@@ -1593,15 +1622,15 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
         clear: clearKnowledgeSemantics
       },
       processing: {
-        fullChain: fullChainSemantics,
-        fullChainRun: fullChainRunSemantics,
+        knowledgeTask: knowledgeTaskSemantics,
+        knowledgeTaskActivity: knowledgeTaskActivitySemantics,
         history: {
           ...processingHistorySemantics,
           productionTitles: productionTitlesAfterProcessing
         },
         ...processingSemantics,
         promptRestore: promptRestoreSemantics,
-        trace: traceSemantics,
+        agentPreviewActivity: agentPreviewActivitySemantics,
         stateAfterNavigation: processingStateAfterNavigation
       }
     }, null, 2)}\n`,
@@ -1662,6 +1691,9 @@ app.whenReady().then(async () => {
   if (fixtureMode()) await initializeFixtureSkills(skillDiscoveryHomeDirectory())
   const repository = new OysterRepository(join(app.getPath('userData'), 'repository'))
   await repository.initialize()
+  const agentDebugStore = new FileAgentDebugStore(
+    join(app.getPath('userData'), 'agent-debug', 'invocations')
+  )
   const artifactService = new ArtifactService(repository)
   const folderBrowser = new FolderBrowserService()
   const designDocumentsPath = app.isPackaged
@@ -1670,26 +1702,37 @@ app.whenReady().then(async () => {
   const managedSkillService = createManagedSkillService(artifactService)
   aiBackendService = createBackendService()
   knowledgeStore = new FileKnowledgeStore(repository.knowledgePath)
-  knowledgeFullChainRunRepository = new FileKnowledgeFullChainRunRepository(repository.runsPath)
-  const processingRepository = new ProcessingRepository(repository)
+  knowledgeTaskHistory = new FileKnowledgeTaskHistory(repository.tasksPath)
+  const processingRepository = new KnowledgeTaskWorkspaceRepository(repository)
   knowledgeProcessingService = createKnowledgeProcessingService(
     aiBackendService,
-    processingRepository
+    processingRepository,
+    agentDebugStore
   )
-  chatSessionRepository = new PiChatSessionRepository(join(app.getPath('userData'), 'chat-sessions'))
+  chatConversationRepository = new PiChatConversationRepository(
+    join(app.getPath('userData'), 'chat-conversations'),
+    agentDebugStore
+  )
   chatAgentService = new ChatAgentService({
-    sessions: chatSessionRepository,
+    conversations: chatConversationRepository,
     configuration: new JsonChatConfigurationRepository(
       join(app.getPath('userData'), 'chat-agent.json')
     ),
     aiBackend: aiBackendService,
-    repositoryPath: repository.rootPath
+    repositoryPath: repository.rootPath,
+    debugStore: agentDebugStore,
+    agent: new PiChatAgent(
+      repository.rootPath,
+      join(app.getPath('userData'), 'pi-agent'),
+      agentDebugStore
+    )
   })
-  knowledgeFullChainService = new KnowledgeFullChainService(
+  knowledgeTaskService = new KnowledgeTaskService(
     service,
     knowledgeProcessingService,
     processingRepository,
-    knowledgeFullChainRunRepository
+    knowledgeTaskHistory,
+    agentDebugStore
   )
   const artifactInitialization = artifactService.initialize().catch((error: unknown) => {
     console.error('Artifact 层初始化失败；可在产物页面重试。', error)
@@ -1710,7 +1753,7 @@ app.whenReady().then(async () => {
   registerKnowledgeProcessingIpc(
     service,
     knowledgeProcessingService,
-    knowledgeFullChainService,
+    knowledgeTaskService,
     () => mainWindow
   )
   registerKnowledgeIpc(
@@ -1718,6 +1761,10 @@ app.whenReady().then(async () => {
     () => mainWindow
   )
   registerChatIpc(chatAgentService, () => mainWindow)
+  registerPiExtensionConfigurationIpc(
+    new PiExtensionConfigurationService(join(app.getPath('userData'), 'pi-agent')),
+    () => mainWindow
+  )
   await createMainWindow()
 
   app.on('activate', () => {
@@ -1727,10 +1774,10 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', () => {
   chatAgentService?.dispose()
-  knowledgeFullChainService?.dispose()
+  knowledgeTaskService?.dispose()
   knowledgeProcessingService?.dispose()
   aiBackendService?.dispose()
-  void chatSessionRepository?.dispose()
+  void chatConversationRepository?.dispose()
 })
 
 app.on('window-all-closed', () => {

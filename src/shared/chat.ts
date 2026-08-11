@@ -1,17 +1,21 @@
 import type { LlmBinding } from './ai-backends'
-import type { AgentRunRecord, SerializableJsonValue } from './agent-runtime'
-import type { ProcessingToolView } from './knowledge-processing'
+import type {
+  AgentInvocationDebugRecord,
+  AgentInvocationRecord,
+  SerializableJsonValue
+} from './agent-runtime'
+import type { AgentToolDefinitionView } from './knowledge-processing'
 
 export const CHAT_AGENT_ID = 'chat_agent' as const
 
-export interface ChatSessionModelBinding extends LlmBinding {}
+export interface ChatConversationModelBinding extends LlmBinding {}
 
-/** Immutable execution binding captured when a conversation is created. */
-export interface ChatSessionBinding extends ChatSessionModelBinding {
+/** Immutable execution binding captured when a Chat Conversation is created. */
+export interface ChatConversationBinding extends ChatConversationModelBinding {
   systemPrompt: string
 }
 
-export interface ChatTranscriptEntry {
+export interface ConversationEntry {
   id: string
   createdAt: string
   message: ChatMessageView
@@ -48,54 +52,54 @@ export type ChatMessageView =
       timestamp: number
     }
 
-export interface ChatSessionSummary {
+export interface ChatConversationSummary {
   id: string
   title?: string
   createdAt: string
   updatedAt: string
   messageCount: number
-  /** Renderer-visible model selection; the frozen System Prompt remains in session storage. */
-  binding: ChatSessionModelBinding
-  isRunning: boolean
+  binding: ChatConversationModelBinding
+  hasActiveInvocation: boolean
 }
 
-export interface ChatSessionDetail extends ChatSessionSummary {
-  messages: ChatTranscriptEntry[]
-  runs: AgentRunRecord[]
+export interface ChatConversationDetail extends ChatConversationSummary {
+  messages: ConversationEntry[]
+  /** Debug projections loaded from the local Debug Store for inspection. */
+  invocations: AgentInvocationDebugRecord[]
 }
 
 export interface ChatAgentConfigurationView {
   id: typeof CHAT_AGENT_ID
   displayName: string
   description: string
-  runtime: 'pi_agent_core'
-  tools: ProcessingToolView[]
+  runtime: 'pi_coding_agent'
+  tools: AgentToolDefinitionView[]
   builtInInstructions: string
   defaultInstructions: string
   isDefaultCustomized: boolean
 }
 
-export interface ChatSnapshot {
+export interface ChatStateView {
   agent: ChatAgentConfigurationView
-  sessions: ChatSessionSummary[]
+  conversations: ChatConversationSummary[]
   configurationError?: string
 }
 
-export interface CreateChatSessionInput {
+export interface CreateChatConversationInput {
   title?: string
 }
 
 export interface SendChatMessageInput {
-  sessionId: string
+  conversationId: string
   text: string
 }
 
-export interface DeleteChatSessionInput {
-  sessionId: string
+export interface DeleteChatConversationInput {
+  conversationId: string
 }
 
-export interface CancelChatRunInput {
-  sessionId: string
+export interface CancelChatInvocationInput {
+  conversationId: string
 }
 
 export interface SaveChatDefaultInstructionsInput {
@@ -104,31 +108,32 @@ export interface SaveChatDefaultInstructionsInput {
 }
 
 export type ChatEvent =
-  | { type: 'snapshot_changed'; snapshot: ChatSnapshot }
+  | { type: 'state_changed'; state: ChatStateView }
   | {
-      type: 'run_state_changed'
-      sessionId: string
-      status: 'running' | 'completed' | 'failed' | 'cancelled'
+      type: 'invocation_state_changed'
+      conversationId: string
+      invocationId: string
+      status: AgentInvocationRecord['status']
       error?: string
     }
   | {
       type: 'message_appended'
-      sessionId: string
-      entry: ChatTranscriptEntry
+      conversationId: string
+      entry: ConversationEntry
     }
   | {
-      type: 'run_updated'
-      sessionId: string
-      run: AgentRunRecord
+      type: 'invocation_updated'
+      conversationId: string
+      invocation: AgentInvocationDebugRecord
     }
 
 export interface ChatApi {
-  getSnapshot(): Promise<ChatSnapshot>
-  createSession(input: CreateChatSessionInput): Promise<ChatSessionDetail>
-  readSession(sessionId: string): Promise<ChatSessionDetail>
-  deleteSession(input: DeleteChatSessionInput): Promise<ChatSnapshot>
-  sendMessage(input: SendChatMessageInput): Promise<ChatSessionDetail>
-  cancelRun(input: CancelChatRunInput): Promise<void>
-  saveDefaultInstructions(input: SaveChatDefaultInstructionsInput): Promise<ChatSnapshot>
+  getState(): Promise<ChatStateView>
+  createConversation(input: CreateChatConversationInput): Promise<ChatConversationDetail>
+  readConversation(conversationId: string): Promise<ChatConversationDetail>
+  deleteConversation(input: DeleteChatConversationInput): Promise<ChatStateView>
+  sendMessage(input: SendChatMessageInput): Promise<ChatConversationDetail>
+  cancelInvocation(input: CancelChatInvocationInput): Promise<void>
+  saveDefaultInstructions(input: SaveChatDefaultInstructionsInput): Promise<ChatStateView>
   subscribe(listener: (event: ChatEvent) => void): () => void
 }

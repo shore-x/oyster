@@ -100,7 +100,7 @@ async function readJsonLinesHead(filePath: string): Promise<Record<string, unkno
         const record = asRecord(JSON.parse(line))
         if (record) records.push(record)
       } catch {
-        // A malformed event does not invalidate a session when its header is readable.
+        // A malformed event does not invalidate a conversation when its header is readable.
       }
     }
     return records
@@ -149,7 +149,7 @@ function safeResolve(rootPath: string, relativePath: string): string {
   const root = resolve(rootPath)
   const target = resolve(root, relativePath)
   if (target !== root && !target.startsWith(`${root}${sep}`)) {
-    throw new Error('Session path escapes the configured history directory')
+    throw new Error('Conversation path escapes the configured history directory')
   }
   return target
 }

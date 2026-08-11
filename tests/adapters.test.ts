@@ -179,7 +179,7 @@ describe('Agent observation adapters', () => {
 
     expect(observation.canonicalActivity.formatVersion).toBe('codex-canonical-activity-v3')
     expect(observation.canonicalActivity.items.map((item) => item.kind)).toEqual([
-      'session', 'user_message', 'tool_call', 'assistant_message'
+      'conversation_context', 'user_message', 'tool_call', 'assistant_message'
     ])
     expect(activityText).toContain('Investigate the real user problem.')
     expect(activityText).toContain('Readable final answer.')
@@ -240,7 +240,7 @@ describe('Agent observation adapters', () => {
       }]
     })
     expect(item.content).toContain('JSONL record (opaque)')
-    expect(item.content).toContain('Raw source locator in the Run input')
+    expect(item.content).toContain('Raw source locator in the Task input')
     expect(item.content).not.toContain('read_evidence')
     expect(item.content).not.toContain(content)
   })

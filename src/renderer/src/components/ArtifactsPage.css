@@ -1,4 +1,14 @@
-.artifacts-page { min-width: 0; }
+.artifacts-page { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; }
+.artifacts-page__tabs { margin-top: 4px; }
+.artifacts-page__panel { min-width: 0; min-height: 0; }
+.artifacts-page__panel[hidden] { display: none; }
+.artifacts-page__panel--overview { flex: 1; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 0 2px 30px; scrollbar-gutter: stable; }
+.artifacts-page__panel--files { flex: 1; overflow: hidden; padding-top: 16px; }
+.artifacts-page__panel--files > [data-testid="page-folder-browser"] { height: 100%; min-height: 0; }
+.artifacts-page__file-empty { display: grid; height: 100%; min-height: 260px; place-items: center; align-content: center; padding: 32px; color: var(--text-muted); border: 1px dashed var(--border-strong); border-radius: var(--radius-surface); text-align: center; }
+.artifacts-page__file-empty > .ui-icon { width: 22px; height: 22px; }
+.artifacts-page__file-empty strong { margin-top: 10px; color: var(--text-secondary); font-size: var(--font-size-body-sm); }
+.artifacts-page__file-empty p { margin: 5px 0 16px; font-size: var(--font-size-label); }
 
 .artifact-repository,
 .artifact-create,

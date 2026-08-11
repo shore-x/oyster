@@ -3,20 +3,20 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   CHAT_AGENT_ID,
   type ChatApi,
-  type ChatSnapshot
+  type ChatStateView
 } from '../src/shared/chat'
 import type {
   KnowledgeProcessingApi,
-  KnowledgeProcessingSnapshot,
-  ProcessingStageView
+  KnowledgeProcessingStateView,
+  KnowledgeAgentDefinitionView
 } from '../src/shared/knowledge-processing'
 import { createAgentConfigurationController } from '../src/renderer/src/agent-configuration-controller'
 
 vi.mock('solid-js', async () => vi.importActual('solid-js/dist/solid.js'))
 
-function processingStage(
-  overrides: Pick<ProcessingStageView, 'id' | 'displayName' | 'runtime'>
-): ProcessingStageView {
+function knowledgeAgent(
+  overrides: Pick<KnowledgeAgentDefinitionView, 'id' | 'displayName' | 'runtime'>
+): KnowledgeAgentDefinitionView {
   return {
     ...overrides,
     description: `${overrides.displayName} description`,
@@ -37,43 +37,43 @@ function processingStage(
   }
 }
 
-const PROCESSING_SNAPSHOT: KnowledgeProcessingSnapshot = {
-  stages: [
-    processingStage({
-      id: 'knowledge_maintenance_agent',
+const PROCESSING_SNAPSHOT: KnowledgeProcessingStateView = {
+  agents: [
+    knowledgeAgent({
+      id: 'knowledge_maintainer',
       displayName: 'Knowledge Maintenance Agent',
-      runtime: 'pi_agent_core'
+      runtime: 'pi_coding_agent'
     })
   ],
   connections: [],
-  runningStageIds: [],
-  debugTraces: []
+  activeAgentIds: [],
+  liveInvocations: []
 }
 
-const CHAT_SNAPSHOT: ChatSnapshot = {
+const CHAT_SNAPSHOT: ChatStateView = {
   agent: {
     id: CHAT_AGENT_ID,
     displayName: '通用 Agent',
     description: 'General Agent description',
-    runtime: 'pi_agent_core',
+    runtime: 'pi_coding_agent',
     tools: [],
     builtInInstructions: 'Chat built in',
     defaultInstructions: 'Chat default',
     isDefaultCustomized: false
   },
-  sessions: []
+  conversations: []
 }
 
 function installApis() {
   const saveProcessingDefault = vi.fn(async () => PROCESSING_SNAPSHOT)
   const saveChatDefault = vi.fn(async () => CHAT_SNAPSHOT)
   const knowledgeProcessing = {
-    getSnapshot: async () => PROCESSING_SNAPSHOT,
-    saveDefaultInstructions: saveProcessingDefault,
+    getState: async () => PROCESSING_SNAPSHOT,
+    saveAgentDefaultInstructions: saveProcessingDefault,
     subscribe: () => () => undefined
   } as unknown as KnowledgeProcessingApi
   const chat = {
-    getSnapshot: async () => CHAT_SNAPSHOT,
+    getState: async () => CHAT_SNAPSHOT,
     saveDefaultInstructions: saveChatDefault,
     subscribe: () => () => undefined
   } as unknown as ChatApi
@@ -93,16 +93,16 @@ describe('agent configuration controller', () => {
         await vi.waitFor(() => expect(controller.loading()).toBe(false))
 
         expect(controller.roles().map((role) => role.id)).toEqual([
-          'knowledge_maintenance_agent',
+          'knowledge_maintainer',
           CHAT_AGENT_ID
         ])
-        expect(controller.roles().every((role) => role.runtime === 'pi_agent_core')).toBe(true)
+        expect(controller.roles().every((role) => role.runtime === 'pi_coding_agent')).toBe(true)
         await expect(controller.saveDefaultInstructions(
-          'knowledge_maintenance_agent',
+          'knowledge_maintainer',
           'Maintainer override'
         )).resolves.toBe(true)
         expect(saveProcessingDefault).toHaveBeenCalledWith({
-          stageId: 'knowledge_maintenance_agent',
+          agentId: 'knowledge_maintainer',
           instructionsOverride: 'Maintainer override'
         })
 

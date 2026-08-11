@@ -32,7 +32,7 @@ export interface SkillDiscoveryError {
   message: string
 }
 
-export interface SkillDiscoverySnapshot {
+export interface SkillDiscoveryStateView {
   skills: DiscoveredSkill[]
   errors: SkillDiscoveryError[]
   scannedAt?: string
@@ -97,8 +97,8 @@ export interface ManagedSkillBindingInput {
 }
 
 export interface SkillApi {
-  getDiscoverySnapshot(): Promise<SkillDiscoverySnapshot>
-  discover(): Promise<SkillDiscoverySnapshot>
+  getDiscoveryStateView(): Promise<SkillDiscoveryStateView>
+  discover(): Promise<SkillDiscoveryStateView>
   readDiscoveredDocument(skillId: string): Promise<SkillDocument>
   openDiscoveredFolder(skillId: string): Promise<void>
   getManagedSnapshot(): Promise<ManagedSkillSnapshot>

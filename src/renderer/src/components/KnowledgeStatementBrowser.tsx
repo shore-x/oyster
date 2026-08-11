@@ -19,9 +19,9 @@ import {
   parseKnowledgeStatementContent
 } from '../../../shared/knowledge-reference'
 import {
-  KnowledgeExplorerSession,
-  type KnowledgeExplorerSessionSnapshot
-} from '../knowledge-explorer-session'
+  KnowledgeExplorerNavigation,
+  type KnowledgeExplorerNavigationSnapshot
+} from '../knowledge-explorer-navigation'
 import { Button } from '../ui'
 import { KnowledgeReferenceExplorer } from './KnowledgeReferenceExplorer'
 
@@ -74,8 +74,8 @@ export function parseStatementContent(content: string): StatementContentPart[] {
 
 export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps) {
   const previewId = `knowledge-statement-preview-${createUniqueId()}`
-  const explorerSession = new KnowledgeExplorerSession(props.selectedTitle)
-  const [session, setSession] = createSignal<KnowledgeExplorerSessionSnapshot>(explorerSession.snapshot())
+  const navigation = new KnowledgeExplorerNavigation(props.selectedTitle)
+  const [navigationState, setNavigationState] = createSignal<KnowledgeExplorerNavigationSnapshot>(navigation.snapshot())
   const [previews, setPreviews] = createSignal<Record<string, StatementPreviewState>>({})
   const [previewOverlay, setPreviewOverlay] = createSignal<StatementPreviewOverlay>()
   const previewLoads = new Map<string, Promise<KnowledgeStatement | undefined>>()
@@ -84,16 +84,16 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
   createEffect(() => {
     const navigationKey = props.navigationKey
     const selectedTitle = props.selectedTitle
-    const currentTitle = untrack(() => session().currentTitle)
+    const currentTitle = untrack(() => navigationState().currentTitle)
     if (navigationKey !== previousNavigationKey) {
       previousNavigationKey = navigationKey
       previewLoads.clear()
       setPreviews({})
-      setSession(explorerSession.reset(selectedTitle))
+      setNavigationState(navigation.reset(selectedTitle))
       return
     }
     if (selectedTitle !== currentTitle) {
-      setSession(explorerSession.reset(selectedTitle))
+      setNavigationState(navigation.reset(selectedTitle))
     }
   })
 
@@ -143,22 +143,22 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
 
   function navigate(title: string): void {
     setPreviewOverlay(undefined)
-    if (session().currentTitle === title) return
-    setSession(explorerSession.navigate(title))
+    if (navigationState().currentTitle === title) return
+    setNavigationState(navigation.navigate(title))
     void props.onSelect(title)
   }
 
   function moveHistory(offset: -1 | 1): void {
-    const next = explorerSession.move(offset)
+    const next = navigation.move(offset)
     const title = next.currentTitle
     if (!title) return
     setPreviewOverlay(undefined)
-    setSession(next)
+    setNavigationState(next)
     void props.onSelect(title)
   }
 
   function hoverGraphNode(title?: string): void {
-    setSession(explorerSession.hover(title))
+    setNavigationState(navigation.hover(title))
   }
 
   async function loadPreview(title: string): Promise<KnowledgeStatement | undefined> {
@@ -255,7 +255,7 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
                     data-testid="statement-nav-back"
                     aria-label="后退到上一个 Statement"
                     title="后退"
-                    disabled={session().historyIndex <= 0}
+                    disabled={navigationState().historyIndex <= 0}
                     onClick={() => moveHistory(-1)}
                   >后退</Button>
                   <Button
@@ -264,17 +264,17 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
                     data-testid="statement-nav-forward"
                     aria-label="前进到下一个 Statement"
                     title="前进"
-                    disabled={session().historyIndex < 0 || session().historyIndex >= session().history.length - 1}
+                    disabled={navigationState().historyIndex < 0 || navigationState().historyIndex >= navigationState().history.length - 1}
                     onClick={() => moveHistory(1)}
                   >前进</Button>
                 </div>
-                <span>{session().historyIndex >= 0 ? `${session().historyIndex + 1} / ${session().history.length}` : ''}</span>
+                <span>{navigationState().historyIndex >= 0 ? `${navigationState().historyIndex + 1} / ${navigationState().history.length}` : ''}</span>
               </div>
               <Show when={props.neighborhood}>
                 {(projection) => (
                   <KnowledgeReferenceExplorer
                     projection={projection()}
-                    hoveredTitle={session().hoveredTitle}
+                    hoveredTitle={navigationState().hoveredTitle}
                     onSelect={navigate}
                     onHover={hoverGraphNode}
                   />

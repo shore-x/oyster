@@ -1,12 +1,12 @@
 import { Type } from '@earendil-works/pi-ai'
 import { createCodingTools } from '@earendil-works/pi-coding-agent'
-import type { ProcessingToolView } from '../../shared/knowledge-processing'
+import type { AgentToolDefinitionView } from '../../shared/knowledge-processing'
 import { AGENT_TODO_TOOL_CATALOG } from '../agent-runtime/agent-todos'
 
 export const spawnAgentParameters = Type.Object({
-  task: Type.String({
+  instruction: Type.String({
     minLength: 1,
-    description: 'The complete task to run in a new Agent context. Include any context the new Agent needs.'
+    description: 'The complete instruction for a new Agent Invocation. Include any context the new Agent needs.'
   })
 }, { additionalProperties: false })
 
@@ -14,7 +14,7 @@ const CHAT_AGENT_TOOL_CATALOG = [
   {
     name: 'spawn_agent',
     label: '创建子 Agent',
-    description: 'Run a delegated task in a new general Agent with an independent conversation context. The new Agent does not see the current conversation; required context must be included in the task. Returns its final response.',
+    description: 'Invoke a delegated general Agent with an independent conversation context. The new Agent does not see the current conversation; required context must be included in the instruction. Returns its final response.',
     parameters: spawnAgentParameters
   },
   ...AGENT_TODO_TOOL_CATALOG
@@ -31,11 +31,11 @@ export function chatAgentToolDefinition<TName extends ChatAgentToolName>(name: T
   return definition as Extract<(typeof CHAT_AGENT_TOOL_CATALOG)[number], { name: TName }>
 }
 
-function serializableParameters(parameters: object): ProcessingToolView['parameters'] {
-  return JSON.parse(JSON.stringify(parameters)) as ProcessingToolView['parameters']
+function serializableParameters(parameters: object): AgentToolDefinitionView['parameters'] {
+  return JSON.parse(JSON.stringify(parameters)) as AgentToolDefinitionView['parameters']
 }
 
-export function chatAgentToolViews(repositoryPath: string): readonly ProcessingToolView[] {
+export function chatAgentToolViews(repositoryPath: string): readonly AgentToolDefinitionView[] {
   return [
     ...createCodingTools(repositoryPath).map((tool) => ({
       name: tool.name,

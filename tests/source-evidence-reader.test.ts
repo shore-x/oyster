@@ -28,7 +28,7 @@ describe('FileSourceEvidenceReader', () => {
     const metadata = await stat(sourcePath)
 
     const evidence = await new FileSourceEvidenceReader().read({
-      sourceRecordId: 'record-one',
+      sourceConversationId: 'record-one',
       absolutePath: sourcePath,
       expectedSizeBytes: metadata.size,
       expectedModifiedAt: metadata.mtime.toISOString()
@@ -51,7 +51,7 @@ describe('FileSourceEvidenceReader', () => {
     const metadata = await stat(sourcePath)
 
     const evidence = await new FileSourceEvidenceReader().read({
-      sourceRecordId: 'record-large',
+      sourceConversationId: 'record-large',
       absolutePath: sourcePath,
       expectedSizeBytes: metadata.size,
       expectedModifiedAt: metadata.mtime.toISOString()
@@ -71,7 +71,7 @@ describe('FileSourceEvidenceReader', () => {
     const metadata = await stat(sourcePath)
     const reader = new FileSourceEvidenceReader()
     const input = {
-      sourceRecordId: 'record-one',
+      sourceConversationId: 'record-one',
       absolutePath: sourcePath,
       expectedSizeBytes: metadata.size,
       expectedModifiedAt: metadata.mtime.toISOString(),
@@ -104,9 +104,9 @@ describe('FileSourceEvidenceReader', () => {
 describe('MemorySourceEvidenceReader', () => {
   it('provides the same optional caller-owned read bound for deterministic fixtures', async () => {
     const content = Buffer.from('{"sessionId":"fixture"}\n', 'utf8')
-    const reader = new MemorySourceEvidenceReader([{ sourceRecordId: 'record-fixture', content }])
+    const reader = new MemorySourceEvidenceReader([{ sourceConversationId: 'record-fixture', content }])
     const input = {
-      sourceRecordId: 'record-fixture',
+      sourceConversationId: 'record-fixture',
       absolutePath: '/not-used-by-memory-reader.jsonl',
       expectedSizeBytes: content.length,
       expectedModifiedAt: '2026-07-26T00:00:00.000Z'
@@ -121,7 +121,7 @@ describe('MemorySourceEvidenceReader', () => {
       .rejects.toThrow('revision has changed')
     await expect(reader.read({ ...input, maxBytes: content.length - 1 }))
       .rejects.toThrow('read limit')
-    await expect(reader.read({ ...input, sourceRecordId: 'missing' }))
+    await expect(reader.read({ ...input, sourceConversationId: 'missing' }))
       .rejects.toThrow('no longer available')
   })
 })

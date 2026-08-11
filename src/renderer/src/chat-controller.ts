@@ -1,26 +1,26 @@
 import { createSignal, onCleanup, onMount } from 'solid-js'
 import type { AiBackendSnapshot } from '../../shared/ai-backends'
 import type {
+  ChatConversationDetail,
   ChatEvent,
-  ChatSessionDetail,
-  ChatSnapshot
+  ChatStateView
 } from '../../shared/chat'
 
-const EMPTY_CHAT_SNAPSHOT: ChatSnapshot = {
+const EMPTY_CHAT_STATE: ChatStateView = {
   agent: {
     id: 'chat_agent',
     displayName: 'Conversation Agent',
     description: '',
-    runtime: 'pi_agent_core',
+    runtime: 'pi_coding_agent',
     tools: [],
     builtInInstructions: '',
     defaultInstructions: '',
     isDefaultCustomized: false
   },
-  sessions: []
+  conversations: []
 }
 
-const EMPTY_BACKEND_SNAPSHOT: AiBackendSnapshot = { options: [], connections: [] }
+const EMPTY_BACKEND_STATE: AiBackendSnapshot = { options: [], connections: [] }
 
 export interface ChatSendOutcome {
   completed: boolean
@@ -37,44 +37,47 @@ function isCancellation(cause: unknown): boolean {
 }
 
 export function createChatController() {
-  const [snapshot, setSnapshot] = createSignal<ChatSnapshot>(EMPTY_CHAT_SNAPSHOT)
-  const [backendSnapshot, setBackendSnapshot] = createSignal<AiBackendSnapshot>(EMPTY_BACKEND_SNAPSHOT)
-  const [selectedSessionId, setSelectedSessionId] = createSignal<string>()
-  const [session, setSession] = createSignal<ChatSessionDetail>()
+  const [state, setState] = createSignal<ChatStateView>(EMPTY_CHAT_STATE)
+  const [backendState, setBackendState] = createSignal<AiBackendSnapshot>(EMPTY_BACKEND_STATE)
+  const [selectedConversationId, setSelectedConversationId] = createSignal<string>()
+  const [conversation, setConversation] = createSignal<ChatConversationDetail>()
   const [creatingNew, setCreatingNew] = createSignal(true)
   const [loading, setLoading] = createSignal(true)
-  const [loadingSessionId, setLoadingSessionId] = createSignal<string>()
+  const [loadingConversationId, setLoadingConversationId] = createSignal<string>()
   const [sending, setSending] = createSignal(false)
-  const [cancellingSessionId, setCancellingSessionId] = createSignal<string>()
+  const [cancellingConversationId, setCancellingConversationId] = createSignal<string>()
   const [error, setError] = createSignal<string>()
-  const [runStates, setRunStates] = createSignal<Record<string, ChatEvent & { type: 'run_state_changed' }>>({})
+  const [invocationStates, setInvocationStates] = createSignal<Record<
+    string,
+    Extract<ChatEvent, { type: 'invocation_state_changed' }>
+  >>({})
   let readGeneration = 0
   let selectionInitialized = false
 
-  function replaceSummary(detail: ChatSessionDetail): void {
-    setSnapshot((current) => {
-      const existing = current.sessions.some((candidate) => candidate.id === detail.id)
-      const sessions = existing
-        ? current.sessions.map((candidate) => candidate.id === detail.id ? detail : candidate)
-        : [detail, ...current.sessions]
-      return { ...current, sessions }
+  function replaceSummary(detail: ChatConversationDetail): void {
+    setState((current) => {
+      const existing = current.conversations.some((candidate) => candidate.id === detail.id)
+      const conversations = existing
+        ? current.conversations.map((candidate) => candidate.id === detail.id ? detail : candidate)
+        : [detail, ...current.conversations]
+      return { ...current, conversations }
     })
   }
 
   function handleEvent(event: ChatEvent): void {
-    if (event.type === 'snapshot_changed') {
-      setSnapshot(event.snapshot)
+    if (event.type === 'state_changed') {
+      setState(event.state)
       return
     }
-    if (event.type === 'run_state_changed') {
-      setRunStates((current) => ({ ...current, [event.sessionId]: event }))
-      if (event.status === 'failed') setError(event.error || '对话 Agent 运行失败。')
+    if (event.type === 'invocation_state_changed') {
+      setInvocationStates((current) => ({ ...current, [event.conversationId]: event }))
+      if (event.status === 'failed') setError(event.error || '对话 Agent Invocation 失败。')
       return
     }
     if (event.type === 'message_appended') {
-      if (event.sessionId === selectedSessionId()) {
-        setSession((current) => {
-          if (!current || current.id !== event.sessionId) return current
+      if (event.conversationId === selectedConversationId()) {
+        setConversation((current) => {
+          if (!current || current.id !== event.conversationId) return current
           const messages = current.messages.some((entry) => entry.id === event.entry.id)
             ? current.messages.map((entry) => entry.id === event.entry.id ? event.entry : entry)
             : [...current.messages, event.entry]
@@ -83,37 +86,38 @@ export function createChatController() {
       }
       return
     }
-    if (event.type === 'run_updated') {
-      if (event.sessionId === selectedSessionId()) {
-        setSession((current) => {
-          if (!current || current.id !== event.sessionId) return current
-          const runs = current.runs.some((run) => run.id === event.run.id)
-            ? current.runs.map((run) => run.id === event.run.id ? event.run : run)
-            : [...current.runs, event.run]
-          return { ...current, runs }
-        })
-      }
-      return
+    if (event.conversationId === selectedConversationId()) {
+      setConversation((current) => {
+        if (!current || current.id !== event.conversationId) return current
+        const invocations = current.invocations.some(
+          (invocation) => invocation.id === event.invocation.id
+        )
+          ? current.invocations.map((invocation) => (
+              invocation.id === event.invocation.id ? event.invocation : invocation
+            ))
+          : [...current.invocations, event.invocation]
+        return { ...current, invocations }
+      })
     }
   }
 
-  async function readSession(sessionId: string): Promise<boolean> {
+  async function readConversation(conversationId: string): Promise<boolean> {
     const generation = ++readGeneration
     setCreatingNew(false)
-    setSelectedSessionId(sessionId)
-    setLoadingSessionId(sessionId)
+    setSelectedConversationId(conversationId)
+    setLoadingConversationId(conversationId)
     setError(undefined)
     try {
-      const detail = await window.oyster.chat.readSession(sessionId)
-      if (generation !== readGeneration || selectedSessionId() !== sessionId) return false
-      setSession(detail)
+      const detail = await window.oyster.chat.readConversation(conversationId)
+      if (generation !== readGeneration || selectedConversationId() !== conversationId) return false
+      setConversation(detail)
       replaceSummary(detail)
       return true
     } catch (cause) {
       if (generation === readGeneration) setError(errorText(cause))
       return false
     } finally {
-      if (generation === readGeneration) setLoadingSessionId(undefined)
+      if (generation === readGeneration) setLoadingConversationId(undefined)
     }
   }
 
@@ -121,37 +125,37 @@ export function createChatController() {
     readGeneration++
     selectionInitialized = true
     setCreatingNew(true)
-    setSelectedSessionId(undefined)
-    setSession(undefined)
-    setLoadingSessionId(undefined)
+    setSelectedConversationId(undefined)
+    setConversation(undefined)
+    setLoadingConversationId(undefined)
     setError(undefined)
   }
 
   onMount(() => {
-    let receivedChatSnapshot = false
-    let receivedBackendSnapshot = false
+    let receivedChatState = false
+    let receivedBackendState = false
     const unsubscribeChat = window.oyster.chat.subscribe((event) => {
-      if (event.type === 'snapshot_changed') receivedChatSnapshot = true
+      if (event.type === 'state_changed') receivedChatState = true
       handleEvent(event)
     })
     const unsubscribeBackends = window.oyster.aiBackends.subscribe((next) => {
-      receivedBackendSnapshot = true
-      setBackendSnapshot(next)
+      receivedBackendState = true
+      setBackendState(next)
     })
 
     void Promise.all([
-      window.oyster.chat.getSnapshot().then((initial) => {
-        if (!receivedChatSnapshot) setSnapshot(initial)
+      window.oyster.chat.getState().then((initial) => {
+        if (!receivedChatState) setState(initial)
         if (selectionInitialized) return
         selectionInitialized = true
-        const first = initial.sessions
+        const first = initial.conversations
           .slice()
           .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]
-        if (first) void readSession(first.id)
+        if (first) void readConversation(first.id)
         else startNew()
       }),
       window.oyster.aiBackends.getSnapshot().then((initial) => {
-        if (!receivedBackendSnapshot) setBackendSnapshot(initial)
+        if (!receivedBackendState) setBackendState(initial)
       })
     ]).catch((cause) => setError(errorText(cause))).finally(() => setLoading(false))
 
@@ -166,54 +170,40 @@ export function createChatController() {
     if (!normalized || sending()) return { completed: false, userMessageRecorded: false }
     setSending(true)
     setError(undefined)
-    let sessionId = selectedSessionId()
+    let conversationId = selectedConversationId()
     const previousMessageIds = new Set(
-      session()?.id === sessionId ? session()?.messages.map((entry) => entry.id) : []
+      conversation()?.id === conversationId
+        ? conversation()?.messages.map((entry) => entry.id)
+        : []
     )
     try {
-      if (!sessionId) {
-        const created = await window.oyster.chat.createSession({})
+      if (!conversationId) {
+        const created = await window.oyster.chat.createConversation({})
         selectionInitialized = true
         setCreatingNew(false)
-        setSelectedSessionId(created.id)
-        setSession(created)
+        setSelectedConversationId(created.id)
+        setConversation(created)
         replaceSummary(created)
-        sessionId = created.id
+        conversationId = created.id
       }
-      setRunStates((current) => ({
-        ...current,
-        [sessionId!]: { type: 'run_state_changed', sessionId: sessionId!, status: 'running' }
-      }))
-      const detail = await window.oyster.chat.sendMessage({ sessionId, text: normalized })
-      if (selectedSessionId() === sessionId) setSession(detail)
+      const detail = await window.oyster.chat.sendMessage({ conversationId, text: normalized })
+      if (selectedConversationId() === conversationId) setConversation(detail)
       replaceSummary(detail)
       return { completed: true, userMessageRecorded: true }
     } catch (cause) {
-      if (sessionId) {
-        setRunStates((current) => ({
-          ...current,
-          [sessionId!]: {
-            type: 'run_state_changed',
-            sessionId: sessionId!,
-            status: isCancellation(cause) ? 'cancelled' : 'failed',
-            ...(!isCancellation(cause) ? { error: errorText(cause) } : {})
-          }
-        }))
-      }
       if (!isCancellation(cause)) setError(errorText(cause))
       let userMessageRecorded = false
-      if (sessionId) {
+      if (conversationId) {
         try {
-          const detail = await window.oyster.chat.readSession(sessionId)
+          const detail = await window.oyster.chat.readConversation(conversationId)
           userMessageRecorded = detail.messages.some((entry) => (
             !previousMessageIds.has(entry.id)
             && entry.message.role === 'user'
             && entry.message.text.trim() === normalized
           ))
-          if (selectedSessionId() === sessionId) setSession(detail)
+          if (selectedConversationId() === conversationId) setConversation(detail)
           replaceSummary(detail)
         } catch {
-          // If persistence cannot be verified, avoid encouraging a duplicate retry.
           userMessageRecorded = true
         }
       }
@@ -224,40 +214,42 @@ export function createChatController() {
   }
 
   async function stop(): Promise<void> {
-    const sessionId = selectedSessionId()
-    if (!sessionId || cancellingSessionId()) return
+    const conversationId = selectedConversationId()
+    if (!conversationId || cancellingConversationId()) return
     try {
-      setCancellingSessionId(sessionId)
+      setCancellingConversationId(conversationId)
       setError(undefined)
-      await window.oyster.chat.cancelRun({ sessionId })
+      await window.oyster.chat.cancelInvocation({ conversationId })
     } catch (cause) {
       if (!isCancellation(cause)) setError(errorText(cause))
     } finally {
-      setCancellingSessionId(undefined)
+      setCancellingConversationId(undefined)
     }
   }
 
-  function isSessionRunning(sessionId: string | undefined): boolean {
-    if (!sessionId) return sending()
-    const local = runStates()[sessionId]?.status
-    if (local) return local === 'running'
-    return snapshot().sessions.find((candidate) => candidate.id === sessionId)?.isRunning ?? false
+  function hasActiveInvocation(conversationId: string | undefined): boolean {
+    if (!conversationId) return sending()
+    const local = invocationStates()[conversationId]?.status
+    if (local) return local === 'in_progress'
+    return state().conversations.find(
+      (candidate) => candidate.id === conversationId
+    )?.hasActiveInvocation ?? false
   }
 
   return {
-    snapshot,
-    backendSnapshot,
-    selectedSessionId,
-    session,
+    state,
+    backendState,
+    selectedConversationId,
+    conversation,
     creatingNew,
     loading,
-    loadingSessionId,
+    loadingConversationId,
     sending,
-    cancellingSessionId,
+    cancellingConversationId,
     error,
-    isSessionRunning,
+    hasActiveInvocation,
     startNew,
-    readSession,
+    readConversation,
     send,
     stop
   }

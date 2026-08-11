@@ -12,7 +12,7 @@ import { MemoryCredentialStore } from './credential-store'
 import type {
   AgentBackendAdapter,
   AgentTaskRequest,
-  ModelRuntime,
+  SelectedModelStream,
   ModelBackendAdapter,
   ModelGenerationRequest,
   StoredModelConnection
@@ -57,7 +57,7 @@ function fixtureUsage(): Usage {
   }
 }
 
-function fixtureRuntime(modelId: string): ModelRuntime {
+function fixtureModelStream(modelId: string): SelectedModelStream {
   const model: Model<Api> = {
     id: modelId,
     name: modelId,
@@ -112,7 +112,7 @@ class FixtureCodingPlanBackend implements CodingPlanBackend {
   async connect(): Promise<void> {}
   cancelConnect(): void {}
   async generate(): Promise<{ text: string }> { return { text: 'OYSTER' } }
-  runtime(modelId: string): ModelRuntime { return fixtureRuntime(modelId) }
+  modelStream(modelId: string): SelectedModelStream { return fixtureModelStream(modelId) }
   dispose(): void {}
 }
 
@@ -165,6 +165,6 @@ export function createFixtureAiBackendService(): AiBackendService {
     new FixtureAgentAdapter(),
     new FixtureModelAdapter(),
     new FixtureCodingPlanBackend(),
-    (connection) => fixtureRuntime(connection.model)
+    (connection) => fixtureModelStream(connection.model)
   )
 }

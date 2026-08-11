@@ -1,41 +1,41 @@
 import { createMemo, createSignal, onCleanup } from 'solid-js'
-import { CHAT_AGENT_ID, type ChatAgentConfigurationView, type ChatSnapshot } from '../../shared/chat'
+import { CHAT_AGENT_ID, type ChatAgentConfigurationView, type ChatStateView } from '../../shared/chat'
 import type {
-  KnowledgeProcessingSnapshot,
-  ProcessingStageId,
-  ProcessingStageView,
-  ProcessingToolView
+  KnowledgeProcessingStateView,
+  KnowledgeAgentId,
+  KnowledgeAgentDefinitionView,
+  AgentToolDefinitionView
 } from '../../shared/knowledge-processing'
 
-const EMPTY_PROCESSING_SNAPSHOT: KnowledgeProcessingSnapshot = {
-  stages: [],
+const EMPTY_PROCESSING_STATE: KnowledgeProcessingStateView = {
+  agents: [],
   connections: [],
-  runningStageIds: [],
-  debugTraces: []
+  activeAgentIds: [],
+  liveInvocations: []
 }
 
-const EMPTY_CHAT_SNAPSHOT: ChatSnapshot = {
+const EMPTY_CHAT_STATE: ChatStateView = {
   agent: {
     id: CHAT_AGENT_ID,
     displayName: '通用 Agent',
     description: '',
-    runtime: 'pi_agent_core',
+    runtime: 'pi_coding_agent',
     tools: [],
     builtInInstructions: '',
     defaultInstructions: '',
     isDefaultCustomized: false
   },
-  sessions: []
+  conversations: []
 }
 
-export type AgentConfigurationRoleId = ProcessingStageId | typeof CHAT_AGENT_ID
+export type AgentConfigurationRoleId = KnowledgeAgentId | typeof CHAT_AGENT_ID
 
 export interface AgentConfigurationRoleView {
   id: AgentConfigurationRoleId
   displayName: string
   description: string
-  runtime: 'pi_agent_core'
-  tools: ProcessingToolView[]
+  runtime: 'pi_coding_agent'
+  tools: AgentToolDefinitionView[]
   builtInInstructions: string
   defaultInstructions: string
   isDefaultCustomized: boolean
@@ -43,10 +43,10 @@ export interface AgentConfigurationRoleView {
   promptUsageStatus: string
 }
 
-function isAgentStage(
-  stage: ProcessingStageView
-): stage is ProcessingStageView & { runtime: 'pi_agent_core' } {
-  return stage.runtime === 'pi_agent_core'
+function isKnowledgeAgent(
+  agent: KnowledgeAgentDefinitionView
+): agent is KnowledgeAgentDefinitionView & { runtime: 'pi_coding_agent' } {
+  return agent.runtime === 'pi_coding_agent'
 }
 
 function chatRole(agent: ChatAgentConfigurationView): AgentConfigurationRoleView {
@@ -58,39 +58,39 @@ function chatRole(agent: ChatAgentConfigurationView): AgentConfigurationRoleView
 }
 
 export function createAgentConfigurationController() {
-  const [processingSnapshot, setProcessingSnapshot] = createSignal(EMPTY_PROCESSING_SNAPSHOT)
-  const [chatSnapshot, setChatSnapshot] = createSignal(EMPTY_CHAT_SNAPSHOT)
+  const [processingState, setProcessingState] = createSignal(EMPTY_PROCESSING_STATE)
+  const [chatState, setChatState] = createSignal(EMPTY_CHAT_STATE)
   const [pendingLoads, setPendingLoads] = createSignal(2)
   const [savingRoleId, setSavingRoleId] = createSignal<AgentConfigurationRoleId>()
   const [savedRoleId, setSavedRoleId] = createSignal<AgentConfigurationRoleId>()
   const [error, setError] = createSignal<string>()
 
   const roles = createMemo<AgentConfigurationRoleView[]>(() => [
-    ...processingSnapshot().stages
-      .filter(isAgentStage)
-      .map((stage) => ({
-        id: stage.id,
-        displayName: stage.displayName,
-        description: stage.description,
-        runtime: stage.runtime,
-        tools: stage.tools,
-        builtInInstructions: stage.builtInInstructions,
-        defaultInstructions: stage.defaultInstructions,
-        isDefaultCustomized: stage.isDefaultCustomized,
-        promptUsageDescription: '没有阶段覆盖的加工运行使用此值；加工测试页的阶段覆盖优先级更高。',
-        promptUsageStatus: stage.isCustomized ? '加工测试存在覆盖' : '当前运行使用默认'
+    ...processingState().agents
+      .filter(isKnowledgeAgent)
+      .map((agent) => ({
+        id: agent.id,
+        displayName: agent.displayName,
+        description: agent.description,
+        runtime: agent.runtime,
+        tools: agent.tools,
+        builtInInstructions: agent.builtInInstructions,
+        defaultInstructions: agent.defaultInstructions,
+        isDefaultCustomized: agent.isDefaultCustomized,
+        promptUsageDescription: '没有 Agent 覆盖的调用使用此值；测试页的 Agent 覆盖优先级更高。',
+        promptUsageStatus: agent.isCustomized ? 'Agent Preview 存在覆盖' : '当前调用使用默认'
       })),
-    chatRole(chatSnapshot().agent)
+    chatRole(chatState().agent)
   ])
   const configurationErrors = createMemo(() => [
-    processingSnapshot().configurationError,
-    chatSnapshot().configurationError
+    processingState().configurationError,
+    chatState().configurationError
   ].filter((message): message is string => Boolean(message)))
 
   const errorMessage = (cause: unknown): string => cause instanceof Error ? cause.message : String(cause)
-  const unsubscribeProcessing = window.oyster.knowledgeProcessing.subscribe(setProcessingSnapshot)
+  const unsubscribeProcessing = window.oyster.knowledgeProcessing.subscribe(setProcessingState)
   const unsubscribeChat = window.oyster.chat.subscribe((event) => {
-    if (event.type === 'snapshot_changed') setChatSnapshot(event.snapshot)
+    if (event.type === 'state_changed') setChatState(event.state)
   })
   onCleanup(() => {
     unsubscribeProcessing()
@@ -100,12 +100,12 @@ export function createAgentConfigurationController() {
   const loaded = (): void => {
     setPendingLoads((count) => Math.max(0, count - 1))
   }
-  void window.oyster.knowledgeProcessing.getSnapshot()
-    .then(setProcessingSnapshot)
+  void window.oyster.knowledgeProcessing.getState()
+    .then(setProcessingState)
     .catch((cause) => setError(errorMessage(cause)))
     .finally(loaded)
-  void window.oyster.chat.getSnapshot()
-    .then(setChatSnapshot)
+  void window.oyster.chat.getState()
+    .then(setChatState)
     .catch((cause) => setError(errorMessage(cause)))
     .finally(loaded)
 
@@ -118,10 +118,10 @@ export function createAgentConfigurationController() {
       setSavedRoleId(undefined)
       setError(undefined)
       if (roleId === CHAT_AGENT_ID) {
-        setChatSnapshot(await window.oyster.chat.saveDefaultInstructions({ instructionsOverride }))
+        setChatState(await window.oyster.chat.saveDefaultInstructions({ instructionsOverride }))
       } else {
-        setProcessingSnapshot(await window.oyster.knowledgeProcessing.saveDefaultInstructions({
-          stageId: roleId,
+        setProcessingState(await window.oyster.knowledgeProcessing.saveAgentDefaultInstructions({
+          agentId: roleId,
           instructionsOverride
         }))
       }

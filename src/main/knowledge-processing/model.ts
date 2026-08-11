@@ -1,26 +1,28 @@
-import type { ModelGenerationRequest, ModelRuntime } from '../ai-backends/model'
-import type { AiBackendSnapshot } from '../../shared/ai-backends'
-import type { ReasoningEffort } from '../../shared/ai-backends'
+import type { ModelGenerationRequest, SelectedModelStream } from '../ai-backends/model'
+import type { AiBackendSnapshot, ReasoningEffort } from '../../shared/ai-backends'
 import type {
-  KnowledgeProcessingSnapshot,
-  ProcessingStageId
+  KnowledgeAgentId,
+  KnowledgeProcessingStateView
 } from '../../shared/knowledge-processing'
-import type { AgentRunRecord } from '../../shared/agent-runtime'
-import type { ProcessingRun } from './processing-repository'
+import type {
+  AgentInvocationDebugRecord,
+  AgentInvocationRecord
+} from '../../shared/agent-runtime'
+import type { KnowledgeTaskWorkspace } from './knowledge-task-workspace-repository'
 
-export interface StoredProcessingStage {
-  stageId: ProcessingStageId
+export interface StoredKnowledgeAgent {
+  agentId: KnowledgeAgentId
   defaultInstructionsOverride?: string
   instructionsOverride?: string
 }
 
-export interface KnowledgeProcessingStateData {
-  stages: StoredProcessingStage[]
+export interface KnowledgeProcessingConfigurationData {
+  agents: StoredKnowledgeAgent[]
 }
 
-export interface KnowledgeProcessingRepository {
-  load(): Promise<KnowledgeProcessingStateData>
-  save(state: KnowledgeProcessingStateData): Promise<void>
+export interface KnowledgeProcessingConfigurationRepository {
+  load(): Promise<KnowledgeProcessingConfigurationData>
+  save(state: KnowledgeProcessingConfigurationData): Promise<void>
 }
 
 export interface AiBackendPort {
@@ -31,44 +33,44 @@ export interface AiBackendPort {
     modelId: string,
     request: ModelGenerationRequest
   ): Promise<{ text: string }>
-  withModelRuntime<T>(
+  withModelStream<T>(
     connectionId: string,
     modelId: string,
-    operation: (runtime: ModelRuntime) => Promise<T>,
+    operation: (modelStream: SelectedModelStream) => Promise<T>,
     options?: { trackHealth?: boolean }
   ): Promise<T>
 }
 
-export interface RepositoryAgentRunResult {
-  run: AgentRunRecord
+export interface RepositoryAgentInvocationResult {
+  invocation: AgentInvocationRecord
   modelCallCount: number
   toolCalls: string[]
 }
 
-interface RepositoryAgentRunInput {
-  runtime: ModelRuntime
+interface RepositoryAgentInvocationInput {
+  modelStream: SelectedModelStream
   systemPrompt: string
-  run: ProcessingRun
+  workspace: KnowledgeTaskWorkspace
   reasoningEffort?: ReasoningEffort
-  runId: string
-  onRunUpdate?: (run: AgentRunRecord) => void
+  invocationId: string
+  onInvocationUpdate?: (record: AgentInvocationDebugRecord) => void
   signal: AbortSignal
 }
 
-export interface KnowledgeMaintainerRunInput extends RepositoryAgentRunInput {
-  previousRevision: string
+export interface KnowledgeMaintainerInvocationInput extends RepositoryAgentInvocationInput {
+  previousRepositoryRevision: string
 }
 
-export interface KnowledgeReviewerRunInput extends RepositoryAgentRunInput {
-  reviewedRevision: string
+export interface KnowledgeReviewerInvocationInput extends RepositoryAgentInvocationInput {
+  reviewedRepositoryRevision: string
 }
 
 export interface KnowledgeMaintainerRuntime {
-  run(input: KnowledgeMaintainerRunInput): Promise<RepositoryAgentRunResult>
+  invoke(input: KnowledgeMaintainerInvocationInput): Promise<RepositoryAgentInvocationResult>
 }
 
 export interface KnowledgeReviewerRuntime {
-  run(input: KnowledgeReviewerRunInput): Promise<RepositoryAgentRunResult>
+  invoke(input: KnowledgeReviewerInvocationInput): Promise<RepositoryAgentInvocationResult>
 }
 
-export type ProcessingSnapshotListener = (snapshot: KnowledgeProcessingSnapshot) => void
+export type KnowledgeProcessingStateListener = (state: KnowledgeProcessingStateView) => void

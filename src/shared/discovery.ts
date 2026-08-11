@@ -5,7 +5,13 @@ export type SourceRecordKind = 'conversation' | 'human_instruction'
 export type InstructionScope = 'user' | 'project' | 'managed'
 export type DiscoveryState = 'not_found' | 'found' | 'needs_permission' | 'error'
 export type ScanState = 'idle' | 'scanning' | 'ready' | 'error'
-export type ScanRunState = 'queued' | 'running' | 'completed' | 'cancelled' | 'failed' | 'interrupted'
+export type DiscoveryScanStatus =
+  | 'queued'
+  | 'in_progress'
+  | 'completed'
+  | 'cancelled'
+  | 'failed'
+  | 'interrupted'
 
 export interface AgentSource {
   id: string
@@ -16,16 +22,17 @@ export interface AgentSource {
   discoveryState: DiscoveryState
   scanState: ScanState
   fileCount: number
-  sessionCount: number
+  conversationCount: number
   instructionFileCount: number
   totalBytes: number
   invalidFileCount: number
-  oldestSessionAt?: string
-  latestSessionAt?: string
+  oldestConversationAt?: string
+  latestConversationAt?: string
   lastDetectedAt?: string
   lastScannedAt?: string
   errorMessage?: string
 }
+
 export interface SourceRecord {
   id: string
   sourceId: string
@@ -44,59 +51,66 @@ export interface SourceRecord {
   fingerprint: string
 }
 
-export interface ScanRun {
-  id: string
+export interface DiscoveryScan {
+  scanId: string
   sourceId: string
-  state: ScanRunState
+  status: DiscoveryScanStatus
   totalFiles: number
   processedFiles: number
   totalBytes: number
   processedBytes: number
   invalidFiles: number
   startedAt?: string
-  finishedAt?: string
+  completedAt?: string
   errorMessage?: string
 }
 
-export interface DiscoverySnapshot {
+export interface DiscoveryStateView {
   sources: AgentSource[]
-  runs: ScanRun[]
+  scans: DiscoveryScan[]
 }
 
-/** A path-free reference to one discovered conversation revision. */
-export interface AvailableSessionSummary {
-  sourceRecordId: string
+/** Renderer-safe identity and metadata for one externally owned conversation. */
+export interface SourceConversationSummary {
+  sourceConversationId: string
   sourceId: string
   agentType: AgentType
   sourceDisplayName: string
-  externalId: string
+  providerConversationId: string
   title?: string
   projectPath?: string
   startedAt?: string
   endedAt?: string
   updatedAt?: string
   sizeBytes: number
-  revision: string
+  sourceRevision: string
 }
 
-export type SessionCatalogState = 'idle' | 'refreshing' | 'error'
+/** Exact external conversation revision accepted as immutable Task input. */
+export interface SourceSnapshotRef {
+  sourceConversationId: string
+  sourceRevision: string
+}
 
-/** The authoritative renderer-facing catalog used when selecting an external Session. */
-export interface SessionCatalogSnapshot {
-  sessions: AvailableSessionSummary[]
-  state: SessionCatalogState
+export type SourceConversationCatalogStatus = 'idle' | 'refreshing' | 'error'
+
+export interface SourceConversationCatalogView {
+  conversations: SourceConversationSummary[]
+  status: SourceConversationCatalogStatus
   refreshedAt?: string
   errorMessage?: string
 }
 
 export interface DiscoveryApi {
-  getSnapshot(): Promise<DiscoverySnapshot>
-  getSessionCatalog(): Promise<SessionCatalogSnapshot>
-  refreshSessionCatalog(): Promise<SessionCatalogSnapshot>
-  detectAgents(): Promise<DiscoverySnapshot>
-  scanSource(sourceId: string): Promise<DiscoverySnapshot>
-  cancelRun(runId: string): Promise<DiscoverySnapshot>
-  chooseSourceRoot(sourceId: string): Promise<DiscoverySnapshot>
-  subscribe(listener: (snapshot: DiscoverySnapshot) => void): () => void
-  subscribeSessionCatalog(listener: (snapshot: SessionCatalogSnapshot) => void): () => void
+  getState(): Promise<DiscoveryStateView>
+  getSourceConversationCatalog(): Promise<SourceConversationCatalogView>
+  refreshSourceConversationCatalog(): Promise<SourceConversationCatalogView>
+  detectAgents(): Promise<DiscoveryStateView>
+  scanSource(sourceId: string): Promise<DiscoveryStateView>
+  cancelScan(scanId: string): Promise<DiscoveryStateView>
+  chooseSourceRoot(sourceId: string): Promise<DiscoveryStateView>
+  subscribe(listener: (state: DiscoveryStateView) => void): () => void
+  subscribeSourceConversationCatalog(
+    listener: (catalog: SourceConversationCatalogView) => void
+  ): () => void
 }

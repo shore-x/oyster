@@ -76,13 +76,13 @@
 
 ### 4.2 项目级
 
-Oyster 当前没有独立的 Workspace 或 Project Registry。项目上下文来自已经由历史 Discovery catalog 发现、当前可用 Session 中的 `projectPath`。对每个已知目录：
+Oyster 当前没有独立的 Workspace 或 Project Registry。项目上下文来自已经由历史 Discovery catalog 发现、当前可用 Source Conversation 中的 `projectPath`。对每个已知目录：
 
 - Claude Code 检查当前目录到 Git repository root 各级 `.claude/skills`，并兼容相应 `.claude/commands/*.md`；
 - Pi 检查当前目录的 `.pi/skills`，以及当前目录向上到 Git root 的各级 `.agents/skills`；没有 Git root 时按 Pi 规则继续到文件系统根；
 - Codex 检查当前目录向上到 Git repository root 的各级 `.agents/skills`。
 
-UI 必须给项目 Skill 显示“项目”标记和注册根所属目录。未出现在 Session catalog 中的项目不会通过遍历整个 Home 猜测；首次使用、没有历史 Session 的项目因此可能暂时不可见。
+UI 必须给项目 Skill 显示“项目”标记和注册根所属目录。未出现在 Source Conversation catalog 中的项目不会通过遍历整个 Home 猜测；首次使用、没有外部对话历史的项目因此可能暂时不可见。
 
 ### 4.3 当前不能证明的来源
 
@@ -125,7 +125,7 @@ UI 必须给项目 Skill 显示“项目”标记和注册根所属目录。未�
 
 ## 7. UI
 
-主导航增加独立“Skills”页，不把 Skill 混入“Agent 数据来源”的 Session 统计卡片。
+主导航增加独立“Skills”页，不把 Skill 混入“Agent 数据来源”的 Source Conversation 统计卡片。
 
 页面只提供：
 

@@ -1,9 +1,9 @@
 import { ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import { chatChannels } from '../../shared/channels'
 import type {
-  CancelChatRunInput,
-  CreateChatSessionInput,
-  DeleteChatSessionInput,
+  CancelChatInvocationInput,
+  CreateChatConversationInput,
+  DeleteChatConversationInput,
   SaveChatDefaultInstructionsInput,
   SendChatMessageInput
 } from '../../shared/chat'
@@ -25,29 +25,29 @@ export function registerChatIpc(
     }
   }
 
-  ipcMain.handle(chatChannels.getSnapshot, (event) => {
+  ipcMain.handle(chatChannels.getState, (event) => {
     assertTrustedSender(event)
-    return service.getSnapshot()
+    return service.getState()
   })
-  ipcMain.handle(chatChannels.createSession, (event, input: CreateChatSessionInput) => {
+  ipcMain.handle(chatChannels.createConversation, (event, input: CreateChatConversationInput) => {
     assertTrustedSender(event)
-    return service.createSession(input)
+    return service.createConversation(input)
   })
-  ipcMain.handle(chatChannels.readSession, (event, sessionId: string) => {
+  ipcMain.handle(chatChannels.readConversation, (event, conversationId: string) => {
     assertTrustedSender(event)
-    return service.readSession(sessionId)
+    return service.readConversation(conversationId)
   })
-  ipcMain.handle(chatChannels.deleteSession, (event, input: DeleteChatSessionInput) => {
+  ipcMain.handle(chatChannels.deleteConversation, (event, input: DeleteChatConversationInput) => {
     assertTrustedSender(event)
-    return service.deleteSession(input)
+    return service.deleteConversation(input)
   })
   ipcMain.handle(chatChannels.sendMessage, (event, input: SendChatMessageInput) => {
     assertTrustedSender(event)
     return service.sendMessage(input)
   })
-  ipcMain.handle(chatChannels.cancelRun, (event, input: CancelChatRunInput) => {
+  ipcMain.handle(chatChannels.cancelInvocation, (event, input: CancelChatInvocationInput) => {
     assertTrustedSender(event)
-    return service.cancelRun(input)
+    return service.cancelInvocation(input)
   })
   ipcMain.handle(
     chatChannels.saveDefaultInstructions,

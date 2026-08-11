@@ -1,266 +1,272 @@
 import { createSignal, onCleanup } from 'solid-js'
-import type { SessionCatalogSnapshot } from '../../shared/discovery'
+import type { SourceConversationCatalogView } from '../../shared/discovery'
 import type {
-  KnowledgeFullChainResult,
-  KnowledgeFullChainRunRecord,
-  KnowledgeFullChainRunSummary,
+  AgentInvocationOrigin,
+  KnowledgeAgentId,
   KnowledgeMaintenanceResult,
-  KnowledgeProcessingDebugTrace,
-  KnowledgeProcessingSnapshot,
-  ProcessingDebugTraceOrigin,
-  ProcessingStageId,
-  RunKnowledgeFullChainInput,
-  RunKnowledgeMaintenanceInput,
-  SaveProcessingStageInput
+  KnowledgeProcessingStateView,
+  KnowledgeTaskDetail,
+  KnowledgeTaskResult,
+  KnowledgeTaskSummary,
+  LiveAgentInvocationView,
+  SaveKnowledgeAgentInput,
+  StartKnowledgeAgentPreviewInput,
+  StartKnowledgeTaskInput
 } from '../../shared/knowledge-processing'
 
-const EMPTY_SNAPSHOT: KnowledgeProcessingSnapshot = {
-  stages: [],
+const EMPTY_STATE: KnowledgeProcessingStateView = {
+  agents: [],
   connections: [],
-  runningStageIds: [],
-  debugTraces: []
+  activeAgentIds: [],
+  liveInvocations: []
 }
 
-const EMPTY_SESSION_CATALOG: SessionCatalogSnapshot = {
-  sessions: [],
-  state: 'idle'
+const EMPTY_SOURCE_CONVERSATION_CATALOG: SourceConversationCatalogView = {
+  conversations: [],
+  status: 'idle'
 }
 
 export function createKnowledgeProcessingController() {
-  const [snapshot, setSnapshot] = createSignal(EMPTY_SNAPSHOT)
-  const [pendingStageIds, setPendingStageIds] = createSignal<ProcessingStageId[]>([])
-  const [savingStageIds, setSavingStageIds] = createSignal<ProcessingStageId[]>([])
+  const [state, setState] = createSignal(EMPTY_STATE)
+  const [pendingAgentIds, setPendingAgentIds] = createSignal<KnowledgeAgentId[]>([])
+  const [savingAgentIds, setSavingAgentIds] = createSignal<KnowledgeAgentId[]>([])
   const [error, setError] = createSignal<string>()
   const [maintenanceResult, setMaintenanceResult] = createSignal<KnowledgeMaintenanceResult>()
-  const [sessionCatalog, setSessionCatalog] = createSignal(EMPTY_SESSION_CATALOG)
-  const [sessionCatalogLoading, setSessionCatalogLoading] = createSignal(true)
-  const [sessionCatalogRefreshing, setSessionCatalogRefreshing] = createSignal(false)
-  const [fullChainPending, setFullChainPending] = createSignal(false)
-  const [fullChainResult, setFullChainResult] = createSignal<KnowledgeFullChainResult>()
-  const [fullChainRuns, setFullChainRuns] = createSignal<KnowledgeFullChainRunSummary[]>([])
-  const [fullChainRunsLoading, setFullChainRunsLoading] = createSignal(true)
-  const [selectedFullChainRun, setSelectedFullChainRun] = createSignal<KnowledgeFullChainRunRecord>()
-  const [loadingFullChainRunId, setLoadingFullChainRunId] = createSignal<string>()
-  const [hiddenStageDebugTraceId, setHiddenStageDebugTraceId] = createSignal<string>()
-  let fullChainRunReadGeneration = 0
+  const [sourceConversationCatalog, setSourceConversationCatalog] = createSignal(
+    EMPTY_SOURCE_CONVERSATION_CATALOG
+  )
+  const [sourceConversationCatalogLoading, setSourceConversationCatalogLoading] = createSignal(true)
+  const [sourceConversationCatalogRefreshing, setSourceConversationCatalogRefreshing] = createSignal(false)
+  const [knowledgeTaskPending, setKnowledgeTaskPending] = createSignal(false)
+  const [knowledgeTaskResult, setKnowledgeTaskResult] = createSignal<KnowledgeTaskResult>()
+  const [knowledgeTasks, setKnowledgeTasks] = createSignal<KnowledgeTaskSummary[]>([])
+  const [knowledgeTasksLoading, setKnowledgeTasksLoading] = createSignal(true)
+  const [selectedKnowledgeTask, setSelectedKnowledgeTask] = createSignal<KnowledgeTaskDetail>()
+  const [loadingKnowledgeTaskId, setLoadingKnowledgeTaskId] = createSignal<string>()
+  const [hiddenPreviewInvocationId, setHiddenPreviewInvocationId] = createSignal<string>()
+  let taskReadGeneration = 0
 
   function errorMessage(cause: unknown): string {
     return cause instanceof Error ? cause.message : String(cause)
   }
 
-  function markPending(stageId: ProcessingStageId, pending: boolean): void {
-    setPendingStageIds((current) => pending
-      ? current.includes(stageId) ? current : [...current, stageId]
-      : current.filter((candidate) => candidate !== stageId))
+  function markPending(agentId: KnowledgeAgentId, pending: boolean): void {
+    setPendingAgentIds((current) => pending
+      ? current.includes(agentId) ? current : [...current, agentId]
+      : current.filter((candidate) => candidate !== agentId))
   }
 
-  function markSaving(stageId: ProcessingStageId, saving: boolean): void {
-    setSavingStageIds((current) => {
-      if (saving) return [...current, stageId]
-      const index = current.indexOf(stageId)
-      return index < 0 ? current : [...current.slice(0, index), ...current.slice(index + 1)]
+  function markSaving(agentId: KnowledgeAgentId, saving: boolean): void {
+    setSavingAgentIds((current) => {
+      if (saving) return current.includes(agentId) ? current : [...current, agentId]
+      return current.filter((candidate) => candidate !== agentId)
     })
   }
 
-  function isRunning(stageId: ProcessingStageId): boolean {
-    return pendingStageIds().includes(stageId) || snapshot().runningStageIds.includes(stageId)
+  function hasActiveInvocation(agentId: KnowledgeAgentId): boolean {
+    return pendingAgentIds().includes(agentId) || state().activeAgentIds.includes(agentId)
   }
 
-  function invalidateInputResults(): void {
-    const stageTraces = snapshot().debugTraces.filter((trace) => trace.origin === 'stage_debug')
-    const currentTrace = stageTraces[stageTraces.length - 1]
-    setHiddenStageDebugTraceId(currentTrace?.run.id)
+  function invalidatePreviewResult(): void {
+    const previewInvocations = state().liveInvocations.filter(
+      (view) => view.origin === 'agent_preview'
+    )
+    setHiddenPreviewInvocationId(previewInvocations.at(-1)?.invocation.id)
     setMaintenanceResult(undefined)
   }
 
-  function resetFullChainResult(): void {
-    setFullChainResult(undefined)
+  function resetKnowledgeTaskResult(): void {
+    setKnowledgeTaskResult(undefined)
   }
 
-  function debugTraces(origin: ProcessingDebugTraceOrigin): KnowledgeProcessingDebugTrace[] {
-    return snapshot().debugTraces.filter((trace) => (
-      trace.origin === origin
+  function liveInvocations(origin: AgentInvocationOrigin): LiveAgentInvocationView[] {
+    return state().liveInvocations.filter((view) => (
+      view.origin === origin
       && !(
-        origin === 'stage_debug'
-        && trace.run.id === hiddenStageDebugTraceId()
-        && trace.run.status !== 'running'
+        origin === 'agent_preview'
+        && view.invocation.id === hiddenPreviewInvocationId()
+        && view.invocation.status !== 'in_progress'
       )
     ))
   }
 
-  function debugTrace(origin: ProcessingDebugTraceOrigin): KnowledgeProcessingDebugTrace | undefined {
-    const traces = debugTraces(origin)
-    return traces[traces.length - 1]
+  function latestInvocation(origin: AgentInvocationOrigin): LiveAgentInvocationView | undefined {
+    return liveInvocations(origin).at(-1)
   }
 
-  let receivedSubscriptionSnapshot = false
-  const unsubscribe = window.oyster.knowledgeProcessing.subscribe((nextSnapshot) => {
-    receivedSubscriptionSnapshot = true
-    setSnapshot(nextSnapshot)
+  let receivedState = false
+  const unsubscribe = window.oyster.knowledgeProcessing.subscribe((nextState) => {
+    receivedState = true
+    setState(nextState)
   })
-  void window.oyster.knowledgeProcessing.getSnapshot()
-    .then((initialSnapshot) => {
-      if (!receivedSubscriptionSnapshot) setSnapshot(initialSnapshot)
+  void window.oyster.knowledgeProcessing.getState()
+    .then((initialState) => {
+      if (!receivedState) setState(initialState)
     })
     .catch((cause) => setError(errorMessage(cause)))
 
-  let receivedSessionCatalog = false
-  const unsubscribeSessionCatalog = window.oyster.discovery.subscribeSessionCatalog((nextCatalog) => {
-    receivedSessionCatalog = true
-    setSessionCatalog(nextCatalog)
-    setSessionCatalogLoading(false)
-  })
-  void loadFullChainRuns()
-  void window.oyster.discovery.getSessionCatalog()
-    .then((initialCatalog) => {
-      if (!receivedSessionCatalog) setSessionCatalog(initialCatalog)
+  let receivedCatalog = false
+  const unsubscribeSourceConversationCatalog = window.oyster.discovery
+    .subscribeSourceConversationCatalog((catalog) => {
+      receivedCatalog = true
+      setSourceConversationCatalog(catalog)
+      setSourceConversationCatalogLoading(false)
+    })
+  void loadKnowledgeTasks()
+  void window.oyster.discovery.getSourceConversationCatalog()
+    .then((catalog) => {
+      if (!receivedCatalog) setSourceConversationCatalog(catalog)
     })
     .catch((cause) => setError(errorMessage(cause)))
-    .finally(() => setSessionCatalogLoading(false))
+    .finally(() => setSourceConversationCatalogLoading(false))
 
   onCleanup(() => {
     unsubscribe()
-    unsubscribeSessionCatalog()
+    unsubscribeSourceConversationCatalog()
   })
 
-  async function refreshAvailableSessions(): Promise<boolean> {
+  async function refreshSourceConversations(): Promise<boolean> {
     try {
-      setSessionCatalogRefreshing(true)
+      setSourceConversationCatalogRefreshing(true)
       setError(undefined)
-      setSessionCatalog(await window.oyster.discovery.refreshSessionCatalog())
+      setSourceConversationCatalog(
+        await window.oyster.discovery.refreshSourceConversationCatalog()
+      )
       return true
     } catch (cause) {
       setError(errorMessage(cause))
       return false
     } finally {
-      setSessionCatalogRefreshing(false)
+      setSourceConversationCatalogRefreshing(false)
     }
   }
 
-  async function loadFullChainRuns(): Promise<void> {
+  async function loadKnowledgeTasks(): Promise<void> {
     try {
-      setFullChainRunsLoading(true)
+      setKnowledgeTasksLoading(true)
       setError(undefined)
-      setFullChainRuns(await window.oyster.knowledgeProcessing.listFullChainRuns())
+      setKnowledgeTasks(await window.oyster.knowledgeProcessing.listKnowledgeTasks())
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {
-      setFullChainRunsLoading(false)
+      setKnowledgeTasksLoading(false)
     }
   }
 
-  async function readFullChainRun(runId: string): Promise<KnowledgeFullChainRunRecord | undefined> {
-    const generation = ++fullChainRunReadGeneration
+  async function readKnowledgeTask(taskId: string): Promise<KnowledgeTaskDetail | undefined> {
+    const generation = ++taskReadGeneration
     try {
-      setLoadingFullChainRunId(runId)
+      setLoadingKnowledgeTaskId(taskId)
       setError(undefined)
-      const record = await window.oyster.knowledgeProcessing.readFullChainRun(runId)
-      if (generation !== fullChainRunReadGeneration) return undefined
-      setSelectedFullChainRun(record)
+      const record = await window.oyster.knowledgeProcessing.readKnowledgeTask(taskId)
+      if (generation !== taskReadGeneration) return undefined
+      setSelectedKnowledgeTask(record)
       return record
     } catch (cause) {
-      if (generation === fullChainRunReadGeneration) setError(errorMessage(cause))
+      if (generation === taskReadGeneration) setError(errorMessage(cause))
       return undefined
     } finally {
-      if (generation === fullChainRunReadGeneration) setLoadingFullChainRunId(undefined)
+      if (generation === taskReadGeneration) setLoadingKnowledgeTaskId(undefined)
     }
   }
 
-  async function saveStage(input: SaveProcessingStageInput): Promise<boolean> {
+  async function saveAgent(input: SaveKnowledgeAgentInput): Promise<boolean> {
     try {
-      markSaving(input.stageId, true)
+      markSaving(input.agentId, true)
       setError(undefined)
-      setSnapshot(await window.oyster.knowledgeProcessing.saveStage(input))
+      setState(await window.oyster.knowledgeProcessing.saveAgent(input))
       return true
     } catch (cause) {
       setError(errorMessage(cause))
       return false
     } finally {
-      markSaving(input.stageId, false)
+      markSaving(input.agentId, false)
     }
   }
 
-  async function runKnowledgeMaintenance(input: RunKnowledgeMaintenanceInput): Promise<void> {
-    const stageId = 'knowledge_maintenance_agent' as const
+  async function previewKnowledgeMaintainer(
+    input: StartKnowledgeAgentPreviewInput
+  ): Promise<void> {
+    const agentId = 'knowledge_maintainer' as const
     try {
-      markPending(stageId, true)
+      markPending(agentId, true)
       setError(undefined)
-      const response = await window.oyster.knowledgeProcessing.runKnowledgeMaintenance(input)
-      if (response.status === 'session_rejected') setError(response.message)
+      const response = await window.oyster.knowledgeProcessing.previewKnowledgeMaintainer(input)
+      if (response.status === 'source_snapshot_rejected') setError(response.message)
       else setMaintenanceResult(response.result)
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {
-      markPending(stageId, false)
+      markPending(agentId, false)
     }
   }
 
-  async function cancelRun(stageId: ProcessingStageId): Promise<void> {
+  async function cancelAgentPreview(agentId: KnowledgeAgentId): Promise<void> {
     try {
       setError(undefined)
-      await window.oyster.knowledgeProcessing.cancelRun(stageId)
+      await window.oyster.knowledgeProcessing.cancelAgentPreview(agentId)
     } catch (cause) {
       setError(errorMessage(cause))
     }
   }
 
-  async function runFullChain(input: RunKnowledgeFullChainInput): Promise<void> {
+  async function startKnowledgeTask(input: StartKnowledgeTaskInput): Promise<void> {
     try {
-      setFullChainPending(true)
+      setKnowledgeTaskPending(true)
       setError(undefined)
-      const response = await window.oyster.knowledgeProcessing.runFullChain(input)
-      if (response.status === 'session_rejected') {
+      const response = await window.oyster.knowledgeProcessing.startKnowledgeTask(input)
+      if (response.status === 'source_snapshot_rejected') {
         setError(response.message)
       } else {
-        setFullChainResult(response.result)
-        await loadFullChainRuns()
+        setKnowledgeTaskResult(response.result)
+        await loadKnowledgeTasks()
       }
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {
-      setFullChainPending(false)
+      setKnowledgeTaskPending(false)
     }
   }
 
-  async function cancelFullChain(): Promise<void> {
+  async function cancelKnowledgeTask(): Promise<void> {
     try {
       setError(undefined)
-      await window.oyster.knowledgeProcessing.cancelFullChain()
+      await window.oyster.knowledgeProcessing.cancelKnowledgeTask()
     } catch (cause) {
       setError(errorMessage(cause))
     }
   }
 
   return {
-    snapshot,
-    isSaving: (stageId: ProcessingStageId) => savingStageIds().includes(stageId),
+    state,
+    isSaving: (agentId: KnowledgeAgentId) => savingAgentIds().includes(agentId),
     error,
     maintenanceResult,
-    availableSessions: () => sessionCatalog().sessions,
-    sessionsLoading: () => (
-      sessionCatalogLoading()
-      || sessionCatalogRefreshing()
-      || sessionCatalog().state === 'refreshing'
+    sourceConversations: () => sourceConversationCatalog().conversations,
+    sourceConversationsLoading: () => (
+      sourceConversationCatalogLoading()
+      || sourceConversationCatalogRefreshing()
+      || sourceConversationCatalog().status === 'refreshing'
     ),
-    sessionCatalogError: () => sessionCatalog().errorMessage,
-    fullChainResult,
-    fullChainRuns,
-    fullChainRunsLoading,
-    selectedFullChainRun,
-    debugTraces,
-    debugTrace,
-    isFullChainRunning: fullChainPending,
-    isLoadingFullChainRun: (runId: string) => loadingFullChainRunId() === runId,
-    invalidateInputResults,
-    resetFullChainResult,
-    isRunning,
-    saveStage,
-    runKnowledgeMaintenance,
-    cancelRun,
-    refreshAvailableSessions,
-    loadFullChainRuns,
-    readFullChainRun,
-    runFullChain,
-    cancelFullChain
+    sourceConversationCatalogError: () => sourceConversationCatalog().errorMessage,
+    knowledgeTaskResult,
+    knowledgeTasks,
+    knowledgeTasksLoading,
+    selectedKnowledgeTask,
+    liveInvocations,
+    latestInvocation,
+    isKnowledgeTaskActive: knowledgeTaskPending,
+    isLoadingKnowledgeTask: (taskId: string) => loadingKnowledgeTaskId() === taskId,
+    invalidatePreviewResult,
+    resetKnowledgeTaskResult,
+    hasActiveInvocation,
+    saveAgent,
+    previewKnowledgeMaintainer,
+    cancelAgentPreview,
+    refreshSourceConversations,
+    loadKnowledgeTasks,
+    readKnowledgeTask,
+    startKnowledgeTask,
+    cancelKnowledgeTask
   }
 }

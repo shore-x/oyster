@@ -1,31 +1,31 @@
 import { ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import { knowledgeProcessingChannels } from '../../shared/channels'
 import type {
-  ProcessingStageId,
-  RunKnowledgeFullChainInput,
-  RunKnowledgeMaintenanceInput,
-  SaveProcessingDefaultInstructionsInput,
-  SaveProcessingStageInput,
-  SessionRunResponse
+  KnowledgeAgentBinding,
+  KnowledgeAgentId,
+  SaveKnowledgeAgentDefaultInstructionsInput,
+  SaveKnowledgeAgentInput,
+  SourceSnapshotOperationResult,
+  StartKnowledgeAgentPreviewInput,
+  StartKnowledgeTaskInput
 } from '../../shared/knowledge-processing'
 import type { DiscoveryService } from '../discovery/discovery-service'
 import type { KnowledgeProcessingService } from './knowledge-processing-service'
-import type { ProcessingStageRunBinding } from './knowledge-processing-service'
-import type { KnowledgeFullChainService } from './full-chain-service'
+import type { KnowledgeTaskService } from './knowledge-task-service'
 import {
-  loadSessionMaterial,
-  SessionSelectionRejectedError
-} from './session'
+  loadSourceSnapshotMaterial,
+  SourceSnapshotRejectedError
+} from './source-snapshot'
 
-async function sessionRunResponse<Result>(
+async function sourceSnapshotOperation<Result>(
   operation: () => Promise<Result>
-): Promise<SessionRunResponse<Result>> {
+): Promise<SourceSnapshotOperationResult<Result>> {
   try {
     return { status: 'completed', result: await operation() }
   } catch (error) {
-    if (error instanceof SessionSelectionRejectedError) {
+    if (error instanceof SourceSnapshotRejectedError) {
       return {
-        status: 'session_rejected',
+        status: 'source_snapshot_rejected',
         reason: error.reason,
         message: error.message
       }
@@ -37,7 +37,7 @@ async function sessionRunResponse<Result>(
 export function registerKnowledgeProcessingIpc(
   discovery: DiscoveryService,
   service: KnowledgeProcessingService,
-  fullChain: KnowledgeFullChainService,
+  tasks: KnowledgeTaskService,
   getMainWindow: () => BrowserWindow | undefined
 ): void {
   const assertTrustedSender = (event: IpcMainInvokeEvent): void => {
@@ -52,84 +52,86 @@ export function registerKnowledgeProcessingIpc(
     }
   }
 
-  const resolveBinding = (stageId: ProcessingStageId): ProcessingStageRunBinding => {
-    if (fullChain.isRunning()) throw new Error('完整链路正在运行，不能启动独立调试')
-    return service.runBinding(stageId)
+  const previewBinding = (agentId: KnowledgeAgentId): KnowledgeAgentBinding => {
+    if (tasks.isActive()) {
+      throw new Error('Knowledge Processing Task 正在进行，不能启动 Agent Preview')
+    }
+    return service.agentBinding(agentId)
   }
 
-  ipcMain.handle(knowledgeProcessingChannels.getSnapshot, (event) => {
+  ipcMain.handle(knowledgeProcessingChannels.getState, (event) => {
     assertTrustedSender(event)
-    return service.snapshot()
+    return service.stateView()
   })
   ipcMain.handle(
-    knowledgeProcessingChannels.saveStage,
-    (event, input: SaveProcessingStageInput) => {
+    knowledgeProcessingChannels.saveAgent,
+    (event, input: SaveKnowledgeAgentInput) => {
       assertTrustedSender(event)
-      return service.saveStage(input)
+      return service.saveAgent(input)
     }
   )
   ipcMain.handle(
-    knowledgeProcessingChannels.saveDefaultInstructions,
-    (event, input: SaveProcessingDefaultInstructionsInput) => {
+    knowledgeProcessingChannels.saveAgentDefaultInstructions,
+    (event, input: SaveKnowledgeAgentDefaultInstructionsInput) => {
       assertTrustedSender(event)
-      return service.saveDefaultInstructions(input)
+      return service.saveAgentDefaultInstructions(input)
     }
   )
   ipcMain.handle(
-    knowledgeProcessingChannels.runKnowledgeMaintenance,
-    async (event, input: RunKnowledgeMaintenanceInput) => {
+    knowledgeProcessingChannels.previewKnowledgeMaintainer,
+    async (event, input: StartKnowledgeAgentPreviewInput) => {
       assertTrustedSender(event)
-      return sessionRunResponse(async () => {
-        const material = await loadSessionMaterial(discovery, input)
-        return service.runKnowledgeMaintenance(
+      return sourceSnapshotOperation(async () => {
+        const material = await loadSourceSnapshotMaterial(discovery, input)
+        return service.executeMaintenance(
           {
             rawEvidence: material.evidence.rawEvidence,
             canonicalActivity: material.evidence.canonicalActivity
           },
           material.sourceRef,
           input.attention,
-          { binding: resolveBinding('knowledge_maintenance_agent') }
+          { binding: previewBinding('knowledge_maintainer') }
         )
       })
     }
   )
   ipcMain.handle(
-    knowledgeProcessingChannels.runFullChain,
-    async (event, input: RunKnowledgeFullChainInput) => {
+    knowledgeProcessingChannels.startKnowledgeTask,
+    async (event, input: StartKnowledgeTaskInput) => {
       assertTrustedSender(event)
-      return sessionRunResponse(() => fullChain.run(input, {
-        maintainer: resolveBinding('knowledge_maintenance_agent'),
-        reviewer: resolveBinding('knowledge_reviewer_agent')
+      return sourceSnapshotOperation(() => tasks.start(input, {
+        maintainer: previewBinding('knowledge_maintainer'),
+        reviewer: previewBinding('knowledge_reviewer')
       }))
     }
   )
-  ipcMain.handle(knowledgeProcessingChannels.listFullChainRuns, (event) => {
+  ipcMain.handle(knowledgeProcessingChannels.listKnowledgeTasks, (event) => {
     assertTrustedSender(event)
-    return fullChain.listRuns()
+    return tasks.listTasks()
   })
   ipcMain.handle(
-    knowledgeProcessingChannels.readFullChainRun,
-    (event, runId: string) => {
+    knowledgeProcessingChannels.readKnowledgeTask,
+    (event, taskId: string) => {
       assertTrustedSender(event)
-      return fullChain.readRun(runId)
+      return tasks.readTask(taskId)
     }
   )
-  ipcMain.handle(knowledgeProcessingChannels.cancelFullChain, (event) => {
+  ipcMain.handle(knowledgeProcessingChannels.cancelKnowledgeTask, (event) => {
     assertTrustedSender(event)
-    fullChain.cancel()
+    tasks.cancel()
   })
   ipcMain.handle(
-    knowledgeProcessingChannels.cancelRun,
-    (event, stageId: ProcessingStageId) => {
+    knowledgeProcessingChannels.cancelAgentPreview,
+    (event, agentId: KnowledgeAgentId) => {
       assertTrustedSender(event)
-      service.cancelRun(stageId)
+      service.cancelAgentInvocation(agentId)
     }
   )
 
-  service.subscribe((snapshot) => {
+  service.subscribe((state) => {
     const window = getMainWindow()
     if (window && !window.isDestroyed()) {
-      window.webContents.send(knowledgeProcessingChannels.snapshot, snapshot)
+      window.webContents.send(knowledgeProcessingChannels.state, state)
     }
   })
 }

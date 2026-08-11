@@ -7,49 +7,51 @@ import {
   folderBrowserChannels,
   knowledgeChannels,
   knowledgeProcessingChannels,
+  piExtensionChannels,
   skillChannels
 } from '../shared/channels'
 import type { AiBackendApi, AiBackendSnapshot } from '../shared/ai-backends'
 import type {
   DiscoveryApi,
-  DiscoverySnapshot,
-  SessionCatalogSnapshot
+  DiscoveryStateView,
+  SourceConversationCatalogView
 } from '../shared/discovery'
 import type {
   KnowledgeProcessingApi,
-  KnowledgeProcessingSnapshot
+  KnowledgeProcessingStateView
 } from '../shared/knowledge-processing'
 import type { KnowledgeApi } from '../shared/knowledge'
 import type { ChatApi, ChatEvent } from '../shared/chat'
 import type { ArtifactApi } from '../shared/artifacts'
 import type { SkillApi } from '../shared/skills'
 import type { FolderBrowserApi } from '../shared/folder-browser'
+import type { PiExtensionConfigurationApi } from '../shared/pi-extensions'
 
 const api: DiscoveryApi = {
-  getSnapshot: () => ipcRenderer.invoke(discoveryChannels.getSnapshot),
-  getSessionCatalog: () => ipcRenderer.invoke(discoveryChannels.getSessionCatalog),
-  refreshSessionCatalog: () => ipcRenderer.invoke(discoveryChannels.refreshSessionCatalog),
+  getState: () => ipcRenderer.invoke(discoveryChannels.getState),
+  getSourceConversationCatalog: () => ipcRenderer.invoke(discoveryChannels.getSourceConversationCatalog),
+  refreshSourceConversationCatalog: () => ipcRenderer.invoke(discoveryChannels.refreshSourceConversationCatalog),
   detectAgents: () => ipcRenderer.invoke(discoveryChannels.detectAgents),
   scanSource: (sourceId) => ipcRenderer.invoke(discoveryChannels.scanSource, sourceId),
-  cancelRun: (runId) => ipcRenderer.invoke(discoveryChannels.cancelRun, runId),
+  cancelScan: (scanId) => ipcRenderer.invoke(discoveryChannels.cancelScan, scanId),
   chooseSourceRoot: (sourceId) => ipcRenderer.invoke(discoveryChannels.chooseSourceRoot, sourceId),
   subscribe: (listener) => {
-    const handler = (_event: Electron.IpcRendererEvent, snapshot: DiscoverySnapshot): void => listener(snapshot)
-    ipcRenderer.on(discoveryChannels.snapshot, handler)
-    return () => ipcRenderer.removeListener(discoveryChannels.snapshot, handler)
+    const handler = (_event: Electron.IpcRendererEvent, state: DiscoveryStateView): void => listener(state)
+    ipcRenderer.on(discoveryChannels.state, handler)
+    return () => ipcRenderer.removeListener(discoveryChannels.state, handler)
   },
-  subscribeSessionCatalog: (listener) => {
+  subscribeSourceConversationCatalog: (listener) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
-      snapshot: SessionCatalogSnapshot
-    ): void => listener(snapshot)
-    ipcRenderer.on(discoveryChannels.sessionCatalogSnapshot, handler)
-    return () => ipcRenderer.removeListener(discoveryChannels.sessionCatalogSnapshot, handler)
+      catalog: SourceConversationCatalogView
+    ): void => listener(catalog)
+    ipcRenderer.on(discoveryChannels.sourceConversationCatalog, handler)
+    return () => ipcRenderer.removeListener(discoveryChannels.sourceConversationCatalog, handler)
   }
 }
 
 const skills: SkillApi = {
-  getDiscoverySnapshot: () => ipcRenderer.invoke(skillChannels.getDiscoverySnapshot),
+  getDiscoveryStateView: () => ipcRenderer.invoke(skillChannels.getDiscoveryStateView),
   discover: () => ipcRenderer.invoke(skillChannels.discover),
   readDiscoveredDocument: (skillId) => ipcRenderer.invoke(
     skillChannels.readDiscoveredDocument,
@@ -90,31 +92,34 @@ const aiBackends: AiBackendApi = {
 }
 
 const knowledgeProcessing: KnowledgeProcessingApi = {
-  getSnapshot: () => ipcRenderer.invoke(knowledgeProcessingChannels.getSnapshot),
-  saveStage: (input) => ipcRenderer.invoke(knowledgeProcessingChannels.saveStage, input),
-  saveDefaultInstructions: (input) => ipcRenderer.invoke(
-    knowledgeProcessingChannels.saveDefaultInstructions,
+  getState: () => ipcRenderer.invoke(knowledgeProcessingChannels.getState),
+  saveAgent: (input) => ipcRenderer.invoke(knowledgeProcessingChannels.saveAgent, input),
+  saveAgentDefaultInstructions: (input) => ipcRenderer.invoke(
+    knowledgeProcessingChannels.saveAgentDefaultInstructions,
     input
   ),
-  runKnowledgeMaintenance: (input) => ipcRenderer.invoke(
-    knowledgeProcessingChannels.runKnowledgeMaintenance,
+  previewKnowledgeMaintainer: (input) => ipcRenderer.invoke(
+    knowledgeProcessingChannels.previewKnowledgeMaintainer,
     input
   ),
-  runFullChain: (input) => ipcRenderer.invoke(knowledgeProcessingChannels.runFullChain, input),
-  listFullChainRuns: () => ipcRenderer.invoke(knowledgeProcessingChannels.listFullChainRuns),
-  readFullChainRun: (runId) => ipcRenderer.invoke(
-    knowledgeProcessingChannels.readFullChainRun,
-    runId
+  startKnowledgeTask: (input) => ipcRenderer.invoke(knowledgeProcessingChannels.startKnowledgeTask, input),
+  listKnowledgeTasks: () => ipcRenderer.invoke(knowledgeProcessingChannels.listKnowledgeTasks),
+  readKnowledgeTask: (taskId) => ipcRenderer.invoke(
+    knowledgeProcessingChannels.readKnowledgeTask,
+    taskId
   ),
-  cancelFullChain: () => ipcRenderer.invoke(knowledgeProcessingChannels.cancelFullChain),
-  cancelRun: (stageId) => ipcRenderer.invoke(knowledgeProcessingChannels.cancelRun, stageId),
+  cancelKnowledgeTask: () => ipcRenderer.invoke(knowledgeProcessingChannels.cancelKnowledgeTask),
+  cancelAgentPreview: (agentId) => ipcRenderer.invoke(
+    knowledgeProcessingChannels.cancelAgentPreview,
+    agentId
+  ),
   subscribe: (listener) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
-      snapshot: KnowledgeProcessingSnapshot
-    ): void => listener(snapshot)
-    ipcRenderer.on(knowledgeProcessingChannels.snapshot, handler)
-    return () => ipcRenderer.removeListener(knowledgeProcessingChannels.snapshot, handler)
+      state: KnowledgeProcessingStateView
+    ): void => listener(state)
+    ipcRenderer.on(knowledgeProcessingChannels.state, handler)
+    return () => ipcRenderer.removeListener(knowledgeProcessingChannels.state, handler)
   }
 }
 
@@ -148,12 +153,15 @@ const folderBrowser: FolderBrowserApi = {
 }
 
 const chat: ChatApi = {
-  getSnapshot: () => ipcRenderer.invoke(chatChannels.getSnapshot),
-  createSession: (input) => ipcRenderer.invoke(chatChannels.createSession, input),
-  readSession: (sessionId) => ipcRenderer.invoke(chatChannels.readSession, sessionId),
-  deleteSession: (input) => ipcRenderer.invoke(chatChannels.deleteSession, input),
+  getState: () => ipcRenderer.invoke(chatChannels.getState),
+  createConversation: (input) => ipcRenderer.invoke(chatChannels.createConversation, input),
+  readConversation: (conversationId) => ipcRenderer.invoke(
+    chatChannels.readConversation,
+    conversationId
+  ),
+  deleteConversation: (input) => ipcRenderer.invoke(chatChannels.deleteConversation, input),
   sendMessage: (input) => ipcRenderer.invoke(chatChannels.sendMessage, input),
-  cancelRun: (input) => ipcRenderer.invoke(chatChannels.cancelRun, input),
+  cancelInvocation: (input) => ipcRenderer.invoke(chatChannels.cancelInvocation, input),
   saveDefaultInstructions: (input) => ipcRenderer.invoke(
     chatChannels.saveDefaultInstructions,
     input
@@ -165,6 +173,13 @@ const chat: ChatApi = {
   }
 }
 
+const piExtensions: PiExtensionConfigurationApi = {
+  getConfiguration: () => ipcRenderer.invoke(piExtensionChannels.getConfiguration),
+  addSource: (input) => ipcRenderer.invoke(piExtensionChannels.addSource, input),
+  setSourceEnabled: (input) => ipcRenderer.invoke(piExtensionChannels.setSourceEnabled, input),
+  removeSource: (input) => ipcRenderer.invoke(piExtensionChannels.removeSource, input)
+}
+
 contextBridge.exposeInMainWorld('oyster', {
   discovery: api,
   skills,
@@ -173,5 +188,6 @@ contextBridge.exposeInMainWorld('oyster', {
   artifacts,
   folderBrowser,
   knowledgeProcessing,
-  chat
+  chat,
+  piExtensions
 })

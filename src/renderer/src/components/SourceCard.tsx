@@ -1,10 +1,10 @@
 import { Show, createMemo } from 'solid-js'
-import type { AgentSource, ScanRun } from '../../../shared/discovery'
+import type { AgentSource, DiscoveryScan } from '../../../shared/discovery'
 import { Button, Icon } from '../ui'
 
 interface SourceCardProps {
   source: AgentSource
-  run?: ScanRun
+  scan?: DiscoveryScan
   onScan(): void
   onCancel(): void
   onChooseRoot(): void
@@ -33,7 +33,9 @@ function status(source: AgentSource): { label: string; tone: string } {
 }
 
 export function SourceCard(props: SourceCardProps) {
-  const isRunning = createMemo(() => props.run?.state === 'running' || props.run?.state === 'queued')
+  const isScanning = createMemo(() => (
+    props.scan?.status === 'in_progress' || props.scan?.status === 'queued'
+  ))
   const state = createMemo(() => status(props.source))
 
   return (
@@ -66,25 +68,25 @@ export function SourceCard(props: SourceCardProps) {
       }>
         <details class="source-card__details ui-disclosure">
           <summary>
-            {props.source.sessionCount} 个会话 · {formatBytes(props.source.totalBytes)} ·
-            {' '}{formatDate(props.source.oldestSessionAt)} – {formatDate(props.source.latestSessionAt)}
+            {props.source.conversationCount} 个对话 · {formatBytes(props.source.totalBytes)} ·
+            {' '}{formatDate(props.source.oldestConversationAt)} – {formatDate(props.source.latestConversationAt)}
           </summary>
           <div class="ui-disclosure__content">
             <div class="metrics">
               <div>
-                <span class="metric__label">会话 · 文件</span>
-                <strong>{props.source.sessionCount} · {props.source.fileCount}</strong>
+                <span class="metric__label">对话 · 文件</span>
+                <strong>{props.source.conversationCount} · {props.source.fileCount}</strong>
               </div>
               <div><span class="metric__label">指令</span><strong>{props.source.instructionFileCount}</strong></div>
               <div><span class="metric__label">数据量</span><strong>{formatBytes(props.source.totalBytes)}</strong></div>
-              <div><span class="metric__label">时间范围</span><strong>{formatDate(props.source.oldestSessionAt)} – {formatDate(props.source.latestSessionAt)}</strong></div>
+              <div><span class="metric__label">时间范围</span><strong>{formatDate(props.source.oldestConversationAt)} – {formatDate(props.source.latestConversationAt)}</strong></div>
             </div>
 
-            <Show when={isRunning()} fallback={
+            <Show when={isScanning()} fallback={
               <div class="catalog-block">
                 <div class="catalog-block__row">
                   <span>本地记录目录</span>
-                  <span class="catalog-block__value">{props.source.sessionCount} 个可用 Session</span>
+                  <span class="catalog-block__value">{props.source.conversationCount} 个 Source Conversations</span>
                 </div>
                 <div class="catalog-block__meta">
                   <span>内容将在使用时从原始位置读取</span>
@@ -98,7 +100,7 @@ export function SourceCard(props: SourceCardProps) {
                 <div class="catalog-block__row">
                   <span>正在扫描历史记录</span>
                   <span class="catalog-block__value">
-                    {props.run!.processedFiles} 个文件 · {formatBytes(props.run!.processedBytes)}
+                    {props.scan!.processedFiles} 个文件 · {formatBytes(props.scan!.processedBytes)}
                   </span>
                 </div>
                 <div class="progress progress--indeterminate" aria-label="扫描进度" role="progressbar">
@@ -109,7 +111,7 @@ export function SourceCard(props: SourceCardProps) {
             </Show>
 
             <div class="source-card__actions">
-              <Show when={isRunning()} fallback={
+              <Show when={isScanning()} fallback={
                 <>
                   <Button variant="ghost" icon="folder" onClick={props.onChooseRoot}>更改目录</Button>
                   <Button variant="secondary" icon="refresh" onClick={props.onScan}>

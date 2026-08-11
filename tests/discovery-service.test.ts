@@ -15,7 +15,7 @@ afterEach(async () => {
 })
 
 describe('DiscoveryService', () => {
-  it('lists scanned Sessions and reads only the selected source file without an import step', async () => {
+  it('lists scanned Source Conversations and reads only the selected source file without an import step', async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), 'oyster-service-'))
     temporaryDirectories.push(homeDirectory)
     const historyRoot = join(homeDirectory, '.claude', 'projects', 'demo')
@@ -49,40 +49,40 @@ describe('DiscoveryService', () => {
     expect(snapshot.sources[0].discoveryState).toBe('found')
     expect(snapshot.sources[0].scanState).toBe('scanning')
     await service.waitForIdle('source:claude')
-    snapshot = service.snapshot()
+    snapshot = service.stateView()
     expect(snapshot.sources[0]).toMatchObject({
       scanState: 'ready',
       fileCount: 5,
-      sessionCount: 2,
+      conversationCount: 2,
       instructionFileCount: 2,
       invalidFileCount: 1
     })
 
-    const availableSessions = service.listAvailableSessions()
+    const sourceConversations = service.listSourceConversations()
     expect(readEvidence).not.toHaveBeenCalled()
-    expect(availableSessions).toHaveLength(2)
-    expect(availableSessions[0]).toMatchObject({
+    expect(sourceConversations).toHaveLength(2)
+    expect(sourceConversations[0]).toMatchObject({
       sourceId: 'source:claude',
       agentType: 'claude',
       sourceDisplayName: 'Claude Code',
-      externalId: 'two'
+      providerConversationId: 'two'
     })
-    expect(availableSessions[0].revision).toMatch(/^[a-f0-9]{64}$/)
-    expect(availableSessions[0]).not.toHaveProperty('relativePath')
-    expect(availableSessions[0]).not.toHaveProperty('sourcePath')
-    expect(availableSessions[0]).not.toHaveProperty('contentHash')
+    expect(sourceConversations[0].sourceRevision).toMatch(/^[a-f0-9]{64}$/)
+    expect(sourceConversations[0]).not.toHaveProperty('relativePath')
+    expect(sourceConversations[0]).not.toHaveProperty('sourcePath')
+    expect(sourceConversations[0]).not.toHaveProperty('contentHash')
 
-    const selected = availableSessions.find((session) => session.externalId === 'one')!
+    const selected = sourceConversations.find((conversation) => conversation.providerConversationId === 'one')!
     const sourceContent = await readFile(join(historyRoot, 'one.jsonl'))
-    const evidence = await service.readAvailableSession({
-      sourceRecordId: selected.sourceRecordId,
-      expectedRevision: selected.revision
+    const evidence = await service.readSourceSnapshot({
+      sourceConversationId: selected.sourceConversationId,
+      sourceRevision: selected.sourceRevision
     })
     expect(readEvidence).toHaveBeenCalledOnce()
     expect(readEvidence).toHaveBeenCalledWith(expect.not.objectContaining({ maxBytes: expect.anything() }))
     expect(evidence).toMatchObject({
-      sourceRecordId: selected.sourceRecordId,
-      revision: selected.revision,
+      sourceConversationId: selected.sourceConversationId,
+      sourceRevision: selected.sourceRevision,
       contentHash: createHash('sha256').update(sourceContent).digest('hex'),
       sizeBytes: selected.sizeBytes
     })
@@ -92,25 +92,25 @@ describe('DiscoveryService', () => {
       lines: expect.any(Array),
       skillHints: expect.any(Array)
     })
-    await expect(service.readAvailableSession({
-      sourceRecordId: selected.sourceRecordId,
-      expectedRevision: '0'.repeat(64)
+    await expect(service.readSourceSnapshot({
+      sourceConversationId: selected.sourceConversationId,
+      sourceRevision: '0'.repeat(64)
     }, selected.sizeBytes)).rejects.toThrow('revision has changed')
     expect(readEvidence).toHaveBeenCalledOnce()
-    await expect(service.readAvailableSession({
-      sourceRecordId: selected.sourceRecordId,
-      expectedRevision: selected.revision
+    await expect(service.readSourceSnapshot({
+      sourceConversationId: selected.sourceConversationId,
+      sourceRevision: selected.sourceRevision
     }, selected.sizeBytes - 1)).rejects.toThrow('read limit')
-    expect(service.snapshot().runs[0]).not.toHaveProperty('kind')
+    expect(service.stateView().scans[0]).not.toHaveProperty('kind')
   })
 
-  it('refreshes a grown Session and removes a deleted Session without a full source rescan', async () => {
+  it('refreshes a grown Source Conversation and removes a deleted Source Conversation without a full source rescan', async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), 'oyster-session-access-'))
     temporaryDirectories.push(homeDirectory)
     const historyRoot = join(homeDirectory, '.claude', 'projects', 'demo')
-    const sessionPath = join(historyRoot, 'one.jsonl')
+    const conversationPath = join(historyRoot, 'one.jsonl')
     await mkdir(historyRoot, { recursive: true })
-    await writeFile(sessionPath, '{"sessionId":"one","timestamp":"2026-07-01T00:00:00.000Z"}\n')
+    await writeFile(conversationPath, '{"sessionId":"one","timestamp":"2026-07-01T00:00:00.000Z"}\n')
 
     const service = new DiscoveryService(
       new InMemoryDiscoveryRepository(),
@@ -122,36 +122,36 @@ describe('DiscoveryService', () => {
     await service.detectAgents()
     await service.waitForIdle()
 
-    const selected = service.listAvailableSessions()[0]
+    const selected = service.listSourceConversations()[0]
     expect(selected).toBeDefined()
-    await writeFile(sessionPath, '{"sessionId":"one","timestamp":"2026-07-01T00:00:00.000Z","changed":true}\n')
-    await expect(service.readAvailableSession({
-      sourceRecordId: selected.sourceRecordId,
-      expectedRevision: selected.revision
+    await writeFile(conversationPath, '{"sessionId":"one","timestamp":"2026-07-01T00:00:00.000Z","changed":true}\n')
+    await expect(service.readSourceSnapshot({
+      sourceConversationId: selected.sourceConversationId,
+      sourceRevision: selected.sourceRevision
     }, 1_024)).rejects.toThrow('has grown')
 
-    const changed = service.listAvailableSessions()[0]
-    expect(changed.sourceRecordId).toBe(selected.sourceRecordId)
-    expect(changed.revision).not.toBe(selected.revision)
+    const changed = service.listSourceConversations()[0]
+    expect(changed.sourceConversationId).toBe(selected.sourceConversationId)
+    expect(changed.sourceRevision).not.toBe(selected.sourceRevision)
     expect(changed.sizeBytes).toBeGreaterThan(selected.sizeBytes)
-    await expect(service.readAvailableSession({
-      sourceRecordId: selected.sourceRecordId,
-      expectedRevision: selected.revision
+    await expect(service.readSourceSnapshot({
+      sourceConversationId: selected.sourceConversationId,
+      sourceRevision: selected.sourceRevision
     }, 1_024)).rejects.toThrow('revision has changed')
-    await expect(service.readAvailableSession({
-      sourceRecordId: changed.sourceRecordId,
-      expectedRevision: changed.revision
-    }, 1_024)).resolves.toMatchObject({ revision: changed.revision })
+    await expect(service.readSourceSnapshot({
+      sourceConversationId: changed.sourceConversationId,
+      sourceRevision: changed.sourceRevision
+    }, 1_024)).resolves.toMatchObject({ sourceRevision: changed.sourceRevision })
 
-    await rm(sessionPath)
-    await expect(service.readAvailableSession({
-      sourceRecordId: changed.sourceRecordId,
-      expectedRevision: changed.revision
+    await rm(conversationPath)
+    await expect(service.readSourceSnapshot({
+      sourceConversationId: changed.sourceConversationId,
+      sourceRevision: changed.sourceRevision
     }, 1_024)).rejects.toThrow('no longer available')
-    expect(service.listAvailableSessions()).toEqual([])
+    expect(service.listSourceConversations()).toEqual([])
   })
 
-  it('transparently follows a Codex Session moved into archived_sessions', async () => {
+  it('transparently follows a Codex Source Conversation moved into archived_sessions', async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), 'oyster-codex-move-'))
     temporaryDirectories.push(homeDirectory)
     const codexRoot = join(homeDirectory, '.codex')
@@ -177,25 +177,25 @@ describe('DiscoveryService', () => {
     await service.initialize()
     await service.detectAgents()
     await service.waitForIdle()
-    const selected = service.listAvailableSessions()[0]
+    const selected = service.listSourceConversations()[0]
     const catalogSnapshots: string[][] = []
-    const unsubscribe = service.subscribeSessionCatalog((catalog) => {
-      catalogSnapshots.push(catalog.sessions.map((session) => session.sourceRecordId))
+    const unsubscribe = service.subscribeSourceConversationCatalog((catalog) => {
+      catalogSnapshots.push(catalog.conversations.map((conversation) => conversation.sourceConversationId))
     })
 
     await rename(originalPath, archivedPath)
-    const evidence = await service.readAvailableSession({
-      sourceRecordId: selected.sourceRecordId,
-      expectedRevision: selected.revision
+    const evidence = await service.readSourceSnapshot({
+      sourceConversationId: selected.sourceConversationId,
+      sourceRevision: selected.sourceRevision
     })
 
-    expect(evidence.revision).toBe(selected.revision)
-    expect(service.listAvailableSessions()).toEqual([selected])
-    expect(catalogSnapshots).toContainEqual([selected.sourceRecordId])
+    expect(evidence.sourceRevision).toBe(selected.sourceRevision)
+    expect(service.listSourceConversations()).toEqual([selected])
+    expect(catalogSnapshots).toContainEqual([selected.sourceConversationId])
     unsubscribe()
   })
 
-  it('uses the first authored Codex request instead of runtime envelopes as the Session title', async () => {
+  it('uses the first authored Codex request instead of runtime envelopes as the Source Conversation title', async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), 'oyster-codex-title-'))
     temporaryDirectories.push(homeDirectory)
     const sessionsRoot = join(homeDirectory, '.codex', 'sessions', '2026', '08', '10')
@@ -226,10 +226,10 @@ describe('DiscoveryService', () => {
     await service.detectAgents()
     await service.waitForIdle()
 
-    expect(service.listAvailableSessions()[0]?.title).toBe('Investigate readable evidence.')
+    expect(service.listSourceConversations()[0]?.title).toBe('Investigate readable evidence.')
   })
 
-  it('refreshes the complete Session catalog and publishes only the committed source scan', async () => {
+  it('refreshes the complete Source Conversation catalog and publishes only the committed source scan', async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), 'oyster-catalog-refresh-'))
     temporaryDirectories.push(homeDirectory)
     const historyRoot = join(homeDirectory, '.claude', 'projects', 'demo')
@@ -247,28 +247,30 @@ describe('DiscoveryService', () => {
     await service.initialize()
     await service.detectAgents()
     await service.waitForIdle()
-    expect(service.sessionCatalogSnapshot().sessions.map((session) => session.externalId)).toEqual(['one'])
+    expect(service.sourceConversationCatalogView().conversations.map(
+      (conversation) => conversation.providerConversationId
+    )).toEqual(['one'])
 
     await rm(firstPath)
     await writeFile(secondPath, '{"sessionId":"two","timestamp":"2026-07-02T00:00:00.000Z"}\n')
-    const snapshots: Array<{ state: string; sessions: string[] }> = []
-    const unsubscribe = service.subscribeSessionCatalog((catalog) => {
+    const snapshots: Array<{ state: string; conversations: string[] }> = []
+    const unsubscribe = service.subscribeSourceConversationCatalog((catalog) => {
       snapshots.push({
-        state: catalog.state,
-        sessions: catalog.sessions.map((session) => session.externalId)
+        state: catalog.status,
+        conversations: catalog.conversations.map((conversation) => conversation.providerConversationId)
       })
     })
 
-    const refreshed = await service.refreshSessionCatalog()
+    const refreshed = await service.refreshSourceConversationCatalog()
 
-    expect(refreshed.state).toBe('idle')
-    expect(refreshed.sessions.map((session) => session.externalId)).toEqual(['two'])
-    expect(snapshots).toContainEqual({ state: 'refreshing', sessions: ['one'] })
-    expect(snapshots.at(-1)).toEqual({ state: 'idle', sessions: ['two'] })
+    expect(refreshed.status).toBe('idle')
+    expect(refreshed.conversations.map((conversation) => conversation.providerConversationId)).toEqual(['two'])
+    expect(snapshots).toContainEqual({ state: 'refreshing', conversations: ['one'] })
+    expect(snapshots.at(-1)).toEqual({ state: 'idle', conversations: ['two'] })
     unsubscribe()
   })
 
-  it('resets indexed sessions when the user selects a different root', async () => {
+  it('resets indexed Source Conversations when the user selects a different root', async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), 'oyster-root-'))
     temporaryDirectories.push(homeDirectory)
     const firstRoot = join(homeDirectory, '.claude', 'projects')
@@ -286,12 +288,12 @@ describe('DiscoveryService', () => {
     await service.initialize()
     await service.detectAgents()
     await service.waitForIdle()
-    expect(service.snapshot().sources[0].sessionCount).toBe(1)
+    expect(service.stateView().sources[0].conversationCount).toBe(1)
 
-    const snapshot = await service.setSourceRoot('source:claude', secondRoot)
+    const snapshot = await service.chooseSourceRoot('source:claude', secondRoot)
     expect(snapshot.sources[0]).toMatchObject({
       rootPath: secondRoot,
-      sessionCount: 0,
+      conversationCount: 0,
       instructionFileCount: 0,
       scanState: 'idle'
     })

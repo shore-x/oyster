@@ -55,7 +55,7 @@ export interface AiConnection {
   authentication?: CodingPlanAuthentication
 }
 
-/** Application default captured by each new Agent run or persistent Session. */
+/** Application default captured by each new Agent Invocation or Chat Conversation. */
 export interface LlmBinding {
   connectionId: string
   modelId: string

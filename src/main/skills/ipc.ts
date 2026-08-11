@@ -26,7 +26,7 @@ export function registerSkillIpc(
     }
   }
 
-  ipcMain.handle(skillChannels.getDiscoverySnapshot, (event) => {
+  ipcMain.handle(skillChannels.getDiscoveryStateView, (event) => {
     assertTrustedSender(event)
     return service.getSnapshot()
   })

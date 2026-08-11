@@ -14,7 +14,7 @@ export interface RawEvidenceSkillHint {
   source: 'runtime_injection' | 'tool_call'
 }
 
-/** Complete, immutable Session evidence plus format-specific navigation hints. */
+/** Complete, immutable Source Snapshot evidence plus format-specific navigation hints. */
 export interface RawEvidence {
   formatVersion: string
   lines: string[]
@@ -27,7 +27,7 @@ export interface EvidenceRange {
 }
 
 export type CanonicalActivityKind =
-  | 'session'
+  | 'conversation_context'
   | 'instruction'
   | 'user_message'
   | 'assistant_message'
@@ -46,7 +46,7 @@ export interface CanonicalActivityItem {
   attachmentId?: string
 }
 
-/** Binary source content is kept out of text pages and materialized as a Run input file. */
+/** Binary source content is kept out of text pages and materialized as a Task input file. */
 export interface CanonicalActivityAttachment {
   id: string
   mimeType: string

@@ -49,7 +49,8 @@ export interface ModelGenerationResult {
   text: string
 }
 
-export interface ModelRuntime {
+/** A Connection-selected Pi model and its already-authenticated streaming transport. */
+export interface SelectedModelStream {
   model: Model<Api>
   streamFn: StreamFn
 }
