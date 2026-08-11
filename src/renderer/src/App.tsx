@@ -90,6 +90,12 @@ export function App() {
             class={`nav-item${page() === 'skills' ? ' nav-item--active' : ''}`}
             onClick={(event) => { event.preventDefault(); navigateTo('skills') }}
           ><Icon name="skill" /><span>Skills</span></a>
+          <a
+            href="#knowledge-processing"
+            data-testid="nav-knowledge-processing"
+            class={`nav-item${page() === 'knowledge-processing' ? ' nav-item--active' : ''}`}
+            onClick={(event) => { event.preventDefault(); navigateTo('knowledge-processing') }}
+          ><Icon name="play" /><span>加工测试</span></a>
           </div>
           <div class="nav-system">
             <a
@@ -98,15 +104,6 @@ export function App() {
               class={`nav-item${page() === 'settings' ? ' nav-item--active' : ''}`}
               onClick={(event) => { event.preventDefault(); navigateTo('settings') }}
             ><Icon name="spark" /><span data-testid="nav-settings">设置</span></a>
-            <details class="nav-advanced" open={page() === 'knowledge-processing'}>
-              <summary><Icon name="play" /><span>高级功能</span></summary>
-              <a
-            href="#knowledge-processing"
-            data-testid="nav-knowledge-processing"
-            class={`nav-item${page() === 'knowledge-processing' ? ' nav-item--active' : ''}`}
-            onClick={(event) => { event.preventDefault(); navigateTo('knowledge-processing') }}
-          ><Icon name="play" /><span>加工测试</span></a>
-            </details>
           </div>
         </nav>
       </aside>

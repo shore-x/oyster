@@ -21,9 +21,10 @@ Chat Agent 是主要人机协作入口，因此应用默认进入“对话”。
 3. 产物；
 4. 数据来源；
 5. Skills；
-6. 设置。
+6. 加工测试；
+7. 设置。
 
-“加工测试”是验证和开发工作面，收在高级功能中，不与日常工作入口并列。“AI 后端”“Agent 配置”和“Pi Extensions”属于同一个设置页，以 Tab 区分，不再各自占用一级导航。“文件浏览”是产物页中的文件工作面，不是独立页面。
+“加工测试”是验证 Knowledge Processing Task 和 Agent Invocation 的稳定工作面，直接进入左侧一级导航，不再使用“高级功能”分组。“AI 后端”“Agent 配置”和“Pi Extensions”属于同一个设置页，以 Tab 区分，不再各自占用一级导航。“文件浏览”是产物页中的文件工作面，不是独立页面。
 
 一级导航只切换稳定产品领域。用户在一个领域中查看对象详情时，优先级从高到低为：
 
@@ -68,7 +69,7 @@ Tab 只用于同一领域中的同级工作面，并保持共享上下文。例�
 
 ### 4.4 Inspector
 
-Inspector 是当前页面的非模态上下文层。对话中的 Knowledge Statement、Model Call 详情以及加工历史详情使用 Inspector：打开后主任务仍保持可见和可操作，关闭只收起详情，不执行“返回页面”。Inspector 必须有可见关闭按钮、支持 `Escape`，并拥有自己的滚动容器。
+Inspector 是当前页面的非模态上下文层。对话中的 Knowledge Statement、Model Call 详情以及加工历史详情使用 Inspector：打开后主任务仍保持可见和可操作，关闭只收起详情，不执行“返回页面”。Inspector 必须有可见关闭按钮、支持 `Escape`，并拥有自己的滚动容器。用户从 Inspector 内继续查看其子详情时，应在同一个 Inspector 中切换内容并提供内部返回操作；不得叠加第二个 Inspector 或遮挡当前 Inspector 的关闭入口。
 
 ## 5. 视觉语言
 

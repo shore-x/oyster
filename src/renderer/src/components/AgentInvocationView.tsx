@@ -296,17 +296,25 @@ export function AgentModelCallInspector(props: {
   )
 }
 
-export function AgentInvocationExplorer(props: AgentInvocationViewProps & { compact?: boolean }) {
+export function AgentInvocationExplorer(props: AgentInvocationViewProps & {
+  compact?: boolean
+  onInspectModelCall?(call: AgentModelCallRecord, index: number): void
+}) {
   const [selectedCallId, setSelectedCallId] = createSignal<string>()
   const inspectorTitleId = `agent-invocation-inspector-${createUniqueId()}`
   const selectedCall = createMemo(() => props.invocation.modelCalls.find(
     (call) => call.id === selectedCallId()
   ))
-  createEffect(() => {
-    if (selectedCallId() && selectedCall()) return
-    const failed = props.invocation.modelCalls.find((call) => call.status === 'failed')
-    setSelectedCallId(failed?.id)
-  })
+  const inspectModelCall = (id: string): void => {
+    const index = props.invocation.modelCalls.findIndex((call) => call.id === id)
+    const call = props.invocation.modelCalls[index]
+    if (!call) return
+    if (props.onInspectModelCall) {
+      props.onInspectModelCall(call, index)
+      return
+    }
+    setSelectedCallId(id)
+  }
   createEffect(() => {
     if (!selectedCall()) return
     const closeOnEscape = (event: KeyboardEvent): void => {
@@ -334,7 +342,7 @@ export function AgentInvocationExplorer(props: AgentInvocationViewProps & { comp
       </Show>
       <Show when={props.invocation.error}>{(error) => <p class="agent-activity-error">{error()}</p>}</Show>
       <div class={`agent-invocation-view__workspace${selectedCall() ? ' agent-invocation-view__workspace--inspecting' : ''}`}>
-        <AgentInvocationTimeline {...props} onSelectModelCall={setSelectedCallId} />
+        <AgentInvocationTimeline {...props} onSelectModelCall={inspectModelCall} />
         <Show when={selectedCall()}>{(call) => (
           <aside
             class="agent-invocation-view__inspector"
@@ -364,6 +372,11 @@ export function AgentInvocationCollectionExplorer(props: {
   followLatestInvocation?: boolean
   toolLabel?: AgentInvocationViewProps['toolLabel']
   onOpenKnowledge?: AgentInvocationViewProps['onOpenKnowledge']
+  onInspectModelCall?(
+    invocation: AgentInvocationDebugRecord,
+    call: AgentModelCallRecord,
+    index: number
+  ): void
 }) {
   const [selectedInvocationId, setSelectedInvocationId] = createSignal<string>()
   const selectedInvocation = createMemo(() => props.invocations.find((invocation) => invocation.id === selectedInvocationId()))
@@ -407,6 +420,7 @@ export function AgentInvocationCollectionExplorer(props: {
           agentDisplayName={props.agentDisplayName?.(invocation())}
           toolLabel={props.toolLabel}
           onOpenKnowledge={props.onOpenKnowledge}
+          onInspectModelCall={(call, index) => props.onInspectModelCall?.(invocation(), call, index)}
         />}
       </Show>
     </section>

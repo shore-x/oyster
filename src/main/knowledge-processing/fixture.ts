@@ -26,9 +26,39 @@ import { KnowledgeTaskGitRepository } from './knowledge-task-git-repository'
 function fixtureInvocation(
   input: KnowledgeMaintainerInvocationInput | KnowledgeReviewerInvocationInput,
   agentId: 'knowledge_maintainer' | 'knowledge_reviewer',
-  toolCalls: string[]
+  toolCalls: string[],
+  includeModelCall = false
 ): AgentInvocationDebugRecord {
   const timestamp = new Date().toISOString()
+  const modelCalls = includeModelCall ? [{
+    id: `${input.invocationId}:model:1`,
+    sequence: 1,
+    purpose: 'agent' as const,
+    status: 'completed' as const,
+    startedAt: timestamp,
+    completedAt: timestamp,
+    durationMs: 0,
+    model: {
+      id: 'fixture-model',
+      name: 'Fixture Model',
+      provider: 'fixture',
+      api: 'fixture',
+      reasoning: false,
+      contextWindow: 128_000,
+      maxTokens: 16_384
+    },
+    context: {
+      systemPrompt: 'Review the candidate Knowledge tree and decide whether it is ready.',
+      messages: [{ role: 'user', content: 'Review the current Task branch.' }],
+      tools: []
+    },
+    options: { temperature: 0 },
+    providerRequest: {
+      payload: { model: 'fixture-model', messages: [{ role: 'user', content: 'Review the current Task branch.' }] }
+    },
+    providerResponse: { status: 200, headers: { 'x-request-id': 'fixture-review' } },
+    output: { role: 'assistant', content: [{ type: 'text', text: 'Approved.' }], stopReason: 'stop' }
+  }] : []
   return {
     formatVersion: AGENT_INVOCATION_FORMAT_VERSION,
     debugFormatVersion: AGENT_INVOCATION_DEBUG_FORMAT_VERSION,
@@ -39,14 +69,14 @@ function fixtureInvocation(
     completedAt: timestamp,
     durationMs: 0,
     debugRecordId: input.invocationId,
-    modelCallCount: 0,
+    modelCallCount: modelCalls.length,
     toolCallCount: toolCalls.length,
     turns: [],
     messages: [],
-    modelCalls: [],
+    modelCalls,
     toolCalls: toolCalls.map((name, index) => ({
       id: `${input.invocationId}:tool:${index + 1}`,
-      sequence: index + 1,
+      sequence: modelCalls.length + index + 1,
       turnId: `${input.invocationId}:turn:1`,
       assistantMessageId: `${input.invocationId}:message:1`,
       name,
@@ -143,12 +173,12 @@ export class FixtureKnowledgeReviewerRuntime implements KnowledgeReviewerRuntime
     input: KnowledgeReviewerInvocationInput
   ): Promise<RepositoryAgentInvocationResult> {
     input.signal.throwIfAborted()
-    const invocation = fixtureInvocation(input, 'knowledge_reviewer', ['read', 'bash'])
+    const invocation = fixtureInvocation(input, 'knowledge_reviewer', ['read', 'bash'], true)
     this.debugStore.save(invocation)
     input.onInvocationUpdate?.(invocation)
     return {
       invocation: parseAgentInvocationRecord(invocation),
-      modelCallCount: 0,
+      modelCallCount: invocation.modelCallCount,
       toolCalls: invocation.toolCalls.map((call) => call.name)
     }
   }

@@ -25,6 +25,13 @@ if (exitCode !== 0) throw new Error(`Electron UI smoke test exited with code ${e
 const semantics = JSON.parse(await readFile(`${capturePath}.json`, 'utf8'))
 if (semantics.defaultPage !== 'chat') throw new Error('Chat is not the default product page')
 if (semantics.title !== 'Agent 数据来源') throw new Error('Expected page title was not rendered')
+if (
+  !semantics.navigationItems?.includes('加工测试')
+  || !semantics.processingInPrimaryNavigation
+  || semantics.advancedNavigationExists
+) {
+  throw new Error('Knowledge processing is not a normal primary navigation item')
+}
 if (semantics.documentScrollY !== 0 || semantics.bodyOverflow !== 'hidden') {
   throw new Error('The document still owns business scrolling instead of the App Shell')
 }
@@ -542,8 +549,11 @@ if (processing.knowledgeTaskActivity.overviewHasActivityExplorer) {
 if (processing.knowledgeTaskActivity.summaryStatementCount !== '6') {
   throw new Error('The knowledge-task overview does not expose compact result counts')
 }
-if (!processing.knowledgeTaskActivity.activityExplorerExists || processing.knowledgeTaskActivity.activityEventCount !== 2) {
+if (!processing.knowledgeTaskActivity.activityExplorerExists || processing.knowledgeTaskActivity.activityEventCount !== 3) {
   throw new Error('The activity inspector does not expose the shared Agent Invocation timeline')
+}
+if (processing.knowledgeTaskActivity.invocationHeadingCount !== 1) {
+  throw new Error('The activity inspector repeats the Agent Invocation detail heading')
 }
 if (
   !processing.knowledgeTaskActivity.invocationSelectorText?.includes('Maintainer')
@@ -556,6 +566,20 @@ if (
 }
 if (!processing.knowledgeTaskActivity.toolText?.includes('read') || !processing.knowledgeTaskActivity.toolOutput?.includes('Fixture read completed')) {
   throw new Error('The activity page does not expose Reviewer Tool Calls')
+}
+if (
+  !processing.knowledgeTaskActivity.modelCallDetailExists
+  || !processing.knowledgeTaskActivity.modelCallUsesSingleInspector
+  || !processing.knowledgeTaskActivity.modelCallBackAvailable
+  || !processing.knowledgeTaskActivity.returnedFromModelCall
+) {
+  throw new Error('A Knowledge Task Model Call does not drill into and return from the existing Invocation inspector')
+}
+if (
+  !processing.knowledgeTaskActivity.invocationInspectorCloseAvailable
+  || !processing.knowledgeTaskActivity.invocationInspectorClosedFromModelCall
+) {
+  throw new Error('The Invocation inspector cannot be closed while a Model Call detail is visible')
 }
 if (!processing.knowledgeTaskActivity.resultDetailExists || !processing.knowledgeTaskActivity.returnedToOverview) {
   throw new Error('The knowledge-task result detail is not a navigable secondary page')

@@ -332,7 +332,13 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       defaultBodyText,
       bodyText: page.innerText,
       documentScrollY: window.scrollY,
-      bodyOverflow: bodyStyle.overflow
+      bodyOverflow: bodyStyle.overflow,
+      navigationItems: Array.from(document.querySelectorAll('.sidebar__navigation .nav-item'))
+        .map((item) => item.textContent?.trim()),
+      processingInPrimaryNavigation: Boolean(
+        document.querySelector('[data-testid="nav-knowledge-processing"]')?.closest('.nav-primary')
+      ),
+      advancedNavigationExists: Boolean(document.querySelector('.nav-advanced'))
     }
   })()`)
   semantics.defaultPage = defaultPage
@@ -935,6 +941,9 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
         page.querySelector('[data-testid="open-knowledge-task-activity"]')?.click()
         await new Promise((resolve) => requestAnimationFrame(resolve))
         const activityExplorerExists = Boolean(page.querySelector('[data-testid="agent-invocation-view"]'))
+        const invocationHeadingCount = Array.from(page.querySelectorAll(
+          '.knowledge-task__inspector strong, .knowledge-task__inspector h2'
+        )).filter((element) => element.textContent?.trim() === 'Agent Invocation 详情').length
         const invocationSelectorText = page.querySelector('.agent-invocation-collection__selector')?.textContent
         const selectedAgentName = page.querySelector('.agent-invocation-view__summary > div:first-child strong')?.textContent?.trim()
         const activityEventCount = page.querySelectorAll('.agent-activity-message, .agent-activity-tool, .agent-activity-model-activity').length
@@ -944,8 +953,25 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
         const toolText = tool?.textContent
         const toolInput = tool?.querySelectorAll('pre')[0]?.textContent
         const toolOutput = tool?.querySelectorAll('pre')[1]?.textContent
+        const modelCallButton = page.querySelector('.agent-activity-message--assistant button, .agent-activity-model-activity')
+        modelCallButton?.click()
+        await new Promise((resolve) => requestAnimationFrame(resolve))
+        const modelCallDetailExists = Boolean(page.querySelector('[data-testid="knowledge-task-model-call-detail"]'))
+        const modelCallUsesSingleInspector = page.querySelectorAll(
+          '.knowledge-task__inspector, .agent-invocation-view__inspector'
+        ).length === 1
+        const modelCallBack = page.querySelector('[data-testid="knowledge-task-model-call-back"]')
+        const modelCallBackAvailable = Boolean(modelCallBack)
+        modelCallBack?.click()
+        await new Promise((resolve) => requestAnimationFrame(resolve))
+        const returnedFromModelCall = Boolean(page.querySelector('[data-testid="agent-invocation-view"]'))
+          && !page.querySelector('[data-testid="knowledge-task-model-call-detail"]')
+        page.querySelector('.agent-activity-message--assistant button, .agent-activity-model-activity')?.click()
+        await new Promise((resolve) => requestAnimationFrame(resolve))
+        const invocationInspectorCloseAvailable = Boolean(page.querySelector('[data-testid="knowledge-task-detail-back"]'))
         page.querySelector('[data-testid="knowledge-task-detail-back"]')?.click()
         await new Promise((resolve) => requestAnimationFrame(resolve))
+        const invocationInspectorClosedFromModelCall = !page.querySelector('.knowledge-task__inspector')
         page.querySelector('[data-testid="open-knowledge-task-result"]')?.click()
         await new Promise((resolve) => requestAnimationFrame(resolve))
         const resultDetailExists = Boolean(page.querySelector('[data-testid="knowledge-task-result-detail"]'))
@@ -989,12 +1015,19 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
           overviewHasActivityExplorer,
           summaryStatementCount,
           activityExplorerExists,
+          invocationHeadingCount,
           invocationSelectorText,
           selectedAgentName,
           activityEventCount,
           toolText,
           toolInput,
           toolOutput,
+          modelCallDetailExists,
+          modelCallUsesSingleInspector,
+          modelCallBackAvailable,
+          returnedFromModelCall,
+          invocationInspectorCloseAvailable,
+          invocationInspectorClosedFromModelCall,
           resultDetailExists,
           statementCount,
           gitResultText,

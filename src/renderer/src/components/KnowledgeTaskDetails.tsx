@@ -1,7 +1,10 @@
 import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
 import { Button } from '../ui'
 import { KnowledgeStatementBrowser, statementPreview } from './KnowledgeStatementBrowser'
-import { AgentInvocationCollectionExplorer } from './AgentInvocationView'
+import {
+  AgentInvocationCollectionExplorer,
+  AgentModelCallInspector
+} from './AgentInvocationView'
 import type {
   KnowledgeTaskResultView,
   UiMilestoneView
@@ -93,40 +96,90 @@ export function KnowledgeTaskActivityDetail(props: {
   backTestId?: string
   onBack?(): void
 }) {
+  const [modelCallSelection, setModelCallSelection] = createSignal<{
+    invocationId: string
+    callId: string
+  }>()
   const invocations = () => props.invocations
     ?? (props.view ? [props.view.invocation] : [])
+  const hasIntro = () => Boolean(props.title || props.description || props.onBack)
+  const selectedModelCall = createMemo(() => {
+    const selection = modelCallSelection()
+    if (!selection) return undefined
+    const invocation = invocations().find((item) => item.id === selection.invocationId)
+    if (!invocation) return undefined
+    const index = invocation.modelCalls.findIndex((call) => call.id === selection.callId)
+    const call = invocation.modelCalls[index]
+    return call ? { call, index } : undefined
+  })
+
+  createEffect(() => {
+    if (modelCallSelection() && !selectedModelCall()) setModelCallSelection(undefined)
+  })
+
   return (
     <section class="knowledge-task__detail-page" data-testid={props.detailTestId}>
-      <div class="knowledge-task__detail-header">
-        <Show when={props.onBack}>{(onBack) => (
-          <Button variant="ghost" icon="back" data-testid={props.backTestId} onClick={onBack()}>
-            {props.backLabel || '返回'}
-          </Button>
-        )}</Show>
-        <div>
-          <h2>{props.title || 'Agent Invocation 详情'}</h2>
-          <p>{props.description || '选择一次 Model Call 或 Tool Call，检查其输入和结果。'}</p>
-        </div>
-      </div>
-      <p class="knowledge-task__detail-disclosure">Debug Record 可能包含原始观察材料、完整 Pi Context 和最终 Provider Payload；数据仅保存在本地，不保存凭据，敏感请求 Header 会被脱敏。</p>
-      <Show when={props.status}>{(status) => (
-        <div
-          class={`processing-history-detail-status processing-history-detail-status--${status()}`}
-          data-testid="history-task-status"
-        >
-          <strong>{terminalStatusLabel(status())}</strong>
-          <Show when={props.error}>{(error) => <p>{error()}</p>}</Show>
-        </div>
-      )}</Show>
       <Show
-        when={invocations().length}
-        fallback={<div class="knowledge-task__empty">这个 Task 没有实际启动 Agent Invocation。</div>}
+        when={selectedModelCall()}
+        fallback={(
+          <>
+            <Show when={hasIntro()}>
+              <div class="knowledge-task__detail-header">
+                <Show when={props.onBack}>{(onBack) => (
+                  <Button variant="ghost" icon="back" data-testid={props.backTestId} onClick={onBack()}>
+                    {props.backLabel || '返回'}
+                  </Button>
+                )}</Show>
+                <div>
+                  <h2>{props.title || 'Agent Invocation 详情'}</h2>
+                  <p>{props.description || '选择一次 Model Call 或 Tool Call，检查其输入和结果。'}</p>
+                </div>
+              </div>
+            </Show>
+            <p class={`knowledge-task__detail-disclosure${hasIntro() ? '' : ' knowledge-task__detail-disclosure--first'}`}>Debug Record 可能包含原始观察材料、完整 Pi Context 和最终 Provider Payload；数据仅保存在本地，不保存凭据，敏感请求 Header 会被脱敏。</p>
+            <Show when={props.status}>{(status) => (
+              <div
+                class={`processing-history-detail-status processing-history-detail-status--${status()}`}
+                data-testid="history-task-status"
+              >
+                <strong>{terminalStatusLabel(status())}</strong>
+                <Show when={props.error}>{(error) => <p>{error()}</p>}</Show>
+              </div>
+            )}</Show>
+            <Show
+              when={invocations().length}
+              fallback={<div class="knowledge-task__empty">这个 Task 没有实际启动 Agent Invocation。</div>}
+            >
+              <AgentInvocationCollectionExplorer
+                invocations={invocations()}
+                agentDisplayName={(invocation) => processingAgentDisplayName(invocation.agentId)}
+                followLatestInvocation={props.followLatestInvocation}
+                onInspectModelCall={(invocation, call) => setModelCallSelection({
+                  invocationId: invocation.id,
+                  callId: call.id
+                })}
+              />
+            </Show>
+          </>
+        )}
       >
-        <AgentInvocationCollectionExplorer
-          invocations={invocations()}
-          agentDisplayName={(invocation) => processingAgentDisplayName(invocation.agentId)}
-          followLatestInvocation={props.followLatestInvocation}
-        />
+        {(selection) => (
+          <div class="knowledge-task__model-call-detail" data-testid="knowledge-task-model-call-detail">
+            <div class="knowledge-task__detail-header knowledge-task__detail-header--back">
+              <Button
+                variant="ghost"
+                icon="back"
+                data-testid="knowledge-task-model-call-back"
+                onClick={() => setModelCallSelection(undefined)}
+              >返回 Invocation</Button>
+              <div>
+                <h2>模型调用详情</h2>
+                <p>检查这一次请求使用的完整 Context、Provider Payload 与模型输出。</p>
+              </div>
+            </div>
+            <AgentModelCallInspector call={selection().call} index={selection().index} />
+          </div>
+        )}
       </Show>
     </section>
   )
