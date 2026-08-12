@@ -44,7 +44,7 @@ const SAFE_STREAM_OPTION_KEYS = [
   'maxRetryDelayMs'
 ] as const
 
-const SECRET_HEADER_PATTERN = /^(?:authorization|proxy-authorization|x-api-key|api-key|cookie|set-cookie)$/i
+const SECRET_HEADER_PATTERN = /^(?:authorization|proxy[-_]authorization|cookie|set[-_]cookie|(?:x[-_])?(?:api[-_]?key|auth[-_]?token|access[-_]?token))$/i
 
 export interface PiAgentInvocationRecorderOptions {
   agentId: string
@@ -163,7 +163,7 @@ export function createPiAgentInvocationRecorder(
   const initialLeafId = options.sessionManager?.getLeafId() ?? undefined
   const invocation: AgentInvocationRecord = {
     formatVersion: AGENT_INVOCATION_FORMAT_VERSION,
-    id: options.invocationId,
+    invocationId: options.invocationId,
     agentId: options.agentId,
     ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
     status: 'in_progress',
@@ -259,7 +259,7 @@ export function createPiAgentInvocationRecorder(
   }
 
   const recordMessage = (message: AgentMessage): void => {
-    const id = `${invocation.id}:message:${++messageNumber}`
+    const id = `${invocation.invocationId}:message:${++messageNumber}`
     currentMessageId = id
     const record: AgentInvocationMessageRecord = {
       id,
@@ -303,7 +303,7 @@ export function createPiAgentInvocationRecorder(
       return
     }
     if (event.type === 'turn_start') {
-      const id = `${invocation.id}:turn:${++turnNumber}`
+      const id = `${invocation.invocationId}:turn:${++turnNumber}`
       currentTurnId = id
       debug.turns.push({
         id,
@@ -394,7 +394,7 @@ export function createPiAgentInvocationRecorder(
     streamFn: StreamFn,
     purpose: AgentModelCallPurpose | (() => AgentModelCallPurpose) = 'agent'
   ): StreamFn => async (model, context, streamOptions) => {
-    const id = `${invocation.id}:model:${++modelCallNumber}`
+    const id = `${invocation.invocationId}:model:${++modelCallNumber}`
     const call: AgentModelCallRecord = {
       id,
       sequence: ++sequence,
@@ -427,9 +427,7 @@ export function createPiAgentInvocationRecorder(
       onResponse: async (response, requestedModel) => {
         call.providerResponse = {
           status: response.status,
-          headers: Object.fromEntries(Object.entries(response.headers).map(
-            ([name, value]) => [name, jsonValue(value)]
-          ))
+          headers: debugHeaders(response.headers) ?? {}
         }
         notify()
         await originalResponse?.(response, requestedModel)

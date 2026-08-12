@@ -51,8 +51,7 @@ export const knowledgeProcessingChannels = {
 export const knowledgeChannels = {
   browse: 'knowledge:browse',
   read: 'knowledge:read',
-  getNeighborhood: 'knowledge:get-neighborhood',
-  clear: 'knowledge:clear'
+  getNeighborhood: 'knowledge:get-neighborhood'
 } as const
 
 export const artifactChannels = {
@@ -72,7 +71,6 @@ export const chatChannels = {
   getState: 'chat:get-state',
   createConversation: 'chat:create-conversation',
   readConversation: 'chat:read-conversation',
-  deleteConversation: 'chat:delete-conversation',
   sendMessage: 'chat:send-message',
   cancelInvocation: 'chat:cancel-invocation',
   saveDefaultInstructions: 'chat:save-default-instructions'

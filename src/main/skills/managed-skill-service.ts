@@ -96,9 +96,9 @@ function bindingTargetDefinitions(context: DetectionContext): BindingTarget[] {
   ]
 }
 
-async function outputBindingPaths(
+async function skillBindingPaths(
   registrationRoot: string,
-  outputPath: string
+  skillPath: string
 ): Promise<string[]> {
   let entries
   try {
@@ -108,14 +108,14 @@ async function outputBindingPaths(
     throw error
   }
 
-  const expectedOutputPath = resolve(outputPath)
+  const expectedSkillPath = resolve(skillPath)
   const paths: string[] = []
   for (const entry of entries) {
     if (!entry.isSymbolicLink()) continue
     const entryPath = join(registrationRoot, entry.name)
     try {
       const targetPath = resolve(dirname(entryPath), await readlink(entryPath))
-      if (targetPath === expectedOutputPath) paths.push(entryPath)
+      if (targetPath === expectedSkillPath) paths.push(entryPath)
     } catch (error) {
       // An entry removed during a refresh is simply no longer a binding fact.
       if (!missingPath(error)) throw error
@@ -126,15 +126,15 @@ async function outputBindingPaths(
 
 async function inspectBindingTarget(
   target: BindingTarget,
-  outputPath: string,
+  skillPath: string,
   skillName: string | undefined,
   invalidIssue?: string
 ): Promise<SkillBindingTargetSummary> {
-  let existingOutputBindings: string[]
+  let existingSkillBindings: string[]
   try {
-    existingOutputBindings = await outputBindingPaths(
+    existingSkillBindings = await skillBindingPaths(
       target.registrationRoot,
-      outputPath
+      skillPath
     )
   } catch (error) {
     return {
@@ -144,16 +144,16 @@ async function inspectBindingTarget(
       message: errorMessage(error)
     }
   }
-  if (existingOutputBindings.length > 1) {
+  if (existingSkillBindings.length > 1) {
     return {
       ...target,
       scope: 'user',
       state: 'error',
-      message: '发现多个指向当前 Skill output 的 symlink，Oyster 无法安全选择'
+      message: '发现多个指向当前 Skill Artifact 的 symlink，Oyster 无法安全选择'
     }
   }
-  if (existingOutputBindings.length === 1) {
-    const bindingPath = existingOutputBindings[0]
+  if (existingSkillBindings.length === 1) {
+    const bindingPath = existingSkillBindings[0]
     const currentName = validSkillName(skillName) ? skillName : undefined
     return {
       ...target,
@@ -204,7 +204,7 @@ async function inspectBindingTarget(
 
   try {
     const targetPath = resolve(dirname(bindingPath), await readlink(bindingPath))
-    if (targetPath === resolve(outputPath)) {
+    if (targetPath === resolve(skillPath)) {
       return { ...target, scope: 'user', bindingPath, state: 'bound' }
     }
     return {
@@ -274,7 +274,7 @@ export class ManagedSkillService {
       return [Promise.all(this.targets().map(async (target) => {
         const summary = await inspectBindingTarget(
           target,
-          artifact.skill!.outputPath,
+          artifact.skill!.skillPath,
           artifact.skill!.name,
           artifact.skill!.issue
         )
@@ -321,15 +321,15 @@ export class ManagedSkillService {
     const artifact = await this.requireManagedArtifact(artifactDirectoryName)
     let details
     try {
-      details = await lstat(artifact.skill.outputPath)
+      details = await lstat(artifact.skill.skillPath)
     } catch (error) {
-      if (missingPath(error)) throw new Error('Skill output 已不存在')
+      if (missingPath(error)) throw new Error('Skill Artifact 已不存在')
       throw error
     }
     if (!details.isDirectory() || details.isSymbolicLink()) {
-      throw new Error('Skill output 不再是可打开的真实目录')
+      throw new Error('Skill Artifact 不再是可打开的真实目录')
     }
-    return artifact.skill.outputPath
+    return artifact.skill.skillPath
   }
 
   async bind(input: ManagedSkillBindingInput): Promise<ManagedSkillSnapshot> {
@@ -349,7 +349,7 @@ export class ManagedSkillService {
 
     const current = await inspectBindingTarget(
       target,
-      artifact.skill.outputPath,
+      artifact.skill.skillPath,
       artifact.skill.name
     )
     if (current.state === 'bound') return this.getSnapshot()
@@ -359,7 +359,7 @@ export class ManagedSkillService {
 
     try {
       await symlink(
-        resolve(artifact.skill.outputPath),
+        resolve(artifact.skill.skillPath),
         current.bindingPath!,
         'dir'
       )
@@ -367,7 +367,7 @@ export class ManagedSkillService {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
       const afterConflict = await inspectBindingTarget(
         target,
-        artifact.skill.outputPath,
+        artifact.skill.skillPath,
         artifact.skill.name
       )
       if (afterConflict.state !== 'bound') {
@@ -382,7 +382,7 @@ export class ManagedSkillService {
     const artifact = await this.requireManagedArtifact(input?.artifactDirectoryName)
     const current = await inspectBindingTarget(
       target,
-      artifact.skill.outputPath,
+      artifact.skill.skillPath,
       artifact.skill.name,
       artifact.skill.issue
     )
@@ -403,7 +403,7 @@ export class ManagedSkillService {
       throw new Error('目标位置不是 Oyster 可以解绑的 symlink')
     }
 
-    const expectedOutputPath = resolve(artifact.skill.outputPath)
+    const expectedSkillPath = resolve(artifact.skill.skillPath)
     let linkedPath
     try {
       linkedPath = resolve(dirname(bindingPath), await readlink(bindingPath))
@@ -411,7 +411,7 @@ export class ManagedSkillService {
       if (missingPath(error)) return this.getSnapshot()
       throw error
     }
-    if (linkedPath !== expectedOutputPath) {
+    if (linkedPath !== expectedSkillPath) {
       throw new Error('目标 symlink 已指向其他位置，Oyster 不会删除')
     }
 
@@ -438,7 +438,7 @@ export class ManagedSkillService {
       !after.isSymbolicLink()
       || after.dev !== before.dev
       || after.ino !== before.ino
-      || linkedPathAfter !== expectedOutputPath
+      || linkedPathAfter !== expectedSkillPath
     ) {
       throw new Error('目标 symlink 在解绑过程中发生变化，未删除任何内容')
     }

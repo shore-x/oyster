@@ -14,16 +14,8 @@ export interface CodexAccountReadResult {
   requiresOpenaiAuth: boolean
 }
 
-export interface CodexLoginStartResult {
-  type: string
-  loginId?: string
-  authUrl?: string
-}
-
 export interface CodexAccountClient {
   readAccount(): Promise<CodexAccountReadResult>
-  startChatGptLogin(): Promise<CodexLoginStartResult>
-  subscribe(listener: (method: string, params: JsonRecord) => void): () => void
   dispose(): void
 }
 
@@ -48,7 +40,6 @@ export class CodexAppServerClient implements CodexAccountClient {
   private nextId = 1
   private stdoutBuffer = ''
   private readonly pending = new Map<number, PendingRequest>()
-  private readonly listeners = new Set<(method: string, params: JsonRecord) => void>()
 
   constructor(
     private readonly executablePath: string,
@@ -108,10 +99,6 @@ export class CodexAppServerClient implements CodexAccountClient {
         continue
       }
 
-      if (typeof message.method === 'string') {
-        const params = asRecord(message.params) ?? {}
-        for (const listener of this.listeners) listener(message.method, params)
-      }
     }
   }
 
@@ -150,15 +137,6 @@ export class CodexAppServerClient implements CodexAccountClient {
 
   async readAccount(): Promise<CodexAccountReadResult> {
     return await this.request('account/read', { refreshToken: false }) as CodexAccountReadResult
-  }
-
-  async startChatGptLogin(): Promise<CodexLoginStartResult> {
-    return await this.request('account/login/start', { type: 'chatgpt' }) as CodexLoginStartResult
-  }
-
-  subscribe(listener: (method: string, params: JsonRecord) => void): () => void {
-    this.listeners.add(listener)
-    return () => this.listeners.delete(listener)
   }
 
   dispose(): void {

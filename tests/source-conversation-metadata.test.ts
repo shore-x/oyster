@@ -19,7 +19,6 @@ function sourceConversation(
     projectPath: '/workspace/oyster',
     startedAt: '2026-07-28T08:00:00.000Z',
     sizeBytes: 2_048,
-    sourceRevision: 'a'.repeat(64),
     ...overrides
   }
 }

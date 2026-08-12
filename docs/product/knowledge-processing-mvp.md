@@ -1,85 +1,55 @@
-# 知识加工验证 MVP
+# 知识加工
 
-> 状态：当前实现
->
-> 日期：2026-08-11
->
-> 术语遵循：[Oyster 术语与执行模型](../architecture/terminology.md)
+本文说明 Oyster 为什么把知识加工设计为 Maintainer 与 Reviewer 在 Git Task 中协作。跨功能的 Git 约束见[统一 Repository 与 Agent Git 协作](../architecture/unified-git-agent-collaboration.md)。
 
-## 目标
+## 验证目标
 
-用真实 Maintainer → Reviewer 链路验证：Source Conversation 的精确版本能够被完整读取；Task、Agent Session 和 Knowledge/Artifact 变化能够在同一 Git 历史中回溯；用户主 checkout 不被 Agent Task 占用；多个 Task Agent 能在不同 worktree 并行；完整 Agent Invocation 活动可以离线检查。
+聊天记录不能因为被摘要就自动成为 Knowledge。知识加工需要验证一条更严格的链路：用户选择的外部活动能在接受时被固定，Agent 能在已有 Knowledge 基础上形成必要修改，独立 Reviewer 能判断结果是否自足，最终变化能进入正式 Repository 并被回溯。
 
-## Repository 与运行布局
+MVP 采用两个角色，不是为了建立通用多 Agent 编排框架，而是为了隔离两种必要判断：
 
-```text
-<Electron userData>/
-├── repository/                         # 用户主 checkout
-│   ├── knowledge/
-│   ├── artifacts/
-│   └── tasks/<taskId>/                 # tracked Task record
-│       ├── BRIEF.md
-│       ├── PROGRESS.md
-│       ├── inputs/
-│       ├── pi-sessions/
-│       └── task.json
-├── worktrees/<taskId>/                 # Agent linked checkout
-├── agent-runtime/<taskId>/             # 不进 Git
-└── agent-debug/invocations/            # 不进 Git
-```
+- Maintainer 可以查看来源，负责理解证据并维护内容；
+- Reviewer 不查看来源，负责检查结果本身是否清楚、一致并且可以复用。
 
-Task 使用 `task/<taskId>` branch。Host 从已提交的 `main` 创建 linked worktree，并用 `task: start` commit 固定 BRIEF、inputs、初始进度和生命周期记录。`tasks/` 与 `knowledge/`、`artifacts/` 由同一个 Repository 跟踪。
+## Source Snapshot 与 Task
 
-Task start revision 已能固定物化输入，因此不再存在 `manifest.json`、working-tree 指纹或自定义 `workspaceRevision`。
+当前结构化入口让用户按稳定 `sourceConversationId` 选择一份 Source Conversation，而不是选择 catalog 元数据所表示的“精确版本”。接受时，Source Adapter 读取来源当时的当前内容，并检查读取期间没有发生变化；陈旧 catalog 可以刷新后重试，只有来源在读取期间持续变化时才拒绝本次接受。成功读取的字节通过 SHA-256 形成不可变 `sourceRef`。
 
-## 文件化输入
+Adapter 随后把本次加工所需的 Canonical Activity、Raw Evidence 定位信息和附件固定到 Task revision。固定材料使后续 Review 能回答“当时依据了什么”，同时不把 Oyster 的副本伪装成仍由外部来源拥有的最新事实。人类指令已经确定为可选输入形态，但其结构化选择与加工入口尚未实现，属于后续目标。
 
-Source Adapter 校验所选 Source Conversation 的精确 `sourceRevision`，生成可定位的 Canonical Activity，并保留 Raw Evidence locator。Host 在 Task 的 `inputs/` 中物化：
+Task 是持续的 Git 工作过程。它可以包含多轮 Maintainer → Reviewer 协作和多次 Agent Invocation；一次模型失败、重试或取消不应产生新的领域实体。Task 与 Knowledge、Artifact 共享 Git 历史，但 Task 只记录输入、进度和必要摘要，不拥有一份结果快照。
 
-- 有序、完整、有界的 Canonical Activity Markdown page；
-- 由固定 Raw Evidence 行模型生成的文本 page 和 locator index；
-- 从 Base64 恢复的真实图片附件；
-- 解释来源、格式和读取顺序的 `inputs/README.md`。
+## Maintainer 与 Reviewer
 
-这些文件是 Source Snapshot 的 Task-local 工作视图，不是新的来源权威。上游 `sourceRef` 绑定外部版本，Task start commit 绑定本地文件。
+Maintainer 从 Task worktree 阅读固定输入、相关 Knowledge 和 Artifact，直接维护正式文件并提交变化。它应形成长期可复用的理解，而不是保存聊天摘要、工作日志或模型推理过程。
 
-## Agent 协作
+Reviewer 审阅 Task 定义、进度和完整候选 tree，但不读取原始 Observation 输入。这个证据隔离是内容质量测试：如果候选内容必须依赖原始对话才能解释，说明它还不适合作为正式 Knowledge 或 Artifact。
 
-Maintainer 和 Reviewer 共用 Pi Coding Agent SDK，但固定为 `resourceMode: disabled`，只暴露普通 `read`、`bash`、`edit`、`write`，不加载 Chat 的 Extension、Skill、Prompt、Theme、Todo 或子 Agent。
+Reviewer 要求修改时，直接在可定位的位置或统一进度记录中留下具体反馈并提交，Maintainer 在下一轮解决。Reviewer 接受内容后，还需要基于最新 `main` 整理 Task 历史、处理冲突并重新检查，最后仅以 fast-forward 方式整合到 `main`。语义编辑、commit 和冲突解决由 Agent 完成；Oyster 的 Repository 协作服务只创建执行坐标并验证 Git 结果。
 
-1. Maintainer 从 Task worktree 根启动，读取 `tasks/<taskId>/`，修改 Knowledge/Artifact 并更新 PROGRESS；
-2. Host 保存 Pi Session、Task handoff 和所有 worktree 修改，创建 Maintainer checkpoint；
-3. Reviewer 审阅当前 Task branch，不读取 inputs；需要修改时写 REVIEW marker 和未完成项，否则直接结束；
-4. Host 根据 tree 与 PROGRESS 记录 changes requested 或 approval checkpoint；
-5. 要求修改时开始新的 Round，批准时把 `task.json` 更新为 `completed`。
+## 接受与状态语义
 
-Agent 不负责 branch、worktree 或 checkpoint commit。Prompt 要求其不执行 commit/reset/clean/stash/merge/rebase/push；Host 不为此增加路径 Sandbox 或复杂权限层。
+当前 Task 只需要两个可由 Git 验证的状态：
 
-## 状态与失败恢复
+- `open` 表示工作仍未进入正式分支，可以继续；
+- `completed` 表示 Reviewer 接受的精确结果已经进入 `main`；
 
-Task 状态为 `open | completed | abandoned`。Agent Invocation 继续使用 `in_progress | completed | failed | cancelled`。
+显式放弃和清理是后续生命周期设计，不在当前模型中预留无法到达的状态。
 
-Agent 失败或取消时，Task 保持 `open`。Host 尽量把 Pi Session、`lastError` 和当前修改 checkpoint 到 Task branch，不 reset、clean 或删除 worktree。当前 UI 还没有继续和放弃按钮，但历史记录会显示可继续的 Task。
+Agent Invocation 的成功、失败或取消只描述一次执行。Reviewer 说“批准”但尚未把结果整合进 `main` 时，Task 仍不是 `completed`。这使知识库和工作台能够把 `main` 作为一致的正式内容边界，不需要再解释“已完成但尚未生效”的中间状态。
 
-## 并发和用户修改
+## 记录边界
 
-- 用户拥有主 checkout；其未提交修改不阻止 Task 创建，也不进入 Task branch；
-- 每个 Task 使用独立 worktree，不同 Task 可以并行；
-- 同一 Task 的 Maintainer 与 Reviewer 串行；
-- 进程内只阻止同一个 worktree 同时启动两个 Agent；
-- Agent 启动前若 Task worktree 已 dirty，Host 先创建 pre-Agent checkpoint；
-- 用户手工接管 Task worktree 前应暂停 Agent，运行中同时编辑无法可靠区分逐行归属。
+Git 保存理解业务变化所需的 Task 材料、协作进度以及 Knowledge/Artifact revision。`task.json` 是创建时的轻量定义，只保存来源与执行配置摘要；完成状态、结果 revision 和 changed paths 由 commit graph 重建。完整 Knowledge 可以直接从对应 revision 读取，不应再次序列化到 Task 记录。
 
-当前 Renderer 仍只允许一个前台 Knowledge Task；取消按钮会中止当前进程内的全部 Knowledge Task Invocation。底层不同 worktree 已支持并行，按 `taskId` 独立启动、展示和取消属于后续 UI/API 工作。
+Pi Session、Agent Invocation 明细和 Debug Record 回答的是如何继续或诊断一次执行，可能包含完整上下文、工具结果和 Provider 数据。它们位于 Repository 外，不随 Task Git 历史传播。调试数据的保留期限尚未确定，后续应由统一设置和清理模块治理。
 
-## UI、历史与 Debug
+## 并发与当前边界
 
-Task 列表从 `refs/heads/task/*` 和 `main:tasks/` 读取 `task.json`，并兼容读取旧版 Git 外记录但不删除它们。Task Repository 是权威索引，不建立 Task 数据库。
+每个 Task 使用独立 branch/worktree，因此多个 Task 可以并行；同一 worktree 在任一时刻只交给一个写入者。用户主 checkout 的未提交内容既不阻止 Task 创建，也不会被静默纳入 Task。
 
-Pi Session 位于 tracked `tasks/<taskId>/pi-sessions/`。完整 Pi Context、工具结果和最终 Provider 请求/响应位于本地 Debug Store；凭据和敏感 header 值不保存，其他业务内容不自动脱敏。
+**当前限制**：Renderer 与 IPC 仍以单个前台知识加工流程组织交互，取消入口可能中止进程内全部活动 Knowledge Task Invocation。按 `taskId` 独立展示、继续和取消属于后续交互设计。
 
-## 当前边界
+**当前限制**：Invocation 失败后，Task 在语义上仍应保持 `open`，branch/worktree 也为恢复提供基础；但应用退出、崩溃及不同失败阶段的可靠继续尚未被定义为当前保证。
 
-当前 Task 完成后仍保持“批准但不 merge”，promotion UI 尚未实现。后续 promotion 必须先把最新 `main` merge 到 Task branch、解决冲突并重新 Review，再 fast-forward；用户主 checkout dirty 时不得自动 stash 或强行更新。
-
-当前通用 Chat Agent 仍直接从主 checkout 工作，尚未迁移到 repo-writer worktree 契约。MVP 不引入多进程租约、远端同步、自动 rebase、强文件系统隔离或权限审批系统。
+**候选方向**：通用 Chat Agent 可以在未来迁移到独立 writer worktree，让对话修改也通过 Agent 完成 Git 整合。该方案仍需验证用户如何接受变化以及如何处理冲突，目前不作为知识加工 MVP 的既定能力。

@@ -61,7 +61,7 @@ export interface AgentHistoryAdapter {
     context?: DetectionContext
   ): Promise<SourceRecordCandidate | undefined>
   resolveRecordPath(rootPath: string, record: SourceRecord): string
-  /** Derives Raw Evidence and its rebuildable Canonical Activity view from one source revision. */
+  /** Derives Raw Evidence and its rebuildable Canonical Activity from successfully read content. */
   createObservation(rawContent: string): AgentObservation
 }
 

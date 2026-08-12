@@ -32,6 +32,20 @@ describe('Markdown', () => {
     expect(html).toContain('&lt;script&gt;')
   })
 
+  it('renders Knowledge bodies as Markdown with the wikilink extension', () => {
+    const html = markdownToSafeHtml([
+      '## 约束',
+      '',
+      '- 使用 [[Knowledge Maintenance Agent|知识维护 Agent]]',
+      '- 保留 `Git` 历史'
+    ].join('\n'), true)
+
+    expect(html).toContain('<h2>约束</h2>')
+    expect(html).toContain('<ul>')
+    expect(html).toContain('data-knowledge-title="Knowledge Maintenance Agent"')
+    expect(html).toContain('<code>Git</code>')
+  })
+
   it('does not emit navigable links for unsafe or local protocols', () => {
     const html = markdownToSafeHtml('[危险](javascript:alert(1)) [本地](file:///tmp/secret)')
 

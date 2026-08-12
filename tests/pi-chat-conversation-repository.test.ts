@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -31,7 +31,7 @@ describe('PiChatConversationRepository', () => {
       reasoningEffort: 'low',
       systemPrompt: 'Use the Knowledge Store.'
     }, 'Knowledge chat')
-    const metadata = { id: opened.id }
+    const metadata = { id: opened.conversationId }
 
     await opened.piSessionManager.appendMessage({
       role: 'user',
@@ -91,8 +91,6 @@ describe('PiChatConversationRepository', () => {
     expect(raw).toContain('"role":"toolResult"')
     expect(raw).toContain('"createdTitles":["Project P"]')
 
-    await reopened.delete(metadata.id)
-    await expect(reopened.open(metadata.id)).rejects.toThrow('不存在')
     await repository.dispose()
     await reopened.dispose()
   })
@@ -105,7 +103,7 @@ describe('PiChatConversationRepository', () => {
       modelId: 'model-small',
       systemPrompt: 'Use the Knowledge Store.'
     })
-    const metadata = { id: opened.id }
+    const metadata = { id: opened.conversationId }
 
     const inProgress = completedAgentInvocation('chat-in-progress', [], 1, 'chat_agent')
     inProgress.status = 'in_progress'
@@ -114,7 +112,7 @@ describe('PiChatConversationRepository', () => {
     await expect(appendChatAgentInvocation(opened.piSessionManager, inProgress)).rejects.toThrow('尚未终态化')
 
     const unknownVersion = completedAgentInvocation('chat-unknown', [], 1, 'chat_agent')
-    unknownVersion.formatVersion = 99 as 3
+    unknownVersion.formatVersion = 99 as 4
     await expect(appendChatAgentInvocation(opened.piSessionManager, unknownVersion)).rejects.toThrow('格式版本无效')
 
     const completed = completedAgentInvocation('chat-completed', [], 1, 'chat_agent')
@@ -122,5 +120,34 @@ describe('PiChatConversationRepository', () => {
     expect((await repository.detail(metadata.id)).invocations).toEqual([completed])
 
     await repository.dispose()
+  })
+
+  it('reads and rewrites legacy descriptors with an unprefixed id', async () => {
+    const rootPath = await temporaryPath()
+    const repository = new PiChatConversationRepository(rootPath)
+    const opened = await repository.create({
+      connectionId: 'connection:one',
+      modelId: 'model-small',
+      systemPrompt: 'Use the Knowledge Store.'
+    })
+    const file = join(rootPath, `${encodeURIComponent(opened.conversationId)}.conversation.json`)
+    const current = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
+    const legacy: Record<string, unknown> = {
+      ...current,
+      formatVersion: 1,
+      id: opened.conversationId
+    }
+    delete legacy.conversationId
+    await writeFile(file, `${JSON.stringify(legacy)}\n`, 'utf8')
+
+    const reopened = new PiChatConversationRepository(rootPath)
+    await expect(reopened.open(opened.conversationId)).resolves.toMatchObject({
+      conversationId: opened.conversationId
+    })
+    const migrated = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
+    expect(migrated).toMatchObject({ formatVersion: 2, conversationId: opened.conversationId })
+    expect(migrated).not.toHaveProperty('id')
+    await repository.dispose()
+    await reopened.dispose()
   })
 })

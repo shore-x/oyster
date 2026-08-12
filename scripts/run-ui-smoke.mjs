@@ -76,13 +76,16 @@ const settings = semantics.settings
 if (
   settings?.defaultGeneral?.selected !== 'true'
   || !settings.defaultGeneral.visible
-  || settings.defaultGeneral.language !== 'zh-CN'
+  || settings.defaultGeneral.uiLanguage !== 'zh-CN'
+  || settings.defaultGeneral.agentLanguage !== 'zh-CN'
 ) {
   throw new Error('General settings is not the default Settings tab')
 }
 if (
   settings.language.documentLanguage !== 'en-US'
-  || settings.language.selectedLanguage !== 'en-US'
+  || settings.language.selectedUiLanguage !== 'en-US'
+  || settings.language.selectedAgentLanguage !== 'zh-CN'
+  || !settings.language.agentLanguageUnchanged
   || settings.language.settingsTitle !== 'Settings'
   || settings.language.generalTab !== 'General'
   || !settings.language.generalPageVisible
@@ -97,8 +100,8 @@ for (const navigationItem of ['Chat', 'Knowledge', 'Workbench', 'Sources', 'Proc
   }
 }
 const persistedAppSettings = JSON.parse(await readFile(join(userDataPath, 'app-settings.json'), 'utf8'))
-if (persistedAppSettings.language !== 'en-US') {
-  throw new Error('English application language was not persisted')
+if (persistedAppSettings.uiLanguage !== 'en-US' || persistedAppSettings.agentLanguage !== 'zh-CN') {
+  throw new Error('Independent UI and Agent languages were not persisted')
 }
 const englishSettingsImage = await readFile(join(dirname(capturePath), 'settings-english.png'))
 if (englishSettingsImage.length === 0) throw new Error('English Settings screenshot is empty')
@@ -226,7 +229,7 @@ if (!knowledge.browse.selectedTitle || knowledge.browse.detailTitle !== knowledg
 }
 if (
   !knowledge.browse.detailContent?.includes('知识维护 Agent')
-  || !knowledge.browse.detailContent?.includes('统一 Repository')
+  || !knowledge.browse.detailContent?.includes('合并到 main 后 Task 才完成')
 ) {
   throw new Error('Knowledge browser did not render the current Statement body')
 }
@@ -255,7 +258,7 @@ if (
   || knowledge.browse.referenceHasCanvas
   || knowledge.browse.referenceHasArrow
   || knowledge.browse.referenceDefaultNodeCount < 2
-  || knowledge.browse.referenceNodeCount !== 4
+  || knowledge.browse.referenceNodeCount !== 3
   || knowledge.browse.referenceDefaultNodeCount >= knowledge.browse.referenceNodeCount
   || knowledge.browse.referenceEdgeCount < 3
   || knowledge.browse.referenceFirstHopEdgeCount < 1
@@ -263,7 +266,7 @@ if (
   || !knowledge.browse.referenceDefaultFirstHopEdgesVisible
   || !knowledge.browse.referenceDefaultContextualEdgesHidden
   || !knowledge.browse.referenceFirstHopEdgesStronger
-  || knowledge.browse.referenceClusterCount !== 1
+  || knowledge.browse.referenceClusterCount !== 0
   || !knowledge.browse.referenceHasTwoHopNode
   || !knowledge.browse.referenceTwoHopTitle
   || !knowledge.browse.referenceSecondHopHiddenByDefault
@@ -278,7 +281,6 @@ if (
   !knowledge.browse.referenceMarkerFree
   || !knowledge.browse.referenceLabelsCentered
   || !knowledge.browse.referenceNodesDoNotOverlap
-  || !knowledge.browse.referenceEndpointsClipped
   || !knowledge.browse.referenceEdgesAvoidText
   || !knowledge.browse.referenceEdgesUsePaths
   || knowledge.browse.referenceHasLineElement
@@ -321,35 +323,7 @@ if (
 ) {
   throw new Error('Knowledge Statement list and detail do not scroll independently within the viewport')
 }
-if (knowledge.browse.clearButtonDisabled !== false) {
-  throw new Error('Knowledge clear action is unavailable for a non-empty Store')
-}
 if (knowledge.browse.overflowX) throw new Error('Knowledge browser has unexpected horizontal overflow')
-if (
-  !knowledge.clear?.exists
-  || knowledge.clear.role !== 'alertdialog'
-  || knowledge.clear.modal !== 'true'
-) {
-  throw new Error('Clearing knowledge does not use an in-app modal confirmation dialog')
-}
-if (knowledge.clear.title !== '清空知识？') {
-  throw new Error('The clear-knowledge confirmation title is missing')
-}
-if (!knowledge.clear.description?.includes('无法撤销')) {
-  throw new Error('The irreversible clear-knowledge impact is not explained')
-}
-if (knowledge.clear.actions?.join(',') !== '取消,清空知识') {
-  throw new Error('Clear-knowledge confirmation actions are not ordered cancel then confirm')
-}
-if (!knowledge.clear.cancelled) {
-  throw new Error('The clear-knowledge confirmation cannot be cancelled')
-}
-if (!knowledge.clear.completed || !knowledge.clear.closedAfterCompletion || knowledge.clear.statementCountAfterClear !== 0) {
-  throw new Error(`Knowledge was not cleared through the confirmed action: ${knowledge.clear.error || 'unknown error'}`)
-}
-if (!knowledge.clear.result?.includes('已清空 4 条知识')) {
-  throw new Error('The knowledge browser does not report the completed reset')
-}
 
 if (semantics.ai.agent.title !== 'AI 后端') throw new Error('AI backend page was not rendered')
 if (!semantics.ai.agent.nestedInSettings) throw new Error('AI backend is not contained by the Settings page')
@@ -566,10 +540,10 @@ if (!processing.knowledgeTask.bodyText.includes('Git 协作测试')) {
   throw new Error('Git collaboration boundary is not visible in the knowledge-task view')
 }
 if (
-  !processing.knowledgeTask.bodyText.includes('统一 Repository 中创建 Knowledge Processing Task')
-  || !processing.knowledgeTask.bodyText.includes('不会合并到目标分支')
+  !processing.knowledgeTask.bodyText.includes('使用独立 Task 分支')
+  || !processing.knowledgeTask.bodyText.includes('合并到 main 后 Task 才会完成')
 ) {
-  throw new Error('Knowledge Task view does not explain its unmerged Git boundary')
+  throw new Error('Knowledge Task view does not explain its branch and integration boundary')
 }
 if (!processing.knowledgeTaskActivity?.inProgressStateVisible || !processing.knowledgeTaskActivity?.completed) {
   throw new Error(`Knowledge Processing Task did not complete without a native confirmation dialog: ${processing.knowledgeTaskActivity?.error || 'unknown error'}`)
@@ -584,8 +558,8 @@ if (
 if (processing.knowledgeTaskActivity.overviewHasActivityExplorer) {
   throw new Error('The Knowledge Task overview still renders unbounded Agent activity details')
 }
-if (processing.knowledgeTaskActivity.summaryStatementCount !== '6') {
-  throw new Error('The knowledge-task overview does not expose compact result counts')
+if (processing.knowledgeTaskActivity.summaryChangedPathCount !== '10') {
+  throw new Error('The knowledge-task overview does not expose the compact changed-file count')
 }
 if (!processing.knowledgeTaskActivity.activityExplorerExists || processing.knowledgeTaskActivity.activityEventCount !== 3) {
   throw new Error('The activity inspector does not expose the shared Agent Invocation timeline')
@@ -622,34 +596,16 @@ if (
 if (!processing.knowledgeTaskActivity.resultDetailExists || !processing.knowledgeTaskActivity.returnedToOverview) {
   throw new Error('The knowledge-task result detail is not a navigable secondary page')
 }
-if (processing.knowledgeTaskActivity.statementCount !== 6) {
-  throw new Error('Knowledge Task result does not expose the complete candidate Knowledge tree')
-}
 if (
-  !processing.knowledgeTaskActivity.collaborationLinkLabel
-  || !processing.knowledgeTaskActivity.collaborationLinkPreview
-  || processing.knowledgeTaskActivity.collaborationLinkedTitle === processing.knowledgeTaskActivity.collaborationInitialTitle
-) {
-  throw new Error('Collaboration result does not use the shared wikilink reader with hover previews')
-}
-if (
-  !processing.knowledgeTaskActivity.collaborationBackAvailable
-  || processing.knowledgeTaskActivity.collaborationTitleAfterBack !== processing.knowledgeTaskActivity.collaborationInitialTitle
-  || processing.knowledgeTaskActivity.collaborationOverflowAfterBack
-  || !processing.knowledgeTaskActivity.collaborationForwardAvailable
-  || processing.knowledgeTaskActivity.collaborationTitleAfterForward !== processing.knowledgeTaskActivity.collaborationLinkedTitle
-) {
-  throw new Error('Collaboration Statement reader cannot navigate backward and forward')
-}
-if (
-  !processing.knowledgeTaskActivity.gitResultText?.includes('Repository')
-  || !processing.knowledgeTaskActivity.gitResultText?.includes('PROGRESS.md')
-  || !processing.knowledgeTaskActivity.gitResultText?.includes('Task branch')
-  || !processing.knowledgeTaskActivity.gitResultText?.includes('目标分支main（未合并）')
-  || !processing.knowledgeTaskActivity.gitResultText?.includes('批准 revision')
+  !processing.knowledgeTaskActivity.gitResultText?.includes('合并 revision')
+  || !processing.knowledgeTaskActivity.gitResultText?.includes('变更文件')
+  || !processing.knowledgeTaskActivity.gitResultText?.includes('耗时')
   || processing.knowledgeTaskActivity.changedPathCount !== 10
 ) {
-  throw new Error('The Knowledge Task result does not expose its Repository, Task worktree, revisions, and changed files')
+  throw new Error('The Knowledge Task result does not expose its integrated revision, changed files, and duration')
+}
+if (processing.knowledgeTaskActivity.resultContainsEmbeddedContentBrowser) {
+  throw new Error('The Knowledge Task result embeds a Knowledge or Artifact snapshot browser')
 }
 if (/来源范围\s+L\d|Raw source|sourceRef|扫描版本/.test(processing.knowledgeTaskActivity.bodyText || '')) {
   throw new Error('The knowledge-task result exposes internal observation coordinates')
@@ -660,40 +616,25 @@ if (processing.history?.taskCount !== 1 || !processing.history.listText?.include
 if (/Fixture (?:raw evidence|Canonical Activity)|Tool call ·|sourceRef|L\d{6}/.test(processing.history.listText || '')) {
   throw new Error('The compact history list eagerly exposes Agent activity or evidence payloads')
 }
-if (!processing.history.resultDetailExists || !processing.history.sharedBrowserExists) {
-  throw new Error('Historical results do not reuse the shared Statement browser')
+if (
+  !processing.history.resultDetailExists
+  || !processing.history.resultText?.includes('合并 revision')
+  || !processing.history.resultText?.includes('变更文件')
+  || !processing.history.resultText?.includes('耗时')
+  || processing.history.changedPathCount !== 10
+) {
+  throw new Error('Historical results do not expose the compact completed Task result')
+}
+if (processing.history.containsEmbeddedContentBrowser) {
+  throw new Error('Historical Task results embed a Knowledge or Artifact snapshot browser')
 }
 if (
   processing.history.importButtonExists
-  || processing.history.productionTitles?.length !== 0
+  || !processing.history.productionTitles?.includes('知识加工链路')
+  || !processing.history.productionTitles?.includes('Knowledge Maintenance Agent')
+  || !processing.history.productionTitles?.includes('Knowledge Reviewer')
 ) {
-  throw new Error('The unmerged Task branch leaked candidate Knowledge into the user main checkout')
-}
-if (
-  !processing.history.historyInitialTitle
-  || processing.history.historyLinkedTitle === processing.history.historyInitialTitle
-  || processing.history.historyTitleAfterBack !== processing.history.historyInitialTitle
-) throw new Error('Historical Statement navigation does not preserve browser history')
-if (processing.history.overflowAfterStatementBack) {
-  throw new Error('Historical Statement navigation introduces horizontal overflow after going back')
-}
-if (
-  !processing.history.activityDetailExists
-  || processing.history.activityEventCount !== 4
-  || !processing.history.activityText?.includes('Fixture read completed')
-  || !processing.history.invocationSelectorText?.includes('Maintainer')
-  || !processing.history.invocationSelectorText?.includes('Reviewer')
-  || processing.history.invocationSelectorText?.includes('knowledge_maintainer')
-  || processing.history.invocationSelectorText?.includes('knowledge_reviewer')
-) {
-  throw new Error('Historical Task details do not expose the persisted Agent Invocation')
-}
-if (
-  !processing.history.toolExpansionKeepsScroll
-  || !processing.history.toolPayloadVisible
-  || !processing.history.toolIsUnboxed
-) {
-  throw new Error('Tool Call disclosure moves the history viewport or still uses a boxed card')
+  throw new Error('The completed Task changes are not visible through the main-backed Knowledge store')
 }
 if (!processing.history.returnedToHistory) {
   throw new Error('Historical secondary pages do not return to the history list')
@@ -708,7 +649,7 @@ if (processing.promptValues.some((prompt) => typeof prompt !== 'string' || !prom
   throw new Error('A processing default prompt is empty')
 }
 const [maintainerPrompt] = processing.promptValues
-for (const requiredCopy of ['Knowledge Maintainer', 'BRIEF.md', 'inputs/README.md', 'Canonical Activity', 'ordinary evidence file', '[[canonical title]]', 'the Host owns branch creation', 'Do not delete PROGRESS.md']) {
+for (const requiredCopy of ['Knowledge Maintainer', 'BRIEF.md', 'inputs/README.md', 'Canonical Activity', 'ordinary evidence file', '[[canonical title]]', 'Use the existing branch and worktree', 'Do not delete PROGRESS.md']) {
   if (!maintainerPrompt.includes(requiredCopy)) {
     throw new Error(`Knowledge Maintenance Agent prompt is missing its responsibility: ${requiredCopy}`)
   }
@@ -742,7 +683,7 @@ if (!processing.maintainerReadyReason?.includes('可以启动 Agent Preview')) {
 }
 if (processing.resultCount !== 0) throw new Error('Knowledge processing produced a candidate without an explicit Agent Preview')
 if (processing.overflowX) throw new Error('Knowledge processing page has unexpected horizontal overflow')
-if (processing.buttonCount !== processing.sharedButtonCount + processing.tabButtonCount + processing.taskStatementButtonCount) {
+if (processing.buttonCount !== processing.sharedButtonCount + processing.tabButtonCount) {
   throw new Error('A knowledge processing action button bypasses the shared UI component')
 }
 if (processing.buttonIconCount !== processing.sharedButtonCount) {
@@ -774,7 +715,7 @@ if (
   || !processing.agentPreviewActivity.resultText?.includes('Task record')
   || !processing.agentPreviewActivity.resultText?.includes('Task branch')
   || !processing.agentPreviewActivity.resultText?.includes('当前 revision')
-  || !processing.agentPreviewActivity.resultText?.includes('未合并到 main')
+  || !processing.agentPreviewActivity.resultText?.includes('等待 Reviewer 处理')
 ) {
   throw new Error('Knowledge maintenance result does not expose the Git handoff state')
 }
@@ -795,7 +736,4 @@ const agentRuntimeImage = await readFile(join(dirname(capturePath), 'agent-confi
 if (agentRuntimeImage.length === 0) throw new Error('Pi Agent Runtime settings screenshot is empty')
 const knowledgeImage = await readFile(join(dirname(capturePath), 'knowledge.png'))
 if (knowledgeImage.length === 0) throw new Error('Knowledge browser screenshot is empty')
-const clearKnowledgeImage = await readFile(join(dirname(capturePath), 'knowledge-clear-confirmation.png'))
-if (clearKnowledgeImage.length === 0) throw new Error('Clear-knowledge confirmation screenshot is empty')
-
 console.log(`UI smoke test passed: ${capturePath}`)

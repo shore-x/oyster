@@ -15,7 +15,7 @@ import { createAgentConfigurationController } from '../src/renderer/src/agent-co
 vi.mock('solid-js', async () => vi.importActual('solid-js/dist/solid.js'))
 
 function knowledgeAgent(
-  overrides: Pick<KnowledgeAgentDefinitionView, 'id' | 'displayName' | 'runtime'>
+  overrides: Pick<KnowledgeAgentDefinitionView, 'agentId' | 'displayName' | 'runtime'>
 ): KnowledgeAgentDefinitionView {
   return {
     ...overrides,
@@ -40,7 +40,7 @@ function knowledgeAgent(
 const PROCESSING_SNAPSHOT: KnowledgeProcessingStateView = {
   agents: [
     knowledgeAgent({
-      id: 'knowledge_maintainer',
+      agentId: 'knowledge_maintainer',
       displayName: 'Knowledge Maintenance Agent',
       runtime: 'pi_coding_agent'
     })
@@ -52,7 +52,7 @@ const PROCESSING_SNAPSHOT: KnowledgeProcessingStateView = {
 
 const CHAT_SNAPSHOT: ChatStateView = {
   agent: {
-    id: CHAT_AGENT_ID,
+    agentId: CHAT_AGENT_ID,
     displayName: '通用 Agent',
     description: 'General Agent description',
     runtime: 'pi_coding_agent',

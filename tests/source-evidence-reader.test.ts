@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, rm, stat, symlink, unlink, utimes, writeFile } from 'node:fs/promises'
+import { mkdtemp, open, rm, stat, symlink, unlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -19,7 +19,7 @@ function sha256(content: Buffer): string {
 }
 
 describe('FileSourceEvidenceReader', () => {
-  it('reads and hashes one exact source-file revision without creating a managed copy', async () => {
+  it('reads and hashes the current source-file bytes without creating a managed copy', async () => {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), 'oyster-source-evidence-'))
     temporaryDirectories.push(temporaryDirectory)
     const sourcePath = join(temporaryDirectory, 'session.jsonl')
@@ -61,7 +61,46 @@ describe('FileSourceEvidenceReader', () => {
     expect(evidence.content.equals(content)).toBe(true)
   })
 
-  it('rejects changed, deleted, symbolic-link, caller-bounded, and invalid-limit sources', async () => {
+  it('rejects a same-inode rewrite after reading starts and before it finishes', async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), 'oyster-source-torn-read-'))
+    temporaryDirectories.push(temporaryDirectory)
+    const sourcePath = join(temporaryDirectory, 'session.jsonl')
+    const original = Buffer.from('{"sessionId":"one"}\n', 'utf8')
+    const replacement = Buffer.from('{"sessionId":"two"}\n', 'utf8')
+    await writeFile(sourcePath, original)
+    const metadata = await stat(sourcePath)
+
+    const probe = await open(sourcePath, 'r')
+    const prototype = Object.getPrototypeOf(probe) as {
+      read: (...args: unknown[]) => Promise<{ bytesRead: number; buffer: Buffer }>
+    }
+    const originalRead = prototype.read
+    await probe.close()
+    let intercepted = false
+    prototype.read = async function (...args: unknown[]) {
+      const result = await originalRead.apply(this, args)
+      if (!intercepted) {
+        intercepted = true
+        await writeFile(sourcePath, replacement)
+        await utimes(sourcePath, metadata.atime, new Date(metadata.mtimeMs + 2_000))
+      }
+      return result
+    }
+
+    try {
+      await expect(new FileSourceEvidenceReader().read({
+        sourceConversationId: 'record-one',
+        absolutePath: sourcePath,
+        expectedSizeBytes: metadata.size,
+        expectedModifiedAt: metadata.mtime.toISOString()
+      })).rejects.toThrow('changed while it was being read')
+      expect(intercepted).toBe(true)
+    } finally {
+      prototype.read = originalRead
+    }
+  })
+
+  it('rejects sources that change during a read, are deleted, symbolic links, caller-bounded, or invalid-limit', async () => {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), 'oyster-source-revision-'))
     temporaryDirectories.push(temporaryDirectory)
     const sourcePath = join(temporaryDirectory, 'session.jsonl')
@@ -85,7 +124,7 @@ describe('FileSourceEvidenceReader', () => {
 
     await writeFile(sourcePath, Buffer.from('{"sessionId":"two"}\n', 'utf8'))
     await utimes(sourcePath, metadata.atime, new Date(metadata.mtimeMs + 2_000))
-    await expect(reader.read(input)).rejects.toThrow('revision has changed')
+    await expect(reader.read(input)).rejects.toThrow('changed while it was being read')
 
     const changedMetadata = await stat(sourcePath)
     await symlink(sourcePath, linkPath)
@@ -118,7 +157,7 @@ describe('MemorySourceEvidenceReader', () => {
       sizeBytes: content.length
     })
     await expect(reader.read({ ...input, expectedSizeBytes: content.length + 1 }))
-      .rejects.toThrow('revision has changed')
+      .rejects.toThrow('changed while it was being read')
     await expect(reader.read({ ...input, maxBytes: content.length - 1 }))
       .rejects.toThrow('read limit')
     await expect(reader.read({ ...input, sourceConversationId: 'missing' }))

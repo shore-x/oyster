@@ -1,92 +1,49 @@
-# Pi Coding Agent SDK 适配层
+# Agent Runtime 与信任边界
 
-> 状态：当前实现规格
->
-> 日期：2026-08-11
->
-> 术语：[Oyster 术语与执行模型](terminology.md)
+## 选择
 
-Oyster 直接以 `@earendil-works/pi-coding-agent` 的 `AgentSession` 作为唯一通用 Agent 执行基础。`pi-agent-core` 是 SDK 自身依赖的模型—工具循环引擎，也是 SDK 尚未完整重导出的 `AgentMessage`、`AgentTool`、`StreamFn` 和底层事件类型来源；Oyster 因而保留同版本的直接类型依赖，但 Chat、Maintainer 或 Reviewer 都不再直接构造 Core `Agent` 作为另一条执行路径。
+Oyster 使用成熟的 Coding Agent Runtime 驱动通用 Agent，并在当前实现中适配 Pi Coding Agent SDK。这样可以复用模型—工具循环、上下文管理、Extension 和 Provider 适配，而不在业务层维护第二套执行引擎。
 
-适配层只负责把 Oyster 输入转换到 SDK 边界，并把执行状态投影为 Agent Invocation 与本地 Debug Record；它不理解 Knowledge Processing Task、Collaboration Round、Review marker 或 Git branch。业务层通过稳定 `agentId`、System Prompt、工具集合、初始工作目录、Pi 资源策略和任务输入定义角色。
+具体依赖版本、Provider payload、重试数和存储字段由代码与测试维护。本页只说明职责边界。
 
-## 执行与模型边界
+## 职责
 
-每次 Agent Invocation 创建一个 `AgentSession`。Oyster Connection 仍拥有认证、计费通道、模型选择和凭据。代码中的 `SelectedModelStream` 只表示“已经选定的 Pi Model + 已认证 StreamFn”，不是 Agent Runtime、Session 或新的生命周期实体。适配层用它创建 request-local Pi `ModelRuntime` bridge；`ModelRuntime` 在 Oyster 代码和文档中只表示 Pi SDK 类型。Bridge 注册同一个 Model 的 native Provider，并把调用转回该 stream，因此：
+Agent Runtime 负责：
 
-- API Key 与 OAuth credential 继续由 Oyster Keychain 和 Connection 生命周期拥有；
-- SDK 的 Agent loop、Extension hooks、工具注册、持久化上下文压缩和溢出重试能够正常工作；
-- 不读取默认 `~/.pi/agent/auth.json`，也不允许 Pi 设置静默替换 Chat Conversation 或 Knowledge Agent 已固定的模型；
-- Recorder 在实际 StreamFn 边界保存模型收到的 Pi Context，并通过 Provider callback 保存 Extension hook 处理后的最终 payload。
+- 驱动一次 Agent Invocation 的模型与工具循环；
+- 管理上下文、Runtime 原生执行历史、取消和执行事件；
+- 把执行活动记录到本地 Agent Debug Record；
+- 接入业务选择的模型、System Prompt、工作目录和工具集合。
 
-OpenAI Chat Completions 与 Responses 不再由 Oyster 维护平行的 streaming transport，而是直接使用 `pi-ai` 的原生 Provider 实现。Payload 转换、流解析、Provider timeout、错误语义和 Provider hooks 均由 Pi 负责；Oyster 只提供已校验的 endpoint、所选模型和凭据。原有 `guardedFetch` 及其针对 Agent 模型请求的 redirect、响应体大小和自定义流解析策略已经删除，避免两套 transport 逐渐分叉。模型目录发现与连接测试仍可拥有各自的有界 HTTP 校验，但不能把这些校验误写成 Agent Provider transport 的保证。
+业务服务负责定义 Chat、Knowledge Processing Task、Maintainer/Reviewer 和完成含义。Agent 自己在业务提供的工作坐标中维护 Git；Runtime 不解释 Review marker、Knowledge、Artifact 或 Repository 集成语义。
 
-瞬时故障只在 Pi `AgentSession` 的 Agent Turn 层统一重试：最多重试 3 次，按 2、4、8 秒指数退避。`overloaded`、瞬时限流、服务端错误和连接中断等由 Pi 的统一错误分类决定；配额、账单、取消和确定性错误立即失败。Provider 请求层的 `maxRetries` 固定为 `0`，避免两层重试预算叠加；重试当前失败的 Assistant 调用不会重新执行本次 Invocation 中已经完成的工具调用。该策略是 Host 不变量，不受 agentDir 或项目设置覆盖。
+AI Connection 与 Runtime 同样分离：Connection 决定凭据、Provider、传输和计费来源，Runtime 只消费已经选择的模型调用能力。Oyster 自己持有凭据，不从其他 Agent Runtime 导入 token。
 
-应用语言同样是 Host 在 Pi Runtime 边界施加的 Invocation 级要求。`<Electron userData>/app-settings.json` 是唯一语言状态；创建每次 Chat、Maintainer 或 Reviewer Invocation 时，适配层读取当前值，并在已配置的 System Prompt 之后追加语言指令。它要求 Agent 用所选语言回复用户并维护自然语言 Repository 内容，同时保留代码标识符、命令、路径、结构化格式、引用原文以及 Repository 或任务明确指定的语言。该追加不修改 Chat Conversation 已保存的 binding 或用户自定义 Prompt；已有 Conversation 从下一次 Invocation 起生效，Chat 子 Agent 继承同一有效 Prompt。
+## 高信任原则
 
-## Headless Extension 资源策略
+Agent 使用普通文件、Shell 与 Git，并按桌面应用当前 OS 用户权限运行。Pi Extension 也在 Electron 主进程中以相同权限执行；用户配置 Extension 即表示信任它。Repository 或 worktree 是工作坐标，不是安全沙箱。
 
-通用 Chat Agent 只启用 Pi 的 Headless Extension 和普通 context file：
+这是早期产品的明确取舍：优先让 Agent 完整维护 Repository，避免用大量路径规则、命令白名单、固定写入者门禁或审批状态机取代 Agent 判断。若真实使用出现重复且无法由提示、可见性或用户确认解决的风险，再引入最小必要约束。
 
-- `cwd` 是唯一 Oyster Repository 根；
-- `agentDir` 固定为 `<Electron userData>/pi-agent/`，不隐式继承用户的 `~/.pi/agent`；
-- 设置页直接通过 Pi `SettingsManager` 管理 `<agentDir>/settings.json` 中的常用 Runtime 设置、Package 与本地 Extension 来源，不建立 Oyster 平行配置数据库；
-- Package 配置显式关闭其中的 Skill、Prompt 和 Theme；Runtime 也设置 `noSkills`、`noPromptTemplates`、`noThemes`；
-- Oyster 固定的 Chat System Prompt 是 base prompt，Host 在执行边界追加当前应用语言要求，Extension 再按 Pi 生命周期扩展有效 Prompt；
-- 普通 Coding Tools、Extension tools、通用 Todo 与 `spawn_agent` 进入同一个 SDK tool registry。
+## Session、业务记录与调试记录
 
-Extension 是在 Electron 主进程内执行的受信代码，不是受限声明文件。本期采用“配置即信任”，不增加权限弹窗、命令白名单、Extension 沙箱或细粒度网络治理。`SettingsManager` 明确以 `projectTrusted: false` 创建，因此只有 Oyster 专属 `agentDir` 的配置生效，Repository 内的 `.pi/settings.json`、Package 和 Extension 不会因打开 Repository 而执行；普通 `AGENTS.md` 等 context file 仍按 Pi 规则加载。Pi TUI renderer、theme、shortcut 和交互组件不会映射为 Electron UI。
+三类记录回答不同问题：
 
-“Agent 配置 / 通用 Agent / Pi Runtime”支持修改自动上下文压缩、Provider 传输方式和 HTTP 空闲超时，并只显示当前 Pi 配置中的 compaction reserve/keep 数值。Agent Turn 重试属于 Host 不变量，不作为可编辑设置。该作用域只覆盖读取 file-backed agentDir 的通用 Chat Agent；Knowledge Maintainer 与 Reviewer 的隔离内存设置不受影响。
+- Chat Conversation 或 Task 记录业务发生了什么；
+- Runtime 原生历史保存 Agent 继续工作所需的消息和工具活动；
+- Agent Debug Record 保存排查一次 Invocation 所需的完整 Context、模型调用、工具输入输出和 Provider 信息。
 
-“Pi Extensions”支持添加、启用、停用和移除 Pi Package 或本地 Extension 路径。Package 的解析、安装缓存和加载语义沿用 Pi SDK，不由 Oyster 复制实现。上述配置均从下一次通用 Chat Agent Invocation 起生效。
+Debug Record 不是“无正文日志”，可能包含敏感业务内容。实现应采用成熟、简洁的 credential 过滤，不承诺不存在所有敏感内容。当前倾向将调试数据保留在本地；**目标**是由统一模块和用户设置管理 Chat、Task 和 Preview 的调试数据保留。产品不需要让“删除对话”承担这项治理。
 
-Knowledge Maintainer 与 Reviewer 使用同一 `AgentSession` 基础，但资源模式固定为 `disabled`：不加载 Extension、Skill、Prompt、Theme 或 context file，只启用普通 `read`、`bash`、`edit`、`write`，也不安装通用 Todo。这一差异是业务能力定义，不是第二套 Runtime。
+同步全量写入等简单存储方式是可接受的 MVP 取舍。只有实测出现主进程阻塞或明显写放大时再演进。
 
-所有 SDK bash 调用从各自 `cwd` 启动。适配层通过 SDK 的 shell command prefix 为完整复合命令固定 Oyster 捆绑 Git 的 PATH 与 Git runtime 环境，不修改 Electron 主进程的全局环境。
+## 语言
 
-## 工作坐标
+UI 语言与 Agent 回复/Repository 自然语言是两种偏好，应该分别设置。前者只影响界面 locale；后者在每次 Invocation 建立时进入 Agent 指令，并允许代码、命令、路径、结构化格式、引文或 Repository 自身要求保持原语言。
 
-- Chat Agent 从 Repository 根启动，可使用普通 Coding Tools、Headless Extension、子 Agent 和通用 Todo；
-- Knowledge Maintainer 与 Reviewer 从 Repository 外的 `worktrees/<taskId>/` linked checkout 根启动，只使用固定普通工具；
-- Task 文件在该 checkout 的 `tasks/<taskId>/`；Maintainer 读取 BRIEF、PROGRESS 和 inputs，Reviewer 读取 BRIEF、PROGRESS 与当前 candidate tree，不读取 inputs。
+## 已知的后续边界
 
-适配层不安装 `read_activity`、`read_activity_attachment` 或 `read_evidence` 等领域专用工具。Task start commit、Host checkpoint 和 Reviewer 的 source-blind 行为由 Knowledge Processing 业务层定义，不属于 SDK 适配层，也不代表 OS 文件系统沙箱。
-
-## Pi Session
-
-Pi Session 是执行历史的事实来源，保存 message、Tool Result、compaction 和分支关系：
-
-- Chat Conversation 使用 `SessionManager` 的 append-only JSONL，并用一个小型 Oyster descriptor 固定模型/System Prompt binding、标题及空 Conversation；一次根 Invocation 通过 `startEntryId` / `endEntryId` 引用它在共享 Session 中产生的范围；
-- Chat 子 Agent 创建独立的持久化 Pi Session，并通过 Pi `parentSession` 指向父 Session；父工具结果只保存最终文本以及子 `invocationId` / `sessionId`，不复制子 transcript；
-- Knowledge Maintainer 与 Reviewer 的每次 Invocation 都在 `tasks/<taskId>/pi-sessions/` 创建独立持久化 Pi Session。
-
-Knowledge Pi Session 随 Host checkpoint 进入 Task branch；对应 `agentDir` 位于 `<Electron userData>/agent-runtime/<taskId>/`，因此 `.pi-runtime`、缓存和临时资源不进入 Git。
-
-SDK 原生 persistent compaction 只改变下一次模型调用使用的活动上下文，不删除 JSONL 中被摘要的历史消息。溢出时由 `AgentSession` 执行“记录失败 Assistant message、生成 compaction、持久化边界、重试”；摘要调用在 Debug Record 中标记为 `purpose: context_compaction`。
-
-## Invocation 与本地 Debug Store
-
-持久化分为三个清晰层次：
-
-```text
-Pi Session JSONL
-└─ messages / tool results / compaction / branches
-
-AgentInvocationRecord
-└─ identity / lifecycle / error / Pi Session range / call counts / debugRecordId
-
-Local Agent Debug Store
-└─ turns / messages / tool calls / model context / final provider request and response
-```
-
-`AgentInvocationRecord` 是精简、版本化的生命周期 envelope。它只保存 `invocationId`、`agentId`、可选父 Invocation、状态和时间、错误、Pi Session 引用、模型/工具调用计数以及 `debugRecordId`，不复制 transcript 或内部活动。Chat 把终态 envelope 写入 Pi JSONL custom entry；Knowledge Task 把所属终态 envelope 写入 `task.json`。
-
-本地 Debug Store 位于 `<Electron userData>/agent-debug/invocations/`，每个 Invocation 使用一个原子替换的 JSON 文件。`AgentInvocationDebugRecord` 保存完整 Pi Context、消息和 Turn 投影、工具输入/结果、模型输出与用量、安全生成选项、Extension hook 处理后的最终 Provider payload、请求 header 视图以及响应 status/header。API Key、Authorization、Cookie 等 credential-bearing header 值不会保存；已出现于 header 视图的敏感值统一写为 `[redacted]`。Context、工具结果、payload 和非凭据 header 仍可能包含敏感业务数据，UI 必须如实披露。
-
-Debug Store 是按 Invocation 组织的本地检查投影，不是第二份 Conversation 历史，也不是 Trace/Span 遥测系统。当前不引入数据库、Phoenix、OpenTelemetry、exporter 或采样；也不预先实现 retention。未来只有在实际存储量需要时，才增加按时间删除旧 Debug Record 的简单策略，Pi Session 与业务 Task 历史不随之删除。
-
-## 边界
-
-适配层不提供 Repository 权限控制、分布式 Trace 或 Git 拓扑编排，也不增加固定模型轮次、工具次数或总时长配额。Git branch/worktree/checkpoint 属于 Host；Runtime 只执行每-worktree单写入者门禁。Headless Extension 与普通 Coding Tools 都按应用当前 OS 用户权限执行；当前安全边界是明确来源、显式配置和不加载项目 `.pi` 可执行资源，而不是能力沙箱。
+- 应用退出、崩溃和中断后的统一恢复仍需单独设计；当前不为所有异常建立复杂事务协议；
+- Agent Preview 是可丢弃的调试执行；当前没有专用清理机制，用户可以显式要求 Chat Agent 清理，未来可以提供统一的临时资源清理能力；
+- 多 Task 并发是明确需求；当前全局取消可以作为紧急停止，后续再增加更精细的 Task 管理；
+- `@earendil-works/pi-*` fork 的维护来源与升级策略需要在依赖管理中补充，但不构成新的领域概念。

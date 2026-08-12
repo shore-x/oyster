@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, createUniqueId, onCleanup } from 'solid-js'
+import { For, Show, createEffect, createMemo, createSignal, createUniqueId } from 'solid-js'
 import type {
   AgentInvocationMessageRecord,
   AgentInvocationDebugRecord,
@@ -7,7 +7,7 @@ import type {
   AgentToolCallRecord,
   SerializableJsonValue
 } from '../../../shared/agent-runtime'
-import { Icon, Markdown } from '../ui'
+import { Inspector, Markdown } from '../ui'
 import { uiText } from '../i18n'
 
 type JsonObject = { [key: string]: SerializableJsonValue }
@@ -304,7 +304,6 @@ export function AgentInvocationExplorer(props: AgentInvocationViewProps & {
   onInspectModelCall?(call: AgentModelCallRecord, index: number): void
 }) {
   const [selectedCallId, setSelectedCallId] = createSignal<string>()
-  const inspectorTitleId = `agent-invocation-inspector-${createUniqueId()}`
   const selectedCall = createMemo(() => props.invocation.modelCalls.find(
     (call) => call.id === selectedCallId()
   ))
@@ -318,14 +317,6 @@ export function AgentInvocationExplorer(props: AgentInvocationViewProps & {
     }
     setSelectedCallId(id)
   }
-  createEffect(() => {
-    if (!selectedCall()) return
-    const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setSelectedCallId(undefined)
-    }
-    document.addEventListener('keydown', closeOnEscape)
-    onCleanup(() => document.removeEventListener('keydown', closeOnEscape))
-  })
   return (
     <section class={`agent-invocation-view agent-invocation-view--${props.invocation.status}${props.compact ? ' agent-invocation-view--compact' : ''}`} data-testid="agent-invocation-view">
       <Show when={props.compact}>
@@ -347,21 +338,17 @@ export function AgentInvocationExplorer(props: AgentInvocationViewProps & {
       <div class={`agent-invocation-view__workspace${selectedCall() ? ' agent-invocation-view__workspace--inspecting' : ''}`}>
         <AgentInvocationTimeline {...props} onSelectModelCall={inspectModelCall} />
         <Show when={selectedCall()}>{(call) => (
-          <aside
+          <Inspector
             class="agent-invocation-view__inspector"
-            role="complementary"
-            aria-labelledby={inspectorTitleId}
+            size="medium"
+            ariaLabel={uiText('模型调用详情', 'Model Call details')}
+            title={uiText('模型调用详情', 'Model Call Details')}
+            closeLabel={uiText('关闭', 'Close')}
+            onClose={() => setSelectedCallId(undefined)}
             data-testid="agent-invocation-inspector"
           >
-            <div class="agent-invocation-view__inspector-toolbar">
-              <strong id={inspectorTitleId}>{uiText('模型调用详情', 'Model Call Details')}</strong>
-              <button class="agent-invocation-view__close" type="button" onClick={() => setSelectedCallId(undefined)}>
-                <Icon name="close" />
-                <span>{uiText('关闭', 'Close')}</span>
-              </button>
-            </div>
             <AgentModelCallInspector call={call()} index={props.invocation.modelCalls.findIndex((item) => item.id === call().id)} />
-          </aside>
+          </Inspector>
         )}</Show>
       </div>
     </section>
@@ -382,23 +369,23 @@ export function AgentInvocationCollectionExplorer(props: {
   ): void
 }) {
   const [selectedInvocationId, setSelectedInvocationId] = createSignal<string>()
-  const selectedInvocation = createMemo(() => props.invocations.find((invocation) => invocation.id === selectedInvocationId()))
+  const selectedInvocation = createMemo(() => props.invocations.find((invocation) => invocation.invocationId === selectedInvocationId()))
   let knownInvocationIds = new Set<string>()
   createEffect(() => {
     const invocations = props.invocations
-    const newInvocations = invocations.filter((invocation) => !knownInvocationIds.has(invocation.id))
+    const newInvocations = invocations.filter((invocation) => !knownInvocationIds.has(invocation.invocationId))
     const newInvocationToFollow = [...newInvocations].reverse().find((invocation) => invocation.status === 'in_progress')
       ?? (props.followLatestInvocation ? newInvocations[newInvocations.length - 1] : undefined)
     if (newInvocationToFollow) {
-      setSelectedInvocationId(newInvocationToFollow.id)
+      setSelectedInvocationId(newInvocationToFollow.invocationId)
     } else if (!selectedInvocation()) {
       setSelectedInvocationId(
-        invocations.find((invocation) => invocation.status === 'failed')?.id
-        ?? invocations.find((invocation) => invocation.status === 'in_progress')?.id
-        ?? invocations[0]?.id
+        invocations.find((invocation) => invocation.status === 'failed')?.invocationId
+        ?? invocations.find((invocation) => invocation.status === 'in_progress')?.invocationId
+        ?? invocations[0]?.invocationId
       )
     }
-    knownInvocationIds = new Set(invocations.map((invocation) => invocation.id))
+    knownInvocationIds = new Set(invocations.map((invocation) => invocation.invocationId))
   })
   return (
     <section class="agent-invocation-collection" data-testid="agent-invocation-collection">
@@ -407,8 +394,8 @@ export function AgentInvocationCollectionExplorer(props: {
           <For each={props.invocations}>{(invocation, index) => (
             <button
               type="button"
-              aria-selected={selectedInvocation()?.id === invocation.id}
-              onClick={() => setSelectedInvocationId(invocation.id)}
+              aria-selected={selectedInvocation()?.invocationId === invocation.invocationId}
+              onClick={() => setSelectedInvocationId(invocation.invocationId)}
             >
               <span>{index() + 1}</span>
               <strong>{props.agentDisplayName?.(invocation) ?? invocation.agentId}</strong>

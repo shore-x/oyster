@@ -7,6 +7,8 @@ const EMPTY_STATE: DiscoveryStateData = { sources: [], records: [], scans: [] }
 
 type StoredSourceRecord = Omit<SourceRecord, 'kind'> & {
   kind?: SourceRecord['kind']
+  /** Legacy metadata hash that was once exposed as a source revision. */
+  fingerprint?: string
   syncState?: string
   rawEvidenceId?: string
   rawContentHash?: string
@@ -55,6 +57,7 @@ function currentRecord(value: StoredSourceRecord): SourceRecord {
   delete copy.rawEvidenceId
   delete copy.rawContentHash
   delete copy.syncedFingerprint
+  delete copy.fingerprint
   delete copy.errorMessage
   return copy as unknown as SourceRecord
 }

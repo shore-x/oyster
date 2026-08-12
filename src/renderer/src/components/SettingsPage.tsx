@@ -5,6 +5,7 @@ import { PiExtensionsPage } from './PiExtensionsPage'
 import { GeneralSettingsPage } from './GeneralSettingsPage'
 import { FolderBrowserPage } from './FolderBrowserPage'
 import { uiText } from '../i18n'
+import { Tab, TabList } from '../ui'
 
 type SettingsTab = 'general' | 'ai-backends' | 'agents' | 'extensions'
 
@@ -50,36 +51,28 @@ export function SettingsPage() {
         </div>
       </header>
 
-      <div class="page-tabs" role="tablist" aria-label={uiText('设置分类', 'Settings categories')}>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab() === 'general'}
+      <TabList class="page-tabs" ariaLabel={uiText('设置分类', 'Settings categories')}>
+        <Tab
+          selected={tab() === 'general'}
           data-testid="settings-tab-general"
           onClick={() => setTab('general')}
-        >{uiText('通用', 'General')}</button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab() === 'ai-backends'}
+        >{uiText('通用', 'General')}</Tab>
+        <Tab
+          selected={tab() === 'ai-backends'}
           data-testid="settings-tab-ai-backends"
           onClick={() => setTab('ai-backends')}
-        >{uiText('AI 后端', 'AI Backends')}</button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab() === 'agents'}
+        >{uiText('AI 后端', 'AI Backends')}</Tab>
+        <Tab
+          selected={tab() === 'agents'}
           data-testid="nav-agent-configuration"
           onClick={() => setTab('agents')}
-        ><span data-testid="settings-tab-agents">{uiText('Agent 配置', 'Agent Configuration')}</span></button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab() === 'extensions'}
+        ><span data-testid="settings-tab-agents">{uiText('Agent 配置', 'Agent Configuration')}</span></Tab>
+        <Tab
+          selected={tab() === 'extensions'}
           data-testid="settings-tab-extensions"
           onClick={() => setTab('extensions')}
-        >Pi Extensions</button>
-      </div>
+        >Pi Extensions</Tab>
+      </TabList>
 
       <section
         class={`settings-page__panel${designDocumentsPath() ? ' settings-page__panel--workspace' : ''}`}

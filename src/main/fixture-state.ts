@@ -75,8 +75,7 @@ export function createFixtureState(): DiscoveryStateData {
       endedAt: '2026-07-21T13:42:00.000Z',
       updatedAt: '2026-07-21T13:42:00.000Z',
       sizeBytes: Buffer.byteLength(FIXTURE_SOURCE_CONVERSATION_CONTENT),
-      modifiedAt: '2026-07-21T13:42:00.000Z',
-      fingerprint: 'a'.repeat(64)
+      modifiedAt: '2026-07-21T13:42:00.000Z'
     }],
     scans: [
       {

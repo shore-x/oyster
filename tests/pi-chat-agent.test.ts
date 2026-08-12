@@ -50,7 +50,7 @@ describe('PiChatAgent', () => {
     models.setProvider(faux.provider)
 
     await new PiChatAgent(rootPath, agentDir).invoke({
-      conversationId: opened.id,
+      conversationId: opened.conversationId,
       rootInvocationId: randomUUID(),
       piSessionManager: opened.piSessionManager,
       binding,
@@ -62,7 +62,7 @@ describe('PiChatAgent', () => {
       signal: new AbortController().signal
     })
 
-    expect((await conversations.detail(opened.id)).messages.at(-1)?.message).toMatchObject({
+    expect((await conversations.detail(opened.conversationId)).messages.at(-1)?.message).toMatchObject({
       role: 'assistant',
       text: 'Extension observed.'
     })
@@ -98,7 +98,7 @@ describe('PiChatAgent', () => {
     models.setProvider(faux.provider)
 
     await new PiChatAgent(rootPath, agentDir).invoke({
-      conversationId: opened.id,
+      conversationId: opened.conversationId,
       rootInvocationId: randomUUID(),
       piSessionManager: opened.piSessionManager,
       binding,
@@ -110,7 +110,7 @@ describe('PiChatAgent', () => {
       signal: new AbortController().signal
     })
 
-    expect((await conversations.detail(opened.id)).messages.at(-1)?.message).toMatchObject({
+    expect((await conversations.detail(opened.conversationId)).messages.at(-1)?.message).toMatchObject({
       role: 'assistant',
       text: 'Project extension ignored.'
     })
@@ -130,11 +130,11 @@ describe('PiChatAgent', () => {
     const faux = fauxProvider()
     faux.setResponses([
       (context) => {
-        expect(context.systemPrompt).toContain('Application language: English.')
+        expect(context.systemPrompt).toContain('Agent output language: English.')
         return fauxAssistantMessage('First invocation.')
       },
       (context) => {
-        expect(context.systemPrompt).toContain('Application language: Simplified Chinese.')
+        expect(context.systemPrompt).toContain('Agent output language: Simplified Chinese.')
         return fauxAssistantMessage('Second invocation.')
       }
     ])
@@ -153,7 +153,7 @@ describe('PiChatAgent', () => {
     )
 
     await agent.invoke({
-      conversationId: opened.id,
+      conversationId: opened.conversationId,
       rootInvocationId: randomUUID(),
       piSessionManager: opened.piSessionManager,
       binding,
@@ -163,7 +163,7 @@ describe('PiChatAgent', () => {
     })
     language = 'zh-CN'
     await agent.invoke({
-      conversationId: opened.id,
+      conversationId: opened.conversationId,
       rootInvocationId: randomUUID(),
       piSessionManager: opened.piSessionManager,
       binding,
@@ -174,7 +174,7 @@ describe('PiChatAgent', () => {
 
     await sessions.dispose()
     const restarted = new PiChatConversationRepository(join(rootPath, 'sessions'))
-    expect((await restarted.open(opened.id)).binding.systemPrompt).toBe(binding.systemPrompt)
+    expect((await restarted.open(opened.conversationId)).binding.systemPrompt).toBe(binding.systemPrompt)
     await restarted.dispose()
   })
 
@@ -232,7 +232,7 @@ describe('PiChatAgent', () => {
         return stream
       }
     }
-    const metadata = { id: opened.id }
+    const metadata = { id: opened.conversationId }
     const invocations = new Map<string, AgentInvocationDebugRecord>()
     await new PiChatAgent(rootPath).invoke({
       conversationId: metadata.id,
@@ -242,7 +242,7 @@ describe('PiChatAgent', () => {
       modelStream,
       text: 'Continue.',
       signal: new AbortController().signal,
-      onInvocationUpdate: (invocation) => invocations.set(invocation.id, invocation)
+      onInvocationUpdate: (invocation) => invocations.set(invocation.invocationId, invocation)
     })
     for (const invocation of invocations.values()) {
       if (invocation.status !== 'in_progress') {
@@ -305,7 +305,7 @@ describe('PiChatAgent', () => {
       model: { ...faux.getModel(), id: 'todo-model' },
       streamFn: (model, context, options) => models.streamSimple(model, context, options)
     }
-    const metadata = { id: opened.id }
+    const metadata = { id: opened.conversationId }
 
     const invocations = new Map<string, AgentInvocationDebugRecord>()
     await new PiChatAgent(rootPath).invoke({
@@ -317,7 +317,7 @@ describe('PiChatAgent', () => {
       text: 'Start.',
       initialTodos: ['Inspect the artifact'],
       signal: new AbortController().signal,
-      onInvocationUpdate: (invocation) => invocations.set(invocation.id, invocation)
+      onInvocationUpdate: (invocation) => invocations.set(invocation.invocationId, invocation)
     })
     for (const invocation of invocations.values()) {
       if (invocation.status !== 'in_progress') {

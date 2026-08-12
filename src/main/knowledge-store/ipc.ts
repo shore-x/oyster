@@ -34,8 +34,4 @@ export function registerKnowledgeIpc(
     assertTrustedSender(event)
     return explorer.getNeighborhood(title)
   })
-  ipcMain.handle(knowledgeChannels.clear, (event) => {
-    assertTrustedSender(event)
-    return store.clear()
-  })
 }

@@ -1,14 +1,17 @@
 import type {
-  SourceConversationSummary,
-  SourceSnapshotRef
+  SourceConversationSelection,
+  SourceConversationSummary
 } from '../../shared/discovery'
-import type { SourceSnapshotSelectionFailureReason } from '../../shared/knowledge-processing'
+import type {
+  SourceSnapshotSelectionFailureReason,
+  StartKnowledgeTaskInput
+} from '../../shared/knowledge-processing'
 import type {
   DiscoveryService,
   SourceSnapshotEvidence
 } from '../discovery/discovery-service'
 import {
-  SourceConversationRevisionChangedError,
+  SourceConversationChangedError,
   SourceConversationUnavailableError,
   SourceConversationUnreadableError
 } from '../discovery/source-evidence-reader'
@@ -35,7 +38,7 @@ function selectionRejected(
   if (reason === 'changed') {
     return new SourceSnapshotRejectedError(
       reason,
-      '所选来源对话已更新，请从刷新后的列表重新选择'
+      '所选来源对话在读取期间持续变化，请稍后重试'
     )
   }
   if (reason === 'unreadable') {
@@ -50,17 +53,63 @@ function selectionRejected(
   )
 }
 
-export function validateSourceSnapshot(input: SourceSnapshotRef): void {
-  if (!input || typeof input !== 'object') throw new Error('来源快照选择无效')
+export function validateSourceConversationSelection(input: unknown): void {
+  if (!input || typeof input !== 'object') throw new Error('来源对话选择无效')
+  const selection = input as Partial<SourceConversationSelection>
   if (
-    typeof input.sourceConversationId !== 'string'
-    || !input.sourceConversationId
-    || input.sourceConversationId.length > 256
+    typeof selection.sourceConversationId !== 'string'
+    || !selection.sourceConversationId
+    || selection.sourceConversationId.length > 256
   ) {
     throw new Error('来源对话 ID 无效')
   }
-  if (!/^[a-f0-9]{64}$/i.test(input.sourceRevision)) {
-    throw new Error('来源版本无效')
+}
+
+/** Projects a runtime value onto the current public Source Conversation selection. */
+export function normalizeSourceConversationSelection(
+  input: unknown
+): SourceConversationSelection {
+  validateSourceConversationSelection(input)
+  return {
+    sourceConversationId: (input as SourceConversationSelection).sourceConversationId
+  }
+}
+
+/** Projects accepted Task input onto the current persisted definition. */
+export function normalizeStartKnowledgeTaskInput(input: unknown): StartKnowledgeTaskInput {
+  const selection = normalizeSourceConversationSelection(input)
+  const attention = (input as Partial<StartKnowledgeTaskInput>).attention
+  if (attention !== undefined && typeof attention !== 'string') {
+    throw new Error('补充关注内容格式无效')
+  }
+  return {
+    ...selection,
+    ...(attention === undefined ? {} : { attention })
+  }
+}
+
+/** Removes legacy catalog-only fields from the current Source Conversation read model. */
+export function normalizeSourceConversationSummary(
+  sourceConversation: SourceConversationSummary
+): SourceConversationSummary {
+  return {
+    sourceConversationId: sourceConversation.sourceConversationId,
+    sourceId: sourceConversation.sourceId,
+    agentType: sourceConversation.agentType,
+    sourceDisplayName: sourceConversation.sourceDisplayName,
+    providerConversationId: sourceConversation.providerConversationId,
+    ...(sourceConversation.title === undefined ? {} : { title: sourceConversation.title }),
+    ...(sourceConversation.projectPath === undefined
+      ? {}
+      : { projectPath: sourceConversation.projectPath }),
+    ...(sourceConversation.startedAt === undefined
+      ? {}
+      : { startedAt: sourceConversation.startedAt }),
+    ...(sourceConversation.endedAt === undefined ? {} : { endedAt: sourceConversation.endedAt }),
+    ...(sourceConversation.updatedAt === undefined
+      ? {}
+      : { updatedAt: sourceConversation.updatedAt }),
+    sizeBytes: sourceConversation.sizeBytes
   }
 }
 
@@ -68,19 +117,12 @@ export function sourceSnapshotRef(sourceConversationId: string, contentHash: str
   return `raw:${sourceConversationId}@sha256:${contentHash.toLowerCase()}`
 }
 
-/** Resolves one exact external conversation revision before accepting a Knowledge Task. */
+/** Reads the selected conversation's current bytes and gives them an immutable content reference. */
 export async function loadSourceSnapshotMaterial(
   discovery: DiscoveryService,
-  input: SourceSnapshotRef
+  input: SourceConversationSelection
 ): Promise<SourceSnapshotMaterial> {
-  validateSourceSnapshot(input)
-  const sourceConversation = discovery.listSourceConversations().find(
-    (candidate) => candidate.sourceConversationId === input.sourceConversationId
-  )
-  if (!sourceConversation) throw selectionRejected('unavailable')
-  if (sourceConversation.sourceRevision !== input.sourceRevision) {
-    throw selectionRejected('changed')
-  }
+  validateSourceConversationSelection(input)
 
   let evidence: SourceSnapshotEvidence
   try {
@@ -89,7 +131,7 @@ export async function loadSourceSnapshotMaterial(
     if (error instanceof SourceConversationUnavailableError) {
       throw selectionRejected('unavailable')
     }
-    if (error instanceof SourceConversationRevisionChangedError) {
+    if (error instanceof SourceConversationChangedError) {
       throw selectionRejected('changed')
     }
     if (error instanceof SourceConversationUnreadableError) {
@@ -100,9 +142,13 @@ export async function loadSourceSnapshotMaterial(
   if (!evidence.rawEvidence.lines.some((line) => line.trim())) {
     throw new Error('所选来源快照没有可处理的 Observation 内容')
   }
+  const sourceConversation = discovery.listSourceConversations().find(
+    (candidate) => candidate.sourceConversationId === evidence.sourceConversationId
+  )
+  if (!sourceConversation) throw selectionRejected('unavailable')
 
   return {
-    sourceConversation,
+    sourceConversation: normalizeSourceConversationSummary(sourceConversation),
     evidence,
     sourceRef: sourceSnapshotRef(evidence.sourceConversationId, evidence.contentHash)
   }

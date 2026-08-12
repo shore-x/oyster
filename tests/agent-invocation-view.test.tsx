@@ -12,7 +12,7 @@ import { completedAgentInvocation } from './agent-invocation-fixture'
 function invocationWithAssistantMessage(agentId: string): AgentInvocationRecord {
   const invocation = completedAgentInvocation(`invocation:${agentId}`, [], 1, agentId)
   invocation.messages.push({
-    id: `${invocation.id}:assistant:1`,
+    id: `${invocation.invocationId}:assistant:1`,
     sequence: 1,
     status: 'completed',
     role: 'assistant',
@@ -67,5 +67,15 @@ describe('Agent Invocation view', () => {
     expect(html).toContain('final payload')
     expect(html).toContain('[redacted]')
     expect(html).toContain('request-1')
+  })
+
+  it('uses the shared Inspector when model-call handling stays local', () => {
+    const invocation = completedAgentInvocation('invocation:inspector', [], 1)
+    const html = renderToString(() => (
+      <AgentInvocationExplorer invocation={invocation} />
+    ))
+
+    expect(html).not.toContain('data-testid="agent-invocation-inspector"')
+    expect(html).not.toContain('agent-invocation-view__inspector-toolbar')
   })
 })

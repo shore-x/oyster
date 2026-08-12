@@ -53,7 +53,7 @@ export type ChatMessageView =
     }
 
 export interface ChatConversationSummary {
-  id: string
+  conversationId: string
   title?: string
   createdAt: string
   updatedAt: string
@@ -69,7 +69,7 @@ export interface ChatConversationDetail extends ChatConversationSummary {
 }
 
 export interface ChatAgentConfigurationView {
-  id: typeof CHAT_AGENT_ID
+  agentId: typeof CHAT_AGENT_ID
   displayName: string
   description: string
   runtime: 'pi_coding_agent'
@@ -92,10 +92,6 @@ export interface CreateChatConversationInput {
 export interface SendChatMessageInput {
   conversationId: string
   text: string
-}
-
-export interface DeleteChatConversationInput {
-  conversationId: string
 }
 
 export interface CancelChatInvocationInput {
@@ -131,7 +127,6 @@ export interface ChatApi {
   getState(): Promise<ChatStateView>
   createConversation(input: CreateChatConversationInput): Promise<ChatConversationDetail>
   readConversation(conversationId: string): Promise<ChatConversationDetail>
-  deleteConversation(input: DeleteChatConversationInput): Promise<ChatStateView>
   sendMessage(input: SendChatMessageInput): Promise<ChatConversationDetail>
   cancelInvocation(input: CancelChatInvocationInput): Promise<void>
   saveDefaultInstructions(input: SaveChatDefaultInstructionsInput): Promise<ChatStateView>

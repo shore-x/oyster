@@ -22,7 +22,7 @@ export interface ChatConfigurationRepository {
 }
 
 export interface PersistedChatConversation {
-  id: string
+  conversationId: string
   piSessionManager: SessionManager
   binding: ChatConversationBinding
 }
@@ -34,7 +34,6 @@ export interface ChatConversationRepository {
   detail(conversationId: string, hasActiveInvocation?: boolean): Promise<ChatConversationDetail>
   setTitle(conversationId: string, title: string): Promise<void>
   appendInvocation(conversationId: string, record: AgentInvocationDebugRecord): Promise<void>
-  delete(conversationId: string): Promise<void>
 }
 
 export interface ChatAiBackendPort {

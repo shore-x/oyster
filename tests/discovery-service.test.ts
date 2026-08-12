@@ -6,7 +6,10 @@ import { tmpdir } from 'node:os'
 import { ClaudeHistoryAdapter, CodexHistoryAdapter } from '../src/main/discovery/adapters'
 import { DiscoveryService } from '../src/main/discovery/discovery-service'
 import { InMemoryDiscoveryRepository } from '../src/main/discovery/repository'
-import { FileSourceEvidenceReader } from '../src/main/discovery/source-evidence-reader'
+import {
+  FileSourceEvidenceReader,
+  SourceConversationChangedError
+} from '../src/main/discovery/source-evidence-reader'
 
 const temporaryDirectories: string[] = []
 
@@ -67,7 +70,7 @@ describe('DiscoveryService', () => {
       sourceDisplayName: 'Claude Code',
       providerConversationId: 'two'
     })
-    expect(sourceConversations[0].sourceRevision).toMatch(/^[a-f0-9]{64}$/)
+    expect(sourceConversations[0]).not.toHaveProperty('sourceRevision')
     expect(sourceConversations[0]).not.toHaveProperty('relativePath')
     expect(sourceConversations[0]).not.toHaveProperty('sourcePath')
     expect(sourceConversations[0]).not.toHaveProperty('contentHash')
@@ -75,14 +78,12 @@ describe('DiscoveryService', () => {
     const selected = sourceConversations.find((conversation) => conversation.providerConversationId === 'one')!
     const sourceContent = await readFile(join(historyRoot, 'one.jsonl'))
     const evidence = await service.readSourceSnapshot({
-      sourceConversationId: selected.sourceConversationId,
-      sourceRevision: selected.sourceRevision
+      sourceConversationId: selected.sourceConversationId
     })
     expect(readEvidence).toHaveBeenCalledOnce()
     expect(readEvidence).toHaveBeenCalledWith(expect.not.objectContaining({ maxBytes: expect.anything() }))
     expect(evidence).toMatchObject({
       sourceConversationId: selected.sourceConversationId,
-      sourceRevision: selected.sourceRevision,
       contentHash: createHash('sha256').update(sourceContent).digest('hex'),
       sizeBytes: selected.sizeBytes
     })
@@ -93,13 +94,7 @@ describe('DiscoveryService', () => {
       skillHints: expect.any(Array)
     })
     await expect(service.readSourceSnapshot({
-      sourceConversationId: selected.sourceConversationId,
-      sourceRevision: '0'.repeat(64)
-    }, selected.sizeBytes)).rejects.toThrow('revision has changed')
-    expect(readEvidence).toHaveBeenCalledOnce()
-    await expect(service.readSourceSnapshot({
-      sourceConversationId: selected.sourceConversationId,
-      sourceRevision: selected.sourceRevision
+      sourceConversationId: selected.sourceConversationId
     }, selected.sizeBytes - 1)).rejects.toThrow('read limit')
     expect(service.stateView().scans[0]).not.toHaveProperty('kind')
   })
@@ -126,29 +121,53 @@ describe('DiscoveryService', () => {
     expect(selected).toBeDefined()
     await writeFile(conversationPath, '{"sessionId":"one","timestamp":"2026-07-01T00:00:00.000Z","changed":true}\n')
     await expect(service.readSourceSnapshot({
+      sourceConversationId: selected.sourceConversationId
+    }, 1_024)).resolves.toMatchObject({
       sourceConversationId: selected.sourceConversationId,
-      sourceRevision: selected.sourceRevision
-    }, 1_024)).rejects.toThrow('has grown')
+      sizeBytes: expect.any(Number)
+    })
 
     const changed = service.listSourceConversations()[0]
     expect(changed.sourceConversationId).toBe(selected.sourceConversationId)
-    expect(changed.sourceRevision).not.toBe(selected.sourceRevision)
     expect(changed.sizeBytes).toBeGreaterThan(selected.sizeBytes)
     await expect(service.readSourceSnapshot({
-      sourceConversationId: selected.sourceConversationId,
-      sourceRevision: selected.sourceRevision
-    }, 1_024)).rejects.toThrow('revision has changed')
-    await expect(service.readSourceSnapshot({
-      sourceConversationId: changed.sourceConversationId,
-      sourceRevision: changed.sourceRevision
-    }, 1_024)).resolves.toMatchObject({ sourceRevision: changed.sourceRevision })
+      sourceConversationId: changed.sourceConversationId
+    }, 1_024)).resolves.toMatchObject({ sourceConversationId: changed.sourceConversationId })
 
     await rm(conversationPath)
     await expect(service.readSourceSnapshot({
-      sourceConversationId: changed.sourceConversationId,
-      sourceRevision: changed.sourceRevision
+      sourceConversationId: changed.sourceConversationId
     }, 1_024)).rejects.toThrow('no longer available')
     expect(service.listSourceConversations()).toEqual([])
+  })
+
+  it('reports changed only when a Source Conversation keeps changing across the refresh retry', async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), 'oyster-session-changing-'))
+    temporaryDirectories.push(homeDirectory)
+    const historyRoot = join(homeDirectory, '.claude', 'projects', 'demo')
+    const conversationPath = join(historyRoot, 'one.jsonl')
+    await mkdir(historyRoot, { recursive: true })
+    await writeFile(conversationPath, '{"sessionId":"one","timestamp":"2026-07-01T00:00:00.000Z"}\n')
+
+    const evidenceReader = new FileSourceEvidenceReader()
+    const readEvidence = vi.spyOn(evidenceReader, 'read').mockRejectedValue(
+      new SourceConversationChangedError()
+    )
+    const service = new DiscoveryService(
+      new InMemoryDiscoveryRepository(),
+      evidenceReader,
+      [new ClaudeHistoryAdapter()],
+      { homeDirectory, environment: {}, pathEntries: [] }
+    )
+    await service.initialize()
+    await service.detectAgents()
+    await service.waitForIdle()
+    const selected = service.listSourceConversations()[0]
+
+    await expect(service.readSourceSnapshot({
+      sourceConversationId: selected.sourceConversationId
+    })).rejects.toThrow('kept changing')
+    expect(readEvidence).toHaveBeenCalledTimes(2)
   })
 
   it('transparently follows a Codex Source Conversation moved into archived_sessions', async () => {
@@ -185,11 +204,10 @@ describe('DiscoveryService', () => {
 
     await rename(originalPath, archivedPath)
     const evidence = await service.readSourceSnapshot({
-      sourceConversationId: selected.sourceConversationId,
-      sourceRevision: selected.sourceRevision
+      sourceConversationId: selected.sourceConversationId
     })
 
-    expect(evidence.sourceRevision).toBe(selected.sourceRevision)
+    expect(evidence.sourceConversationId).toBe(selected.sourceConversationId)
     expect(service.listSourceConversations()).toEqual([selected])
     expect(catalogSnapshots).toContainEqual([selected.sourceConversationId])
     unsubscribe()

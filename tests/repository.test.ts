@@ -91,8 +91,7 @@ describe('JsonDiscoveryRepository', () => {
         externalId: 'upstream-session',
         relativePath: 'project/session.jsonl',
         sizeBytes: 10,
-        modifiedAt: '2026-07-22T00:00:00.000Z',
-        fingerprint: 'legacy-fingerprint'
+        modifiedAt: '2026-07-22T00:00:00.000Z'
       }
     ])
     expect(state.scans).toEqual([expect.objectContaining({
@@ -143,8 +142,7 @@ describe('JsonDiscoveryRepository', () => {
         externalId: 'upstream-one',
         relativePath: 'sessions/one.jsonl',
         sizeBytes: 20,
-        modifiedAt: '2026-07-26T00:00:00.000Z',
-        fingerprint: 'b'.repeat(64)
+        modifiedAt: '2026-07-26T00:00:00.000Z'
       }],
       scans: [{
         scanId: 'scan-one',
@@ -161,6 +159,6 @@ describe('JsonDiscoveryRepository', () => {
     const stored = await readFile(statePath, 'utf8')
     expect(stored).toContain('"records"')
     expect(stored).not.toMatch(/"artifacts"|"sessions"/)
-    expect(stored).not.toMatch(/rawEvidence|rawContentHash|syncState|syncedFingerprint|"kind": "import"/)
+    expect(stored).not.toMatch(/rawEvidence|rawContentHash|syncState|syncedFingerprint|fingerprint|"kind": "import"/)
   })
 })

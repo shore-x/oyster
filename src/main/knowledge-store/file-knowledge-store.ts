@@ -1,15 +1,11 @@
 import {
   mkdirSync,
   readFileSync,
-  readdirSync,
-  rmSync,
-  statSync,
-  writeFileSync
+  readdirSync
 } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 import type {
   BrowseKnowledgeInput,
-  ClearKnowledgeResult,
   KnowledgeBrowseResult,
   KnowledgeStatement,
   ListKnowledgeStatementsOptions
@@ -159,15 +155,4 @@ export class FileKnowledgeStore implements KnowledgeReader {
     return this.statements().find((statement) => statement.title === normalizedTitle)
   }
 
-  clear(): ClearKnowledgeResult {
-    const paths = markdownPaths(this.knowledgePath)
-    for (const path of paths) rmSync(path)
-    for (const path of [...new Set(paths.map((path) => resolve(path, '..')))]) {
-      if (path !== this.knowledgePath && statSync(path).isDirectory()) {
-        try { rmSync(path, { recursive: false }) } catch { /* non-empty parent remains */ }
-      }
-    }
-    writeFileSync(join(this.knowledgePath, '.gitkeep'), '', { flag: 'a' })
-    return { deletedStatementCount: paths.length }
-  }
 }

@@ -14,7 +14,7 @@ import {
   runtimeLabel,
   selectedLlmModel
 } from '../processing-configuration'
-import { Button, Icon } from '../ui'
+import { Button, Icon, Tab, TabList } from '../ui'
 import { KnowledgeTaskWorktree } from './KnowledgeTaskWorktree'
 import { knowledgeTaskResultView } from './KnowledgeTaskDetails'
 import { AgentInvocationPanel } from './AgentInvocationPanel'
@@ -49,7 +49,7 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
     <section class="processing-result" data-testid="processing-result-knowledge_maintainer">
       <div class="processing-result__heading">
         <div><Icon name="check" /><h3>{uiText('知识维护结果', 'Knowledge Maintenance Result')}</h3></div>
-        <span>{uiText('已提交到 Task branch · 未合并到', 'Committed to Task branch · Not merged into')} {props.result.worktree.targetBranch}</span>
+        <span>{uiText('已提交到 Task 分支 · 等待 Reviewer 处理', 'Committed to the Task branch · Awaiting Reviewer')}</span>
       </div>
       <dl class="knowledge-task-details">
         <div><dt>Repository</dt><dd>{props.result.worktree.repositoryPath}</dd></div>
@@ -75,37 +75,29 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
   )
 }
 
-export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }) {
+export function KnowledgeProcessingPage() {
   const controller = createKnowledgeProcessingController()
   const [view, setView] = createSignal<'knowledge_task' | 'history' | 'agent_preview'>('knowledge_task')
-  const [selectedSnapshotRef, setSelectedSnapshotRef] = createSignal<{
-    sourceConversationId: string
-    sourceRevision: string
-  }>()
+  const [selectedSourceConversationId, setSelectedSourceConversationId] = createSignal<string>()
   const [knowledgeTaskAttention, setKnowledgeTaskAttention] = createSignal('')
   const [attention, setAttention] = createSignal('')
   const [instructions, setInstructions] = createSignal('')
 
-  createEffect(() => {
-    if (props.knowledgeResetVersion > 0) controller.resetKnowledgeTaskResult()
-  })
-
   const maintainer = createMemo(() => controller.state().agents.find(
-    (agent) => agent.id === 'knowledge_maintainer'
+    (agent) => agent.agentId === 'knowledge_maintainer'
   ))
   const reviewer = createMemo(() => controller.state().agents.find(
-    (agent) => agent.id === 'knowledge_reviewer'
+    (agent) => agent.agentId === 'knowledge_reviewer'
   ))
   const defaultLlm = createMemo(() => controller.state().defaultLlm)
   const selectedConnection = createMemo(() => controller.state().connections.find(
     (connection) => connection.id === defaultLlm()?.connectionId
   ))
   const selectedSourceConversation = createMemo(() => {
-    const selected = selectedSnapshotRef()
+    const selected = selectedSourceConversationId()
     if (!selected) return undefined
     return controller.sourceConversations().find((conversation) => (
-      conversation.sourceConversationId === selected.sourceConversationId
-      && conversation.sourceRevision === selected.sourceRevision
+      conversation.sourceConversationId === selected
     ))
   })
   const maintenanceInvocation = createMemo(() => controller.latestInvocation('agent_preview'))
@@ -115,7 +107,7 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
   const currentMaintenanceResult = createMemo(() => {
     const result = controller.maintenanceResult()
     const invocation = maintenanceInvocation()
-    if (!result || (invocation && invocation.invocation.id !== result.agentInvocationId)) return undefined
+    if (!result || (invocation && invocation.invocation.invocationId !== result.agentInvocationId)) return undefined
     return result
   })
   const anyActivityInProgress = createMemo(() => (
@@ -139,8 +131,8 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
 
   createEffect(() => {
     if (controller.sourceConversationsLoading()) return
-    if (selectedSnapshotRef() && !selectedSourceConversation()) {
-      setSelectedSnapshotRef(undefined)
+    if (selectedSourceConversationId() && !selectedSourceConversation()) {
+      setSelectedSourceConversationId(undefined)
       controller.invalidatePreviewResult()
       controller.resetKnowledgeTaskResult()
     }
@@ -166,7 +158,7 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
   const disabledReason = createMemo(() => {
     const agent = maintainer()
     if (anyActivityInProgress()) return uiText('已有 Knowledge Processing Task 或 Agent Preview 处于进行中。', 'A Knowledge Processing Task or Agent Preview is already in progress.')
-    if (agent && controller.isSaving(agent.id)) return uiText('正在保存 Agent 配置…', 'Saving Agent configuration…')
+    if (agent && controller.isSaving(agent.agentId)) return uiText('正在保存 Agent 配置…', 'Saving Agent configuration…')
     const issue = configurationIssue(agent)
     if (issue) return issue
     if (instructionsDirty()) return uiText('处理指令有未保存修改，请先保存。', 'Processing instructions have unsaved changes; save them first.')
@@ -177,12 +169,7 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
   })
 
   function updateSelectedSourceConversation(conversation?: SourceConversationSummary): void {
-    setSelectedSnapshotRef(conversation
-      ? {
-          sourceConversationId: conversation.sourceConversationId,
-          sourceRevision: conversation.sourceRevision
-        }
-      : undefined)
+    setSelectedSourceConversationId(conversation?.sourceConversationId)
     controller.invalidatePreviewResult()
     controller.resetKnowledgeTaskResult()
   }
@@ -195,14 +182,14 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
           <div class="page-summary">
             <span>{uiText('Task 与 Agent Preview 均由用户显式启动', 'Tasks and Agent Previews are started explicitly by the user')}</span>
             <span class="page-summary__separator">·</span>
-            <span>{uiText('结果保留在未合并的 Git 协作分支', 'Results remain on unmerged Git collaboration branches')}</span>
+            <span>{uiText('Reviewer 合并到 main 后 Task 才完成', 'Tasks complete after the Reviewer integrates them into main')}</span>
           </div>
         </div>
-        <div class="processing-mode-nav" role="tablist" aria-label={uiText('加工测试工作面', 'Processing workspaces')}>
-          <button type="button" role="tab" data-testid="processing-view-knowledge-task" aria-selected={view() === 'knowledge_task'} onClick={() => setView('knowledge_task')}>{uiText('链路测试', 'Workflow Test')}</button>
-          <button type="button" role="tab" data-testid="processing-view-history" aria-selected={view() === 'history'} onClick={() => { setView('history'); void controller.loadKnowledgeTasks() }}>{uiText('历史记录', 'History')}</button>
-          <button type="button" role="tab" data-testid="processing-view-agent-preview" aria-selected={view() === 'agent_preview'} onClick={() => setView('agent_preview')}>{uiText('高级调试', 'Advanced Debugging')}</button>
-        </div>
+        <TabList class="processing-mode-nav" variant="segmented" size="compact" ariaLabel={uiText('加工测试工作面', 'Processing workspaces')}>
+          <Tab data-testid="processing-view-knowledge-task" selected={view() === 'knowledge_task'} onClick={() => setView('knowledge_task')}>{uiText('链路测试', 'Workflow Test')}</Tab>
+          <Tab data-testid="processing-view-history" selected={view() === 'history'} onClick={() => { setView('history'); void controller.loadKnowledgeTasks() }}>{uiText('历史记录', 'History')}</Tab>
+          <Tab data-testid="processing-view-agent-preview" selected={view() === 'agent_preview'} onClick={() => setView('agent_preview')}>{uiText('高级调试', 'Advanced Debugging')}</Tab>
+        </TabList>
       </header>
 
       <Show when={controller.error()}>{(error) => <div class="page-error"><Icon name="warning" />{error()}</div>}</Show>
@@ -234,7 +221,6 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
             if (!conversation) return
             void controller.startKnowledgeTask({
               sourceConversationId: conversation.sourceConversationId,
-              sourceRevision: conversation.sourceRevision,
               attention: knowledgeTaskAttention().trim() || undefined
             })
           }}
@@ -303,10 +289,10 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
                         <div><h3>{uiText('处理指令', 'Processing Instructions')}</h3><p>{uiText('作为 Maintainer 的 System Prompt 使用。', 'Used as the Maintainer System Prompt.')}</p></div>
                         <span class={`processing-mode-badge${instructions() !== agent().defaultInstructions ? ' processing-mode-badge--custom' : ''}`} data-testid="processing-prompt-badge-knowledge_maintainer">{instructions() !== agent().defaultInstructions ? uiText('已自定义', 'Customized') : uiText('默认', 'Default')}</span>
                       </div>
-                      <textarea class="processing-prompt__editor" data-testid="processing-instructions-knowledge_maintainer" value={instructions()} rows={12} spellcheck={false} disabled={anyActivityInProgress() || controller.isSaving(agent().id)} onInput={(event) => setInstructions(event.currentTarget.value)} />
+                      <textarea class="processing-prompt__editor" data-testid="processing-instructions-knowledge_maintainer" value={instructions()} rows={12} spellcheck={false} disabled={anyActivityInProgress() || controller.isSaving(agent().agentId)} onInput={(event) => setInstructions(event.currentTarget.value)} />
                       <div class="processing-prompt__actions">
-                        <Button variant="ghost" icon="refresh" data-testid="restore-processing-instructions-knowledge_maintainer" disabled={anyActivityInProgress() || controller.isSaving(agent().id) || (!agent().isCustomized && instructions() === agent().defaultInstructions)} onClick={() => { setInstructions(agent().defaultInstructions); void controller.saveAgent({ agentId: agent().id, instructionsOverride: null }) }}>{uiText('恢复默认', 'Restore Default')}</Button>
-                        <Button variant="secondary" icon="check" data-testid="save-processing-instructions-knowledge_maintainer" disabled={anyActivityInProgress() || controller.isSaving(agent().id) || !instructionsDirty() || !instructions().trim()} onClick={() => void controller.saveAgent({ agentId: agent().id, instructionsOverride: instructions() === agent().defaultInstructions ? null : instructions() })}>{uiText('保存提示词', 'Save Prompt')}</Button>
+                        <Button variant="ghost" icon="refresh" data-testid="restore-processing-instructions-knowledge_maintainer" disabled={anyActivityInProgress() || controller.isSaving(agent().agentId) || (!agent().isCustomized && instructions() === agent().defaultInstructions)} onClick={() => { setInstructions(agent().defaultInstructions); void controller.saveAgent({ agentId: agent().agentId, instructionsOverride: null }) }}>{uiText('恢复默认', 'Restore Default')}</Button>
+                        <Button variant="secondary" icon="check" data-testid="save-processing-instructions-knowledge_maintainer" disabled={anyActivityInProgress() || controller.isSaving(agent().agentId) || !instructionsDirty() || !instructions().trim()} onClick={() => void controller.saveAgent({ agentId: agent().agentId, instructionsOverride: instructions() === agent().defaultInstructions ? null : instructions() })}>{uiText('保存提示词', 'Save Prompt')}</Button>
                       </div>
                     </section>
                   </div>
@@ -331,15 +317,15 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
                       />
                       <Show when={selectedSourceConversation()}>{(conversation) => <SourceConversationMetadata conversation={conversation()} class="source-conversation-summary" testId="maintainer-source-conversation-meta" />}</Show>
                       <label class="ai-field ai-field--wide">
-                        <span>{uiText('Attention（可选）', 'Attention (Optional)')}</span>
+                        <span>{uiText('补充关注内容（可选）', 'Additional Focus (Optional)')}</span>
                         <input data-testid="processing-attention-input" value={attention()} placeholder={uiText('例如：重点关注用户明确否定过的设计选择', 'For example: focus on design choices the user explicitly rejected')} disabled={anyActivityInProgress()} onInput={(event) => { setAttention(event.currentTarget.value); controller.invalidatePreviewResult() }} />
                       </label>
-                      <p class={`knowledge-agent__preview-status${disabledReason() ? ' knowledge-agent__preview-status--blocked' : ''}`} data-testid="maintainer-disabled-reason">{disabledReason() || uiText('配置和 Source Snapshot 已准备，可以启动 Agent Preview。', 'Configuration and Source Snapshot are ready; the Agent Preview can start.')}</p>
+                      <p class={`knowledge-agent__preview-status${disabledReason() ? ' knowledge-agent__preview-status--blocked' : ''}`} data-testid="maintainer-disabled-reason">{disabledReason() || uiText('配置和来源对话已准备，可以启动 Agent Preview。', 'Configuration and the Source Conversation are ready; the Agent Preview can start.')}</p>
                       <div class="knowledge-agent__actions">
-                        <Show when={controller.hasActiveInvocation(agent().id)} fallback={(
-                          <Button variant="primary" icon="play" data-testid="preview-maintainer" disabled={Boolean(disabledReason())} onClick={() => { const conversation = selectedSourceConversation(); if (conversation) void controller.previewKnowledgeMaintainer({ sourceConversationId: conversation.sourceConversationId, sourceRevision: conversation.sourceRevision, attention: attention().trim() || undefined }) }}>{uiText('预览知识维护', 'Preview Knowledge Maintenance')}</Button>
+                        <Show when={controller.hasActiveInvocation(agent().agentId)} fallback={(
+                          <Button variant="primary" icon="play" data-testid="preview-maintainer" disabled={Boolean(disabledReason())} onClick={() => { const conversation = selectedSourceConversation(); if (conversation) void controller.previewKnowledgeMaintainer({ sourceConversationId: conversation.sourceConversationId, attention: attention().trim() || undefined }) }}>{uiText('预览知识维护', 'Preview Knowledge Maintenance')}</Button>
                         )}>
-                          <Button variant="danger" icon="stop" data-testid="cancel-maintainer" onClick={() => void controller.cancelAgentPreview(agent().id)}>{uiText('停止预览', 'Stop Preview')}</Button>
+                          <Button variant="danger" icon="stop" data-testid="cancel-maintainer" onClick={() => void controller.cancelAgentPreview(agent().agentId)}>{uiText('停止预览', 'Stop Preview')}</Button>
                         </Show>
                       </div>
                     </section>
@@ -351,7 +337,7 @@ export function KnowledgeProcessingPage(props: { knowledgeResetVersion: number }
                     </Show>
                   </div>
                   <div class="processing-worktree-panel agent-preview__output" aria-label={uiText('输出结果', 'Output result')}>
-                    <Show when={!controller.hasActiveInvocation(agent().id) ? currentMaintenanceResult() : undefined} fallback={<div class="processing-worktree-empty">{uiText('完成预览后，这里会展示 Task worktree 与提交结果。', 'The Task worktree and commit result appear here after the preview completes.')}</div>}>
+                    <Show when={!controller.hasActiveInvocation(agent().agentId) ? currentMaintenanceResult() : undefined} fallback={<div class="processing-worktree-empty">{uiText('完成预览后，这里会展示 Task worktree 与提交结果。', 'The Task worktree and commit result appear here after the preview completes.')}</div>}>
                       {(result) => <MaintenanceResult result={result()} />}
                     </Show>
                   </div>

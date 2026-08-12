@@ -28,7 +28,7 @@ import {
   ModelOutputTruncatedError
 } from './model'
 import type {
-  AgentBackendAdapter,
+  CodexAccountDiscovery,
   AiBackendRepository,
   AiBackendStateData,
   CredentialStore,
@@ -232,7 +232,6 @@ export class AiBackendService {
   private readonly apiModels = new Map<string, AvailableModel[]>()
   private readonly discoveredModelCache = new Map<string, AvailableModel[]>()
   private readonly listeners = new Set<(snapshot: AiBackendSnapshot) => void>()
-  private readonly unsubscribeDiscovery: () => void
   private configurationError?: string
   private mutationQueue: Promise<void> = Promise.resolve()
 
@@ -240,12 +239,11 @@ export class AiBackendService {
     private readonly repository: AiBackendRepository,
     private readonly credentialStore: CredentialStore,
     /** Used only to discover a locally installed Codex account; its token is never read. */
-    private readonly codexDiscovery: AgentBackendAdapter,
+    private readonly codexDiscovery: CodexAccountDiscovery,
     private readonly modelAdapter: ModelBackendAdapter,
     private readonly codingPlanAdapter: CodingPlanBackend,
     private readonly apiModelStreamFactory: ApiModelStreamFactory = createOysterModelStream
   ) {
-    this.unsubscribeDiscovery = codexDiscovery.subscribe(() => void this.refreshCodingPlan())
   }
 
   async initialize(): Promise<void> {
@@ -716,7 +714,6 @@ export class AiBackendService {
   }
 
   dispose(): void {
-    this.unsubscribeDiscovery()
     this.codexDiscovery.dispose()
     this.codingPlanAdapter.dispose()
     this.listeners.clear()

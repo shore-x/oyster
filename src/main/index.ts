@@ -5,7 +5,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { discoveryChannels } from '../shared/channels'
 import type { DiscoveryStateView, SourceConversationCatalogView } from '../shared/discovery'
 import { AiBackendService } from './ai-backends/ai-backend-service'
-import { CodexAgentAdapter } from './ai-backends/codex-adapter'
+import { CodexAccountDiscovery } from './ai-backends/codex-adapter'
 import { KeychainCredentialStore } from './ai-backends/credential-store'
 import { createFixtureAiBackendService } from './ai-backends/fixture'
 import { registerAiBackendIpc } from './ai-backends/ipc'
@@ -109,7 +109,7 @@ function createBackendService(): AiBackendService {
   return new AiBackendService(
     new JsonAiBackendRepository(join(app.getPath('userData'), 'ai-connections.json')),
     credentials,
-    new CodexAgentAdapter(app.getPath('home')),
+    new CodexAccountDiscovery(app.getPath('home')),
     new OpenAiCompatibleAdapter(),
     new PiCodingPlanAdapter({
       credentials: new PiKeychainCredentialStore(credentials),
@@ -174,17 +174,17 @@ async function initializeFixtureKnowledge(store: FileKnowledgeStore): Promise<vo
     {
       path: 'oyster-processing.md',
       title: 'Oyster 知识加工链路',
-      content: 'Host 在统一 Repository 中创建 Knowledge Processing Task branch 与独立 linked worktree，让 [[Knowledge Maintenance Agent|知识维护 Agent]] 和 Reviewer 通过 PROGRESS.md 与 Host checkpoint 交替工作；固定的 [[Raw Evidence|原始证据]] 输入视图保存在该 Task 中，测试结果保持未合并。'
+      content: 'Knowledge Processing Task 在独立 Task 分支与 linked worktree 中运行，[[Knowledge Maintenance Agent|知识维护 Agent]] 与 Reviewer 通过 PROGRESS.md 协作；Reviewer 把批准的修改合并到 main 后 Task 才完成，知识库与工作台始终读取 main 中的正式内容。'
     },
     {
       path: 'knowledge-maintainer.md',
       title: 'Knowledge Maintenance Agent',
-      content: '从独立 Task worktree 读取 BRIEF.md、PROGRESS.md 与文件化 Canonical Activity，按需回溯[[Raw Evidence|原始证据]]并直接维护 Knowledge/Artifact 文件；Host 负责 checkpoint commit。'
+      content: '从独立 Task worktree 读取 BRIEF.md、PROGRESS.md 与文件化 Canonical Activity，按需回溯[[Raw Evidence|原始证据]]并直接维护 Knowledge/Artifact 文件；Maintainer 自行提交完整变化。'
     },
     {
       path: 'raw-evidence.md',
       title: 'Raw Evidence',
-      content: '外部 Source Conversation 的确定版本材料。Host 为一次 Knowledge Processing Task 生成固定的 Source Snapshot 文件视图与 Canonical Activity，供 [[Knowledge Maintenance Agent]] 用普通文件工具有界读取和精确回查。'
+      content: '外部 Source Conversation 在接受时读取到的稳定内容。Oyster 为一次 Knowledge Processing Task 固定 Source Snapshot 文件视图与 Canonical Activity，并用内容引用标识实际字节，供 [[Knowledge Maintenance Agent]] 用普通文件工具有界读取和精确回查。'
     },
     {
       path: 'skill-activation.md',
@@ -705,11 +705,15 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       page.querySelector('[data-testid="knowledge-statement-detail"] h2')?.textContent?.trim() !== 'Oyster 知识加工链路'
       && Date.now() < deadline
     ) await new Promise((resolve) => setTimeout(resolve, 25))
-    const link = page.querySelector('.knowledge-statement-link > a')
-    link?.dispatchEvent(new MouseEvent('mouseenter'))
+    const link = page.querySelector(
+      '[data-testid="knowledge-statement-detail"] [data-knowledge-title="Knowledge Maintenance Agent"]'
+    )
+    link?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
     deadline = Date.now() + 2_000
     while (
-      document.querySelector('.knowledge-statement-preview > span')?.textContent?.includes('正在读取')
+      (document.querySelector('.knowledge-statement-preview > strong')?.textContent?.trim() !== 'Knowledge Maintenance Agent'
+        || !document.querySelector('.knowledge-statement-preview > span')?.textContent?.trim()
+        || document.querySelector('.knowledge-statement-preview > span')?.textContent?.includes('正在读取'))
       && Date.now() < deadline
     ) await new Promise((resolve) => setTimeout(resolve, 25))
     const linkLabel = link?.textContent?.trim()
@@ -815,57 +819,9 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       forwardAvailable,
       titleAfterForward,
       searchPlaceholder: page.querySelector('[data-testid="knowledge-search"]')?.getAttribute('placeholder'),
-      clearButtonDisabled: page.querySelector('[data-testid="clear-knowledge"]')?.disabled,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
       bodyText: page.innerText
     }
-  })()`)
-  await window.webContents.executeJavaScript(`(async () => {
-    document.querySelector('[data-testid="page-knowledge"] [data-testid="clear-knowledge"]')?.click()
-    const deadline = Date.now() + 2_000
-    while (
-      !document.querySelector('[data-testid="page-knowledge"] [data-testid="clear-knowledge-dialog"]')
-      && Date.now() < deadline
-    ) {
-      await new Promise((resolve) => setTimeout(resolve, 25))
-    }
-  })()`)
-  await new Promise((resolve) => setTimeout(resolve, 80))
-  const clearKnowledgeImage = await window.webContents.capturePage()
-  await writeFile(join(dirname(capturePath), 'knowledge-clear-confirmation.png'), clearKnowledgeImage.toPNG())
-  const clearKnowledgeSemantics = await window.webContents.executeJavaScript(`(async () => {
-    const page = document.querySelector('[data-testid="page-knowledge"]')
-    const dialog = page.querySelector('[data-testid="clear-knowledge-dialog"]')
-    const initial = {
-      exists: Boolean(dialog),
-      role: dialog?.querySelector('[role="alertdialog"]')?.getAttribute('role'),
-      modal: dialog?.querySelector('[role="alertdialog"]')?.getAttribute('aria-modal'),
-      title: dialog?.querySelector('h2')?.textContent?.trim(),
-      description: dialog?.querySelector('p')?.textContent?.trim(),
-      actions: Array.from(dialog?.querySelectorAll('button') ?? []).map((button) => button.textContent?.trim())
-    }
-    page.querySelector('[data-testid="cancel-clear-knowledge"]')?.click()
-    await new Promise((resolve) => requestAnimationFrame(resolve))
-    const cancelled = !page.querySelector('[data-testid="clear-knowledge-dialog"]')
-    page.querySelector('[data-testid="clear-knowledge"]')?.click()
-    await new Promise((resolve) => requestAnimationFrame(resolve))
-    page.querySelector('[data-testid="confirm-clear-knowledge"]')?.click()
-    const deadline = Date.now() + 2_000
-    while (Date.now() < deadline) {
-      const result = page.querySelector('[data-testid="clear-knowledge-result"]')?.textContent?.trim()
-      const error = page.querySelector('.page-error')?.textContent?.trim()
-      if (result || error) return {
-        ...initial,
-        cancelled,
-        completed: Boolean(result),
-        result,
-        error,
-        statementCountAfterClear: page.querySelectorAll('.knowledge-browser__item').length,
-        closedAfterCompletion: !page.querySelector('[data-testid="clear-knowledge-dialog"]')
-      }
-      await new Promise((resolve) => setTimeout(resolve, 25))
-    }
-    return { ...initial, cancelled, completed: false, error: 'Timed out clearing knowledge' }
   })()`)
 
   window.setSize(1160, 780)
@@ -957,7 +913,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       if (completed || error) {
         if (error) return { completed, inProgressStateVisible, error }
         const overviewHasActivityExplorer = Boolean(page.querySelector('[data-testid="agent-invocation-view"]'))
-        const summaryStatementCount = page.querySelector('[data-testid="knowledge-task-result-statement-count"]')?.textContent?.trim()
+        const summaryChangedPathCount = page.querySelector('[data-testid="knowledge-task-result-changed-path-count"]')?.textContent?.trim()
         page.querySelector('[data-testid="open-knowledge-task-activity"]')?.click()
         await new Promise((resolve) => requestAnimationFrame(resolve))
         const activityExplorerExists = Boolean(page.querySelector('[data-testid="agent-invocation-view"]'))
@@ -995,34 +951,12 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
         page.querySelector('[data-testid="open-knowledge-task-result"]')?.click()
         await new Promise((resolve) => requestAnimationFrame(resolve))
         const resultDetailExists = Boolean(page.querySelector('[data-testid="knowledge-task-result-detail"]'))
-        const statementCount = page.querySelectorAll('.knowledge-browser--collaboration .knowledge-browser__item').length
         const gitResultText = page.querySelector('[data-testid="knowledge-task-git-result"]')?.textContent
         const changedPathCount = page.querySelector('.knowledge-task__candidates')?.querySelectorAll('code').length
-        const collaborationInitialTitle = page.querySelector('.knowledge-browser--collaboration [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
-        const collaborationLink = page.querySelector('.knowledge-browser--collaboration .knowledge-statement-link > a')
-        collaborationLink?.dispatchEvent(new MouseEvent('mouseenter'))
-        let linkDeadline = Date.now() + 2_000
-        while (
-          document.querySelector('.knowledge-statement-preview > span')?.textContent?.includes('正在读取')
-          && Date.now() < linkDeadline
-        ) await new Promise((resolve) => setTimeout(resolve, 25))
-        const collaborationLinkLabel = collaborationLink?.textContent?.trim()
-        const collaborationLinkPreview = document.querySelector('.knowledge-statement-preview')?.textContent?.trim()
-        collaborationLink?.click()
-        linkDeadline = Date.now() + 2_000
-        await new Promise((resolve) => requestAnimationFrame(resolve))
-        const collaborationLinkedTitle = page.querySelector('.knowledge-browser--collaboration [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
-        const collaborationBack = page.querySelector('.knowledge-browser--collaboration [data-testid="statement-nav-back"]')
-        const collaborationBackAvailable = collaborationBack?.disabled === false
-        collaborationBack?.click()
-        await new Promise((resolve) => requestAnimationFrame(resolve))
-        const collaborationTitleAfterBack = page.querySelector('.knowledge-browser--collaboration [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
-        const collaborationOverflowAfterBack = document.documentElement.scrollWidth > document.documentElement.clientWidth
-        const collaborationForward = page.querySelector('.knowledge-browser--collaboration [data-testid="statement-nav-forward"]')
-        const collaborationForwardAvailable = collaborationForward?.disabled === false
-        collaborationForward?.click()
-        await new Promise((resolve) => requestAnimationFrame(resolve))
-        const collaborationTitleAfterForward = page.querySelector('.knowledge-browser--collaboration [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
+        const resultContainsEmbeddedContentBrowser = Boolean(
+          page.querySelector('[data-testid="knowledge-task-result-detail"] [data-testid="knowledge-statement-browser"]')
+          || page.querySelector('[data-testid="knowledge-task-result-detail"] .folder-browser-page')
+        )
         const bodyText = page.innerText
         page.querySelector('[data-testid="knowledge-task-result-back"]')?.click()
         await new Promise((resolve) => requestAnimationFrame(resolve))
@@ -1033,7 +967,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
           liveUpdateKeepsScroll,
           liveToolPayloadVisible,
           overviewHasActivityExplorer,
-          summaryStatementCount,
+          summaryChangedPathCount,
           activityExplorerExists,
           invocationHeadingCount,
           invocationSelectorText,
@@ -1049,18 +983,9 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
           invocationInspectorCloseAvailable,
           invocationInspectorClosedFromModelCall,
           resultDetailExists,
-          statementCount,
           gitResultText,
           changedPathCount,
-          collaborationInitialTitle,
-          collaborationLinkLabel,
-          collaborationLinkPreview,
-          collaborationLinkedTitle,
-          collaborationBackAvailable,
-          collaborationTitleAfterBack,
-          collaborationOverflowAfterBack,
-          collaborationForwardAvailable,
-          collaborationTitleAfterForward,
+          resultContainsEmbeddedContentBrowser,
           returnedToOverview: Boolean(page.querySelector('[data-testid="knowledge-task-source-conversation-select"]')),
           bodyText
         }
@@ -1084,66 +1009,23 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
     const resultDetailExists = Boolean(page.querySelector('[data-testid="history-task-result-detail"]'))
-    const sharedBrowserExists = Boolean(page.querySelector('[data-testid="history-task-result-detail"] [data-testid="knowledge-statement-browser"]'))
+    const resultText = page.querySelector('[data-testid="history-task-result-detail"]')?.textContent
+    const changedPathCount = page.querySelector('[data-testid="history-task-result-detail"] .knowledge-task__candidates')?.querySelectorAll('code').length
+    const containsEmbeddedContentBrowser = Boolean(
+      page.querySelector('[data-testid="history-task-result-detail"] [data-testid="knowledge-statement-browser"]')
+      || page.querySelector('[data-testid="history-task-result-detail"] .folder-browser-page')
+    )
     const importButton = page.querySelector('[data-testid="import-history-task"]')
-    const historyLink = page.querySelector('[data-testid="history-task-result-detail"] .knowledge-statement-link > a')
-    const historyInitialTitle = page.querySelector('[data-testid="history-task-result-detail"] [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
-    historyLink?.click()
-    await new Promise((resolve) => requestAnimationFrame(resolve))
-    const historyLinkedTitle = page.querySelector('[data-testid="history-task-result-detail"] [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
-    page.querySelector('[data-testid="history-task-result-detail"] [data-testid="statement-nav-back"]')?.click()
-    await new Promise((resolve) => requestAnimationFrame(resolve))
-    const historyTitleAfterBack = page.querySelector('[data-testid="history-task-result-detail"] [data-testid="knowledge-statement-detail"] h2')?.textContent?.trim()
-    const overflowAfterStatementBack = document.documentElement.scrollWidth > document.documentElement.clientWidth
     page.querySelector('[data-testid="history-task-result-back"]')?.click()
-    await new Promise((resolve) => requestAnimationFrame(resolve))
-    page.querySelector('.processing-history-task [data-testid^="open-history-activity-"]')?.click()
-    deadline = Date.now() + 2_000
-    while (!page.querySelector('[data-testid="history-task-activity-detail"]') && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 25))
-    }
-    const activityDetailExists = Boolean(page.querySelector('[data-testid="history-task-activity-detail"]'))
-    const activityEventCount = page.querySelectorAll('[data-testid="history-task-activity-detail"] .agent-activity-message, [data-testid="history-task-activity-detail"] .agent-activity-tool, [data-testid="history-task-activity-detail"] .agent-activity-model-activity').length
-    const activityDetail = page.querySelector('[data-testid="history-task-activity-detail"]')
-    const activityScroll = page.querySelector('.processing-history__inspector-content')
-    const activityText = page.querySelector('[data-testid="history-task-activity-detail"]')?.textContent
-    const invocationSelectorText = page.querySelector('.agent-invocation-collection__selector')?.textContent
-    const tool = activityDetail?.querySelector('.agent-activity-tool')
-    const toolStyle = tool ? getComputedStyle(tool) : undefined
-    const toolIsUnboxed = Boolean(toolStyle
-      && (toolStyle.backgroundColor === 'rgba(0, 0, 0, 0)' || toolStyle.backgroundColor === 'transparent')
-      && Number.parseFloat(toolStyle.borderTopWidth) === 0)
-    const spacer = document.createElement('div')
-    spacer.style.height = '900px'
-    activityDetail?.prepend(spacer)
-    tool?.scrollIntoView({ block: 'center' })
-    await new Promise((resolve) => requestAnimationFrame(resolve))
-    const toolScrollBefore = activityScroll?.scrollTop ?? 0
-    tool?.querySelector('.agent-activity-tool__toggle')?.click()
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-    const toolScrollAfter = activityScroll?.scrollTop ?? 0
-    const toolPayloadVisible = tool?.querySelector('.agent-activity-tool__payloads')?.hidden === false
-    spacer.remove()
-    if (activityScroll) activityScroll.scrollTop = 0
-    page.querySelector('[data-testid="history-task-activity-back"]')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
     return {
       taskCount: page.querySelectorAll('.processing-history-task').length,
       listText,
       resultDetailExists,
-      sharedBrowserExists,
+      resultText,
+      changedPathCount,
+      containsEmbeddedContentBrowser,
       importButtonExists: Boolean(importButton),
-      historyInitialTitle,
-      historyLinkedTitle,
-      historyTitleAfterBack,
-      overflowAfterStatementBack,
-      activityDetailExists,
-      activityEventCount,
-      activityText,
-      invocationSelectorText,
-      toolExpansionKeepsScroll: toolScrollBefore > 0 && Math.abs(toolScrollAfter - toolScrollBefore) < 1,
-      toolPayloadVisible,
-      toolIsUnboxed,
       returnedToHistory: Boolean(page.querySelector('.processing-history__list'))
     }
   })()`)
@@ -1178,7 +1060,6 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       buttonCount: buttons.length,
       sharedButtonCount: page.querySelectorAll('.ui-button').length,
       tabButtonCount: page.querySelectorAll('button[role="tab"]').length,
-      taskStatementButtonCount: page.querySelectorAll('.knowledge-browser--collaboration .knowledge-browser__item').length,
       buttonIconCount: buttons.filter((button) => button.querySelector('.ui-button__icon .ui-icon')?.childElementCount > 0).length,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
       bodyText: page.innerText
@@ -1242,7 +1123,8 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   const generalSettingsDefaultSemantics = await window.webContents.executeJavaScript(`(() => ({
     selected: document.querySelector('[data-testid="settings-tab-general"]')?.getAttribute('aria-selected'),
     visible: !document.querySelector('[data-testid="page-general-settings"]')?.hidden,
-    language: document.querySelector('[data-testid="app-language-select"]')?.value
+    uiLanguage: document.querySelector('[data-testid="ui-language-select"]')?.value,
+    agentLanguage: document.querySelector('[data-testid="agent-language-select"]')?.value
   }))()`)
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="settings-tab-ai-backends"]')?.click()`)
   await new Promise((resolve) => setTimeout(resolve, 120))
@@ -1530,13 +1412,19 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     modelCallButton?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
     const modelCallInspector = page.querySelector('[data-testid="agent-model-call-inspector"]')
-    const inspectorPanel = page.querySelector('[data-testid="agent-invocation-inspector"]')
+    const inspectorPanel = modelCallInspector?.closest('.ui-inspector')
     const inspectorBounds = inspectorPanel?.getBoundingClientRect()
     const inspectorPosition = inspectorPanel ? getComputedStyle(inspectorPanel).position : undefined
+    const inspectorRole = inspectorPanel?.getAttribute('role')
+    const inspectorModal = inspectorPanel?.getAttribute('aria-modal')
+    const inspectorWithinViewport = Boolean(inspectorBounds
+      && inspectorBounds.top >= 52
+      && inspectorBounds.right <= window.innerWidth
+      && inspectorBounds.bottom <= window.innerHeight)
     const messageHeightStable = messages?.scrollHeight === messageScrollHeightBeforeInspector
     const modelCallContext = page.querySelector('[data-testid="agent-model-call-context"]')?.textContent
     const overflowWithInspector = document.documentElement.scrollWidth > document.documentElement.clientWidth
-    page.querySelector('.agent-invocation-view__close')?.click()
+    page.querySelector('.agent-invocation-view__inspector .ui-inspector__close')?.click()
     await new Promise((resolve) => requestAnimationFrame(resolve))
     const workspace = page.querySelector('.chat-workspace')?.getBoundingClientRect()
     const timelineStyle = page.querySelector('.agent-activity-timeline')
@@ -1560,12 +1448,9 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       modelCallInspector: Boolean(modelCallInspector),
       modelCallContext,
       inspectorPosition,
-      inspectorRole: inspectorPanel?.getAttribute('role'),
-      inspectorModal: inspectorPanel?.getAttribute('aria-modal'),
-      inspectorWithinViewport: Boolean(inspectorBounds
-        && inspectorBounds.top >= 52
-        && inspectorBounds.right <= window.innerWidth
-        && inspectorBounds.bottom <= window.innerHeight),
+      inspectorRole,
+      inspectorModal,
+      inspectorWithinViewport,
       messageHeightStable,
       timelineGap: timelineStyle?.rowGap,
       messageFontSize: assistantStyle?.fontSize,
@@ -1699,7 +1584,9 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="nav-ai-backends"]')?.click()`)
   await window.webContents.executeJavaScript(`document.querySelector('[data-testid="settings-tab-general"]')?.click()`)
   const languageSemantics = await window.webContents.executeJavaScript(`(async () => {
-    const select = document.querySelector('[data-testid="app-language-select"]')
+    const select = document.querySelector('[data-testid="ui-language-select"]')
+    const agentSelect = document.querySelector('[data-testid="agent-language-select"]')
+    const originalAgentLanguage = agentSelect.value
     select.value = 'en-US'
     select.dispatchEvent(new Event('change', { bubbles: true }))
     const deadline = Date.now() + 2_000
@@ -1710,7 +1597,9 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
     ) await new Promise((resolve) => setTimeout(resolve, 25))
     return {
       documentLanguage: document.documentElement.lang,
-      selectedLanguage: select.value,
+      selectedUiLanguage: select.value,
+      selectedAgentLanguage: agentSelect.value,
+      agentLanguageUnchanged: agentSelect.value === originalAgentLanguage,
       settingsTitle: document.querySelector('[data-testid="settings-page"] h1')?.textContent?.trim(),
       generalTab: document.querySelector('[data-testid="settings-tab-general"]')?.textContent?.trim(),
       generalPageVisible: !document.querySelector('[data-testid="page-general-settings"]')?.hidden,
@@ -1741,8 +1630,7 @@ async function captureFixture(window: BrowserWindow, capturePath: string): Promi
       },
       chat: chatSemantics,
       knowledge: {
-        browse: knowledgeBrowseSemantics,
-        clear: clearKnowledgeSemantics
+        browse: knowledgeBrowseSemantics
       },
       processing: {
         knowledgeTask: knowledgeTaskSemantics,
@@ -1839,7 +1727,7 @@ app.whenReady().then(async () => {
     aiBackendService,
     processingRepository,
     agentDebugStore,
-    () => appSettingsService.languageSetting
+    () => appSettingsService.agentLanguageSetting
   )
   chatConversationRepository = new PiChatConversationRepository(
     join(app.getPath('userData'), 'chat-conversations'),
@@ -1857,15 +1745,14 @@ app.whenReady().then(async () => {
       repository.rootPath,
       join(app.getPath('userData'), 'pi-agent'),
       agentDebugStore,
-      () => appSettingsService.languageSetting
+      () => appSettingsService.agentLanguageSetting
     )
   })
   knowledgeTaskService = new KnowledgeTaskService(
     service,
     knowledgeProcessingService,
     processingRepository,
-    knowledgeTaskHistory,
-    agentDebugStore
+    knowledgeTaskHistory
   )
   const artifactInitialization = artifactService.initialize().catch((error: unknown) => {
     console.error('Artifact 层初始化失败；可在工作台重试。', error)
@@ -1878,7 +1765,7 @@ app.whenReady().then(async () => {
     chatAgentService.initialize()
   ])
   if (fixtureMode()) await initializeFixtureKnowledge(knowledgeStore)
-  registerIpc(service, () => appSettingsService.languageSetting)
+  registerIpc(service, () => appSettingsService.uiLanguageSetting)
   registerSkillIpc(skillDiscoveryService, managedSkillService, () => mainWindow)
   registerArtifactIpc(artifactService, () => mainWindow)
   registerFolderBrowserIpc(folderBrowser, designDocumentsPath, () => mainWindow)

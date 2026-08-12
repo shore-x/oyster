@@ -3,17 +3,20 @@ export const APP_LANGUAGES = ['zh-CN', 'en-US'] as const
 export type AppLanguage = typeof APP_LANGUAGES[number]
 
 export const DEFAULT_APP_SETTINGS = {
-  language: 'zh-CN' as AppLanguage
+  uiLanguage: 'zh-CN' as AppLanguage,
+  agentLanguage: 'zh-CN' as AppLanguage
 }
 
 export interface AppSettingsView {
-  language: AppLanguage
+  uiLanguage: AppLanguage
+  agentLanguage: AppLanguage
   settingsPath: string
   error?: string
 }
 
 export interface SaveAppSettingsInput {
-  language: AppLanguage
+  uiLanguage: AppLanguage
+  agentLanguage: AppLanguage
 }
 
 export interface AppSettingsApi {

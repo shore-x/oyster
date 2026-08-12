@@ -1,6 +1,8 @@
+import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
 import type { AiBackendService } from '../ai-backends/ai-backend-service'
 import {
   AGENT_INVOCATION_DEBUG_FORMAT_VERSION,
@@ -22,6 +24,19 @@ import type {
 import { InMemoryKnowledgeProcessingConfigurationRepository } from './repository'
 import { KnowledgeProcessingService } from './knowledge-processing-service'
 import { KnowledgeTaskGitRepository } from './knowledge-task-git-repository'
+import {
+  ARTIFACT_GIT_BINARY_PATH,
+  createArtifactGitEnvironment
+} from '../artifacts/git-runtime'
+
+const execFileAsync = promisify(execFile)
+
+async function git(args: string[], cwd: string): Promise<void> {
+  await execFileAsync(ARTIFACT_GIT_BINARY_PATH, args, {
+    cwd,
+    env: createArtifactGitEnvironment()
+  })
+}
 
 function fixtureInvocation(
   input: KnowledgeMaintainerInvocationInput | KnowledgeReviewerInvocationInput,
@@ -62,7 +77,7 @@ function fixtureInvocation(
   return {
     formatVersion: AGENT_INVOCATION_FORMAT_VERSION,
     debugFormatVersion: AGENT_INVOCATION_DEBUG_FORMAT_VERSION,
-    id: input.invocationId,
+    invocationId: input.invocationId,
     agentId,
     status: 'completed',
     startedAt: timestamp,
@@ -154,6 +169,11 @@ export class FixtureKnowledgeMaintainerRuntime implements KnowledgeMaintainerRun
     input.onInvocationUpdate?.(inProgressFixtureInvocation(input, toolCalls, 3))
     await emitFixtureFrame()
     input.signal.throwIfAborted()
+    await git(['add', '-A'], input.worktree.worktreePath)
+    await git([
+      'commit', '--quiet', '--allow-empty', '--no-gpg-sign', '-m',
+      'fixture: maintain Knowledge Task'
+    ], input.worktree.worktreePath)
     const invocation = fixtureInvocation(input, 'knowledge_maintainer', toolCalls)
     this.debugStore.save(invocation)
     input.onInvocationUpdate?.(invocation)
@@ -173,6 +193,10 @@ export class FixtureKnowledgeReviewerRuntime implements KnowledgeReviewerRuntime
     input: KnowledgeReviewerInvocationInput
   ): Promise<RepositoryAgentInvocationResult> {
     input.signal.throwIfAborted()
+    await git(['rebase', input.worktree.targetBranch], input.worktree.worktreePath)
+    await git([
+      'merge', '--ff-only', input.worktree.branchName
+    ], input.worktree.repositoryPath)
     const invocation = fixtureInvocation(input, 'knowledge_reviewer', ['read', 'bash'], true)
     this.debugStore.save(invocation)
     input.onInvocationUpdate?.(invocation)

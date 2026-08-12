@@ -12,7 +12,7 @@ import {
   managedSkillOperationKey
 } from '../managed-skills-controller'
 import { createSkillDiscoveryController } from '../skill-discovery-controller'
-import { Button, Icon, Markdown } from '../ui'
+import { Button, Icon, Markdown, Tab, TabList } from '../ui'
 import './SkillsPage.css'
 import { appLanguage, uiText } from '../i18n'
 
@@ -134,7 +134,7 @@ function ManagedSkillListItem(props: {
       <strong>{props.skill.name || props.skill.artifactDirectoryName}</strong>
       <span class="skills-browser__item-badges">
         <span class={`managed-skill-status managed-skill-status--${props.skill.status}`}>
-          {props.skill.status === 'ready' ? uiText('可绑定', 'Ready') : uiText('输出无效', 'Invalid output')}
+          {props.skill.status === 'ready' ? uiText('可绑定', 'Ready') : uiText('声明无效', 'Invalid declaration')}
         </span>
         <Show when={props.skill.status === 'ready'}>
           <span>{boundCount()} {uiText('个目标已绑定', 'targets bound')}</span>
@@ -290,22 +290,18 @@ export function SkillsPage(props: SkillsPageProps = {}) {
         </div>
       </header>
 
-      <div class="skills-page__tabs" role="tablist" aria-label={uiText('Skill 视图', 'Skill views')}>
-        <button
-          type="button"
-          role="tab"
+      <TabList class="skills-page__tabs" variant="segmented" ariaLabel={uiText('Skill 视图', 'Skill views')}>
+        <Tab
           data-testid="skills-view-managed"
-          aria-selected={view() === 'managed'}
+          selected={view() === 'managed'}
           onClick={() => setView('managed')}
-        >{uiText('Oyster 管理', 'Managed by Oyster')}</button>
-        <button
-          type="button"
-          role="tab"
+        >{uiText('Oyster 管理', 'Managed by Oyster')}</Tab>
+        <Tab
           data-testid="skills-view-external"
-          aria-selected={view() === 'external'}
+          selected={view() === 'external'}
           onClick={() => setView('external')}
-        >{uiText('外部发现', 'External Discovery')}</button>
-      </div>
+        >{uiText('外部发现', 'External Discovery')}</Tab>
+      </TabList>
 
       <Show when={view() === 'managed'}>
         <div class="skills-page__view" data-testid="managed-skills-view">
@@ -347,7 +343,7 @@ export function SkillsPage(props: SkillsPageProps = {}) {
                   fallback={(
                     <div class="skills-browser__empty-list">
                       {managed.snapshot()
-                        ? uiText('还没有 Skill Artifact。在 Artifact 的 output/ 中提供 SKILL.md 后即可管理。', 'No Skill Artifacts yet. Add SKILL.md under an Artifact’s output/ to manage it here.')
+                        ? uiText('还没有 Skill Artifact。在 Artifact 根目录提供 SKILL.md 后即可管理。', 'No Skill Artifacts yet. Add SKILL.md at an Artifact root to manage it here.')
                         : managed.error()
                           ? uiText('无法读取 Skill Artifact。', 'Unable to read Skill Artifacts.')
                           : uiText('正在读取 Skill Artifact…', 'Reading Skill Artifacts…')}
@@ -368,7 +364,7 @@ export function SkillsPage(props: SkillsPageProps = {}) {
             <div class="skills-browser__detail" data-testid="managed-skill-detail-scroll">
               <Show
                 when={managed.selectedSkill()}
-                fallback={<div class="skills-browser__empty-detail">{uiText('选择一个 Skill Artifact 查看输出和 Agent 绑定。', 'Select a Skill Artifact to view its output and Agent bindings.')}</div>}
+                fallback={<div class="skills-browser__empty-detail">{uiText('选择一个 Skill Artifact 查看内容和 Agent 绑定。', 'Select a Skill Artifact to view its content and Agent bindings.')}</div>}
               >
                 {(skill) => (
                   <>
@@ -377,7 +373,7 @@ export function SkillsPage(props: SkillsPageProps = {}) {
                         <div class="skill-detail__badges">
                           <span class="skill-agent-badge">{uiText('Oyster 管理', 'Managed by Oyster')}</span>
                           <span class={`managed-skill-status managed-skill-status--${skill().status}`}>
-                            {skill().status === 'ready' ? uiText('可绑定', 'Ready') : uiText('输出无效', 'Invalid output')}
+                            {skill().status === 'ready' ? uiText('可绑定', 'Ready') : uiText('声明无效', 'Invalid declaration')}
                           </span>
                         </div>
                         <h2>{skill().name || skill().artifactDirectoryName}</h2>
@@ -394,7 +390,7 @@ export function SkillsPage(props: SkillsPageProps = {}) {
                         data-testid="open-managed-skill-folder"
                         disabled={managed.isBusy(`open:${skill().artifactDirectoryName}`)}
                         onClick={() => void managed.openFolder(skill().artifactDirectoryName)}
-                      >{managed.isBusy(`open:${skill().artifactDirectoryName}`) ? uiText('正在打开…', 'Opening…') : uiText('打开输出目录', 'Open Output Folder')}</Button>
+                      >{managed.isBusy(`open:${skill().artifactDirectoryName}`) ? uiText('正在打开…', 'Opening…') : uiText('打开 Artifact 文件夹', 'Open Artifact Folder')}</Button>
                     </header>
 
                     <dl class="skill-detail__metadata managed-skill-detail__metadata">
@@ -404,15 +400,15 @@ export function SkillsPage(props: SkillsPageProps = {}) {
                       </div>
                       <div>
                         <dt>{uiText('状态', 'Status')}</dt>
-                        <dd>{skill().status === 'ready' ? uiText('Skill 输出可用', 'Skill output available') : uiText('Skill 输出无效', 'Skill output invalid')}</dd>
+                        <dd>{skill().status === 'ready' ? uiText('Skill 声明有效', 'Valid Skill declaration') : uiText('Skill 声明无效', 'Invalid Skill declaration')}</dd>
                       </div>
                       <div class="skill-detail__metadata-wide">
                         <dt>{uiText('Artifact 位置', 'Artifact Location')}</dt>
                         <dd><code data-testid="managed-skill-artifact-path">{skill().artifactPath}</code></dd>
                       </div>
                       <div class="skill-detail__metadata-wide">
-                        <dt>{uiText('输出目录', 'Output Folder')}</dt>
-                        <dd><code data-testid="managed-skill-output-path">{skill().outputPath}</code></dd>
+                        <dt>{uiText('Artifact 目录', 'Artifact Folder')}</dt>
+                        <dd><code data-testid="managed-skill-path">{skill().skillPath}</code></dd>
                       </div>
                       <Show when={skill().documentPath}>
                         <div class="skill-detail__metadata-wide">
@@ -427,8 +423,8 @@ export function SkillsPage(props: SkillsPageProps = {}) {
                         <div>
                           <h3 id="managed-bindings-title">{uiText('Agent 注入', 'Agent Injection')}</h3>
                           <p>{uiText(
-                            '在目标 Agent 的用户级注册位置创建指向 output/ 的目录符号链接。',
-                            'Creates a directory symbolic link to output/ in the target Agent’s user-level registration location.'
+                            '在目标 Agent 的用户级注册位置创建指向 Artifact 根目录的符号链接。',
+                            'Creates a directory symbolic link to the Artifact root in the target Agent’s user-level registration location.'
                           )}</p>
                         </div>
                         <span>{uiText('用户级', 'User Level')}</span>
@@ -436,8 +432,8 @@ export function SkillsPage(props: SkillsPageProps = {}) {
                       <Show when={skill().status !== 'ready'}>
                         <div class="managed-bindings__unavailable">
                           {uiText(
-                            '当前输出不能创建新绑定；已有 Oyster 绑定仍可在下方解绑。',
-                            'The current output cannot create new bindings; existing Oyster bindings can still be removed below.'
+                            '当前 Skill 声明不能创建新绑定；已有 Oyster 绑定仍可在下方解绑。',
+                            'The current Skill declaration cannot create new bindings; existing Oyster bindings can still be removed below.'
                           )}
                         </div>
                       </Show>

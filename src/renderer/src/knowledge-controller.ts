@@ -14,8 +14,6 @@ export function createKnowledgeController() {
   const [neighborhood, setNeighborhood] = createSignal<KnowledgeNeighborhoodProjection>()
   const [loading, setLoading] = createSignal(false)
   const [loadingMore, setLoadingMore] = createSignal(false)
-  const [clearing, setClearing] = createSignal(false)
-  const [clearResult, setClearResult] = createSignal<{ deletedStatementCount: number }>()
   const [error, setError] = createSignal<string>()
   let browseGeneration = 0
   let readGeneration = 0
@@ -76,23 +74,6 @@ export function createKnowledgeController() {
     }
   }
 
-  async function clear(): Promise<boolean> {
-    try {
-      setClearing(true)
-      setError(undefined)
-      const cleared = await window.oyster.knowledge.clear()
-      setClearResult({ deletedStatementCount: cleared.deletedStatementCount })
-      setResult(EMPTY_RESULT)
-      await select(undefined)
-      return true
-    } catch (cause) {
-      setError(errorMessage(cause))
-      return false
-    } finally {
-      setClearing(false)
-    }
-  }
-
   return {
     result,
     selectedTitle,
@@ -100,11 +81,8 @@ export function createKnowledgeController() {
     neighborhood,
     loading,
     loadingMore,
-    clearing,
-    clearResult,
     error,
     browse,
-    select,
-    clear
+    select
   }
 }

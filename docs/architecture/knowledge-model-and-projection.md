@@ -1,72 +1,57 @@
-# Knowledge、Artifact、Task 与 Projection
+# Observation、Knowledge 与 Artifact
 
-> 状态：当前架构
->
-> 日期：2026-08-11
->
-> 术语遵循：[Oyster 术语与执行模型](terminology.md)
+## 为什么要区分三种信息
 
-## 1. 四个边界
+Agent 活动、形成的理解和用户真正要维护的产物具有不同的修改语义：Observation 需要保真，Knowledge 需要能够修订，Artifact 需要延续用户已经接纳的状态。把三者都当成聊天、向量节点或可重建文档，会丢失出处、覆盖用户编辑，并把运行噪声固化为长期事实。
 
-系统区分四类事实：
+因此 Oyster 保留三种信息形态，而不是为每种形态建设隔离的系统：
 
-1. 观察层表达外部 Agent 实际发生了什么；
-2. Knowledge 表达当前可复用的理解；
-3. Artifact 表达围绕持久 Attention 维护的实际产物；
-4. Knowledge Processing Task 表达一次结构化知识加工尝试及其协作过程。
+```mermaid
+flowchart LR
+  O["Observation\n发生了什么"] --> T["Task\n加工过程"]
+  K["Knowledge\n当前理解"] --> T
+  T --> K
+  T --> A["Artifact\n持续维护的产物"]
+  K -.->|按需使用| A
+```
 
-外部原文归来源 Harness 所有。Discovery 用 Source Conversation 标识一条逻辑对话；用户选定并接受其精确版本后形成 Source Snapshot。Host 把该 Snapshot 物化成 Task-local 固定输入。Knowledge、Artifact 与 Task 分别位于统一 Oyster Repository 的 `knowledge/`、`artifacts/` 和 `tasks/`，但 Task 不拥有或复制全局 Knowledge 与 Artifact。
+Task 是改变信息的过程，不是第四种信息形态。搜索结果、局部图和工作台是由正式内容形成的界面，不建立平行真相。
 
-## 2. Knowledge
+## Observation
 
-`knowledge/**/*.md` 中一个文件保存一条 Knowledge Statement：
+Observation 可以来自外部 Agent Conversation 或人类指令。人类指令已经确定为可选输入形态，但当前 Knowledge Processing 的结构化选择入口仍只支持 Conversation。发现阶段只保存轻量 catalog，不主动复制全部正文；用户选择一份 Conversation 后，Source Adapter 按稳定身份读取当时的当前内容，并以内容引用固定本次实际使用的版本。Task 可以将阅读所需的活动页、原始证据页和附件写入自己的 revision，使本次加工可审计。
 
-- 第一个 H1 是 canonical title，剩余 Markdown 是自足正文；
-- canonical title 在一个 revision 中唯一；
-- `[[canonical title]]` 或 `[[canonical title|display text]]` 表达关系；
-- 文件路径是 locator，不是 Statement 身份。
+外部文件可能移动、变化或消失。系统必须明确暴露来源失效，不能静默替换为相似记录。Catalog 元数据不是用户选择的内容版本；接受时读取到的稳定字节才通过内容引用获得不可变身份。过去使用的 Task 材料是当时加工的记录，但不会自动升级为新的外部来源。
 
-Knowledge 浏览器直接扫描这一文件层。全文搜索、邻域图和引用关系是可重建 Projection，不是第二份权威 Knowledge Store。
+领域设计只关心“实际读取了哪份内容”。准确的读取、变化检测和重新定位算法属于 Adapter 实现，不再创造与内容版本平行的领域身份。
 
-## 3. Artifact
+## Knowledge
 
-`artifacts/<artifact>/` 保存一个 Artifact。其根 `AGENTS.md` 表达持久 Attention，其他文件结构任意。Artifact 内容不会仅因存在而自动成为 Knowledge；一次现实修改可以在同一个 commit 中同时更新两层。
+每个 Statement 是一份以自然语言为主的 Markdown，第一项 H1 作为当前 canonical title，wikilink 表达对其他 Statement 的显式引用。这个最小格式便于用户和 Agent 用普通文件工具维护，也让搜索、反向引用和局部图都能从正文重建。
 
-根 `AGENTS.md` 是当前 Artifact 说明，也是本地维护契约的表达载体。除持久 Attention 外，它以自然语言说明维护目标、证据边界、质量义务和完成条件，不规定固定 Agent 名称、数量、调用次数或编排拓扑。
+当前名字表达内容身份，而不是隐藏的稳定 ID。这个选择降低了早期模型复杂度，但意味着重命名与引用迁移仍需后续治理。
 
-工作台是 Artifact 文件层面向用户的界面投影。用户通过工作台浏览 Artifact，并可以在未来通过该界面直接维护其内容；工作台不拥有 Artifact，不是新的持久化领域、Repository、Project 或 Workspace，也不改变 Artifact 的身份和生命周期。当前 Artifact 由通用 Chat Agent 根据用户在对话中表达的目标，通过普通文件工具初始化和维护；工作台不提供绕过 Agent 的手动创建表单。
+可核查出处是 Knowledge 的核心产品承诺。当前 Observation 和 Git revision 已保留部分审计基础，但 Statement 级 provenance 的表示、核查和 UI 尚未确定；文档不把目标写成已实现保证。
 
-Artifact Domain 不定义全局 Maintainer、Reviewer 或 Critic。结构化知识加工中的 Maintainer 和 Reviewer 是 Knowledge Agent Definition，只服务于具体 Task。Artifact 也可以由用户、通用 Chat Agent、临时协作 Agent 或未来其他机制修订。若未来需要可强制的独立审批、权限分离或 promotion，应由采用它的工作流定义。
+## Artifact
 
-## 4. Knowledge Processing Task
+Artifact 使用普通目录承载任意内容，并通过根 `AGENTS.md` 声明“这是一个需要由 Agent 持续维护的产物”。选择 `AGENTS.md` 是为了复用 Coding Agent 已有的上下文约定，而不是创造 Oyster 专用 manifest。它是维护该 Artifact 的说明；Agent Runtime 的 System Prompt 在信任优先级上更高。MVP 不为潜在冲突增加额外治理层。
 
-每个 Task 使用 `task/<taskId>` branch 和 Repository 外的 linked worktree。`tasks/<taskId>/` 是与领域变化一起被 Git 跟踪的 Task 记录：
+Artifact 的当前名字和目录就是身份。目录可以包含二进制、大文件或完整工程；工作台和通用文件浏览器因此只提供尽量通用的阅读入口，不要求统一 Schema。Skill 只是 Artifact 的一种实际用途，其消费约定由对应产品设计说明。
 
-- `BRIEF.md` 固定目标、Source Snapshot 引用、Repository 坐标、base revision 与完成边界；
-- `inputs/README.md` 解释输入视图，`inputs/activity/`、`inputs/evidence/` 与 `inputs/attachments/` 保存 Source Snapshot 的固定文件表示；
-- `PROGRESS.md` 保存 Maintainer / Reviewer 共用的检查清单和 handoff；
-- `pi-sessions/` 保存 Maintainer / Reviewer 的 Pi Session；
-- `task.json` 从 Task 创建起保存 `open | completed | abandoned` 生命周期、配置、结果或最近执行错误。
+## Repository 与协作
 
-Task 不拥有或复制 Knowledge/Artifact，但 Task 文件、Knowledge 与 Artifact 变化可以出现在同一 commit。Task start commit 固定输入，后续 commit 同时回溯 Agent Session、Review handoff 和候选内容。
+三种信息在一个标准 Git Repository 中协作。Knowledge 和 Artifact 是全局正式内容；Task 在独立 branch/worktree 中修改它们，并把输入与必要过程摘要放在同一历史中。Task 不保存完整 Knowledge Snapshot，任何时刻的内容都通过 Git revision 读取。
 
-一个 Task 包含一个或多个 Collaboration Round。每轮由一次 Maintainer Agent Invocation 形成候选 revision，随后由一次 Reviewer Agent Invocation 批准或要求修改。要求修改会开启下一轮，不会续写前一次 Invocation。所有轮次共享同一 Task worktree 和 branch，但每次 Invocation、Turn、Model Call 与 Tool Call 都有独立身份。
+当前架构有意采用高信任 Agent：普通文件、Shell 和 Git 足以表达维护行为，Agent Runtime 不增加内容路由器、文件类型白名单或复杂审批协议。文档型 Review 反馈适合原地写入，其他内容可以把反馈写入 `PROGRESS.md` 等统一位置。没有留下待处理反馈的 Reviewer 可以继续完成 Repository 集成；这是刻意采用的最小自然语言协议。
 
-Task 是持续业务工作，不是 Agent 执行的同义词。Agent Invocation 失败或取消后 Task 仍为 `open`；只有 Reviewer 完成契约时为 `completed`，用户明确放弃时才为 `abandoned`。Agent Preview 只执行一个知识 Agent，用于调试输入和活动，不进入 `task/*` 历史。
+当前存储与浏览采用同步文件扫描等简单实现。这是早期规模取舍；只有真实数据证明延迟、内存或写放大不可接受时，才引入索引、分页或增量存储。
 
-## 5. Source Snapshot 与文件化输入
+## 未确定方向
 
-Source Adapter 从外部 Harness 的原始位置读取所选 Source Conversation 的精确版本。Raw Evidence 保留上游格式；Canonical Activity 是其确定性、可定位、对话优先的语义投影：
+- Chat Agent 是否迁移到独立 worktree，并由 Agent 负责 merge/rebase；
+- Statement 重命名、合并、拆分与 wikilink 迁移；
+- provenance 的正式结构与核查体验；
+- Artifact 的跨设备身份、同步和更复杂的协作治理。
 
-- 用户与 Assistant 消息以及上下文压缩产生的语义摘要保留完整正文；
-- 工具活动只保留操作身份，并分别绑定调用和结果的 Raw locator；
-- 参数、结果、模型内部 reasoning、压缩 replacement history、协议包装和重复上下文快照不进入默认正文；
-- 图片等附件从工具结果中独立提取。
-
-Host 将完整 Canonical Activity 切分为有界 Markdown 文件，从固定 Raw Evidence 行模型生成带 locator 的文本页，并将附件还原为普通二进制文件，一并写入 Task 的 `inputs/`。上游 `sourceRef` 绑定外部原始字节与版本；Task start commit 固定物化文件自身。
-
-Maintainer 使用普通文件工具扫描 Activity、查看附件并按需回查 Evidence。原始 Task 定义可由 Task start revision 回溯，不再维护平行 manifest 或全量 hash。Reviewer 与 Maintainer 共用 Task worktree 和普通工具，但 System Prompt 明确排除 `inputs/`；这是可审计的行为与上下文边界，不是文件系统安全隔离。
-
-## 6. Projection
-
-Projection 从 Knowledge、Attention 和必要的当前状态形成可消费输出，或初始化、修订 Artifact。它是一项活动，不是新的权威存储域。任何缓存、搜索索引、邻域图或临时 Context Packet 都必须能够从正式层重建，不能与 Knowledge 或 Artifact 形成平行真相。
+这些方向不引入 Project 概念，也不改变 Observation、Knowledge 与 Artifact 的基本区别。

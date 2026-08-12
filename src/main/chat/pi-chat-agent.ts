@@ -58,7 +58,7 @@ export class PiChatAgent {
     private readonly repositoryPath: string,
     private readonly agentDir = join(repositoryPath, '.oyster', 'pi-agent'),
     private readonly debugStore: AgentDebugStore = new InMemoryAgentDebugStore(),
-    private readonly getLanguage: () => AppLanguage = () => DEFAULT_APP_SETTINGS.language
+    private readonly getLanguage: () => AppLanguage = () => DEFAULT_APP_SETTINGS.agentLanguage
   ) {}
 
   async invoke(input: PiChatAgentInvocationInput): Promise<void> {

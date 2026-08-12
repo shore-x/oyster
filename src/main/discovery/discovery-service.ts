@@ -20,7 +20,7 @@ import type {
   SourceRecordCandidate
 } from './model'
 import {
-  SourceConversationRevisionChangedError,
+  SourceConversationChangedError,
   SourceConversationUnavailableError,
   type SourceEvidenceReader,
   type SourceEvidenceReadResult
@@ -40,23 +40,20 @@ interface DiscoveryServiceOptions {
   recoverInterruptedScans?: boolean
 }
 
+interface RefreshedConversationRecord {
+  record?: SourceRecord
+}
+
 export interface ReadSourceSnapshotInput {
   sourceConversationId: string
-  sourceRevision: string
 }
 
 export interface SourceSnapshotEvidence {
   sourceConversationId: string
-  sourceRevision: string
   contentHash: string
   sizeBytes: number
   rawEvidence: RawEvidence
   canonicalActivity: CanonicalActivity
-}
-
-interface RefreshedConversationRecord {
-  record?: SourceRecord
-  grew: boolean
 }
 
 function now(): string {
@@ -65,12 +62,6 @@ function now(): string {
 
 function clone<T>(value: T): T {
   return structuredClone(value)
-}
-
-function fingerprint(sourceId: string, candidate: SourceRecordCandidate): string {
-  return createHash('sha256')
-    .update(`${sourceId}\0${candidate.externalId}\0${candidate.sizeBytes}\0${candidate.modifiedAt}`)
-    .digest('hex')
 }
 
 function sourceConversationId(sourceId: string, kind: SourceRecordKind, externalId: string): string {
@@ -101,8 +92,7 @@ function sourceConversationSummary(
     startedAt: record.startedAt,
     endedAt: record.endedAt,
     updatedAt: record.updatedAt,
-    sizeBytes: record.sizeBytes,
-    sourceRevision: record.fingerprint
+    sizeBytes: record.sizeBytes
   }
 }
 
@@ -111,7 +101,6 @@ function sourceRecord(
   candidate: SourceRecordCandidate,
   existing?: SourceRecord
 ): SourceRecord {
-  const nextFingerprint = fingerprint(sourceId, candidate)
   return {
     id: sourceConversationId(sourceId, candidate.kind, candidate.externalId),
     sourceId,
@@ -124,24 +113,25 @@ function sourceRecord(
     instructionScope: candidate.instructionScope,
     startedAt: candidate.startedAt,
     endedAt: candidate.endedAt
-      ?? (existing?.fingerprint === nextFingerprint ? existing.endedAt : undefined),
+      ?? (
+        existing?.sizeBytes === candidate.sizeBytes
+        && existing.modifiedAt === candidate.modifiedAt
+          ? existing.endedAt
+          : undefined
+      ),
     updatedAt: candidate.updatedAt,
     sizeBytes: candidate.sizeBytes,
-    modifiedAt: candidate.modifiedAt,
-    fingerprint: nextFingerprint
+    modifiedAt: candidate.modifiedAt
   }
 }
 
-function assertSourceSnapshotRef(input: { sourceConversationId: string; sourceRevision: string }): void {
+function assertSourceConversationSelection(input: { sourceConversationId: string }): void {
   if (
     typeof input.sourceConversationId !== 'string'
     || input.sourceConversationId.length === 0
     || input.sourceConversationId.length > 256
   ) {
     throw new Error('Invalid source conversation ID')
-  }
-  if (!/^[a-f0-9]{64}$/i.test(input.sourceRevision)) {
-    throw new Error('Invalid source revision')
   }
 }
 
@@ -265,13 +255,10 @@ export class DiscoveryService {
     input: ReadSourceSnapshotInput,
     maxBytes?: number
   ): Promise<SourceSnapshotEvidence> {
-    assertSourceSnapshotRef(input)
+    assertSourceConversationSelection(input)
     const record = this.state.records.find((candidate) => candidate.id === input.sourceConversationId)
     if (!record || record.kind !== 'conversation') {
       throw new SourceConversationUnavailableError()
-    }
-    if (record.fingerprint !== input.sourceRevision) {
-      throw new SourceConversationRevisionChangedError()
     }
     const source = this.state.sources.find((candidate) => candidate.id === record.sourceId)
     if (!source) throw new SourceConversationUnavailableError()
@@ -283,7 +270,7 @@ export class DiscoveryService {
     } catch (error) {
       if (
         !(error instanceof SourceConversationUnavailableError)
-        && !(error instanceof SourceConversationRevisionChangedError)
+        && !(error instanceof SourceConversationChangedError)
       ) {
         throw error
       }
@@ -291,20 +278,21 @@ export class DiscoveryService {
       const refreshed = await this.refreshConversationRecord(source, adapter, currentRecord)
       if (!refreshed.record) throw new SourceConversationUnavailableError()
       currentRecord = refreshed.record
-      if (currentRecord.fingerprint !== input.sourceRevision) {
-        throw new SourceConversationRevisionChangedError(
-          refreshed.grew
-            ? 'The source conversation has grown since it was selected; retry with the refreshed source revision'
-            : 'The source conversation revision has changed'
-        )
+      try {
+        evidence = await this.readRecordEvidence(source, adapter, currentRecord, maxBytes)
+      } catch (retryError) {
+        if (retryError instanceof SourceConversationChangedError) {
+          throw new SourceConversationChangedError(
+            'The source conversation kept changing while it was being read'
+          )
+        }
+        throw retryError
       }
-      evidence = await this.readRecordEvidence(source, adapter, currentRecord, maxBytes)
     }
     const content = new TextDecoder('utf-8', { fatal: true }).decode(evidence.content)
     const observation = adapter.createObservation(content)
     return {
       sourceConversationId: currentRecord.id,
-      sourceRevision: currentRecord.fingerprint,
       contentHash: evidence.contentHash,
       sizeBytes: evidence.sizeBytes,
       ...observation
@@ -343,13 +331,12 @@ export class DiscoveryService {
       this.updateSourceRecordSummary(source)
       await this.persistAndEmit()
       this.emitSourceConversationCatalog()
-      return { grew: false }
+      return {}
     }
     if (candidate.kind !== 'conversation' || candidate.externalId !== previous.externalId) {
       throw new Error(`History adapter returned the wrong conversation while refreshing ${previous.externalId}`)
     }
 
-    const previousSizeBytes = current?.sizeBytes ?? previous.sizeBytes
     const next = sourceRecord(source.id, candidate, current)
     if (next.id !== previous.id) {
       throw new Error(`History adapter changed the stable conversation identity for ${previous.externalId}`)
@@ -359,10 +346,7 @@ export class DiscoveryService {
     this.updateSourceRecordSummary(source)
     await this.persistAndEmit()
     this.emitSourceConversationCatalog()
-    return {
-      record: current ?? next,
-      grew: next.sizeBytes > previousSizeBytes
-    }
+    return { record: current ?? next }
   }
 
   private updateSourceRecordSummary(source: AgentSource): void {

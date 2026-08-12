@@ -158,7 +158,7 @@ function resourceLoader(
     settingsManager,
     systemPromptOverride: () => withAgentLanguage(
       options.systemPrompt,
-      options.language ?? DEFAULT_APP_SETTINGS.language
+      options.language ?? DEFAULT_APP_SETTINGS.agentLanguage
     ),
     ...(options.resourceMode === 'disabled' ? {
       noExtensions: true,

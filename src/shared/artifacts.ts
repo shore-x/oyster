@@ -1,7 +1,8 @@
-/** Skill-specific application view derived from an Artifact's root output entry. */
+/** Skill-specific application view declared by a standard root SKILL.md. */
 export interface ArtifactSkillSummary {
-  outputPath: string
-  documentPath?: string
+  /** The Artifact root, which is also the standard Agent Skill directory. */
+  skillPath: string
+  documentPath: string
   name?: string
   description?: string
   status: 'ready' | 'invalid'
@@ -17,7 +18,7 @@ export interface ArtifactSummary {
   attention: string
   /** Last modification time of the root AGENTS.md. */
   modifiedAt: string
-  /** Present when this Artifact carries the Skill application's output convention. */
+  /** Present when this Artifact declares Skill intent with a root SKILL.md. */
   skill?: ArtifactSkillSummary
 }
 

@@ -8,15 +8,14 @@ import { SettingsPage } from './components/SettingsPage'
 import { SkillsPage, type SkillsNavigationRequest } from './components/SkillsPage'
 import { SourceCard } from './components/SourceCard'
 import { Button, Icon } from './ui'
-import { loadAppLanguage, uiText } from './i18n'
+import { loadAppSettings, uiText } from './i18n'
 
 type PageId = 'chat' | 'knowledge' | 'artifacts' | 'sources' | 'skills' | 'settings' | 'knowledge-processing'
 
 export function App() {
-  onMount(() => { void loadAppLanguage() })
+  onMount(() => { void loadAppSettings() })
   const controller = createDiscoveryController()
   const [page, setPage] = createSignal<PageId>('chat')
-  const [knowledgeResetVersion, setKnowledgeResetVersion] = createSignal(0)
   const [skillsNavigation, setSkillsNavigation] = createSignal<SkillsNavigationRequest>()
   const [artifactBrowserTarget, setArtifactBrowserTarget] = createSignal<ArtifactBrowserTarget>()
   const [navigationError, setNavigationError] = createSignal<string>()
@@ -147,10 +146,7 @@ export function App() {
           <SkillsPage navigationRequest={skillsNavigation()} />
         </div>
         <div class="ui-page ui-page--workspace knowledge-page" data-testid="page-knowledge" hidden={page() !== 'knowledge'}>
-          <KnowledgeBrowserPage
-            active={page() === 'knowledge'}
-            onKnowledgeCleared={() => setKnowledgeResetVersion((version) => version + 1)}
-          />
+          <KnowledgeBrowserPage active={page() === 'knowledge'} />
         </div>
         <div class="ui-page ui-page--workspace" data-testid="page-artifacts" hidden={page() !== 'artifacts'}>
           <ArtifactsPage
@@ -174,7 +170,7 @@ export function App() {
           <ChatPage />
         </div>
         <div class="ui-page ui-page--flow" data-testid="page-knowledge-processing" hidden={page() !== 'knowledge-processing'}>
-          <KnowledgeProcessingPage knowledgeResetVersion={knowledgeResetVersion()} />
+          <KnowledgeProcessingPage />
         </div>
         <div class="ui-page ui-page--workspace" data-testid="page-settings" hidden={page() !== 'settings'}>
           <SettingsPage />

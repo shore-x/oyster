@@ -28,13 +28,13 @@ function missingPath(error: unknown): boolean {
 }
 
 function invalidSkill(
-  outputPath: string,
+  skillPath: string,
   issue: string,
-  documentPath?: string,
+  documentPath: string,
   fields: { name?: string; description?: string } = {}
 ): ArtifactSkillSummary {
   return {
-    outputPath,
+    skillPath,
     documentPath,
     name: fields.name,
     description: fields.description,
@@ -61,13 +61,13 @@ async function openRegularDocument(documentPath: string): Promise<{
     handle = await open(documentPath, READ_ONLY_NO_FOLLOW)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ELOOP') {
-      throw new Error('output/SKILL.md 必须是普通文件')
+      throw new Error('SKILL.md 必须是普通文件')
     }
     throw error
   }
   try {
     const details = await handle.stat()
-    if (!details.isFile()) throw new Error('output/SKILL.md 必须是普通文件')
+    if (!details.isFile()) throw new Error('SKILL.md 必须是普通文件')
     return { handle, details }
   } catch (error) {
     await handle.close()
@@ -77,40 +77,23 @@ async function openRegularDocument(documentPath: string): Promise<{
 
 /**
  * Derives the Skill application view from one already-valid Artifact directory.
- * A root output entry marks Skill intent even when its contents are invalid.
+ * A root SKILL.md is the standard filesystem declaration of Skill intent.
  */
 export async function inspectArtifactSkill(
   artifactPath: string
 ): Promise<ArtifactSkillSummary | undefined> {
-  const outputPath = resolve(artifactPath, 'output')
-  let outputDetails
-  try {
-    outputDetails = await lstat(outputPath)
-  } catch (error) {
-    if (missingPath(error)) return undefined
-    return invalidSkill(outputPath, `无法读取 output：${errorMessage(error)}`)
-  }
-
-  if (!outputDetails.isDirectory() || outputDetails.isSymbolicLink()) {
-    return invalidSkill(outputPath, 'output 必须是 Artifact 内的真实目录')
-  }
-
-  const documentPath = join(outputPath, 'SKILL.md')
+  const skillPath = resolve(artifactPath)
+  const documentPath = join(skillPath, 'SKILL.md')
   let documentDetails
   try {
     documentDetails = await lstat(documentPath)
   } catch (error) {
-    if (missingPath(error)) {
-      return invalidSkill(outputPath, 'output 中缺少普通文件 SKILL.md', documentPath)
-    }
-    return invalidSkill(
-      outputPath,
-      `无法读取 output/SKILL.md：${errorMessage(error)}`,
-      documentPath
-    )
+    if (missingPath(error)) return undefined
+    return invalidSkill(skillPath, `无法读取 SKILL.md：${errorMessage(error)}`, documentPath)
   }
+
   if (!documentDetails.isFile() || documentDetails.isSymbolicLink()) {
-    return invalidSkill(outputPath, 'output/SKILL.md 必须是普通文件', documentPath)
+    return invalidSkill(skillPath, 'SKILL.md 必须是普通文件', documentPath)
   }
 
   let opened
@@ -120,19 +103,19 @@ export async function inspectArtifactSkill(
     try {
       const metadata = validateSkillMetadata(fields)
       return {
-        outputPath,
+        skillPath,
         documentPath,
         name: metadata.name,
         description: metadata.description,
         status: 'ready'
       }
     } catch (error) {
-      return invalidSkill(outputPath, errorMessage(error), documentPath, fields)
+      return invalidSkill(skillPath, errorMessage(error), documentPath, fields)
     }
   } catch (error) {
     return invalidSkill(
-      outputPath,
-      `无法读取 output/SKILL.md：${errorMessage(error)}`,
+      skillPath,
+      `无法读取 SKILL.md：${errorMessage(error)}`,
       documentPath
     )
   } finally {
@@ -144,19 +127,7 @@ export async function inspectArtifactSkill(
 export async function readArtifactSkillDocument(
   artifactPath: string
 ): Promise<ArtifactSkillDocumentFile> {
-  const outputPath = resolve(artifactPath, 'output')
-  let outputDetails
-  try {
-    outputDetails = await lstat(outputPath)
-  } catch (error) {
-    if (missingPath(error)) throw new Error('Skill output 已不存在')
-    throw error
-  }
-  if (!outputDetails.isDirectory() || outputDetails.isSymbolicLink()) {
-    throw new Error('Skill output 不再是可读取的真实目录')
-  }
-
-  const documentPath = join(outputPath, 'SKILL.md')
+  const documentPath = join(resolve(artifactPath), 'SKILL.md')
   let opened
   try {
     opened = await openRegularDocument(documentPath)

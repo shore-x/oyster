@@ -48,7 +48,6 @@ export interface SourceRecord {
   updatedAt?: string
   sizeBytes: number
   modifiedAt: string
-  fingerprint: string
 }
 
 export interface DiscoveryScan {
@@ -83,13 +82,11 @@ export interface SourceConversationSummary {
   endedAt?: string
   updatedAt?: string
   sizeBytes: number
-  sourceRevision: string
 }
 
-/** Exact external conversation revision accepted as immutable Task input. */
-export interface SourceSnapshotRef {
+/** Stable selection of an externally owned conversation. */
+export interface SourceConversationSelection {
   sourceConversationId: string
-  sourceRevision: string
 }
 
 export type SourceConversationCatalogStatus = 'idle' | 'refreshing' | 'error'

@@ -36,12 +36,20 @@ export function parseAgentInvocationRecord(
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Agent Invocation 记录格式无效')
   }
-  const record = value as Partial<AgentInvocationRecord>
-  if (record.formatVersion !== AGENT_INVOCATION_FORMAT_VERSION) {
+  const record = value as Partial<AgentInvocationRecord> & {
+    formatVersion?: number
+    /** Version 3 compatibility. */
+    id?: unknown
+  }
+  if (record.formatVersion !== AGENT_INVOCATION_FORMAT_VERSION && record.formatVersion !== 3) {
     throw new Error(`Agent Invocation 格式版本无效：${String(record.formatVersion)}`)
   }
-  const id = requiredString(record.id, 'Agent Invocation ID', MAX_AGENT_INVOCATION_ID_LENGTH)
-  if (expectedInvocationId !== undefined && id !== expectedInvocationId) {
+  const invocationId = requiredString(
+    record.invocationId ?? record.id,
+    'Agent Invocation ID',
+    MAX_AGENT_INVOCATION_ID_LENGTH
+  )
+  if (expectedInvocationId !== undefined && invocationId !== expectedInvocationId) {
     throw new Error('Agent Invocation ID 与持久化索引不匹配')
   }
   requiredString(record.agentId, 'Agent ID', MAX_AGENT_ID_LENGTH)
@@ -51,7 +59,7 @@ export function parseAgentInvocationRecord(
       '父 Agent Invocation ID',
       MAX_AGENT_INVOCATION_ID_LENGTH
     )
-    if (parentInvocationId === id) throw new Error('Agent Invocation 不能以自身作为父 Invocation')
+    if (parentInvocationId === invocationId) throw new Error('Agent Invocation 不能以自身作为父 Invocation')
   }
   if (!record.status || !AGENT_INVOCATION_STATUSES.includes(record.status)) {
     throw new Error('Agent Invocation 状态无效')
@@ -64,7 +72,7 @@ export function parseAgentInvocationRecord(
     ['Tool Call', record.toolCallCount]
   ] as const) {
     if (!Number.isSafeInteger(count) || (count as number) < 0) {
-      throw new Error(`${label} 计数无效：${id}`)
+      throw new Error(`${label} 计数无效：${invocationId}`)
     }
   }
   if (record.session) {
@@ -75,19 +83,19 @@ export function parseAgentInvocationRecord(
   }
   if (record.status === 'in_progress') {
     if (record.completedAt !== undefined || record.durationMs !== undefined) {
-      throw new Error(`处于 in_progress 的 Agent Invocation 不能包含终态时间：${id}`)
+      throw new Error(`处于 in_progress 的 Agent Invocation 不能包含终态时间：${invocationId}`)
     }
   } else {
     requiredString(record.completedAt, 'Agent Invocation 完成时间', 128)
     if (typeof record.durationMs !== 'number'
       || !Number.isFinite(record.durationMs)
       || record.durationMs < 0) {
-      throw new Error(`Agent Invocation 耗时无效：${id}`)
+      throw new Error(`Agent Invocation 耗时无效：${invocationId}`)
     }
   }
   return structuredClone({
-    formatVersion: record.formatVersion,
-    id: record.id,
+    formatVersion: AGENT_INVOCATION_FORMAT_VERSION,
+    invocationId,
     agentId: record.agentId,
     ...(record.parentInvocationId ? { parentInvocationId: record.parentInvocationId } : {}),
     status: record.status,
@@ -105,7 +113,7 @@ export function parseAgentInvocationRecord(
 export function parseTerminalAgentInvocationRecord(value: unknown): AgentInvocationRecord {
   const record = parseAgentInvocationRecord(value)
   if (record.status === 'in_progress') {
-    throw new Error(`Agent Invocation 尚未终态化：${record.id}`)
+    throw new Error(`Agent Invocation 尚未终态化：${record.invocationId}`)
   }
   return record
 }
@@ -130,7 +138,7 @@ export function parseAgentInvocationDebugRecord(
   }
   if (invocation.toolCallCount !== debug.toolCalls.length
     || invocation.modelCallCount !== debug.modelCalls.length) {
-    throw new Error(`Agent Invocation Debug 计数不一致：${invocation.id}`)
+    throw new Error(`Agent Invocation Debug 计数不一致：${invocation.invocationId}`)
   }
   return structuredClone({
     ...invocation,

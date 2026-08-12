@@ -9,7 +9,7 @@ import {
   type KnowledgeMaintenanceResult,
   type KnowledgeProcessingStateView,
   type KnowledgeReviewResult,
-  type KnowledgeTaskRecord,
+  type KnowledgeTaskDefinition,
   type LiveAgentInvocationView,
   type SaveKnowledgeAgentDefaultInstructionsInput,
   type SaveKnowledgeAgentInput
@@ -58,7 +58,7 @@ export interface KnowledgeMaintenanceInvocationOptions {
   taskId?: string
   previousRepositoryRevision?: string
   invocation?: AgentInvocationContext
-  taskRecord?: KnowledgeTaskRecord
+  taskDefinition?: KnowledgeTaskDefinition
   onWorktreeCreated?: (worktree: KnowledgeTaskWorktree) => void
 }
 
@@ -206,8 +206,7 @@ function worktreeView(worktree: KnowledgeTaskWorktree) {
     inputPath: worktree.inputPath,
     branchName: worktree.branchName,
     targetBranch: worktree.targetBranch,
-    baseRepositoryRevision: worktree.baseRepositoryRevision,
-    taskStartRepositoryRevision: worktree.taskStartRepositoryRevision
+    baseRepositoryRevision: worktree.baseRepositoryRevision
   }
 }
 
@@ -250,10 +249,10 @@ export class KnowledgeProcessingService {
     const connections = connectionViews(backend)
     return structuredClone({
       agents: KNOWLEDGE_AGENT_DEFINITIONS.map((definition) => {
-        const stored = this.state.agents.find((candidate) => candidate.agentId === definition.id)
-        const configuredDefault = defaultInstructions(definition.id, stored)
+        const stored = this.state.agents.find((candidate) => candidate.agentId === definition.agentId)
+        const configuredDefault = defaultInstructions(definition.agentId, stored)
         return {
-          id: definition.id,
+          agentId: definition.agentId,
           displayName: definition.displayName,
           description: definition.description,
           inputDescription: definition.inputDescription,
@@ -516,7 +515,7 @@ export class KnowledgeProcessingService {
             attention: normalizedAttention,
             plan: inputPlan,
             kind: invocation.origin === 'knowledge_task' ? 'task' as const : 'preview' as const,
-            taskRecord: options.taskRecord
+            taskDefinition: options.taskDefinition
           }
           const worktree = options.worktree
             ?? await this.tasks.createWorktree(worktreeInput)
@@ -524,7 +523,7 @@ export class KnowledgeProcessingService {
           this.beginWorktree(worktree.worktreePath)
           activeWorktreePath = worktree.worktreePath
           const expectedRepositoryRevision = options.previousRepositoryRevision
-            ?? worktree.taskStartRepositoryRevision
+            ?? worktree.baseRepositoryRevision
           const previousRepositoryRevision = await this.tasks.prepareAgentTurn(
             worktree,
             expectedRepositoryRevision
@@ -539,10 +538,9 @@ export class KnowledgeProcessingService {
             onInvocationUpdate: (record) => this.recordInvocation(invocation, record),
             signal: controller.signal
           })
-          const handoff = await this.tasks.checkpointMaintainer(
+          const handoff = await this.tasks.inspectAgentCommit(
             worktree,
-            previousRepositoryRevision,
-            result.invocation.id
+            previousRepositoryRevision
           )
           this.settleInvocation(invocation, result.invocation)
           return {
@@ -553,7 +551,7 @@ export class KnowledgeProcessingService {
             previousRepositoryRevision: handoff.previousRepositoryRevision,
             candidateRepositoryRevision: handoff.candidateRepositoryRevision,
             changedPaths: handoff.changedPaths,
-            agentInvocationId: result.invocation.id,
+            agentInvocationId: result.invocation.invocationId,
             durationMs: Date.now() - startedAt,
             completedAt: new Date().toISOString(),
             invocation: invocationSummary(
@@ -615,10 +613,9 @@ export class KnowledgeProcessingService {
             onInvocationUpdate: (record) => this.recordInvocation(invocation, record),
             signal: controller.signal
           })
-          const decision = await this.tasks.checkpointReview(
+          const decision = await this.tasks.inspectReview(
             worktree,
-            actualReviewedRepositoryRevision,
-            result.invocation.id
+            actualReviewedRepositoryRevision
           )
           this.settleInvocation(invocation, result.invocation)
           return {
@@ -628,7 +625,10 @@ export class KnowledgeProcessingService {
             candidateRepositoryRevision: decision.candidateRepositoryRevision,
             changedPaths: decision.kind === 'changes_requested' ? decision.changedPaths : [],
             markerPaths: decision.kind === 'changes_requested' ? decision.markerPaths : [],
-            agentInvocationId: result.invocation.id,
+            ...(decision.kind === 'approved'
+              ? { integratedRepositoryRevision: decision.integratedRepositoryRevision }
+              : {}),
+            agentInvocationId: result.invocation.invocationId,
             durationMs: Date.now() - startedAt,
             completedAt: new Date().toISOString(),
             invocation: invocationSummary(

@@ -98,28 +98,7 @@ export interface ModelBackendAdapter {
   ): Promise<ModelGenerationResult>
 }
 
-export interface AgentTaskRequest {
-  prompt: string
-  workspacePath: string
-  modelId?: string
-  reasoningEffort?: ReasoningEffort
-  signal?: AbortSignal
-}
-
-export interface AgentTaskResult {
-  text: string
-}
-
-export interface AgentAuthLaunch {
-  url: string
-}
-
-export interface AgentBackendAdapter {
-  readonly id: 'codex'
+export interface CodexAccountDiscovery {
   inspect(): Promise<AiConnection>
-  connect(): Promise<AgentAuthLaunch | undefined>
-  cancelConnect(): void
-  runTask(request: AgentTaskRequest): Promise<AgentTaskResult>
-  subscribe(listener: () => void): () => void
   dispose(): void
 }

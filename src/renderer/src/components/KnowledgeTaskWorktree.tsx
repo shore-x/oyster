@@ -1,9 +1,7 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
+import { Show, createEffect, createMemo, createSignal } from 'solid-js'
 import type { SourceConversationSummary } from '../../../shared/discovery'
 import type { LlmBinding } from '../../../shared/ai-backends'
-import type { KnowledgeStatement } from '../../../shared/knowledge'
 import type {
-  KnowledgeTaskWorktreeView,
   LiveAgentInvocationView,
   AiConnectionView,
   KnowledgeAgentDefinitionView
@@ -16,7 +14,7 @@ import {
   selectedLlmModel
 } from '../processing-configuration'
 import { processingAgentDisplayName } from '../processing-agent-presentation'
-import { Button, Icon } from '../ui'
+import { Button, Inspector } from '../ui'
 import {
   KnowledgeTaskActivityDetail,
   KnowledgeTaskResultDetail
@@ -25,26 +23,11 @@ import { SourceConversationMetadata } from './SourceConversationMetadata'
 import { SourceConversationPicker } from './SourceConversationPicker'
 import { appLanguage, uiText } from '../i18n'
 
-export type UiMilestoneState = 'pending' | 'in_progress' | 'completed' | 'failed'
-
-export interface UiMilestoneView {
-  id: string
-  label: string
-  detail: string
-  state: UiMilestoneState
-}
-
 export interface KnowledgeTaskResultView {
-  taskId: string
   completedAt?: string
   durationMs?: number
-  worktree: KnowledgeTaskWorktreeView
-  approvedRepositoryRevision: string
+  integratedRepositoryRevision: string
   changedPaths: string[]
-  artifactPaths: string[]
-  roundCount: number
-  milestones: UiMilestoneView[]
-  statements: KnowledgeStatement[]
 }
 
 export interface KnowledgeTaskWorktreeProps {
@@ -97,7 +80,7 @@ function agentSummary(
   const reasoningSupported = !binding?.reasoningEffort
     || Boolean(model?.reasoningEfforts.includes(binding.reasoningEffort))
   return {
-    name: agent.id === 'knowledge_maintainer'
+    name: agent.agentId === 'knowledge_maintainer'
       ? uiText('知识维护 Agent', 'Knowledge Maintainer')
       : uiText('知识审阅 Agent', 'Knowledge Reviewer'),
     detail: connection && model
@@ -153,22 +136,13 @@ export function KnowledgeTaskWorktree(props: KnowledgeTaskWorktreeProps) {
     if (detail() === 'result' && !props.result) setDetail(undefined)
   })
 
-  createEffect(() => {
-    if (!detail()) return
-    const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setDetail(undefined)
-    }
-    document.addEventListener('keydown', closeOnEscape)
-    onCleanup(() => document.removeEventListener('keydown', closeOnEscape))
-  })
-
   return (
     <div class="knowledge-task" data-testid="knowledge-task-worktree">
       <div class="knowledge-task__boundary" data-testid="git-collaboration-boundary">
         <span class="git-collaboration-badge">{uiText('Git 协作测试', 'Git Collaboration Test')}</span>
         <p>{uiText(
-          'Host 在统一 Repository 中创建 Knowledge Processing Task 与真实 Task branch；Maintainer 和 Reviewer 共用 PROGRESS.md，最终结果不会合并到目标分支。',
-          'The Host creates a Knowledge Processing Task and real Task branch in the unified Repository. Maintainer and Reviewer share PROGRESS.md, and the final result is not merged into the target branch.'
+          'Knowledge Processing Task 使用独立 Task 分支；Maintainer 与 Reviewer 通过 PROGRESS.md 协作，Reviewer 将批准的修改合并到 main 后 Task 才会完成。',
+          'A Knowledge Processing Task uses an independent Task branch. The Maintainer and Reviewer collaborate through PROGRESS.md, and the Task completes only after the Reviewer integrates approved changes into main.'
         )}</p>
       </div>
 
@@ -177,7 +151,7 @@ export function KnowledgeTaskWorktree(props: KnowledgeTaskWorktreeProps) {
             <div class="knowledge-task__section-heading">
               <div>
                 <h2>{uiText('Task 设置', 'Task Setup')}</h2>
-                <p>{uiText('选择 Source Snapshot 和关注点，然后启动 Knowledge Processing Task。', 'Select a Source Snapshot and focus, then start the Knowledge Processing Task.')}</p>
+                <p>{uiText('选择来源对话并补充关注内容，然后启动 Knowledge Processing Task。', 'Select a Source Conversation, add any focus, then start the Knowledge Processing Task.')}</p>
               </div>
             </div>
 
@@ -205,7 +179,7 @@ export function KnowledgeTaskWorktree(props: KnowledgeTaskWorktreeProps) {
             </Show>
 
             <label class="ai-field ai-field--wide">
-              <span>{uiText('Attention（可选）', 'Attention (Optional)')}</span>
+              <span>{uiText('补充关注内容（可选）', 'Additional Focus (Optional)')}</span>
               <input
                 data-testid="knowledge-task-attention-input"
                 value={props.attention}
@@ -290,26 +264,19 @@ export function KnowledgeTaskWorktree(props: KnowledgeTaskWorktreeProps) {
             <section class="knowledge-task__result-summary" data-testid="knowledge-task-result" aria-label={uiText('Git 协作测试结果概览', 'Git collaboration test result overview')}>
               <div class="knowledge-task__result-heading">
                 <div>
-                  <h2>{uiText('Reviewer 已批准', 'Approved by Reviewer')}</h2>
+                  <h2>{uiText('已合并到 main', 'Integrated into main')}</h2>
                   <p>{uiText(
-                    '结果保留在 Task branch 中，PROGRESS.md 与 handoff 已保留，目标分支未被修改。',
-                    'The result remains on the Task branch, PROGRESS.md and the handoff are preserved, and the target branch is unchanged.'
+                    '当前知识与产物请分别前往知识库与工作台浏览。',
+                    'Browse current Knowledge and Artifacts in Knowledge and Workbench respectively.'
                   )}</p>
                 </div>
                 <span>{result().completedAt ? `${uiText('完成于', 'Completed at')} ${formatTime(result().completedAt)}` : ''}</span>
               </div>
               <div class="knowledge-task__result-metrics">
-                <div><strong data-testid="knowledge-task-result-statement-count">{result().statements.length}</strong><span>Statements</span></div>
-                <div><strong>{result().roundCount}</strong><span>Collaboration Rounds</span></div>
-                <div><strong>{result().changedPaths.length}</strong><span>{uiText('变更文件', 'Changed Files')}</span></div>
+                <div><strong title={result().integratedRepositoryRevision}>{result().integratedRepositoryRevision.slice(0, 12)}</strong><span>{uiText('合并 revision', 'Integrated Revision')}</span></div>
+                <div><strong data-testid="knowledge-task-result-changed-path-count">{result().changedPaths.length}</strong><span>{uiText('变更文件', 'Changed Files')}</span></div>
                 <div><strong>{result().durationMs === undefined ? '—' : formatDuration(result().durationMs!)}</strong><span>{uiText('耗时', 'Duration')}</span></div>
               </div>
-              <Show when={result().statements.length}>
-                <div class="knowledge-task__result-titles">
-                  <For each={result().statements.slice(0, 5)}>{(statement) => <span>{statement.title}</span>}</For>
-                  <Show when={result().statements.length > 5}><span>+{result().statements.length - 5}</span></Show>
-                </div>
-              </Show>
               <div class="knowledge-task__result-actions">
                 <Button
                   variant="primary"
@@ -323,17 +290,16 @@ export function KnowledgeTaskWorktree(props: KnowledgeTaskWorktreeProps) {
         </Show>
 
       <Show when={detail()}>{(currentDetail) => (
-        <aside class="knowledge-task__inspector" role="complementary" aria-label={uiText('Knowledge Task 详情', 'Knowledge Task details')}>
-          <div class="processing-history__inspector-toolbar">
-            <strong>{currentDetail() === 'activity' ? uiText('Agent Invocation 详情', 'Agent Invocation Details') : uiText('Task 结果', 'Task Result')}</strong>
-            <button
-              type="button"
-              data-testid={currentDetail() === 'activity' ? 'knowledge-task-detail-back' : 'knowledge-task-result-back'}
-              aria-label={uiText('关闭 Knowledge Task 详情', 'Close Knowledge Task details')}
-              onClick={() => setDetail(undefined)}
-            ><Icon name="close" /><span>{uiText('关闭', 'Close')}</span></button>
-          </div>
-          <div class="knowledge-task__inspector-content">
+        <Inspector
+          class="knowledge-task__inspector"
+          size="wide"
+          ariaLabel={uiText('Knowledge Task 详情', 'Knowledge Task details')}
+          title={currentDetail() === 'activity' ? uiText('Agent Invocation 详情', 'Agent Invocation Details') : uiText('Task 结果', 'Task Result')}
+          closeLabel={uiText('关闭', 'Close')}
+          closeTestId={currentDetail() === 'activity' ? 'knowledge-task-detail-back' : 'knowledge-task-result-back'}
+          onClose={() => setDetail(undefined)}
+          contentClass="knowledge-task__inspector-content"
+        >
             <Show when={currentDetail() === 'activity'}>
               <KnowledgeTaskActivityDetail
                 invocations={visibleInvocations()}
@@ -347,8 +313,7 @@ export function KnowledgeTaskWorktree(props: KnowledgeTaskWorktreeProps) {
                 detailTestId="knowledge-task-result-detail"
               />}
             </Show>
-          </div>
-        </aside>
+        </Inspector>
       )}
       </Show>
     </div>

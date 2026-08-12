@@ -6,7 +6,6 @@ import {
   readFile,
   readdir,
   rename,
-  unlink,
   writeFile
 } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
@@ -38,8 +37,9 @@ import {
 
 const CHAT_METADATA_KIND = 'oyster-chat'
 const CHAT_BINDING_CUSTOM_ENTRY = 'oyster-chat-binding-v1'
-const CHAT_INVOCATION_CUSTOM_ENTRY = 'oyster-agent-invocation-v3'
-const CHAT_DESCRIPTOR_FORMAT_VERSION = 1
+const CHAT_INVOCATION_CUSTOM_ENTRY = 'oyster-agent-invocation-v4'
+const LEGACY_CHAT_INVOCATION_CUSTOM_ENTRY = 'oyster-agent-invocation-v3'
+const CHAT_DESCRIPTOR_FORMAT_VERSION = 2
 const CHAT_DESCRIPTOR_SUFFIX = '.conversation.json'
 const MAX_CHAT_TITLE_LENGTH = 512
 
@@ -52,7 +52,7 @@ interface LegacyChatHeader extends SessionHeader {
 
 interface ChatConversationDescriptor {
   formatVersion: typeof CHAT_DESCRIPTOR_FORMAT_VERSION
-  id: string
+  conversationId: string
   createdAt: string
   binding: ChatConversationBinding
   title?: string
@@ -102,7 +102,7 @@ function parseDescriptor(value: unknown): ChatConversationDescriptor {
     throw new Error('Chat Conversation 描述文件无效')
   }
   const record = value as Record<string, unknown>
-  if (record.formatVersion !== CHAT_DESCRIPTOR_FORMAT_VERSION) {
+  if (record.formatVersion !== CHAT_DESCRIPTOR_FORMAT_VERSION && record.formatVersion !== 1) {
     throw new Error(`Chat Conversation 描述文件版本无效：${String(record.formatVersion)}`)
   }
   const piSessionFile = record.piSessionFile
@@ -119,7 +119,7 @@ function parseDescriptor(value: unknown): ChatConversationDescriptor {
     : requiredString(record.title, '对话标题', MAX_CHAT_TITLE_LENGTH)
   return {
     formatVersion: CHAT_DESCRIPTOR_FORMAT_VERSION,
-    id: requiredString(record.id, 'Conversation ID', 512),
+    conversationId: requiredString(record.conversationId ?? record.id, 'Conversation ID', 512),
     createdAt: requiredString(record.createdAt, '创建时间', 128),
     binding: normalizeBinding(record.binding),
     ...(title ? { title } : {}),
@@ -137,7 +137,10 @@ function messageEntries(entries: readonly SessionEntry[]): ConversationEntry[] {
 
 function invocationEntries(entries: readonly SessionEntry[]): AgentInvocationRecord[] {
   return entries.flatMap((entry) => {
-    if (entry.type !== 'custom' || entry.customType !== CHAT_INVOCATION_CUSTOM_ENTRY) return []
+    if (entry.type !== 'custom' || ![
+      CHAT_INVOCATION_CUSTOM_ENTRY,
+      LEGACY_CHAT_INVOCATION_CUSTOM_ENTRY
+    ].includes(entry.customType)) return []
     try {
       return [parseAgentInvocationRecord(entry.data)]
     } catch {
@@ -184,7 +187,7 @@ function descriptorForLegacy(
   const title = manager.getSessionName()
   return {
     formatVersion: CHAT_DESCRIPTOR_FORMAT_VERSION,
-    id: header.id,
+    conversationId: header.id,
     createdAt: header.timestamp,
     binding,
     ...(title ? { title } : {}),
@@ -202,7 +205,7 @@ function sessionSummary(
   const entries = manager.getEntries()
   const messages = messageEntries(entries)
   return {
-    id: descriptor.id,
+    conversationId: descriptor.conversationId,
     ...(descriptor.title ?? manager.getSessionName()
       ? { title: descriptor.title ?? manager.getSessionName() }
       : {}),
@@ -236,7 +239,7 @@ export class PiChatConversationRepository implements ChatConversationRepository 
 
   private async writeDescriptor(descriptor: ChatConversationDescriptor): Promise<void> {
     await mkdir(this.rootPath, { recursive: true })
-    const target = descriptorPath(this.rootPath, descriptor.id)
+    const target = descriptorPath(this.rootPath, descriptor.conversationId)
     const temporary = `${target}.${randomUUID()}.tmp`
     await writeFile(temporary, `${JSON.stringify(descriptor, null, 2)}\n`, 'utf8')
     await rename(temporary, target)
@@ -245,10 +248,15 @@ export class PiChatConversationRepository implements ChatConversationRepository 
   private async readDescriptor(conversationId: string): Promise<ChatConversationDescriptor | undefined> {
     const normalizedId = requiredString(conversationId, 'Conversation ID', 512)
     try {
-      const descriptor = parseDescriptor(JSON.parse(
+      const raw = JSON.parse(
         await readFile(descriptorPath(this.rootPath, normalizedId), 'utf8')
-      ) as unknown)
-      if (descriptor.id !== normalizedId) throw new Error('Conversation ID 与描述文件名不一致')
+      ) as Record<string, unknown>
+      const descriptor = parseDescriptor(raw)
+      if (descriptor.conversationId !== normalizedId) throw new Error('Conversation ID 与描述文件名不一致')
+      if (
+        raw.formatVersion !== CHAT_DESCRIPTOR_FORMAT_VERSION
+        || raw.conversationId !== descriptor.conversationId
+      ) await this.writeDescriptor(descriptor)
       return descriptor
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
@@ -257,7 +265,7 @@ export class PiChatConversationRepository implements ChatConversationRepository 
   }
 
   private managerForDescriptor(descriptor: ChatConversationDescriptor): SessionManager {
-    const cached = this.openManagers.get(descriptor.id)
+    const cached = this.openManagers.get(descriptor.conversationId)
     if (cached) return cached
     const candidate = descriptor.piSessionFile
       ? resolve(this.rootPath, descriptor.piSessionFile)
@@ -265,12 +273,12 @@ export class PiChatConversationRepository implements ChatConversationRepository 
     const manager = candidate && candidate.startsWith(`${resolve(this.rootPath)}/`)
       && requireExistingPath(candidate)
       ? SessionManager.open(candidate, this.rootPath, this.rootPath)
-      : SessionManager.create(this.rootPath, this.rootPath, { id: descriptor.id })
+      : SessionManager.create(this.rootPath, this.rootPath, { id: descriptor.conversationId })
     if (!bindingFromPiSession(manager)) {
       manager.appendCustomEntry(CHAT_BINDING_CUSTOM_ENTRY, descriptor.binding)
       if (descriptor.title) manager.appendSessionInfo(descriptor.title)
     }
-    this.openManagers.set(descriptor.id, manager)
+    this.openManagers.set(descriptor.conversationId, manager)
     return manager
   }
 
@@ -286,7 +294,7 @@ export class PiChatConversationRepository implements ChatConversationRepository 
       const binding = bindingFromPiSession(manager)
       if (!binding) return undefined
       this.openManagers.set(conversationId, manager)
-      return { id: conversationId, piSessionManager: manager, binding }
+      return { conversationId, piSessionManager: manager, binding }
     }
     return undefined
   }
@@ -302,7 +310,7 @@ export class PiChatConversationRepository implements ChatConversationRepository 
     if (normalizedTitle) manager.appendSessionInfo(normalizedTitle)
     const descriptor: ChatConversationDescriptor = {
       formatVersion: CHAT_DESCRIPTOR_FORMAT_VERSION,
-      id,
+      conversationId: id,
       createdAt: new Date().toISOString(),
       binding: normalizedBinding,
       ...(normalizedTitle ? { title: normalizedTitle } : {}),
@@ -312,7 +320,7 @@ export class PiChatConversationRepository implements ChatConversationRepository 
     }
     await this.writeDescriptor(descriptor)
     this.openManagers.set(id, manager)
-    return { id, piSessionManager: manager, binding: normalizedBinding }
+    return { conversationId: id, piSessionManager: manager, binding: normalizedBinding }
   }
 
   async open(conversationId: string): Promise<PersistedChatConversation> {
@@ -320,7 +328,7 @@ export class PiChatConversationRepository implements ChatConversationRepository 
     const descriptor = await this.readDescriptor(normalizedId)
     if (descriptor) {
       return {
-        id: descriptor.id,
+        conversationId: descriptor.conversationId,
         piSessionManager: this.managerForDescriptor(descriptor),
         binding: descriptor.binding
       }
@@ -336,16 +344,22 @@ export class PiChatConversationRepository implements ChatConversationRepository 
       .filter((entry) => entry.isFile() && entry.name.endsWith(CHAT_DESCRIPTOR_SUFFIX))
     const descriptors: ChatConversationDescriptor[] = []
     for (const file of files) {
-      descriptors.push(parseDescriptor(JSON.parse(
+      const raw = JSON.parse(
         await readFile(join(this.rootPath, file.name), 'utf8')
-      ) as unknown))
+      ) as Record<string, unknown>
+      const descriptor = parseDescriptor(raw)
+      descriptors.push(descriptor)
+      if (
+        raw.formatVersion !== CHAT_DESCRIPTOR_FORMAT_VERSION
+        || raw.conversationId !== descriptor.conversationId
+      ) await this.writeDescriptor(descriptor)
     }
     return descriptors
   }
 
   async list(): Promise<ChatConversationSummary[]> {
     const descriptors = await this.descriptors()
-    const byId = new Map(descriptors.map((descriptor) => [descriptor.id, descriptor]))
+    const byId = new Map(descriptors.map((descriptor) => [descriptor.conversationId, descriptor]))
     for (const file of await jsonlFiles(this.rootPath)) {
       let manager: SessionManager
       try {
@@ -357,8 +371,8 @@ export class PiChatConversationRepository implements ChatConversationRepository 
       const binding = bindingFromPiSession(manager)
       if (!binding) continue
       const descriptor = descriptorForLegacy(this.rootPath, manager, binding)
-      byId.set(descriptor.id, descriptor)
-      this.openManagers.set(descriptor.id, manager)
+      byId.set(descriptor.conversationId, descriptor)
+      this.openManagers.set(descriptor.conversationId, manager)
     }
     return [...byId.values()].map((descriptor) => sessionSummary(
       descriptor,
@@ -372,7 +386,7 @@ export class PiChatConversationRepository implements ChatConversationRepository 
     hasActiveInvocation = false
   ): Promise<ChatConversationDetail> {
     const opened = await this.open(conversationId)
-    const descriptor = await this.readDescriptor(opened.id)
+    const descriptor = await this.readDescriptor(opened.conversationId)
       ?? descriptorForLegacy(this.rootPath, opened.piSessionManager, opened.binding)
     const entries = opened.piSessionManager.getEntries()
     const invocations = invocationEntries(entries)
@@ -392,7 +406,7 @@ export class PiChatConversationRepository implements ChatConversationRepository 
     if (opened.piSessionManager.getSessionName() !== normalizedTitle) {
       opened.piSessionManager.appendSessionInfo(normalizedTitle)
     }
-    const descriptor = await this.readDescriptor(opened.id)
+    const descriptor = await this.readDescriptor(opened.conversationId)
       ?? descriptorForLegacy(this.rootPath, opened.piSessionManager, opened.binding)
     await this.writeDescriptor({ ...descriptor, title: normalizedTitle })
   }
@@ -407,25 +421,13 @@ export class PiChatConversationRepository implements ChatConversationRepository 
       CHAT_INVOCATION_CUSTOM_ENTRY,
       parseTerminalAgentInvocationRecord(debugRecord)
     )
-    const descriptor = await this.readDescriptor(opened.id)
+    const descriptor = await this.readDescriptor(opened.conversationId)
       ?? descriptorForLegacy(this.rootPath, opened.piSessionManager, opened.binding)
     const sessionFile = opened.piSessionManager.getSessionFile()
     await this.writeDescriptor({
       ...descriptor,
       ...(sessionFile ? { piSessionFile: relative(this.rootPath, sessionFile) } : {})
     })
-  }
-
-  async delete(conversationId: string): Promise<void> {
-    const opened = await this.open(conversationId)
-    const sessionFile = opened.piSessionManager.getSessionFile()
-    if (sessionFile) await unlink(sessionFile).catch((error: unknown) => {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    })
-    await unlink(descriptorPath(this.rootPath, opened.id)).catch((error: unknown) => {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    })
-    this.openManagers.delete(opened.id)
   }
 
   async dispose(): Promise<void> {

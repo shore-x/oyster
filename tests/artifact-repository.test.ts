@@ -261,7 +261,7 @@ describe('ArtifactService', () => {
     ])
   })
 
-  it('derives a ready Skill view from a real output directory and valid SKILL.md', async () => {
+  it('derives a ready Skill view from a valid root SKILL.md', async () => {
     const repositoryPath = await temporaryRepositoryPath()
     const repository = new ArtifactService(repositoryPath)
     await repository.initialize()
@@ -269,7 +269,7 @@ describe('ArtifactService', () => {
     await mkdir(join(artifactPath, 'output'), { recursive: true })
     await Promise.all([
       writeFile(join(artifactPath, 'AGENTS.md'), '# Attention\n\nMaintain review guidance.\n'),
-      writeFile(join(artifactPath, 'output', 'SKILL.md'), [
+      writeFile(join(artifactPath, 'SKILL.md'), [
         '---',
         'name: review',
         'description: Review changes before delivery.',
@@ -285,8 +285,8 @@ describe('ArtifactService', () => {
     expect(snapshot.artifacts).toEqual([expect.objectContaining({
       directoryName: 'review-skill',
       skill: {
-        outputPath: join(artifactPath, 'output'),
-        documentPath: join(artifactPath, 'output', 'SKILL.md'),
+        skillPath: artifactPath,
+        documentPath: join(artifactPath, 'SKILL.md'),
         name: 'review',
         description: 'Review changes before delivery.',
         status: 'ready'
@@ -294,40 +294,36 @@ describe('ArtifactService', () => {
     })])
   })
 
-  it('keeps malformed output entries visible as invalid Skill views', async () => {
+  it('ignores ordinary output directories and keeps malformed root SKILL.md visible', async () => {
     const repositoryPath = await temporaryRepositoryPath()
     const repository = new ArtifactService(repositoryPath)
     await repository.initialize()
-    const missingDocument = join(repository.artifactsPath, 'missing-document')
-    const linkedOutput = join(repository.artifactsPath, 'linked-output')
-    const outputTarget = join(repository.artifactsPath, '.output-target')
+    const ordinaryOutput = join(repository.artifactsPath, 'ordinary-output')
+    const linkedDocument = join(repository.artifactsPath, 'linked-document')
+    const documentTarget = join(repository.artifactsPath, '.skill-target')
     await Promise.all([
-      mkdir(join(missingDocument, 'output'), { recursive: true }),
-      mkdir(linkedOutput),
-      mkdir(outputTarget)
+      mkdir(join(ordinaryOutput, 'output'), { recursive: true }),
+      mkdir(linkedDocument),
+      writeFile(documentTarget, '---\nname: linked\ndescription: Linked.\n---\n')
     ])
     await Promise.all([
-      writeFile(join(missingDocument, 'AGENTS.md'), '# Missing document\n'),
-      writeFile(join(linkedOutput, 'AGENTS.md'), '# Linked output\n')
+      writeFile(join(ordinaryOutput, 'AGENTS.md'), '# Ordinary output\n'),
+      writeFile(join(linkedDocument, 'AGENTS.md'), '# Linked document\n')
     ])
-    await symlink(outputTarget, join(linkedOutput, 'output'), 'dir')
+    await symlink(documentTarget, join(linkedDocument, 'SKILL.md'), 'file')
 
     const snapshot = await repository.refresh()
 
     expect(snapshot.artifacts).toEqual([
       expect.objectContaining({
-        directoryName: 'linked-output',
+        directoryName: 'linked-document',
         skill: expect.objectContaining({
           status: 'invalid',
-          issue: expect.stringContaining('真实目录')
+          issue: expect.stringContaining('普通文件')
         })
       }),
       expect.objectContaining({
-        directoryName: 'missing-document',
-        skill: expect.objectContaining({
-          status: 'invalid',
-          issue: expect.stringContaining('缺少普通文件 SKILL.md')
-        })
+        directoryName: 'ordinary-output'
       })
     ])
   })

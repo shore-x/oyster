@@ -1,12 +1,12 @@
 # 主流 Coding Agent 的 Skill 发现与格式调研
 
-> 状态：生态调研，不是实现规格或长期兼容性契约
+> 历史研究：这是截至调研日期的生态证据，不是当前实现规格或长期兼容性契约。
 >
 > 日期：2026-08-01
 >
 > 范围：调研主流 Coding Agent 如何发现用户级、项目级及其他来源的 Skill，以及它们对 Skill 入口、元数据和附带文件的要求。本文不设计迁移、注入、绑定或执行机制。
 >
-> 相关原则：[知识加工、Projection 与 Artifact](../architecture/knowledge-model-and-projection.md)、[Artifact Repository MVP](../product/artifact-repository-mvp.md)
+> 相关原则：[Observation、Knowledge 与 Artifact](../architecture/knowledge-model-and-projection.md)、[Artifact 与工作台](../product/artifact-repository-mvp.md)
 >
 > 后续设计：[Skill Symlink 注入 MVP](../product/skill-symlink-injection-mvp.md)
 
@@ -141,7 +141,7 @@ Skill 中存在脚本、二进制、依赖声明或动态 shell 内容，只说�
 
 因此，外部格式和未知扩展应原样保留；发现或兼容性检查可以给出目标 Agent 专属诊断，但不得自动删除文件、改写字段或阻止它成为 Oyster Artifact。这不限制用户或维护 Agent 在明确的 Artifact 编辑任务中修改 Skill。
 
-当前 Artifact Repository 统一要求的根 `AGENTS.md` 属于 Oyster 的载体与 Attention 契约，不替代外部 Agent 使用的 `SKILL.md`，也不是对目标 Agent Skill 格式作出的要求。后续绑定设计已确定把外部可消费内容放在 Artifact 根 `output/` 中，并只将该目录 symlink 到目标 Agent，因此根 `AGENTS.md` 不会成为外部 Skill 根文件；这项后续设计不改变本文的格式调研结论。
+当前 Artifact 根 `AGENTS.md` 说明如何维护产物，根 `SKILL.md` 则复用 Agent Skills 的消费约定。后续绑定直接将完整 Artifact 根 symlink 到目标 Agent 注册位置。这项后续设计不改变本文对外部生态的调研结论。
 
 ## 6. 使用情况的现有可观测线索
 
@@ -170,7 +170,7 @@ Skill 中存在脚本、二进制、依赖声明或动态 shell 内容，只说�
 5. **格式分析只提供兼容性信息。** Oyster 保存完整目录和未知内容；面向某个目标 Agent 时，再判断入口、frontmatter、专属扩展、依赖与目录位置是否兼容。一个 Agent 无法加载不构成拒绝 Artifact 的理由。
 6. **调用观察后于发现，但早于自动优化。** 只有先确认每个 Agent 能提供什么级别的调用证据，优化建议才有可解释基础。调用次数本身不足以支持“自进化”或自动改写 Skill。
 
-这意味着调研阶段最小的下一验证方向是“看清外部状态并在 Oyster 内维护完整 Skill Artifact”，而不是立即统一接管其他 Agent 的 Skill 注册。后续在保持发现与纳管分离的前提下，已以固定 `output/` 和目录 symlink 落地首个用户级 Skill Binding 切片，见[《Skill Symlink 注入 MVP》](../product/skill-symlink-injection-mvp.md)。
+这意味着调研阶段最小的下一验证方向是“看清外部状态并在 Oyster 内维护完整 Skill Artifact”，而不是立即统一接管其他 Agent 的 Skill 注册。后续在保持发现与纳管分离的前提下，采用根 `SKILL.md` 声明和目录 symlink 形成首个用户级 Binding 切片，见[《Oyster Skill 与文件系统绑定》](../product/skill-symlink-injection-mvp.md)。
 
 ## 8. 不确定性与后续验证
 

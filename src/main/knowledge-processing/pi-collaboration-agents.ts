@@ -76,7 +76,7 @@ async function invokeRepositoryAgent(
 ): Promise<RepositoryAgentInvocationResult> {
   const piSessionManager = SessionManager.create(
     input.worktree.worktreePath,
-    join(input.worktree.taskPath, 'pi-sessions'),
+    join(input.worktree.runtimePath, 'pi-sessions'),
     { id: input.invocationId }
   )
   const invocation = await createPiCodingAgentInvocation({
@@ -146,7 +146,7 @@ function reviewerTaskPrompt(_input: KnowledgeReviewerInvocationInput): string {
 export class PiKnowledgeMaintainerAgent implements KnowledgeMaintainerRuntime {
   constructor(
     private readonly debugStore: AgentDebugStore = new InMemoryAgentDebugStore(),
-    private readonly getLanguage: () => AppLanguage = () => DEFAULT_APP_SETTINGS.language
+    private readonly getLanguage: () => AppLanguage = () => DEFAULT_APP_SETTINGS.agentLanguage
   ) {}
 
   async invoke(input: KnowledgeMaintainerInvocationInput): Promise<RepositoryAgentInvocationResult> {
@@ -169,7 +169,7 @@ export class PiKnowledgeMaintainerAgent implements KnowledgeMaintainerRuntime {
 export class PiKnowledgeReviewerAgent implements KnowledgeReviewerRuntime {
   constructor(
     private readonly debugStore: AgentDebugStore = new InMemoryAgentDebugStore(),
-    private readonly getLanguage: () => AppLanguage = () => DEFAULT_APP_SETTINGS.language
+    private readonly getLanguage: () => AppLanguage = () => DEFAULT_APP_SETTINGS.agentLanguage
   ) {}
 
   async invoke(input: KnowledgeReviewerInvocationInput): Promise<RepositoryAgentInvocationResult> {

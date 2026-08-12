@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -22,19 +22,39 @@ describe('FileAgentDebugStore', () => {
     const debug = completedAgentInvocation('invocation:debug', ['read'], 2)
     store.save(debug)
 
-    expect(store.read(debug.id)).toEqual(debug)
+    expect(store.read(debug.invocationId)).toEqual(debug)
     expect(await readdir(root)).toHaveLength(1)
     expect(parseAgentInvocationRecord(debug)).toEqual({
-      formatVersion: 3,
-      id: debug.id,
+      formatVersion: 4,
+      invocationId: debug.invocationId,
       agentId: debug.agentId,
       status: 'completed',
       startedAt: debug.startedAt,
       completedAt: debug.completedAt,
       durationMs: 0,
-      debugRecordId: debug.id,
+      debugRecordId: debug.invocationId,
       modelCallCount: 2,
       toolCallCount: 1
     })
+  })
+
+  it('reads and rewrites the version 3 id field as invocationId', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'oyster-agent-debug-legacy-'))
+    temporaryPaths.push(root)
+    const current = completedAgentInvocation('invocation:legacy')
+    const legacy = {
+      ...current,
+      formatVersion: 3,
+      id: current.invocationId,
+      invocationId: undefined
+    }
+    const file = join(root, 'invocation%3Alegacy.json')
+    await writeFile(file, `${JSON.stringify(legacy)}\n`, 'utf8')
+
+    const store = new FileAgentDebugStore(root)
+    expect(store.read(current.invocationId)).toEqual(current)
+    const migrated = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
+    expect(migrated).toMatchObject({ formatVersion: 4, invocationId: current.invocationId })
+    expect(migrated).not.toHaveProperty('id')
   })
 })

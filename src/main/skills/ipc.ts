@@ -61,7 +61,7 @@ export function registerSkillIpc(
       assertTrustedSender(event)
       const folderPath = await managedService.getFolderPath(artifactDirectoryName)
       const message = await shell.openPath(folderPath)
-      if (message) throw new Error(`无法打开 Skill 输出文件夹：${message}`)
+      if (message) throw new Error(`无法打开 Skill Artifact 文件夹：${message}`)
     }
   )
   ipcMain.handle(

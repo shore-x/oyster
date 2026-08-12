@@ -1,14 +1,14 @@
 import { createHash } from 'node:crypto'
 import { lstat, open } from 'node:fs/promises'
 
-export interface SourceEvidenceRevisionInput {
+export interface SourceEvidenceMetadataInput {
   sourceConversationId: string
   absolutePath: string
   expectedSizeBytes: number
   expectedModifiedAt: string
 }
 
-export interface SourceEvidenceReadInput extends SourceEvidenceRevisionInput {
+export interface SourceEvidenceReadInput extends SourceEvidenceMetadataInput {
   /** Optional caller-owned bound for uses that intentionally require a bounded read. */
   maxBytes?: number
 }
@@ -37,10 +37,10 @@ export class SourceConversationUnreadableError extends Error {
   }
 }
 
-export class SourceConversationRevisionChangedError extends Error {
-  constructor(message = 'The source conversation revision has changed') {
+export class SourceConversationChangedError extends Error {
+  constructor(message = 'The source conversation changed while it was being read') {
     super(message)
-    this.name = 'SourceConversationRevisionChangedError'
+    this.name = 'SourceConversationChangedError'
   }
 }
 
@@ -54,9 +54,9 @@ function assertReadLimit(maxBytes: number | undefined): void {
   }
 }
 
-function matchesExpectedRevision(
+function matchesExpectedMetadata(
   metadata: { size: number; mtime: Date },
-  input: SourceEvidenceRevisionInput
+  input: SourceEvidenceMetadataInput
 ): boolean {
   return metadata.size === input.expectedSizeBytes
     && metadata.mtime.toISOString() === input.expectedModifiedAt
@@ -86,8 +86,8 @@ export class FileSourceEvidenceReader implements SourceEvidenceReader {
     if (!pathMetadata.isFile() || pathMetadata.isSymbolicLink()) {
       throw new Error('The source conversation is not a readable regular file')
     }
-    if (!matchesExpectedRevision(pathMetadata, input)) {
-      throw new SourceConversationRevisionChangedError()
+    if (!matchesExpectedMetadata(pathMetadata, input)) {
+      throw new SourceConversationChangedError()
     }
     if (input.maxBytes !== undefined && pathMetadata.size > input.maxBytes) {
       throw new Error(`Source Evidence exceeds the ${input.maxBytes} byte read limit`)
@@ -97,15 +97,16 @@ export class FileSourceEvidenceReader implements SourceEvidenceReader {
       throw sourceAccessError(error) ?? error
     })
     try {
+      // Metadata is an internal read guard, not a public identity or content revision.
       const before = await handle.stat()
       if (
         !before.isFile()
         || before.dev !== pathMetadata.dev
         || before.ino !== pathMetadata.ino
-        || !matchesExpectedRevision(before, input)
+        || !matchesExpectedMetadata(before, input)
       ) {
-        throw new SourceConversationRevisionChangedError(
-          'The source conversation revision changed before it could be read'
+        throw new SourceConversationChangedError(
+          'The source conversation changed before it could be read'
         )
       }
 
@@ -114,7 +115,7 @@ export class FileSourceEvidenceReader implements SourceEvidenceReader {
       while (offset < content.length) {
         const { bytesRead } = await handle.read(content, offset, content.length - offset, offset)
         if (bytesRead === 0) {
-          throw new SourceConversationRevisionChangedError(
+          throw new SourceConversationChangedError(
             'The source conversation changed while it was being read'
           )
         }
@@ -128,7 +129,7 @@ export class FileSourceEvidenceReader implements SourceEvidenceReader {
         || after.size !== before.size
         || after.mtimeMs !== before.mtimeMs
       ) {
-        throw new SourceConversationRevisionChangedError(
+        throw new SourceConversationChangedError(
           'The source conversation changed while it was being read'
         )
       }
@@ -162,7 +163,7 @@ export class MemorySourceEvidenceReader implements SourceEvidenceReader {
     const stored = this.records.get(input.sourceConversationId)
     if (!stored) throw new SourceConversationUnavailableError()
     if (stored.length !== input.expectedSizeBytes) {
-      throw new SourceConversationRevisionChangedError()
+      throw new SourceConversationChangedError()
     }
     if (input.maxBytes !== undefined && stored.length > input.maxBytes) {
       throw new Error(`Source Evidence exceeds the ${input.maxBytes} byte read limit`)

@@ -16,6 +16,8 @@ export interface MarkdownProps {
   /** External documents can disable images to avoid local or remote resource loads. */
   allowImages?: boolean
   onOpenKnowledge?(title: string): void
+  /** Reports the Knowledge link currently hovered or focused and its rendered anchor. */
+  onPreviewKnowledge?(title: string | undefined, anchor?: HTMLElement): void
   /** Opens an unresolved path from the current Markdown document. */
   onOpenFile?(target: string): void
   /** Reports the unresolved path currently hovered or focused, or clears it. */
@@ -177,6 +179,12 @@ function fileLinkWithin(container: HTMLElement, target: EventTarget | null): HTM
   return link && container.contains(link) ? link : undefined
 }
 
+function knowledgeLinkWithin(container: HTMLElement, target: EventTarget | null): HTMLElement | undefined {
+  if (!(target instanceof Element)) return undefined
+  const link = target.closest<HTMLElement>('[data-knowledge-title]')
+  return link && container.contains(link) ? link : undefined
+}
+
 export function Markdown(props: MarkdownProps) {
   const html = createMemo(() => markdownToSafeHtml(
     props.text,
@@ -219,16 +227,49 @@ export function Markdown(props: MarkdownProps) {
     if (!fileLinkWithin(container, relatedTarget)) props.onPreviewFile(undefined)
   }
 
+  const startKnowledgePreview = (
+    container: HTMLDivElement,
+    target: EventTarget | null,
+    relatedTarget: EventTarget | null
+  ): void => {
+    if (!props.onPreviewKnowledge) return
+    const link = knowledgeLinkWithin(container, target)
+    if (!link || link === knowledgeLinkWithin(container, relatedTarget)) return
+    const title = link.dataset.knowledgeTitle
+    if (title) props.onPreviewKnowledge(title, link)
+  }
+
+  const endKnowledgePreview = (
+    container: HTMLDivElement,
+    target: EventTarget | null,
+    relatedTarget: EventTarget | null
+  ): void => {
+    if (!props.onPreviewKnowledge || !knowledgeLinkWithin(container, target)) return
+    if (!knowledgeLinkWithin(container, relatedTarget)) props.onPreviewKnowledge(undefined)
+  }
+
   return (
     <div
       class={`markdown-body${props.class ? ` ${props.class}` : ''}`}
       data-testid={props.testId}
       innerHTML={html()}
       onClick={onClick}
-      onMouseOver={(event) => startFilePreview(event.currentTarget, event.target, event.relatedTarget)}
-      onMouseOut={(event) => endFilePreview(event.currentTarget, event.target, event.relatedTarget)}
-      onFocusIn={(event) => startFilePreview(event.currentTarget, event.target, event.relatedTarget)}
-      onFocusOut={(event) => endFilePreview(event.currentTarget, event.target, event.relatedTarget)}
+      onMouseOver={(event) => {
+        startFilePreview(event.currentTarget, event.target, event.relatedTarget)
+        startKnowledgePreview(event.currentTarget, event.target, event.relatedTarget)
+      }}
+      onMouseOut={(event) => {
+        endFilePreview(event.currentTarget, event.target, event.relatedTarget)
+        endKnowledgePreview(event.currentTarget, event.target, event.relatedTarget)
+      }}
+      onFocusIn={(event) => {
+        startFilePreview(event.currentTarget, event.target, event.relatedTarget)
+        startKnowledgePreview(event.currentTarget, event.target, event.relatedTarget)
+      }}
+      onFocusOut={(event) => {
+        endFilePreview(event.currentTarget, event.target, event.relatedTarget)
+        endKnowledgePreview(event.currentTarget, event.target, event.relatedTarget)
+      }}
     />
   )
 }

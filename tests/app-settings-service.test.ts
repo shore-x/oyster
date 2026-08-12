@@ -26,46 +26,72 @@ describe('AppSettingsService', () => {
     const { settingsPath, service } = await settingsService()
 
     expect(service.getSettings()).toEqual({
-      language: 'zh-CN',
+      uiLanguage: 'zh-CN',
+      agentLanguage: 'zh-CN',
       settingsPath
     })
   })
 
-  it('persists English for the next application launch', async () => {
+  it('persists independent languages for the next application launch', async () => {
     const { settingsPath, service } = await settingsService()
 
-    await service.saveSettings({ language: 'en-US' })
-    expect(JSON.parse(await readFile(settingsPath, 'utf8'))).toEqual({ language: 'en-US' })
+    await service.saveSettings({ uiLanguage: 'en-US', agentLanguage: 'zh-CN' })
+    expect(JSON.parse(await readFile(settingsPath, 'utf8'))).toEqual({
+      uiLanguage: 'en-US',
+      agentLanguage: 'zh-CN'
+    })
 
     const restarted = new AppSettingsService(settingsPath)
     await restarted.initialize()
-    expect(restarted.languageSetting).toBe('en-US')
+    expect(restarted.uiLanguageSetting).toBe('en-US')
+    expect(restarted.agentLanguageSetting).toBe('zh-CN')
+  })
+
+  it('migrates the legacy application language to both independent settings', async () => {
+    const { settingsPath } = await settingsService()
+    await writeFile(settingsPath, JSON.stringify({ language: 'en-US' }), 'utf8')
+
+    const restarted = new AppSettingsService(settingsPath)
+    await restarted.initialize()
+
+    expect(restarted.getSettings()).toEqual({
+      uiLanguage: 'en-US',
+      agentLanguage: 'en-US',
+      settingsPath
+    })
   })
 
   it('rejects unsupported languages before writing', async () => {
     const { settingsPath, service } = await settingsService()
 
-    expect(() => service.saveSettings({ language: 'fr-FR' as 'zh-CN' }))
-      .toThrow('应用语言无效')
+    expect(() => service.saveSettings({
+      uiLanguage: 'fr-FR' as 'zh-CN',
+      agentLanguage: 'zh-CN'
+    })).toThrow('语言设置无效')
     await expect(readFile(settingsPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('reports a damaged file, falls back to Chinese, and repairs it on save', async () => {
     const { settingsPath, service } = await settingsService()
-    await service.saveSettings({ language: 'en-US' })
+    await service.saveSettings({ uiLanguage: 'en-US', agentLanguage: 'zh-CN' })
     await writeFile(settingsPath, '{ damaged', 'utf8')
     await service.initialize()
 
     expect(service.getSettings()).toMatchObject({
-      language: 'zh-CN',
+      uiLanguage: 'zh-CN',
+      agentLanguage: 'zh-CN',
       settingsPath,
       error: expect.any(String)
     })
 
-    expect(await service.saveSettings({ language: 'en-US' })).toEqual({
-      language: 'en-US',
+    expect(await service.saveSettings({ uiLanguage: 'en-US', agentLanguage: 'zh-CN' })).toEqual({
+      uiLanguage: 'en-US',
+      agentLanguage: 'zh-CN',
       settingsPath
     })
-    expect(JSON.parse(await readFile(settingsPath, 'utf8'))).toEqual({ language: 'en-US' })
+    expect(JSON.parse(await readFile(settingsPath, 'utf8'))).toEqual({
+      uiLanguage: 'en-US',
+      agentLanguage: 'zh-CN'
+    })
   })
 })

@@ -6,7 +6,6 @@ import type {
   ChatConversationModelBinding,
   ChatStateView,
   CreateChatConversationInput,
-  DeleteChatConversationInput,
   SaveChatDefaultInstructionsInput,
   SendChatMessageInput
 } from '../../shared/chat'
@@ -151,11 +150,11 @@ export class ChatAgentService implements ChatApi {
   async getState(): Promise<ChatStateView> {
     const conversations = (await this.options.conversations.list()).map((conversation) => ({
       ...conversation,
-      hasActiveInvocation: this.activeInvocations.has(conversation.id)
+      hasActiveInvocation: this.activeInvocations.has(conversation.conversationId)
     }))
     return structuredClone({
       agent: {
-        id: CHAT_AGENT_ID,
+        agentId: CHAT_AGENT_ID,
         displayName: '通用 Agent',
         description: '理解和维护 Oyster 的 Knowledge 与 Artifact。',
         runtime: 'pi_coding_agent' as const,
@@ -183,7 +182,7 @@ export class ChatAgentService implements ChatApi {
       ...binding,
       systemPrompt: this.defaultInstructions()
     }, title)
-    const detail = await this.options.conversations.detail(opened.id)
+    const detail = await this.options.conversations.detail(opened.conversationId)
     await this.emitState()
     return detail
   }
@@ -194,16 +193,6 @@ export class ChatAgentService implements ChatApi {
       normalizedId,
       this.activeInvocations.has(normalizedId)
     )
-  }
-
-  async deleteConversation(input: DeleteChatConversationInput): Promise<ChatStateView> {
-    if (!input || typeof input !== 'object') throw new Error('删除对话参数无效')
-    const conversationId = requiredString(input.conversationId, 'Conversation ID', 512)
-    if (this.activeInvocations.has(conversationId)) {
-      throw new Error('存在进行中的 Agent Invocation；请先取消再删除对话')
-    }
-    await this.options.conversations.delete(conversationId)
-    return this.emitState()
   }
 
   async sendMessage(input: SendChatMessageInput): Promise<ChatConversationDetail> {
@@ -219,7 +208,7 @@ export class ChatAgentService implements ChatApi {
     this.activeInvocations.set(conversationId, { invocationId: rootInvocationId, controller })
     const observedInvocations = new Map<string, AgentInvocationDebugRecord>()
     const observeInvocation = (record: AgentInvocationDebugRecord): void => {
-      observedInvocations.set(record.id, structuredClone(record))
+      observedInvocations.set(record.invocationId, structuredClone(record))
       this.emit({
         type: 'invocation_updated',
         conversationId,

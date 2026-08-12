@@ -8,9 +8,9 @@ export function completedAgentInvocation(
 ): AgentInvocationDebugRecord {
   const timestamp = '2026-07-20T10:00:00.000Z'
   return {
-    formatVersion: 3,
+    formatVersion: 4,
     debugFormatVersion: 1,
-    id,
+    invocationId: id,
     agentId,
     status: 'completed',
     startedAt: timestamp,

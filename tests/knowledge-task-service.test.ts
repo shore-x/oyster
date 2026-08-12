@@ -1,7 +1,9 @@
+import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ModelGenerationRequest, SelectedModelStream } from '../src/main/ai-backends/model'
 import type { DiscoveryService } from '../src/main/discovery/discovery-service'
@@ -38,10 +40,23 @@ import {
 } from '../src/main/knowledge-processing/repository'
 import type { AiBackendSnapshot, AiConnection } from '../src/shared/ai-backends'
 import type { SourceConversationSummary } from '../src/shared/discovery'
-import type { KnowledgeTaskRecord } from '../src/shared/knowledge-processing'
+import type { StartKnowledgeTaskInput } from '../src/shared/knowledge-processing'
 import { completedAgentInvocation } from './agent-invocation-fixture'
+import {
+  ARTIFACT_GIT_BINARY_PATH,
+  createArtifactGitEnvironment
+} from '../src/main/artifacts/git-runtime'
 
 const temporaryDirectories: string[] = []
+const execFileAsync = promisify(execFile)
+
+async function git(args: string[], cwd: string): Promise<string> {
+  const { stdout } = await execFileAsync(ARTIFACT_GIT_BINARY_PATH, args, {
+    cwd,
+    env: createArtifactGitEnvironment()
+  })
+  return stdout.trimEnd()
+}
 
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex')
@@ -104,8 +119,7 @@ class FakeBackend implements AiBackendPort {
 
 function fakeDiscovery() {
   const content = '{"role":"user","content":"Keep summaries concise."}'
-  const sourceRevision = sha256(`revision\0${content}`)
-  const sourceConversation: SourceConversationSummary = {
+  const sourceConversation: SourceConversationSummary & { sourceRevision: string } = {
     sourceConversationId: 'source-conversation-1',
     sourceId: 'source:codex',
     agentType: 'codex',
@@ -113,21 +127,18 @@ function fakeDiscovery() {
     providerConversationId: 'provider-conversation-1',
     title: 'Knowledge test conversation',
     sizeBytes: Buffer.byteLength(content),
-    sourceRevision
+    sourceRevision: 'legacy-catalog-revision'
   }
   const service = {
     listSourceConversations: () => [structuredClone(sourceConversation)],
     readSourceSnapshot: async (input: {
       sourceConversationId: string
-      sourceRevision: string
     }) => {
-      if (
-        input.sourceConversationId !== sourceConversation.sourceConversationId
-        || input.sourceRevision !== sourceRevision
-      ) throw new Error('The Source Snapshot has changed')
+      if (input.sourceConversationId !== sourceConversation.sourceConversationId) {
+        throw new Error('The Source Conversation is unavailable')
+      }
       return {
         sourceConversationId: sourceConversation.sourceConversationId,
-        sourceRevision,
         contentHash: sha256(content),
         sizeBytes: Buffer.byteLength(content),
         rawEvidence: {
@@ -151,21 +162,6 @@ function fakeDiscovery() {
     }
   } as unknown as DiscoveryService
   return { service, sourceConversation }
-}
-
-function inMemoryHistory(): {
-  history: KnowledgeTaskHistory
-  records: KnowledgeTaskRecord[]
-} {
-  const records: KnowledgeTaskRecord[] = []
-  return {
-    records,
-    history: {
-      save: async (record) => { records.push(structuredClone(record)) },
-      list: async () => [],
-      read: async (taskId) => records.find((record) => record.taskId === taskId)
-    }
-  }
 }
 
 const BINDINGS: KnowledgeTaskBindings = {
@@ -198,15 +194,13 @@ async function harness(
   )
   await processing.initialize()
   const discovery = fakeDiscovery()
-  const { history, records } = inMemoryHistory()
   const selectedHistory = historyOverride === 'file'
     ? new GitKnowledgeTaskHistory(join(directory, 'repository'), tasks)
-    : historyOverride ?? history
+    : historyOverride
   return {
     processing,
     tasks,
     discovery,
-    records,
     service: new KnowledgeTaskService(
       discovery.service,
       processing,
@@ -261,7 +255,7 @@ class RequestChangesOnceReviewer implements KnowledgeReviewerRuntime {
       REVIEW_MARKER_START,
       (await readFile(statementPath, 'utf8')).trimEnd(),
       REVIEW_MARKER_COMMENT,
-      'Explain that the approved revision remains unmerged.',
+      'Explain how the candidate becomes reusable Knowledge.',
       REVIEW_MARKER_END,
       ''
     ].join('\n')
@@ -271,6 +265,10 @@ class RequestChangesOnceReviewer implements KnowledgeReviewerRuntime {
       `${await readFile(input.worktree.progressPath, 'utf8')}\n- [ ] Resolve the Reviewer request.\n`,
       'utf8'
     )
+    await git(['add', '-A'], input.worktree.worktreePath)
+    await git([
+      'commit', '--quiet', '--no-gpg-sign', '-m', 'fixture: request review changes'
+    ], input.worktree.worktreePath)
     const invocation = completedAgentInvocation(
       input.invocationId,
       ['read', 'edit', 'bash'],
@@ -288,6 +286,7 @@ class RequestChangesOnceReviewer implements KnowledgeReviewerRuntime {
 
 class ConcurrentMaintainerFailure implements KnowledgeMaintainerRuntime {
   readonly invocationIds: string[] = []
+  readonly worktrees: KnowledgeTaskWorktree[] = []
   private readonly delegate = new FixtureKnowledgeMaintainerRuntime()
   private firstStartedResolve!: () => void
   private secondStartedResolve!: () => void
@@ -302,6 +301,7 @@ class ConcurrentMaintainerFailure implements KnowledgeMaintainerRuntime {
     input: KnowledgeMaintainerInvocationInput
   ): Promise<RepositoryAgentInvocationResult> {
     const sequence = this.invocationIds.push(input.invocationId)
+    this.worktrees.push(input.worktree)
     const result = await this.delegate.invoke(input)
     if (sequence === 1) {
       this.firstStartedResolve()
@@ -329,41 +329,24 @@ afterEach(async () => {
 })
 
 describe('KnowledgeTaskService', () => {
-  it('runs Maintainer then Reviewer on a real branch and stores an unmerged Task result', async () => {
-    const { service, processing, tasks, discovery, records } = await harness()
+  it('completes only after Reviewer fast-forwards the Task revision into main', async () => {
+    const { service, processing, tasks, discovery } = await harness()
     const baseRepositoryRevision = await tasks.currentRevision()
     const result = await service.start({
-      sourceConversationId: discovery.sourceConversation.sourceConversationId,
-      sourceRevision: discovery.sourceConversation.sourceRevision
+      sourceConversationId: discovery.sourceConversation.sourceConversationId
     }, BINDINGS)
 
-    expect(result.rounds).toHaveLength(1)
-    expect(result.rounds[0].review).toMatchObject({
-      decision: 'approved',
-      reviewedRepositoryRevision: result.rounds[0].maintenance.candidateRepositoryRevision
-    })
-    expect(result.approvedRepositoryRevision)
-      .toBe(result.rounds[0].review.candidateRepositoryRevision)
-    expect(result.knowledge.map((statement) => statement.title)).toEqual([
-      'Knowledge Maintenance Agent',
-      'Knowledge Reviewer',
-      '知识加工链路'
-    ])
+    expect(result.approvedRepositoryRevision).toBe(result.integratedRepositoryRevision)
+    expect(result.integratedRepositoryRevision).not.toBe(baseRepositoryRevision)
     expect(result.changedPaths).toEqual(expect.arrayContaining([
       'knowledge/knowledge-processing.md',
       'knowledge/knowledge-maintainer.md',
-      'knowledge/knowledge-reviewer.md'
+      'knowledge/knowledge-reviewer.md',
+      `tasks/${result.taskId}/task.json`
     ]))
-    expect(await tasks.currentRevision()).toBe(baseRepositoryRevision)
-    await expect(readFile(result.worktree.progressPath, 'utf8'))
-      .resolves.toContain('approved the candidate')
-    expect(records).toHaveLength(1)
-    expect(records[0]).toMatchObject({
-      formatVersion: 2,
-      status: 'completed',
-      result: { approvedRepositoryRevision: result.approvedRepositoryRevision }
-    })
-    expect(records[0].agentInvocations).toHaveLength(2)
+    expect(await tasks.currentRevision()).toBe(result.integratedRepositoryRevision)
+    expect(await git(['rev-parse', 'HEAD'], result.worktree.repositoryPath))
+      .toBe(result.integratedRepositoryRevision)
     expect(processing.stateView().liveInvocations.map((view) => view.invocation.agentId)).toEqual([
       'knowledge_maintainer',
       'knowledge_reviewer'
@@ -377,30 +360,15 @@ describe('KnowledgeTaskService', () => {
     const baseRepositoryRevision = await tasks.currentRevision()
     const result = await service.start({
       sourceConversationId: discovery.sourceConversation.sourceConversationId,
-      sourceRevision: discovery.sourceConversation.sourceRevision,
       attention: 'Keep the Git state explicit.'
     }, BINDINGS)
 
-    expect(result.rounds).toHaveLength(2)
-    expect(result.rounds.map((round) => round.review.decision)).toEqual([
-      'changes_requested',
-      'approved'
-    ])
-    expect(result.rounds[0].review.markerPaths).toEqual(['knowledge/knowledge-processing.md'])
-    expect(result.rounds[1].maintenance.previousRepositoryRevision)
-      .toBe(result.rounds[0].review.candidateRepositoryRevision)
-    expect(result.rounds[1].review.reviewedRepositoryRevision)
-      .toBe(result.rounds[1].maintenance.candidateRepositoryRevision)
     const sharedWorktree = {
       taskPath: result.worktree.taskPath,
       briefPath: result.worktree.briefPath,
       inputPath: result.worktree.inputPath,
-      taskStartRepositoryRevision: result.worktree.taskStartRepositoryRevision
+      baseRepositoryRevision: result.worktree.baseRepositoryRevision
     }
-    expect(result.rounds.map((round) => round.maintenance.worktree)).toEqual([
-      expect.objectContaining(sharedWorktree),
-      expect.objectContaining(sharedWorktree)
-    ])
     expect(maintainer.tasks).toEqual([
       expect.objectContaining(sharedWorktree),
       expect.objectContaining(sharedWorktree)
@@ -415,19 +383,22 @@ describe('KnowledgeTaskService', () => {
       'knowledge_maintainer',
       'knowledge_reviewer'
     ])
-    expect(await tasks.currentRevision()).toBe(baseRepositoryRevision)
+    expect(reviewer.calls).toBe(2)
+    expect(result.integratedRepositoryRevision).not.toBe(baseRepositoryRevision)
+    expect(await tasks.currentRevision()).toBe(result.integratedRepositoryRevision)
   })
 
-  it('stores completed Task state beside the tracked Task inputs and Pi sessions', async () => {
+  it('keeps a small immutable Task definition and runtime-only Pi sessions', async () => {
     const { service, discovery } = await harness(
       new FixtureKnowledgeMaintainerRuntime(),
       new FixtureKnowledgeReviewerRuntime(),
       'file'
     )
-    const result = await service.start({
+    const input: StartKnowledgeTaskInput & { sourceRevision: string } = {
       sourceConversationId: discovery.sourceConversation.sourceConversationId,
-      sourceRevision: discovery.sourceConversation.sourceRevision
-    }, BINDINGS)
+      sourceRevision: 'legacy-selection-revision'
+    }
+    const result = await service.start(input, BINDINGS)
 
     expect(await readdir(result.worktree.taskPath)).toEqual(expect.arrayContaining([
       'BRIEF.md',
@@ -435,11 +406,38 @@ describe('KnowledgeTaskService', () => {
       'inputs',
       'task.json'
     ]))
-    await expect(readFile(join(result.worktree.taskPath, 'task.json'), 'utf8'))
-      .resolves.toContain('"formatVersion": 2')
+    expect(await readdir(result.worktree.taskPath)).not.toContain('pi-sessions')
+    const definition = JSON.parse(await readFile(
+      join(result.worktree.taskPath, 'task.json'),
+      'utf8'
+    )) as Record<string, unknown>
+    expect(definition).toMatchObject({ formatVersion: 3, taskId: result.taskId })
+    expect(definition.input).toEqual({
+      sourceConversationId: discovery.sourceConversation.sourceConversationId
+    })
+    expect(definition.sourceConversation).not.toHaveProperty('sourceRevision')
+    expect(result.sourceConversation).not.toHaveProperty('sourceRevision')
+    expect(definition).not.toHaveProperty('status')
+    expect(definition).not.toHaveProperty('result')
+    expect(definition).not.toHaveProperty('agentInvocations')
+    expect(definition).not.toHaveProperty('lastError')
+    const readModel = await service.readTask(result.taskId)
+    expect(readModel).toMatchObject({
+      formatVersion: 3,
+      status: 'completed',
+      result: {
+        integratedRepositoryRevision: result.integratedRepositoryRevision,
+        changedPaths: result.changedPaths
+      }
+    })
+    expect(readModel?.input).toEqual({
+      sourceConversationId: discovery.sourceConversation.sourceConversationId
+    })
+    expect(readModel?.sourceConversation).not.toHaveProperty('sourceRevision')
+    expect(readModel?.result?.sourceConversation).not.toHaveProperty('sourceRevision')
   })
 
-  it('checkpoints an Agent failure while keeping the Task open', async () => {
+  it('preserves failed Agent working-tree facts without rewriting task.json', async () => {
     const maintainer = new TaskRecordSquattingMaintainer()
     const { service, discovery } = await harness(
       maintainer,
@@ -448,57 +446,52 @@ describe('KnowledgeTaskService', () => {
     )
 
     await expect(service.start({
-      sourceConversationId: discovery.sourceConversation.sourceConversationId,
-      sourceRevision: discovery.sourceConversation.sourceRevision
+      sourceConversationId: discovery.sourceConversation.sourceConversationId
     }, BINDINGS)).rejects.toThrow('Maintainer failed after creating reserved task.json')
 
     expect(maintainer.worktree).toBeDefined()
-    const record = JSON.parse(await readFile(
+    expect(JSON.parse(await readFile(
       join(maintainer.worktree!.taskPath, 'task.json'),
       'utf8'
-    ))
-    expect(record).toMatchObject({
-      formatVersion: 2,
-      status: 'open',
-      lastError: 'Maintainer failed after creating reserved task.json'
-    })
+    ))).toEqual({ ownedBy: 'agent' })
+    expect(await git(['status', '--porcelain'], maintainer.worktree!.worktreePath))
+      .toContain('tasks/')
   })
 
-  it('reports a checkpoint failure without deleting the Task worktree', async () => {
+  it('does not call Task history writes after an Agent failure', async () => {
+    let historyWrites = 0
     const failingHistory: KnowledgeTaskHistory = {
-      save: async () => { throw new Error('Task checkpoint failed') },
       list: async () => [],
-      read: async () => undefined
+      read: async () => {
+        historyWrites += 1
+        throw new Error('Task history should remain read-only')
+      }
     }
+    const maintainer = new TaskRecordSquattingMaintainer()
     const { service, discovery } = await harness(
-      new TaskRecordSquattingMaintainer(),
+      maintainer,
       new FixtureKnowledgeReviewerRuntime(),
       failingHistory
     )
 
     const failure = await service.start({
-      sourceConversationId: discovery.sourceConversation.sourceConversationId,
-      sourceRevision: discovery.sourceConversation.sourceRevision
+      sourceConversationId: discovery.sourceConversation.sourceConversationId
     }, BINDINGS).catch((error: unknown) => error)
 
-    expect(failure).toBeInstanceOf(AggregateError)
-    expect((failure as AggregateError).message)
-      .toBe('Maintainer failed after creating reserved task.json')
-    expect((failure as AggregateError).errors).toEqual([
-      expect.objectContaining({ message: 'Maintainer failed after creating reserved task.json' }),
-      expect.objectContaining({ message: 'Task checkpoint failed' })
-    ])
+    expect(failure).toMatchObject({ message: 'Maintainer failed after creating reserved task.json' })
+    expect(historyWrites).toBe(0)
+    await expect(readFile(maintainer.worktree!.briefPath, 'utf8'))
+      .resolves.toContain('Knowledge Processing Task')
   })
 
-  it('records only the failing Task own Invocations while another Task is running', async () => {
+  it('keeps one Task failure isolated while another Task completes', async () => {
     const maintainer = new ConcurrentMaintainerFailure()
-    const { service, discovery, records } = await harness(
+    const { service, discovery, tasks } = await harness(
       maintainer,
       new FixtureKnowledgeReviewerRuntime()
     )
     const taskInput = {
-      sourceConversationId: discovery.sourceConversation.sourceConversationId,
-      sourceRevision: discovery.sourceConversation.sourceRevision
+      sourceConversationId: discovery.sourceConversation.sourceConversationId
     }
 
     const first = service.start(taskInput, BINDINGS)
@@ -508,24 +501,22 @@ describe('KnowledgeTaskService', () => {
     maintainer.failFirst()
 
     await expect(first).rejects.toThrow('First concurrent Task failed')
-    const failedRecord = records.find((record) => record.lastError === 'First concurrent Task failed')
-    expect(failedRecord?.agentInvocations.map((invocation) => invocation.id))
-      .toEqual([maintainer.invocationIds[0]])
+    expect(await git(['rev-parse', 'HEAD'], maintainer.worktrees[0].worktreePath))
+      .not.toBe(maintainer.worktrees[0].baseRepositoryRevision)
 
     maintainer.completeSecond()
-    await expect(second).resolves.toMatchObject({ rounds: [{ review: { decision: 'approved' } }] })
+    const completed = await second
+    expect(await tasks.currentRevision()).toBe(completed.integratedRepositoryRevision)
   })
 
   it('rejects an unavailable Source Conversation before accepting a Task', async () => {
-    const { service, processing, discovery, records } = await harness()
+    const { service, processing, discovery } = await harness()
     discovery.service.listSourceConversations = () => []
 
     await expect(service.start({
-      sourceConversationId: discovery.sourceConversation.sourceConversationId,
-      sourceRevision: discovery.sourceConversation.sourceRevision
+      sourceConversationId: discovery.sourceConversation.sourceConversationId
     }, BINDINGS)).rejects.toThrow('所选来源对话已不可用')
 
-    expect(records).toEqual([])
     expect(processing.stateView().liveInvocations).toEqual([])
     expect(service.isActive()).toBe(false)
   })

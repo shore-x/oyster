@@ -153,12 +153,12 @@ describe('KnowledgeProcessingService', () => {
 
     expect(snapshot.agents).toHaveLength(2)
     expect(snapshot.agents[0]).toMatchObject({
-      id: 'knowledge_maintainer',
+      agentId: 'knowledge_maintainer',
       runtime: 'pi_coding_agent',
       builtInInstructions: KNOWLEDGE_MAINTENANCE_AGENT_PROMPT
     })
     expect(snapshot.agents[1]).toMatchObject({
-      id: 'knowledge_reviewer',
+      agentId: 'knowledge_reviewer',
       builtInInstructions: KNOWLEDGE_REVIEWER_AGENT_PROMPT
     })
     expect(snapshot.agents[0].tools.map((tool) => tool.name)).toEqual([
@@ -187,7 +187,7 @@ describe('KnowledgeProcessingService', () => {
     expect(await readFile(result.worktree.briefPath, 'utf8'))
       .toContain('Inspect the repository model.')
     expect(await readFile(join(result.worktree.inputPath, 'README.md'), 'utf8'))
-      .toContain('fixed, Host-materialized input view')
+      .toContain('fixed input view materialized when this Knowledge Processing Task is accepted')
     expect(await readdir(join(result.worktree.inputPath, 'activity'))).toEqual([
       'segment-000001-page-000001.md'
     ])
@@ -197,7 +197,7 @@ describe('KnowledgeProcessingService', () => {
     await expect(collaborations.assertWorktree(maintainer.calls[0].worktree))
       .resolves.toBeUndefined()
     expect(result.activitySegmentCount).toBe(1)
-    expect(result.previousRepositoryRevision).toBe(result.worktree.taskStartRepositoryRevision)
+    expect(result.previousRepositoryRevision).toBe(result.worktree.baseRepositoryRevision)
     expect(result.candidateRepositoryRevision).not.toBe(result.previousRepositoryRevision)
     expect(result.changedPaths).toEqual(expect.arrayContaining([
       'knowledge/knowledge-processing.md'
@@ -205,7 +205,7 @@ describe('KnowledgeProcessingService', () => {
     expect(result.worktree.repositoryPath).toBe(maintainer.calls[0].worktree.repositoryPath)
     expect(await readdir(result.worktree.taskPath)).not.toContain('task.json')
     expect(await collaborations.currentRevision()).toBe(baseRepositoryRevision)
-    expect(service.stateView().liveInvocations[0]?.invocation.id).toBe(result.agentInvocationId)
+    expect(service.stateView().liveInvocations[0]?.invocation.invocationId).toBe(result.agentInvocationId)
   })
 
   it('does not absorb a late edit from the user main checkout', async () => {
@@ -311,7 +311,7 @@ describe('KnowledgeProcessingService', () => {
     expect(maintainer.calls).toHaveLength(2)
   })
 
-  it('checkpoints a manual Task input edit before starting the Reviewer', async () => {
+  it('does not checkpoint a manual Task edit before starting the Reviewer', async () => {
     const { service } = await harness()
     const maintained = await service.executeMaintenance(
       observation(['first']),
@@ -330,7 +330,7 @@ describe('KnowledgeProcessingService', () => {
       maintained.worktree,
       maintained.candidateRepositoryRevision,
       { agent: reviewer }
-    )).resolves.toMatchObject({ decision: 'approved' })
+    )).rejects.toThrow('Reviewer 结束前必须提交全部审阅变化')
     expect(reviewerCalls).toBe(1)
   })
 
@@ -340,24 +340,34 @@ describe('KnowledgeProcessingService', () => {
       observation(['first']),
       'session:first'
     )
-    let releaseReviewer!: () => void
-    let reviewerStarted!: () => void
-    const release = new Promise<void>((resolve) => { releaseReviewer = resolve })
-    const started = new Promise<void>((resolve) => { reviewerStarted = resolve })
-    const reviewer: KnowledgeReviewerRuntime = {
+    let releaseMaintainer!: () => void
+    let maintainerStarted!: () => void
+    const release = new Promise<void>((resolve) => { releaseMaintainer = resolve })
+    const started = new Promise<void>((resolve) => { maintainerStarted = resolve })
+    const blockingMaintainer: KnowledgeMaintainerRuntime = {
       invoke: async (input) => {
-        reviewerStarted()
+        const result = await new FixtureKnowledgeMaintainerRuntime().invoke(input)
+        maintainerStarted()
         await release
-        return new FixtureKnowledgeReviewerRuntime().invoke(input)
+        return result
       }
     }
-    const review = service.executeReview(maintained.worktree, maintained.candidateRepositoryRevision, { agent: reviewer })
+    const continued = service.executeMaintenance(
+      observation(['continued']),
+      'session:continued',
+      undefined,
+      {
+        worktree: maintained.worktree,
+        previousRepositoryRevision: maintained.candidateRepositoryRevision,
+        agent: blockingMaintainer
+      }
+    )
     await started
 
     await expect(service.executeMaintenance(observation(['second']), 'session:second'))
       .resolves.toMatchObject({ agentId: 'knowledge_maintainer' })
-    releaseReviewer()
-    await expect(review).resolves.toMatchObject({ decision: 'approved' })
+    releaseMaintainer()
+    await expect(continued).resolves.toMatchObject({ agentId: 'knowledge_maintainer' })
   })
 
   it('allows only one Agent to write a Task worktree at a time', async () => {
@@ -366,21 +376,27 @@ describe('KnowledgeProcessingService', () => {
       observation(['first']),
       'session:first'
     )
-    let releaseReviewer!: () => void
-    let reviewerStarted!: () => void
-    const release = new Promise<void>((resolve) => { releaseReviewer = resolve })
-    const started = new Promise<void>((resolve) => { reviewerStarted = resolve })
-    const reviewer: KnowledgeReviewerRuntime = {
+    let releaseMaintainer!: () => void
+    let maintainerStarted!: () => void
+    const release = new Promise<void>((resolve) => { releaseMaintainer = resolve })
+    const started = new Promise<void>((resolve) => { maintainerStarted = resolve })
+    const blockingMaintainer: KnowledgeMaintainerRuntime = {
       invoke: async (input) => {
-        reviewerStarted()
+        const result = await new FixtureKnowledgeMaintainerRuntime().invoke(input)
+        maintainerStarted()
         await release
-        return new FixtureKnowledgeReviewerRuntime().invoke(input)
+        return result
       }
     }
-    const review = service.executeReview(
-      maintained.worktree,
-      maintained.candidateRepositoryRevision,
-      { agent: reviewer }
+    const continued = service.executeMaintenance(
+      observation(['continued']),
+      'session:continued',
+      undefined,
+      {
+        worktree: maintained.worktree,
+        previousRepositoryRevision: maintained.candidateRepositoryRevision,
+        agent: blockingMaintainer
+      }
     )
     await started
 
@@ -394,7 +410,7 @@ describe('KnowledgeProcessingService', () => {
       }
     )).rejects.toThrow('这个 Task worktree 已有 Agent 正在执行')
 
-    releaseReviewer()
-    await expect(review).resolves.toMatchObject({ decision: 'approved' })
+    releaseMaintainer()
+    await expect(continued).resolves.toMatchObject({ agentId: 'knowledge_maintainer' })
   })
 })

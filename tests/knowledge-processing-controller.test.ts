@@ -23,8 +23,7 @@ const SOURCE_CONVERSATION: SourceConversationSummary = {
   sourceDisplayName: 'Codex',
   providerConversationId: 'conversation-1',
   title: 'Conversation one',
-  sizeBytes: 120,
-  sourceRevision: 'a'.repeat(64)
+  sizeBytes: 120
 }
 
 const STATE: KnowledgeProcessingStateView = {
@@ -65,8 +64,7 @@ function maintenanceResult(): KnowledgeMaintenanceResult {
       inputPath: '/tmp/oyster-worktrees/task-1/tasks/task-1/inputs',
       branchName: 'task/task-1',
       targetBranch: 'main',
-      baseRepositoryRevision: 'b'.repeat(40),
-      taskStartRepositoryRevision: 'd'.repeat(40)
+      baseRepositoryRevision: 'b'.repeat(40)
     },
     previousRepositoryRevision: 'b'.repeat(40),
     candidateRepositoryRevision: 'c'.repeat(40),
@@ -131,7 +129,7 @@ function installApis(
 afterEach(() => vi.unstubAllGlobals())
 
 describe('knowledge processing controller', () => {
-  it('previews Maintainer from an immutable Source Snapshot', async () => {
+  it('previews Maintainer from a stable Source Conversation selection', async () => {
     const { previewKnowledgeMaintainer } = installApis()
     await createRoot(async (dispose) => {
       try {
@@ -139,13 +137,11 @@ describe('knowledge processing controller', () => {
         await vi.waitFor(() => expect(controller.sourceConversationsLoading()).toBe(false))
         await controller.previewKnowledgeMaintainer({
           sourceConversationId: SOURCE_CONVERSATION.sourceConversationId,
-          sourceRevision: SOURCE_CONVERSATION.sourceRevision,
           attention: 'Inspect Skill activations.'
         })
 
         expect(previewKnowledgeMaintainer).toHaveBeenCalledWith({
           sourceConversationId: SOURCE_CONVERSATION.sourceConversationId,
-          sourceRevision: SOURCE_CONVERSATION.sourceRevision,
           attention: 'Inspect Skill activations.'
         })
         expect(controller.maintenanceResult()?.activitySegmentCount).toBe(1)
@@ -169,8 +165,7 @@ describe('knowledge processing controller', () => {
       try {
         const controller = createKnowledgeProcessingController()
         const preview = controller.previewKnowledgeMaintainer({
-          sourceConversationId: SOURCE_CONVERSATION.sourceConversationId,
-          sourceRevision: SOURCE_CONVERSATION.sourceRevision
+          sourceConversationId: SOURCE_CONVERSATION.sourceConversationId
         })
         expect(controller.hasActiveInvocation('knowledge_maintainer')).toBe(true)
         resolve(maintenanceResult())
@@ -208,18 +203,17 @@ describe('knowledge processing controller', () => {
       previewKnowledgeMaintainer: async () => ({
         status: 'source_snapshot_rejected',
         reason: 'changed',
-        message: '所选 Source Snapshot 已更新，请重新选择'
+        message: '所选来源对话在读取期间持续变化，请稍后重试'
       })
     })
     await createRoot(async (dispose) => {
       try {
         const controller = createKnowledgeProcessingController()
         await controller.previewKnowledgeMaintainer({
-          sourceConversationId: SOURCE_CONVERSATION.sourceConversationId,
-          sourceRevision: SOURCE_CONVERSATION.sourceRevision
+          sourceConversationId: SOURCE_CONVERSATION.sourceConversationId
         })
 
-        expect(controller.error()).toBe('所选 Source Snapshot 已更新，请重新选择')
+        expect(controller.error()).toBe('所选来源对话在读取期间持续变化，请稍后重试')
         expect(controller.maintenanceResult()).toBeUndefined()
       } finally {
         dispose()

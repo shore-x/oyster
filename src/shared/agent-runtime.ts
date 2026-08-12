@@ -25,7 +25,7 @@ export type AgentInvocationStatus = 'in_progress' | 'completed' | 'failed' | 'ca
 export type AgentInvocationActivityStatus = AgentInvocationStatus
 export type AgentModelCallPurpose = 'agent' | 'context_compaction'
 
-export const AGENT_INVOCATION_FORMAT_VERSION = 3 as const
+export const AGENT_INVOCATION_FORMAT_VERSION = 4 as const
 export const AGENT_INVOCATION_DEBUG_FORMAT_VERSION = 1 as const
 
 /**
@@ -45,7 +45,7 @@ export interface AgentInvocationSessionRef {
  */
 export interface AgentInvocationRecord {
   formatVersion: typeof AGENT_INVOCATION_FORMAT_VERSION
-  id: string
+  invocationId: string
   agentId: string
   parentInvocationId?: string
   status: AgentInvocationStatus
@@ -152,7 +152,7 @@ export interface AgentInvocationDebugRecord {
   /** Version of the debug-only fields; `formatVersion` remains the Invocation version. */
   debugFormatVersion: typeof AGENT_INVOCATION_DEBUG_FORMAT_VERSION
   formatVersion: typeof AGENT_INVOCATION_FORMAT_VERSION
-  id: string
+  invocationId: string
   agentId: string
   parentInvocationId?: string
   status: AgentInvocationStatus

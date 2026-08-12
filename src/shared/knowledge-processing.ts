@@ -8,13 +8,11 @@ import type {
   ReasoningEffort
 } from './ai-backends'
 import type {
-  SourceConversationSummary,
-  SourceSnapshotRef
+  SourceConversationSelection,
+  SourceConversationSummary
 } from './discovery'
-import type { KnowledgeStatement } from './knowledge'
 import type {
   AgentInvocationDebugRecord,
-  AgentInvocationRecord,
   SerializableJsonValue
 } from './agent-runtime'
 
@@ -47,7 +45,7 @@ export interface AiConnectionView {
 }
 
 export interface KnowledgeAgentDefinitionView {
-  id: KnowledgeAgentId
+  agentId: KnowledgeAgentId
   displayName: string
   description: string
   inputDescription: string
@@ -88,7 +86,7 @@ export interface SaveKnowledgeAgentDefaultInstructionsInput {
   instructionsOverride: string | null
 }
 
-export interface StartKnowledgeAgentPreviewInput extends SourceSnapshotRef {
+export interface StartKnowledgeAgentPreviewInput extends SourceConversationSelection {
   attention?: string
 }
 
@@ -138,7 +136,6 @@ export interface KnowledgeTaskWorktreeView {
   branchName: string
   targetBranch: string
   baseRepositoryRevision: string
-  taskStartRepositoryRevision: string
 }
 
 export interface KnowledgeMaintenanceResult {
@@ -162,30 +159,21 @@ export interface KnowledgeReviewResult {
   candidateRepositoryRevision: string
   changedPaths: string[]
   markerPaths: string[]
+  integratedRepositoryRevision?: string
   agentInvocationId: string
   durationMs: number
   completedAt: string
   invocation: AgentInvocationSummary
 }
 
-export interface KnowledgeTaskRound {
-  roundId: string
-  sequence: number
-  maintenance: KnowledgeMaintenanceResult
-  review: KnowledgeReviewResult
-}
-
 export interface KnowledgeTaskResult {
   taskId: string
   sourceConversation: SourceConversationSummary
-  sourceSnapshot: SourceSnapshotRef
   sourceRef: string
   worktree: KnowledgeTaskWorktreeView
-  rounds: KnowledgeTaskRound[]
   approvedRepositoryRevision: string
+  integratedRepositoryRevision: string
   changedPaths: string[]
-  knowledge: KnowledgeStatement[]
-  artifactPaths: string[]
   durationMs: number
   completedAt: string
 }
@@ -197,29 +185,42 @@ export interface KnowledgeAgentBinding {
   reasoningEffort?: ReasoningEffort
 }
 
-export interface KnowledgeTaskRecord {
-  formatVersion: 2
+export type KnowledgeAgentBindingSummary = Omit<KnowledgeAgentBinding, 'instructions'>
+
+/** Immutable Task definition tracked with the Task's repository changes. */
+export interface KnowledgeTaskDefinition {
+  formatVersion: 3
   taskId: string
-  status: 'open' | 'completed' | 'abandoned'
+  startedAt: string
+  input: StartKnowledgeTaskInput
+  sourceConversation?: SourceConversationSummary
+  sourceRef: string
+  configuration: {
+    maintainer: KnowledgeAgentBindingSummary
+    reviewer: KnowledgeAgentBindingSummary
+  }
+}
+
+/** Read model derived from task.json and the Git commit graph. */
+export interface KnowledgeTaskRecord {
+  formatVersion: 3
+  taskId: string
+  status: 'open' | 'completed'
   startedAt: string
   updatedAt: string
   completedAt?: string
   durationMs: number
   input: StartKnowledgeTaskInput
   sourceConversation?: SourceConversationSummary
+  sourceRef: string
   configuration: {
-    maintainer: KnowledgeAgentBinding
-    reviewer: KnowledgeAgentBinding
+    maintainer: KnowledgeAgentBindingSummary
+    reviewer: KnowledgeAgentBindingSummary
   }
-  agentInvocations: AgentInvocationRecord[]
   result?: KnowledgeTaskResult
-  lastError?: string
 }
 
-/** Read model that joins a small Task record with separately stored debug data. */
-export interface KnowledgeTaskDetail extends KnowledgeTaskRecord {
-  invocationDebugRecords: AgentInvocationDebugRecord[]
-}
+export type KnowledgeTaskDetail = KnowledgeTaskRecord
 
 export interface KnowledgeTaskSummary {
   taskId: string
@@ -229,11 +230,8 @@ export interface KnowledgeTaskSummary {
   sourceConversationTitle?: string
   sourceDisplayName?: string
   projectPath?: string
-  statementCount: number
+  changedPathCount: number
   maintainerModel: string
-  agentInvocationCount: number
-  modelCallCount: number
-  error?: string
 }
 
 export interface KnowledgeProcessingApi {

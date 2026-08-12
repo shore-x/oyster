@@ -1,11 +1,10 @@
-import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js'
+import { For, Show, createEffect, createSignal } from 'solid-js'
 import type {
   KnowledgeTaskDetail,
   KnowledgeTaskSummary
 } from '../../../shared/knowledge-processing'
-import { Button, Icon } from '../ui'
+import { Button, Inspector } from '../ui'
 import {
-  KnowledgeTaskActivityDetail,
   KnowledgeTaskResultDetail,
   knowledgeTaskResultView
 } from './KnowledgeTaskDetails'
@@ -22,9 +21,8 @@ function formatDuration(durationMs: number): string {
 }
 
 function statusLabel(status: KnowledgeTaskSummary['status']): string {
-  if (status === 'completed') return uiText('已完成', 'Completed')
-  if (status === 'abandoned') return uiText('已放弃', 'Abandoned')
-  return uiText('可继续', 'Can Continue')
+  if (status === 'completed') return uiText('已合并', 'Integrated')
+  return uiText('仍在 Task 分支', 'Still on Task Branch')
 }
 
 export function KnowledgeTaskHistory(props: {
@@ -34,23 +32,14 @@ export function KnowledgeTaskHistory(props: {
   loadingTaskId?: string
   onOpen(taskId: string): Promise<KnowledgeTaskDetail | undefined>
 }) {
-  const [detail, setDetail] = createSignal<'activity' | 'result'>()
+  const [resultOpen, setResultOpen] = createSignal(false)
 
   createEffect(() => {
-    if (detail() && !props.selected) setDetail(undefined)
+    if (resultOpen() && !props.selected) setResultOpen(false)
   })
 
-  createEffect(() => {
-    if (!detail()) return
-    const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setDetail(undefined)
-    }
-    document.addEventListener('keydown', closeOnEscape)
-    onCleanup(() => document.removeEventListener('keydown', closeOnEscape))
-  })
-
-  async function open(taskId: string, target: 'activity' | 'result'): Promise<void> {
-    if (await props.onOpen(taskId)) setDetail(target)
+  async function open(taskId: string): Promise<void> {
+    if (await props.onOpen(taskId)) setResultOpen(true)
   }
 
   return (
@@ -58,10 +47,10 @@ export function KnowledgeTaskHistory(props: {
       <section class="processing-history__overview">
           <div class="processing-history__heading">
             <div>
-              <h2>{uiText('测试历史', 'Test History')}</h2>
+              <h2>{uiText('Task 历史', 'Task History')}</h2>
               <p>{uiText(
-                'Task、领域变化和 Agent Session 由同一 Git 历史保存；执行失败不会自动终结 Task。',
-                'Tasks, domain changes, and Agent Sessions share the same Git history; execution failures do not automatically end a Task.'
+                '已完成的 Task 已由 Reviewer 合并到 main；open Task 的修改仍保留在各自的 Task 分支。',
+                'Completed Tasks were integrated into main by the Reviewer. Changes from open Tasks remain on their Task branches.'
               )}</p>
             </div>
             <strong>{props.tasks.length}</strong>
@@ -85,30 +74,24 @@ export function KnowledgeTaskHistory(props: {
                       <time>{statusLabel(task.status)} · {formatTime(task.updatedAt)}</time>
                     </div>
                     <div class="processing-history-task__metrics">
-                      <span><strong>{task.statementCount}</strong> Statements</span>
+                      <span><strong>{task.changedPathCount}</strong> {uiText('变更文件', 'Changed Files')}</span>
                       <span><strong>{formatDuration(task.durationMs)}</strong> {uiText('耗时', 'duration')}</span>
-                      <span><strong>{task.agentInvocationCount}</strong> Agent Invocations</span>
-                      <span><strong>{task.modelCallCount}</strong> Model Calls</span>
                     </div>
                     <div class="processing-history-task__models">
                       <span>{uiText('知识维护', 'Knowledge Maintenance')} · {task.maintainerModel}</span>
                     </div>
-                    <Show when={task.error}><p class="agent-activity-error">{task.error}</p></Show>
                     <div class="processing-history-task__actions">
-                      <Button
-                        variant="secondary"
-                        icon="link"
-                        disabled={props.loadingTaskId === task.taskId}
-                        data-testid={`open-history-activity-${task.taskId}`}
-                        onClick={() => void open(task.taskId, 'activity')}
-                      >{uiText('Invocation 详情', 'Invocation Details')}</Button>
                       <Button
                         variant="primary"
                         icon="layers"
                         disabled={task.status !== 'completed' || props.loadingTaskId === task.taskId}
                         data-testid={`open-history-result-${task.taskId}`}
-                        onClick={() => void open(task.taskId, 'result')}
-                      >{props.loadingTaskId === task.taskId ? uiText('正在读取…', 'Reading…') : uiText('查看结果', 'View Result')}</Button>
+                        onClick={() => void open(task.taskId)}
+                      >{props.loadingTaskId === task.taskId
+                          ? uiText('正在读取…', 'Reading…')
+                          : task.status === 'completed'
+                            ? uiText('查看结果', 'View Result')
+                            : uiText('合并后可查看', 'Available After Integration')}</Button>
                     </div>
                   </article>
                 )}</For>
@@ -117,40 +100,30 @@ export function KnowledgeTaskHistory(props: {
           </Show>
       </section>
 
-      <Show when={detail() && props.selected ? props.selected : undefined}>
+      <Show when={resultOpen() && props.selected ? props.selected : undefined}>
         {(record) => (
-          <aside class="processing-history__inspector" role="complementary" aria-label={uiText('历史详情', 'History details')}>
-            <div class="processing-history__inspector-toolbar">
-              <strong>{detail() === 'activity' ? uiText('Invocation 详情', 'Invocation Details') : uiText('结果快照', 'Result Snapshot')}</strong>
-              <button
-                type="button"
-                data-testid={detail() === 'activity' ? 'history-task-activity-back' : 'history-task-result-back'}
-                aria-label={uiText('关闭历史详情', 'Close history details')}
-                onClick={() => setDetail(undefined)}
-              ><Icon name="close" /><span>{uiText('关闭', 'Close')}</span></button>
-            </div>
-            <div class="processing-history__inspector-content">
-              <Show when={detail() === 'activity'}>
-                <KnowledgeTaskActivityDetail
-                  invocations={record().invocationDebugRecords}
-                  status={record().status}
-                  error={record().lastError}
-                  title={uiText('历史 Agent Invocations', 'Historical Agent Invocations')}
-                  description={uiText('这是该 Task 已保存的模型与工具调用记录。', 'These are the model and tool call records saved for this Task.')}
-                  detailTestId="history-task-activity-detail"
-                />
-              </Show>
-              <Show when={detail() === 'result' && record().status === 'completed' && record().result}>
+          <Inspector
+            class="processing-history__inspector"
+            size="wide"
+            ariaLabel={uiText('历史详情', 'History details')}
+            title={uiText('已合并结果', 'Integrated Result')}
+            closeLabel={uiText('关闭', 'Close')}
+            closeTestId="history-task-result-back"
+            onClose={() => setResultOpen(false)}
+            contentClass="processing-history__inspector-content"
+          >
+              <Show when={record().status === 'completed' && record().result}>
                 <KnowledgeTaskResultDetail
                   result={knowledgeTaskResultView(record().result!)}
-                  title={uiText('历史结果快照', 'Historical Result Snapshot')}
-                  description={uiText('这是该次测试结束时保存的已批准 Git revision；它没有合并到目标分支。', 'This is the approved Git revision saved when the test ended; it was not merged into the target branch.')}
-                  listLabel={uiText('历史 Statements', 'Historical Statements')}
+                  title={uiText('历史合并结果', 'Historical Integrated Result')}
+                  description={uiText(
+                    '这是该 Task 合并到 main 后记录的 revision 与文件变更；请前往知识库或工作台浏览当前内容。',
+                    'These are the revision and file changes recorded after the Task was integrated into main. Browse current content in Knowledge or Workbench.'
+                  )}
                   detailTestId="history-task-result-detail"
                 />
               </Show>
-            </div>
-          </aside>
+          </Inspector>
         )}
       </Show>
     </div>

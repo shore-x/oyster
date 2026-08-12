@@ -168,7 +168,15 @@ describe('Pi Agent Invocation recorder', () => {
     })
     const stream = await recorder.wrapStreamFn(async (model, _context, options) => {
       const payload = await options?.onPayload?.({ original: true }, model)
-      await options?.onResponse?.({ status: 202, headers: { 'x-request-id': 'request-1' } }, model)
+      await options?.onResponse?.({
+        status: 202,
+        headers: {
+          'x-request-id': 'request-1',
+          'set-cookie': 'session=must-not-be-recorded',
+          'x-auth-token': 'must-not-be-recorded',
+          x_auth_token: 'must-not-be-recorded'
+        }
+      }, model)
       const output = createAssistantMessageEventStream()
       output.end(fauxAssistantMessage(JSON.stringify(payload)))
       return output
@@ -192,8 +200,14 @@ describe('Pi Agent Invocation recorder', () => {
       },
       providerResponse: {
         status: 202,
-        headers: { 'x-request-id': 'request-1' }
+        headers: {
+          'x-request-id': 'request-1',
+          'set-cookie': '[redacted]',
+          'x-auth-token': '[redacted]',
+          x_auth_token: '[redacted]'
+        }
       }
     })
+    expect(JSON.stringify(recorder.snapshot())).not.toContain('must-not-be-recorded')
   })
 })

@@ -59,13 +59,8 @@ export interface KnowledgeNeighborhoodProjection {
   unresolvedReferences: UnresolvedKnowledgeReference[]
 }
 
-export interface ClearKnowledgeResult {
-  deletedStatementCount: number
-}
-
 export interface KnowledgeApi {
   browse(input?: BrowseKnowledgeInput): Promise<KnowledgeBrowseResult>
   read(title: string): Promise<KnowledgeStatement | undefined>
   getNeighborhood(title: string): Promise<KnowledgeNeighborhoodProjection | undefined>
-  clear(): Promise<ClearKnowledgeResult>
 }

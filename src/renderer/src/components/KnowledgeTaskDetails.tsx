@@ -1,16 +1,11 @@
 import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
 import { Button } from '../ui'
-import { KnowledgeStatementBrowser, statementPreview } from './KnowledgeStatementBrowser'
 import {
   AgentInvocationCollectionExplorer,
   AgentModelCallInspector
 } from './AgentInvocationView'
+import type { KnowledgeTaskResultView } from './KnowledgeTaskWorktree'
 import type {
-  KnowledgeTaskResultView,
-  UiMilestoneView
-} from './KnowledgeTaskWorktree'
-import type {
-  KnowledgeTaskRecord,
   KnowledgeTaskResult,
   LiveAgentInvocationView
 } from '../../../shared/knowledge-processing'
@@ -24,72 +19,24 @@ function formatTime(value?: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString(appLanguage())
 }
 
-function milestoneClass(state: UiMilestoneView['state']): string {
-  return `ui-milestone ui-milestone--${state}`
-}
-
-function milestoneMarker(milestone: UiMilestoneView, index: number): string {
-  if (milestone.state === 'completed') return '✓'
-  if (milestone.state === 'failed') return '!'
-  if (milestone.state === 'in_progress') return '…'
-  return String(index + 1)
+function formatDuration(durationMs: number): string {
+  if (durationMs < 1_000) return `${durationMs} ms`
+  return `${(durationMs / 1_000).toFixed(1)} s`
 }
 
 export function knowledgeTaskResultView(result: KnowledgeTaskResult): KnowledgeTaskResultView {
   return {
-    taskId: result.taskId,
     completedAt: result.completedAt,
     durationMs: result.durationMs,
-    worktree: result.worktree,
-    approvedRepositoryRevision: result.approvedRepositoryRevision,
-    changedPaths: result.changedPaths,
-    artifactPaths: result.artifactPaths,
-    roundCount: result.rounds.length,
-    milestones: [
-      {
-        id: 'source_snapshot',
-        label: uiText('固定 Source Snapshot', 'Freeze Source Snapshot'),
-        detail: `${result.sourceConversation.sourceDisplayName} · ${result.sourceSnapshot.sourceRevision.slice(0, 12)}`,
-        state: 'completed'
-      },
-      {
-        id: 'task_worktree',
-        label: uiText('创建 Task worktree', 'Create Task Worktree'),
-        detail: `${result.worktree.branchName} · ${result.worktree.taskPath}`,
-        state: 'completed'
-      },
-      {
-        id: 'collaboration_rounds',
-        label: uiText('Maintainer / Reviewer 协作', 'Maintainer / Reviewer Collaboration'),
-        detail: `${result.rounds.length} Collaboration Rounds`,
-        state: 'completed'
-      },
-      {
-        id: 'reviewer_approval',
-        label: uiText('Reviewer 批准', 'Reviewer Approval'),
-        detail: `${result.approvedRepositoryRevision.slice(0, 12)} · ${uiText('未合并到', 'not merged into')} ${result.worktree.targetBranch}`,
-        state: 'completed'
-      }
-    ],
-    statements: result.knowledge.map((statement) => ({
-      title: statement.title,
-      content: statement.content
-    }))
+    integratedRepositoryRevision: result.integratedRepositoryRevision,
+    changedPaths: result.changedPaths
   }
-}
-
-function terminalStatusLabel(status: KnowledgeTaskRecord['status']): string {
-  if (status === 'completed') return uiText('已完成', 'Completed')
-  if (status === 'abandoned') return uiText('已放弃', 'Abandoned')
-  return uiText('Task 可继续', 'Task Can Continue')
 }
 
 export function KnowledgeTaskActivityDetail(props: {
   view?: LiveAgentInvocationView
   invocations?: AgentInvocationDebugRecord[]
   followLatestInvocation?: boolean
-  status?: KnowledgeTaskRecord['status']
-  error?: string
   title?: string
   description?: string
   backLabel?: string
@@ -107,7 +54,7 @@ export function KnowledgeTaskActivityDetail(props: {
   const selectedModelCall = createMemo(() => {
     const selection = modelCallSelection()
     if (!selection) return undefined
-    const invocation = invocations().find((item) => item.id === selection.invocationId)
+    const invocation = invocations().find((item) => item.invocationId === selection.invocationId)
     if (!invocation) return undefined
     const index = invocation.modelCalls.findIndex((call) => call.id === selection.callId)
     const call = invocation.modelCalls[index]
@@ -138,18 +85,9 @@ export function KnowledgeTaskActivityDetail(props: {
               </div>
             </Show>
             <p class={`knowledge-task__detail-disclosure${hasIntro() ? '' : ' knowledge-task__detail-disclosure--first'}`}>{uiText(
-              'Debug Record 可能包含原始观察材料、完整 Pi Context 和最终 Provider Payload；数据仅保存在本地，不保存凭据，敏感请求 Header 会被脱敏。',
-              'Debug Records may contain raw observation material, complete Pi Context, and the final Provider Payload. Data stays local, credentials are not stored, and sensitive request headers are redacted.'
+              'Debug Record 可能包含原始观察材料、完整 Pi Context 和最终 Provider Payload；数据仅保存在本地，并对常见凭据 Header 做脱敏。',
+              'Debug Records may contain raw observation material, complete Pi Context, and the final Provider Payload. Data stays local, and common credential-bearing headers are redacted.'
             )}</p>
-            <Show when={props.status}>{(status) => (
-              <div
-                class={`processing-history-detail-status processing-history-detail-status--${status()}`}
-                data-testid="history-task-status"
-              >
-                <strong>{terminalStatusLabel(status())}</strong>
-                <Show when={props.error}>{(error) => <p>{error()}</p>}</Show>
-              </div>
-            )}</Show>
             <Show
               when={invocations().length}
               fallback={<div class="knowledge-task__empty">{uiText('这个 Task 没有实际启动 Agent Invocation。', 'This Task did not actually start an Agent Invocation.')}</div>}
@@ -159,7 +97,7 @@ export function KnowledgeTaskActivityDetail(props: {
                 agentDisplayName={(invocation) => processingAgentDisplayName(invocation.agentId)}
                 followLatestInvocation={props.followLatestInvocation}
                 onInspectModelCall={(invocation, call) => setModelCallSelection({
-                  invocationId: invocation.id,
+                  invocationId: invocation.invocationId,
                   callId: call.id
                 })}
               />
@@ -193,26 +131,11 @@ export function KnowledgeTaskResultDetail(props: {
   result: KnowledgeTaskResultView
   title?: string
   description?: string
-  listLabel?: string
   backLabel?: string
   detailTestId: string
   backTestId?: string
   onBack?(): void
 }) {
-  const [selectedTitle, setSelectedTitle] = createSignal<string>()
-  const selectedStatement = createMemo(() => props.result.statements.find(
-    (statement) => statement.title === selectedTitle()
-  ) || props.result.statements[0])
-  const statementSummaries = createMemo(() => props.result.statements.map((statement) => ({
-    title: statement.title,
-    preview: statementPreview(statement.content, 150)
-  })))
-
-  createEffect(() => {
-    props.result.taskId
-    setSelectedTitle(props.result.statements[0]?.title)
-  })
-
   return (
     <section class="knowledge-task__detail-page knowledge-task__result" data-testid={props.detailTestId} aria-label={uiText('Knowledge Processing Task 结果详情', 'Knowledge Processing Task result details')}>
       <div class="knowledge-task__detail-header">
@@ -222,56 +145,22 @@ export function KnowledgeTaskResultDetail(props: {
           </Button>
         )}</Show>
         <div>
-          <h2>{props.title || uiText('协作分支结果', 'Collaboration Branch Result')}</h2>
-          <p>{props.description || uiText('Reviewer 已批准这个 revision；Task 不会把它合并到目标分支。', 'The Reviewer approved this revision; the Task does not merge it into the target branch.')}</p>
+          <h2>{props.title || uiText('已合并结果', 'Integrated Result')}</h2>
+          <p>{props.description || uiText(
+            'Reviewer 已将批准的修改合并到 main；请前往知识库或工作台浏览当前内容。',
+            'The Reviewer integrated the approved changes into main. Browse the current content in Knowledge or Workbench.'
+          )}</p>
         </div>
         <div class="knowledge-task__detail-actions">
           <span>{props.result.completedAt ? `${uiText('完成于', 'Completed at')} ${formatTime(props.result.completedAt)}` : ''}</span>
         </div>
       </div>
 
-      <div class="ui-milestone-list" aria-label="Task UI Milestones">
-        <For each={props.result.milestones}>{(milestone, index) => (
-          <div class={milestoneClass(milestone.state)}>
-            <span class="ui-milestone__marker">{milestoneMarker(milestone, index())}</span>
-            <strong>{milestone.label}</strong>
-            <p title={milestone.detail}>{milestone.detail}</p>
-          </div>
-        )}</For>
-      </div>
-
       <dl class="knowledge-task-details" data-testid="knowledge-task-git-result">
-        <div><dt>Repository</dt><dd>{props.result.worktree.repositoryPath}</dd></div>
-        <div><dt>Task record</dt><dd>{props.result.worktree.taskPath}</dd></div>
-        <div><dt>BRIEF.md</dt><dd>{props.result.worktree.briefPath}</dd></div>
-        <div><dt>PROGRESS.md</dt><dd>{props.result.worktree.progressPath}</dd></div>
-        <div><dt>Inputs</dt><dd>{props.result.worktree.inputPath}</dd></div>
-        <div><dt>Task branch</dt><dd>{props.result.worktree.branchName}</dd></div>
-        <div><dt>{uiText('目标分支', 'Target Branch')}</dt><dd>{uiText(
-          `${props.result.worktree.targetBranch}（未合并）`,
-          `${props.result.worktree.targetBranch} (not merged)`
-        )}</dd></div>
-        <div><dt>Base revision</dt><dd>{props.result.worktree.baseRepositoryRevision}</dd></div>
-        <div><dt>{uiText('批准 revision', 'Approved Revision')}</dt><dd>{props.result.approvedRepositoryRevision}</dd></div>
-        <div><dt>Collaboration Rounds</dt><dd>{props.result.roundCount}</dd></div>
+        <div><dt>{uiText('合并 revision', 'Integrated Revision')}</dt><dd>{props.result.integratedRepositoryRevision}</dd></div>
         <div><dt>{uiText('变更文件', 'Changed Files')}</dt><dd>{props.result.changedPaths.length}</dd></div>
+        <div><dt>{uiText('耗时', 'Duration')}</dt><dd>{props.result.durationMs === undefined ? '—' : formatDuration(props.result.durationMs)}</dd></div>
       </dl>
-
-      <div class="knowledge-browser knowledge-browser--collaboration">
-        <KnowledgeStatementBrowser
-          items={statementSummaries()}
-          total={props.result.statements.length}
-          selectedTitle={selectedStatement()?.title}
-          selectedStatement={selectedStatement()}
-          listLabel={props.listLabel || uiText('协作分支 Statements', 'Collaboration Branch Statements')}
-          emptyListText={uiText('本次 Task 没有生成 Knowledge Statement。', 'This Task did not generate any Knowledge Statements.')}
-          navigationKey={props.result.taskId}
-          onSelect={setSelectedTitle}
-          onRead={async (title) => props.result.statements.find(
-            (statement) => statement.title === title
-          )}
-        />
-      </div>
 
       <details class="knowledge-task__candidates ui-disclosure">
         <summary>{uiText('变更文件', 'Changed Files')} ({props.result.changedPaths.length})</summary>
@@ -279,14 +168,6 @@ export function KnowledgeTaskResultDetail(props: {
           <For each={props.result.changedPaths}>{(path) => <li><code>{path}</code></li>}</For>
         </ul>
       </details>
-      <Show when={props.result.artifactPaths.length}>
-        <details class="knowledge-task__candidates ui-disclosure">
-          <summary>Artifacts（{props.result.artifactPaths.length}）</summary>
-          <ul>
-            <For each={props.result.artifactPaths}>{(path) => <li><code>{path}</code></li>}</For>
-          </ul>
-        </details>
-      </Show>
     </section>
   )
 }

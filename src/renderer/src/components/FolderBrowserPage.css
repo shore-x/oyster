@@ -200,7 +200,7 @@
   background: #fff;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-control);
-  box-shadow: 0 12px 34px rgba(26, 34, 42, .16);
+  box-shadow: var(--shadow-overlay);
   pointer-events: none;
 }
 

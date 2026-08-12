@@ -17,7 +17,7 @@ const EMPTY_PROCESSING_STATE: KnowledgeProcessingStateView = {
 
 const EMPTY_CHAT_STATE: ChatStateView = {
   agent: {
-    id: CHAT_AGENT_ID,
+    agentId: CHAT_AGENT_ID,
     displayName: '通用 Agent',
     description: '',
     runtime: 'pi_coding_agent',
@@ -52,7 +52,14 @@ function isKnowledgeAgent(
 
 function chatRole(agent: ChatAgentConfigurationView): AgentConfigurationRoleView {
   return {
-    ...agent,
+    id: agent.agentId,
+    displayName: agent.displayName,
+    description: agent.description,
+    runtime: agent.runtime,
+    tools: agent.tools,
+    builtInInstructions: agent.builtInInstructions,
+    defaultInstructions: agent.defaultInstructions,
+    isDefaultCustomized: agent.isDefaultCustomized,
     promptUsageDescription: uiText(
       '新建对话会固化当时的默认 Prompt；已有对话继续使用创建时的配置。',
       'New conversations capture the current default Prompt; existing conversations keep the configuration used at creation.'
@@ -73,7 +80,7 @@ export function createAgentConfigurationController() {
     ...processingState().agents
       .filter(isKnowledgeAgent)
       .map((agent) => ({
-        id: agent.id,
+        id: agent.agentId,
         displayName: agent.displayName,
         description: agent.description,
         runtime: agent.runtime,

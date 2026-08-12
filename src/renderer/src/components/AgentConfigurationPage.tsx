@@ -5,7 +5,7 @@ import {
 } from '../agent-configuration-controller'
 import { CHAT_AGENT_ID } from '../../../shared/chat'
 import { runtimeLabel } from '../processing-configuration'
-import { Button, Icon } from '../ui'
+import { Button, Icon, Tab, TabList } from '../ui'
 import { PiAgentSettingsPanel } from './PiAgentSettingsPanel'
 import { uiText } from '../i18n'
 
@@ -153,31 +153,25 @@ export function AgentConfigurationPage(props: { embedded?: boolean } = {}) {
                 </span>
               </div>
 
-              <div class="agent-config-tabs" role="tablist" aria-label={uiText('Agent 配置内容', 'Agent configuration content')}>
-                <button
-                  type="button"
-                  role="tab"
+              <TabList class="agent-config-tabs" size="compact" ariaLabel={uiText('Agent 配置内容', 'Agent configuration content')}>
+                <Tab
                   data-testid="agent-config-tab-prompt"
-                  aria-selected={detailView() === 'prompt'}
+                  selected={detailView() === 'prompt'}
                   onClick={() => setDetailView('prompt')}
-                >System Prompt</button>
-                <button
-                  type="button"
-                  role="tab"
+                >System Prompt</Tab>
+                <Tab
                   data-testid="agent-config-tab-tools"
-                  aria-selected={detailView() === 'tools'}
+                  selected={detailView() === 'tools'}
                   onClick={() => setDetailView('tools')}
-                >Tools <span>{role().tools.length}</span></button>
+                >Tools <span>{role().tools.length}</span></Tab>
                 <Show when={role().id === CHAT_AGENT_ID}>
-                  <button
-                    type="button"
-                    role="tab"
+                  <Tab
                     data-testid="agent-config-tab-runtime"
-                    aria-selected={detailView() === 'runtime'}
+                    selected={detailView() === 'runtime'}
                     onClick={() => setDetailView('runtime')}
-                  >Pi Runtime</button>
+                  >Pi Runtime</Tab>
                 </Show>
-              </div>
+              </TabList>
 
               <Show when={detailView() === 'prompt'}>
                 <div class="agent-config-prompt" data-testid="agent-config-prompt-panel">

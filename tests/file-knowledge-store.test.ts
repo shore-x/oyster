@@ -40,10 +40,4 @@ describe('FileKnowledgeStore', () => {
     await writeFile(join(knowledgePath, 'duplicate.md'), '# Alpha\n\nDuplicate.\n')
     expect(() => store.listStatements()).toThrow('canonical title 重复：Alpha')
   })
-
-  it('clears Markdown statements while retaining the global layer', async () => {
-    const { store } = await fixture()
-    expect(store.clear()).toEqual({ deletedStatementCount: 2 })
-    expect(store.listStatements()).toEqual([])
-  })
 })

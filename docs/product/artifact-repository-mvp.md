@@ -1,25 +1,31 @@
-# Artifact 文件层 MVP
+# Artifact 与工作台
 
-> 状态：当前实现
->
-> 日期：2026-08-10
+## 为什么使用文件目录
 
-Artifact 是统一 Oyster Repository 中的全局文件层，不是独立 Repository：
+Artifact 是用户与 Agent 持续维护的实际产物。真实产物可能是文档、配置、代码、脚本、图片或完整工程；普通目录能够保留这种异构性，也能直接使用 Coding Agent、编辑器和 Git，而无需先设计 Artifact 类型体系或专用编辑器。
 
-```text
-<Electron userData>/repository/artifacts/<artifact>/
-├── AGENTS.md
-└── ...
-```
+当前统一 Repository 的 `artifacts/` 下，每个带可读取根 `AGENTS.md` 的一级真实目录是一个 Artifact。目录名表达当前身份，其他内部结构由内容决定。隐藏目录、symlink 目录以及缺少根 `AGENTS.md` 的目录不被当作 Artifact。
 
-带可读取普通根 `AGENTS.md` 的一级真实目录是一个 Artifact；该文件保存持久 Attention，并作为维护目标、证据边界、质量义务和完成条件的自然语言表达载体，其他内部结构任意。四项内容是否表达充分属于 Artifact 的内容质量，不是当前文件层的有效性 Schema。目录名是当前 locator。隐藏目录、symlink 目录以及缺少普通根 `AGENTS.md` 的目录不成为 Artifact。
+选择 `AGENTS.md` 是为了复用 Coding Agent 生态已经理解的上下文约定。它以自然语言说明如何维护当前 Artifact；说明质量由用户与 Agent判断，不使用固定 Schema 作为有效性门槛。Agent Runtime 的 System Prompt 具有更高信任优先级，MVP 不为两者的潜在冲突增加治理层。
 
-工作台是 Artifact 文件层面向用户的界面投影。它直接扫描 `repository/artifacts/`，显示有效 Artifact 和无效目录，并允许用户浏览 Artifact 或在系统文件管理器中打开其实际目录。工作台不拥有 Artifact，不引入新的 Repository、Project 或 Workspace，也不改变 Artifact 的身份和生命周期。
+## 工作台
 
-当前工作台不提供手动创建 Artifact 的表单或 IPC。用户在对话中表达需要长期保留和维护的实际内容后，通用 Chat Agent 使用普通文件工具建立 Artifact 目录与根 `AGENTS.md`；未来模板也只帮助用户形成对话起点，不直接建立空 Artifact。用户和其他已获授权的机制仍可以直接修改正式文件层。初始化和 Git Runtime 由统一 Repository 负责。
+工作台是 Artifact 面向用户的浏览与未来维护界面。它读取同一正式文件，不拥有副本，也不引入 Project、Workspace、Artifact 类型或新的生命周期。
 
-Skill Artifact 仍可在 Artifact 内使用真实 `output/` 和 `output/SKILL.md`，并由 Skill 页面派生注册视图。该约定不改变 Artifact 的通用文件语义。
+当前用户通过与 Chat Agent 对话表达需要长期维护的内容，由 Agent 创建和修改 Artifact。工作台不提供手动创建空目录的表单；未来模板也应帮助用户形成对话目标，而不是绕过 Agent 创建空壳。
 
-Artifact 内容当前可以由用户、Chat Agent 或 Knowledge Processing Task 中的 Agent 直接修改，并能与 `knowledge/` 变化进入同一个 commit。Task 只引用这些路径，不建立 Artifact 副本或 symlink。工作台当前只读浏览这些内容；未来增加界面内维护能力时也必须直接修订同一正式文件层。
+文件浏览器提供底层、通用的检查方式。当前界面只读并不限制 Artifact 本身只能由 Agent 修改；普通编辑器、用户和其他获得授权的机制都可以维护相同文件。
 
-上述入口只是当前实现，不定义 Artifact 的唯一维护者。Artifact 文件层不预设全局 Maintainer、Reviewer、Critic 或固定多 Agent 编排；具体维护方式可以结合 Artifact 说明，采用单个通用 Agent、临时 subagent、其他多 Agent 流程或非 Agent 机制。任务内临时分工不因此成为 Artifact Domain 的角色，正式审批或 promotion 也必须由采用它的具体工作流另行定义。
+## 与 Knowledge、Task 和 Skill 的关系
+
+Artifact 内容不会仅因存在而成为 Knowledge。一次有意义的维护可以同时修改两者并进入同一 Git revision。
+
+Knowledge Processing Task 在自己的 branch/worktree 中修改正式 Artifact，但不复制 Artifact 树。Task 中临时使用的 Maintainer、Reviewer 或 subagent 也不会变成 Artifact Domain 的固定角色。
+
+Skill 作为 Artifact 的一种实际用途，继续保持完整目录与普通 Artifact 规则。如何声明 Skill intent 以及如何绑定到外部 Agent，由[Skill 文件系统绑定](skill-symlink-injection-mvp.md)单独说明。
+
+## 待验证的候选方向
+
+工作台未来可能提供比文件浏览更贴近产物的内容视图。一个候选约定是：仅当 Artifact 根存在普通 `index.html` 时，工作台可在隔离环境中提供静态交互页面，并继续保留文件浏览器。
+
+这不是当前实现或 Artifact 有效性契约。`index.html` 仍是普通文件，不建立新的 Artifact 类型或 manifest。页面可访问的本地资源、脚本、网络和持久化边界，需要通过真实用户场景验证后另行设计。

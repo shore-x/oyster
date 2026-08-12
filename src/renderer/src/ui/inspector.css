@@ -1,0 +1,72 @@
+.ui-inspector {
+  position: fixed;
+  z-index: 40;
+  top: 64px;
+  right: 16px;
+  bottom: 16px;
+  display: grid;
+  min-width: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--surface-card);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-overlay);
+  box-shadow: var(--shadow-overlay);
+  -webkit-app-region: no-drag;
+}
+
+.ui-inspector--narrow { width: min(480px, calc(100vw - var(--sidebar-width) - 32px)); }
+.ui-inspector--medium { width: min(620px, calc(100vw - var(--sidebar-width) - 32px)); }
+.ui-inspector--wide { width: min(780px, calc(100vw - var(--sidebar-width) - 32px)); }
+
+.ui-inspector__toolbar {
+  display: flex;
+  min-width: 0;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 8px 10px 8px 16px;
+  background: rgba(255, 255, 255, .96);
+  border-bottom: 1px solid var(--border-default);
+  backdrop-filter: blur(8px);
+}
+
+.ui-inspector__navigation { display: flex; min-width: 0; align-items: center; gap: var(--space-2); }
+.ui-inspector__identity { min-width: 0; }
+.ui-inspector__identity span,
+.ui-inspector__identity strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-inspector__identity span { color: var(--text-muted); font-size: var(--font-size-caption); }
+.ui-inspector__identity strong { color: var(--text-primary); font-size: var(--font-size-body-sm); font-weight: var(--font-weight-semibold); }
+.ui-inspector__identity span + strong { margin-top: 2px; }
+
+.ui-inspector__back,
+.ui-inspector__close {
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 32px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  font-size: var(--font-size-caption);
+}
+
+.ui-inspector__back:hover,
+.ui-inspector__close:hover { color: var(--text-secondary); background: var(--surface-hover); }
+.ui-inspector__back:focus-visible,
+.ui-inspector__close:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--control-primary-ring); }
+.ui-inspector__back .ui-icon,
+.ui-inspector__close .ui-icon { width: 14px; height: 14px; }
+
+.ui-inspector__content {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}

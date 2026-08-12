@@ -130,8 +130,7 @@ const knowledgeProcessing: KnowledgeProcessingApi = {
 const knowledge: KnowledgeApi = {
   browse: (input) => ipcRenderer.invoke(knowledgeChannels.browse, input),
   read: (title) => ipcRenderer.invoke(knowledgeChannels.read, title),
-  getNeighborhood: (title) => ipcRenderer.invoke(knowledgeChannels.getNeighborhood, title),
-  clear: () => ipcRenderer.invoke(knowledgeChannels.clear)
+  getNeighborhood: (title) => ipcRenderer.invoke(knowledgeChannels.getNeighborhood, title)
 }
 
 const artifacts: ArtifactApi = {
@@ -161,7 +160,6 @@ const chat: ChatApi = {
     chatChannels.readConversation,
     conversationId
   ),
-  deleteConversation: (input) => ipcRenderer.invoke(chatChannels.deleteConversation, input),
   sendMessage: (input) => ipcRenderer.invoke(chatChannels.sendMessage, input),
   cancelInvocation: (input) => ipcRenderer.invoke(chatChannels.cancelInvocation, input),
   saveDefaultInstructions: (input) => ipcRenderer.invoke(

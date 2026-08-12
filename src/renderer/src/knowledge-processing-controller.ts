@@ -71,7 +71,7 @@ export function createKnowledgeProcessingController() {
     const previewInvocations = state().liveInvocations.filter(
       (view) => view.origin === 'agent_preview'
     )
-    setHiddenPreviewInvocationId(previewInvocations.at(-1)?.invocation.id)
+    setHiddenPreviewInvocationId(previewInvocations.at(-1)?.invocation.invocationId)
     setMaintenanceResult(undefined)
   }
 
@@ -84,7 +84,7 @@ export function createKnowledgeProcessingController() {
       view.origin === origin
       && !(
         origin === 'agent_preview'
-        && view.invocation.id === hiddenPreviewInvocationId()
+        && view.invocation.invocationId === hiddenPreviewInvocationId()
         && view.invocation.status !== 'in_progress'
       )
     ))

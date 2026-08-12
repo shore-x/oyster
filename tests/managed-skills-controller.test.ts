@@ -32,8 +32,8 @@ function managedSkill(overrides: Partial<ManagedSkillSummary> = {}): ManagedSkil
   return {
     artifactDirectoryName: 'review-skill',
     artifactPath: '/app-data/artifacts/review-skill',
-    outputPath: '/app-data/artifacts/review-skill/output',
-    documentPath: '/app-data/artifacts/review-skill/output/SKILL.md',
+    skillPath: '/app-data/artifacts/review-skill',
+    documentPath: '/app-data/artifacts/review-skill/SKILL.md',
     name: 'review',
     description: 'Review changes before delivery.',
     status: 'ready',
@@ -50,7 +50,7 @@ function documentFor(artifactDirectoryName: string): ManagedSkillDocument {
   const content = '# Review\n\nKeep the change focused.'
   return {
     artifactDirectoryName,
-    documentPath: `/app-data/artifacts/${artifactDirectoryName}/output/SKILL.md`,
+    documentPath: `/app-data/artifacts/${artifactDirectoryName}/SKILL.md`,
     fileName: 'SKILL.md',
     content,
     sizeBytes: Buffer.byteLength(content),

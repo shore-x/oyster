@@ -2,7 +2,7 @@ import { For, Show, createEffect, createSignal, type JSX } from 'solid-js'
 import type { ArtifactSummary } from '../../../shared/artifacts'
 import { createArtifactsController } from '../artifacts-controller'
 import { appLanguage, uiText } from '../i18n'
-import { Button, Icon, Markdown } from '../ui'
+import { Button, Icon, Markdown, Tab, TabList } from '../ui'
 import { FolderBrowserPage } from './FolderBrowserPage'
 import './ArtifactsPage.css'
 
@@ -98,7 +98,7 @@ function ArtifactCard(props: {
     <FolderCard
       testId="artifact-card"
       title={props.artifact.directoryName}
-      description={`${uiText('更新于', 'Updated')} ${modifiedAtLabel(props.artifact.modifiedAt)}`}
+      description={`${uiText('说明更新于', 'Guidance updated')} ${modifiedAtLabel(props.artifact.modifiedAt)}`}
       badge={props.artifact.skill ? {
         class: 'artifact-skill-badge',
         label: 'Skill',
@@ -124,16 +124,16 @@ function ArtifactCard(props: {
               <section class={`artifact-card__skill artifact-card__skill--${skill().status}`} data-testid="artifact-skill-summary">
                 <div class="artifact-card__skill-identity">
                   <div>
-                    <strong>{skill().name || uiText('Skill 输出', 'Skill output')}</strong>
+                    <strong>{skill().name || 'Skill'}</strong>
                     <span>{skill().status === 'ready'
                       ? uiText('可在目标 Agent 中绑定', 'Can be bound in target Agents')
-                      : uiText('输出暂不可绑定', 'Output cannot be bound')}</span>
+                      : uiText('当前 Skill 暂不可绑定', 'This Skill cannot be bound')}</span>
                   </div>
                   <span class={`artifact-card__skill-status artifact-card__skill-status--${skill().status}`}>
-                    {skill().status === 'ready' ? uiText('可绑定', 'Ready') : uiText('输出无效', 'Invalid output')}
+                    {skill().status === 'ready' ? uiText('可绑定', 'Ready') : uiText('声明无效', 'Invalid declaration')}
                   </span>
                 </div>
-                <code data-testid="artifact-skill-output-path" title={skill().outputPath}>{skill().outputPath}</code>
+                <code data-testid="artifact-skill-path" title={skill().skillPath}>{skill().skillPath}</code>
                 <Show when={skill().issue}>
                   <p><Icon name="warning" />{skill().issue}</p>
                 </Show>
@@ -211,22 +211,18 @@ export function ArtifactsPage(props: {
         </div>
       </header>
 
-      <div class="page-tabs artifacts-page__tabs" role="tablist" aria-label={uiText('工作台视图', 'Workbench views')}>
-        <button
-          type="button"
-          role="tab"
+      <TabList class="page-tabs artifacts-page__tabs" ariaLabel={uiText('工作台视图', 'Workbench views')}>
+        <Tab
           data-testid="artifacts-tab-overview"
-          aria-selected={view() === 'overview'}
+          selected={view() === 'overview'}
           onClick={() => setView('overview')}
-        >{uiText('概览', 'Overview')}</button>
-        <button
-          type="button"
-          role="tab"
+        >{uiText('概览', 'Overview')}</Tab>
+        <Tab
           data-testid="artifacts-tab-files"
-          aria-selected={view() === 'files'}
+          selected={view() === 'files'}
           onClick={() => setView('files')}
-        >{uiText('文件', 'Files')}</button>
-      </div>
+        >{uiText('文件', 'Files')}</Tab>
+      </TabList>
 
       <div class="artifacts-page__panel artifacts-page__panel--overview" hidden={view() !== 'overview'}>
         <Show when={controller.error()}>

@@ -22,7 +22,6 @@ function installApi(overrides: Partial<KnowledgeApi> = {}): KnowledgeApi {
       edges: [],
       unresolvedReferences: []
     }),
-    clear: async () => ({ deletedStatementCount: 2, deletedContributionCount: 1 }),
     ...overrides
   }
   vi.stubGlobal('window', { oyster: { knowledge: api } })
@@ -49,26 +48,6 @@ describe('knowledge controller', () => {
         expect(controller.selectedTitle()).toBe('Database')
         expect(controller.statement()).toEqual({ title: 'Database', content: 'Database body.' })
         expect(controller.neighborhood()?.centerTitle).toBe('Database')
-      } finally {
-        dispose()
-      }
-    })
-  })
-
-  it('clears the visible knowledge only after the Store confirms success', async () => {
-    const api = installApi()
-    const clear = vi.spyOn(api, 'clear')
-
-    await createRoot(async (dispose) => {
-      try {
-        const controller = createKnowledgeController()
-        await controller.browse()
-        await expect(controller.clear()).resolves.toBe(true)
-
-        expect(clear).toHaveBeenCalledOnce()
-        expect(controller.result()).toEqual({ statements: [], total: 0 })
-        expect(controller.statement()).toBeUndefined()
-        expect(controller.clearResult()).toEqual({ deletedStatementCount: 2 })
       } finally {
         dispose()
       }

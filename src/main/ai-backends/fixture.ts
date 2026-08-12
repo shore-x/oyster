@@ -10,8 +10,7 @@ import {
 import { AiBackendService, type CodingPlanBackend } from './ai-backend-service'
 import { MemoryCredentialStore } from './credential-store'
 import type {
-  AgentBackendAdapter,
-  AgentTaskRequest,
+  CodexAccountDiscovery,
   SelectedModelStream,
   ModelBackendAdapter,
   ModelGenerationRequest,
@@ -19,9 +18,7 @@ import type {
 } from './model'
 import { InMemoryAiBackendRepository } from './repository'
 
-class FixtureAgentAdapter implements AgentBackendAdapter {
-  readonly id = 'codex' as const
-
+class FixtureAgentAdapter implements CodexAccountDiscovery {
   async inspect(): Promise<AiConnection> {
     return {
       id: 'runtime:codex',
@@ -39,10 +36,6 @@ class FixtureAgentAdapter implements AgentBackendAdapter {
     }
   }
 
-  async connect(): Promise<undefined> { return undefined }
-  cancelConnect(): void {}
-  async runTask(_request: AgentTaskRequest): Promise<{ text: string }> { return { text: 'OYSTER' } }
-  subscribe(_listener: () => void): () => void { return () => undefined }
   dispose(): void {}
 }
 

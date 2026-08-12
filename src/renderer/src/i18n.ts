@@ -5,19 +5,21 @@ import {
   type AppSettingsView
 } from '../../shared/app-settings'
 
-const [language, setLanguage] = createSignal<AppLanguage>(DEFAULT_APP_SETTINGS.language)
+const [language, setLanguage] = createSignal<AppLanguage>(DEFAULT_APP_SETTINGS.uiLanguage)
+const [agentLanguage, setAgentLanguage] = createSignal<AppLanguage>(DEFAULT_APP_SETTINGS.agentLanguage)
 const [settings, setSettings] = createSignal<AppSettingsView>()
 const [loading, setLoading] = createSignal(true)
 const [error, setError] = createSignal<string>()
 
 function apply(value: AppSettingsView): void {
   setSettings(value)
-  setLanguage(value.language)
+  setLanguage(value.uiLanguage)
+  setAgentLanguage(value.agentLanguage)
   setError(value.error)
-  document.documentElement.lang = value.language
+  document.documentElement.lang = value.uiLanguage
 }
 
-export async function loadAppLanguage(): Promise<void> {
+export async function loadAppSettings(): Promise<void> {
   try {
     setLoading(true)
     setError(undefined)
@@ -29,11 +31,14 @@ export async function loadAppLanguage(): Promise<void> {
   }
 }
 
-export async function saveAppLanguage(value: AppLanguage): Promise<void> {
+async function saveLanguages(uiLanguage: AppLanguage, nextAgentLanguage: AppLanguage): Promise<void> {
   try {
     setLoading(true)
     setError(undefined)
-    apply(await window.oyster.appSettings.saveSettings({ language: value }))
+    apply(await window.oyster.appSettings.saveSettings({
+      uiLanguage,
+      agentLanguage: nextAgentLanguage
+    }))
   } catch (cause) {
     setError(cause instanceof Error ? cause.message : String(cause))
   } finally {
@@ -41,19 +46,31 @@ export async function saveAppLanguage(value: AppLanguage): Promise<void> {
   }
 }
 
+export function saveUiLanguage(value: AppLanguage): Promise<void> {
+  return saveLanguages(value, agentLanguage())
+}
+
+export function saveAgentLanguage(value: AppLanguage): Promise<void> {
+  return saveLanguages(language(), value)
+}
+
 export function appLanguage(): AppLanguage {
   return language()
 }
 
-export function appLanguageSettings(): AppSettingsView | undefined {
+export function agentOutputLanguage(): AppLanguage {
+  return agentLanguage()
+}
+
+export function currentAppSettings(): AppSettingsView | undefined {
   return settings()
 }
 
-export function appLanguageLoading(): boolean {
+export function appSettingsLoading(): boolean {
   return loading()
 }
 
-export function appLanguageError(): string | undefined {
+export function appSettingsError(): string | undefined {
   return error()
 }
 

@@ -137,7 +137,7 @@ describe('ChatAgentService', () => {
       modelId: 'next-default-model',
       reasoningEffort: 'low'
     })
-    expect((await fixture.service.readConversation(first.id)).binding).toEqual(first.binding)
+    expect((await fixture.service.readConversation(first.conversationId)).binding).toEqual(first.binding)
     await fixture.conversations.dispose()
   })
 
@@ -159,10 +159,10 @@ describe('ChatAgentService', () => {
     await fixture.service.saveDefaultInstructions({ instructionsOverride: customPrompt })
     const conversation = await fixture.service.createConversation({})
     await fixture.service.saveDefaultInstructions({ instructionsOverride: null })
-    expect((await fixture.conversations.open(conversation.id)).binding.systemPrompt).toBe(customPrompt)
+    expect((await fixture.conversations.open(conversation.conversationId)).binding.systemPrompt).toBe(customPrompt)
 
     const detail = await fixture.service.sendMessage({
-      conversationId: conversation.id,
+      conversationId: conversation.conversationId,
       text: 'Please inspect the repository.'
     })
     expect(fixture.callCount()).toBe(1)
@@ -173,12 +173,12 @@ describe('ChatAgentService', () => {
     expect(detail.invocations[0].toolCalls).toEqual([])
     expect(events).toContainEqual(expect.objectContaining({
       type: 'invocation_state_changed',
-      conversationId: conversation.id,
+      conversationId: conversation.conversationId,
       status: 'completed'
     }))
     expect(events).toContainEqual(expect.objectContaining({
       type: 'invocation_updated',
-      conversationId: conversation.id,
+      conversationId: conversation.conversationId,
       invocation: expect.objectContaining({ status: 'completed' })
     }))
     const snapshot = await fixture.service.getState()
@@ -248,7 +248,7 @@ describe('ChatAgentService', () => {
     const conversation = await fixture.service.createConversation({})
 
     const detail = await fixture.service.sendMessage({
-      conversationId: conversation.id,
+      conversationId: conversation.conversationId,
       text: `Delegate this without sharing ${parentOnlyContext}.`
     })
 
@@ -278,21 +278,21 @@ describe('ChatAgentService', () => {
       invocationId: string
       sessionId: string
     }
-    expect(details.invocationId).not.toBe(conversation.id)
+    expect(details.invocationId).not.toBe(conversation.conversationId)
     expect(details.sessionId).toBe(details.invocationId)
     expect(JSON.stringify(details)).not.toContain(parentOnlyContext)
     expect(detail.invocations).toHaveLength(2)
     const rootInvocation = detail.invocations.find((invocation) => invocation.parentInvocationId === undefined)
-    const childInvocation = detail.invocations.find((invocation) => invocation.id === details.invocationId)
+    const childInvocation = detail.invocations.find((invocation) => invocation.invocationId === details.invocationId)
     expect(rootInvocation).toMatchObject({
-      formatVersion: 3,
+      formatVersion: 4,
       agentId: 'chat_agent',
       status: 'completed'
     })
     expect(childInvocation).toMatchObject({
-      formatVersion: 3,
+      formatVersion: 4,
       agentId: 'chat_agent',
-      parentInvocationId: rootInvocation?.id,
+      parentInvocationId: rootInvocation?.invocationId,
       status: 'completed'
     })
 
@@ -322,7 +322,7 @@ describe('ChatAgentService', () => {
     const conversation = await fixture.service.createConversation({})
 
     const detail = await fixture.service.sendMessage({
-      conversationId: conversation.id,
+      conversationId: conversation.conversationId,
       text: 'Delegate the investigation.'
     })
 
@@ -339,7 +339,7 @@ describe('ChatAgentService', () => {
       text: 'Parent recovered from the child failure.'
     })
     const rootInvocation = detail.invocations.find((invocation) => invocation.parentInvocationId === undefined)
-    const childInvocation = detail.invocations.find((invocation) => invocation.parentInvocationId === rootInvocation?.id)
+    const childInvocation = detail.invocations.find((invocation) => invocation.parentInvocationId === rootInvocation?.invocationId)
     expect(rootInvocation).toMatchObject({ agentId: 'chat_agent', status: 'completed' })
     expect(childInvocation).toMatchObject({
       agentId: 'chat_agent',
@@ -387,7 +387,7 @@ describe('ChatAgentService', () => {
     const conversation = await fixture.service.createConversation({})
 
     const detail = await fixture.service.sendMessage({
-      conversationId: conversation.id,
+      conversationId: conversation.conversationId,
       text: `Delegate recursively while keeping ${parentOnlyContext} private.`
     })
 
@@ -447,7 +447,7 @@ describe('ChatAgentService', () => {
     const conversation = await fixture.service.createConversation({})
 
     const detail = await fixture.service.sendMessage({
-      conversationId: conversation.id,
+      conversationId: conversation.conversationId,
       text: 'Exercise the filesystem tools.'
     })
 
@@ -508,7 +508,7 @@ describe('ChatAgentService', () => {
     ))
     const fixture = await serviceFixture([...toolCalls, fauxAssistantMessage('Finished.')])
     const conversation = await fixture.service.createConversation({})
-    const detail = await fixture.service.sendMessage({ conversationId: conversation.id, text: 'Search widely.' })
+    const detail = await fixture.service.sendMessage({ conversationId: conversation.conversationId, text: 'Search widely.' })
 
     expect(fixture.callCount()).toBe(13)
     expect(detail.messages.filter((entry) => (
@@ -608,12 +608,12 @@ describe('ChatAgentService', () => {
       events.push(event)
     })
 
-    const send = service.sendMessage({ conversationId: conversation.id, text: 'Delegate a wait.' })
+    const send = service.sendMessage({ conversationId: conversation.conversationId, text: 'Delegate a wait.' })
     await Promise.race([
       childStarted,
       new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('child invocation did not start')), 500))
     ])
-    await service.cancelInvocation({ conversationId: conversation.id })
+    await service.cancelInvocation({ conversationId: conversation.conversationId })
     await expect(Promise.race([
       send,
       new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('invocation did not cancel')), 500))

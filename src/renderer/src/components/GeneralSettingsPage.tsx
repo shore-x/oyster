@@ -1,11 +1,13 @@
 import { Show } from 'solid-js'
 import type { AppLanguage } from '../../../shared/app-settings'
 import {
+  agentOutputLanguage,
   appLanguage,
-  appLanguageError,
-  appLanguageLoading,
-  appLanguageSettings,
-  saveAppLanguage,
+  appSettingsError,
+  appSettingsLoading,
+  currentAppSettings,
+  saveAgentLanguage,
+  saveUiLanguage,
   uiText
 } from '../i18n'
 import { Button, Icon } from '../ui'
@@ -18,34 +20,53 @@ export function GeneralSettingsPage(props: {
 }) {
   return (
     <div class="general-settings" data-testid="general-settings-page">
-      <Show when={appLanguageError()}>{(message) => (
+      <Show when={appSettingsError()}>{(message) => (
         <div class="page-error" role="status"><Icon name="warning" />{message()}</div>
       )}</Show>
 
       <section class="settings-card">
         <div class="settings-card__heading">
           <div>
-            <h2>{uiText('语言', 'Language')}</h2>
+            <h2>{uiText('语言', 'Languages')}</h2>
             <p>{uiText(
-              '统一控制 Oyster 界面，以及 Agent 回复和维护仓库时使用的自然语言。',
-              'Controls the Oyster interface and the natural language Agents use in replies and repository maintenance.'
+              '分别设置 Oyster 界面语言，以及 Agent 回复和维护 Repository 内容时使用的自然语言。',
+              'Set the Oyster interface language independently from the language Agents use in replies and Repository content.'
             )}</p>
           </div>
         </div>
         <label class="general-setting-row">
           <span>
-            <strong>{uiText('应用语言', 'Application language')}</strong>
+            <strong>{uiText('界面语言', 'Interface language')}</strong>
             <small>{uiText(
-              '切换后界面立即更新；新的 Agent Invocation 会自动收到相同的语言要求。',
-              'The interface updates immediately; new Agent Invocations automatically receive the same language instruction.'
+              '切换后界面、日期和数字格式会立即更新，不会改写现有内容。',
+              'The interface, dates, and number formats update immediately without rewriting existing content.'
             )}</small>
           </span>
           <select
             value={appLanguage()}
-            disabled={appLanguageLoading()}
-            data-testid="app-language-select"
-            aria-label={uiText('应用语言', 'Application language')}
-            onChange={(event) => void saveAppLanguage(event.currentTarget.value as AppLanguage)}
+            disabled={appSettingsLoading()}
+            data-testid="ui-language-select"
+            aria-label={uiText('界面语言', 'Interface language')}
+            onChange={(event) => void saveUiLanguage(event.currentTarget.value as AppLanguage)}
+          >
+            <option value="zh-CN">简体中文</option>
+            <option value="en-US">English</option>
+          </select>
+        </label>
+        <label class="general-setting-row">
+          <span>
+            <strong>{uiText('Agent 输出语言', 'Agent output language')}</strong>
+            <small>{uiText(
+              '新的 Agent Invocation 会使用该语言回复，并维护自然语言形式的 Repository 内容；已有内容保持不变。',
+              'New Agent Invocations use this language for replies and natural-language Repository content; existing content remains unchanged.'
+            )}</small>
+          </span>
+          <select
+            value={agentOutputLanguage()}
+            disabled={appSettingsLoading()}
+            data-testid="agent-language-select"
+            aria-label={uiText('Agent 输出语言', 'Agent output language')}
+            onChange={(event) => void saveAgentLanguage(event.currentTarget.value as AppLanguage)}
           >
             <option value="zh-CN">简体中文</option>
             <option value="en-US">English</option>
@@ -95,8 +116,8 @@ export function GeneralSettingsPage(props: {
         </div>
       </section>
 
-      <p class="general-settings__path" title={appLanguageSettings()?.settingsPath}>
-        {appLanguageSettings()?.settingsPath || uiText('正在读取应用设置…', 'Reading application settings…')}
+      <p class="general-settings__path" title={currentAppSettings()?.settingsPath}>
+        {currentAppSettings()?.settingsPath || uiText('正在读取应用设置…', 'Reading application settings…')}
       </p>
     </div>
   )

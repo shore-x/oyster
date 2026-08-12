@@ -96,7 +96,9 @@ describe('Knowledge Task worktree plan', () => {
     const guide = value.files.find((file) => file.relativePath === 'inputs/README.md')
 
     expect(guide?.content).toContain('raw:test@sha256:fixture')
-    expect(guide?.content).toContain('fixed, Host-materialized input view')
+    expect(guide?.content).toContain('fixed input view materialized when this Knowledge Processing Task is accepted')
+    expect(guide?.content).toContain('exact external content bytes successfully read')
+    expect(guide?.content).not.toContain('external source revision')
     expect(value.files.every((file) => !file.relativePath.startsWith('/'))).toBe(true)
   })
 

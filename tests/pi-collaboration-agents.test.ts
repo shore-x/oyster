@@ -43,8 +43,7 @@ async function taskWorktree(): Promise<KnowledgeTaskWorktree> {
     inputPath,
     targetBranch: 'main',
     branchName: 'task/worktree-test',
-    baseRepositoryRevision: 'a'.repeat(40),
-    taskStartRepositoryRevision: 'd'.repeat(40)
+    baseRepositoryRevision: 'a'.repeat(40)
   }
 }
 
@@ -116,7 +115,7 @@ describe('Pi collaboration Agents', () => {
         expect(context.tools?.map((tool) => tool.name)).toEqual([
           'read', 'bash', 'edit', 'write'
         ])
-        expect(context.systemPrompt).toContain('Application language: English.')
+        expect(context.systemPrompt).toContain('Agent output language: English.')
         expect(contextText(context)).toContain('Review the current Task branch checkout')
         expect(contextText(context)).not.toContain('read_evidence')
         expect(contextText(context)).not.toContain('Raw Evidence format')

@@ -14,21 +14,14 @@ import type {
   KnowledgeStatement,
   KnowledgeStatementSummary
 } from '../../../shared/knowledge'
-import {
-  knowledgeStatementExcerpt,
-  parseKnowledgeStatementContent
-} from '../../../shared/knowledge-reference'
+import { knowledgeStatementExcerpt } from '../../../shared/knowledge-reference'
 import {
   KnowledgeExplorerNavigation,
   type KnowledgeExplorerNavigationSnapshot
 } from '../knowledge-explorer-navigation'
-import { Button } from '../ui'
+import { Button, Markdown } from '../ui'
 import { KnowledgeReferenceExplorer } from './KnowledgeReferenceExplorer'
 import { uiText } from '../i18n'
-
-type StatementContentPart =
-  | { kind: 'text'; value: string }
-  | { kind: 'link'; target: string; label: string }
 
 interface StatementPreviewState {
   status: 'loading' | 'ready' | 'missing' | 'failed'
@@ -65,12 +58,6 @@ export interface KnowledgeStatementBrowserProps {
 
 export function statementPreview(content: string, limit = 220): string {
   return knowledgeStatementExcerpt(content, limit)
-}
-
-export function parseStatementContent(content: string): StatementContentPart[] {
-  return parseKnowledgeStatementContent(content).map((part) => part.kind === 'text'
-    ? part
-    : { kind: 'link', target: part.targetTitle, label: part.label })
 }
 
 export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps) {
@@ -114,7 +101,7 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
     })
   })
 
-  function showPreview(title: string, anchor: HTMLAnchorElement): void {
+  function showPreview(title: string, anchor: HTMLElement): void {
     const bounds = anchor.getBoundingClientRect()
     const width = Math.min(PREVIEW_MAX_WIDTH, window.innerWidth - PREVIEW_EDGE_GAP * 2)
     const left = Math.max(
@@ -283,29 +270,15 @@ export function KnowledgeStatementBrowser(props: KnowledgeStatementBrowserProps)
               </Show>
               <article data-testid="knowledge-statement-detail">
                 <h2>{statement().title}</h2>
-                <div class="knowledge-browser__content">
-                  <For each={parseStatementContent(statement().content)}>{(part) => (
-                    <Show when={part.kind === 'link' ? part : undefined} fallback={part.kind === 'text' ? part.value : ''}>
-                      {(link) => (
-                        <span class="knowledge-statement-link">
-                          <a
-                            href={`#statement-${encodeURIComponent(link().target)}`}
-                            aria-describedby={previewOverlay()?.target === link().target ? previewId : undefined}
-                            onMouseEnter={(event) => showPreview(link().target, event.currentTarget)}
-                            onMouseLeave={() => setPreviewOverlay(undefined)}
-                            onFocus={(event) => showPreview(link().target, event.currentTarget)}
-                            onBlur={() => setPreviewOverlay(undefined)}
-                            onClick={(event) => {
-                              event.preventDefault()
-                              setPreviewOverlay(undefined)
-                              void followLink(link().target)
-                            }}
-                          >{link().label}</a>
-                        </span>
-                      )}
-                    </Show>
-                  )}</For>
-                </div>
+                <Markdown
+                  class="knowledge-browser__content"
+                  text={statement().content}
+                  onOpenKnowledge={(title) => void followLink(title)}
+                  onPreviewKnowledge={(title, anchor) => {
+                    if (title && anchor) showPreview(title, anchor)
+                    else setPreviewOverlay(undefined)
+                  }}
+                />
               </article>
             </>
           )}

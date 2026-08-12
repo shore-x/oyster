@@ -104,8 +104,8 @@ function managedSkill(overrides: Partial<ManagedSkillSummary> = {}): ManagedSkil
   return {
     artifactDirectoryName: 'review-skill',
     artifactPath: '/app-data/artifacts/review-skill',
-    outputPath: '/app-data/artifacts/review-skill/output',
-    documentPath: '/app-data/artifacts/review-skill/output/SKILL.md',
+    skillPath: '/app-data/artifacts/review-skill',
+    documentPath: '/app-data/artifacts/review-skill/SKILL.md',
     name: 'review',
     description: 'Review changes before delivery.',
     status: 'ready',
@@ -187,7 +187,7 @@ describe('SkillsPage', () => {
     const html = renderToString(() => SkillsPage())
 
     expect(html).toContain('review-skill')
-    expect(html).toContain('/app-data/artifacts/review-skill/output')
+    expect(html).toContain('/app-data/artifacts/review-skill')
     expect(html).toContain('Claude Code')
     expect(html).toContain('Pi')
     expect(html).toContain('Codex')
@@ -202,7 +202,7 @@ describe('SkillsPage', () => {
     expect(html).not.toContain('<img')
     expect(html).not.toContain('file:///tmp/private.png')
     expect(html).toContain('data-testid="open-managed-skill-folder"')
-    expect(html).toContain('打开输出目录')
+    expect(html).toContain('打开 Artifact 文件夹')
   })
 
   it('previews an invalid Skill document and allows only an existing binding to be removed', () => {
@@ -231,9 +231,9 @@ describe('SkillsPage', () => {
 
     const html = renderToString(() => SkillsPage())
 
-    expect(html).toContain('输出无效')
+    expect(html).toContain('声明无效')
     expect(html).toContain('SKILL.md 缺少有效 name')
-    expect(html).toContain('当前输出不能创建新绑定')
+    expect(html).toContain('当前 Skill 声明不能创建新绑定')
     expect(html).toContain('<h1>Managed Review</h1>')
     expect(html).not.toContain('data-testid="bind-managed-skill"')
     expect(html).toContain('data-testid="unbind-managed-skill"')

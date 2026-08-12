@@ -61,7 +61,7 @@ describe('ArtifactsPage', () => {
     expect(html).toContain('data-testid="start-artifact-conversation"')
     expect(html).not.toContain('Oyster 设计文档')
     expect(html).toContain('agent-memory-tracking')
-    expect(html).toContain('更新于')
+    expect(html).toContain('说明更新于')
     expect(html).toContain('目标与维护说明')
     expect(html).toContain('>Attention Track agent memory research.</span>')
     expect(html).not.toContain('># Attention Track agent memory research.</span>')
@@ -74,7 +74,7 @@ describe('ArtifactsPage', () => {
     expect(html).not.toContain('data-testid="manage-artifact-skill"')
   })
 
-  it('marks a Skill Artifact and links its output to the dedicated Skills management view', () => {
+  it('marks a Skill Artifact and links it to the dedicated Skills management view', () => {
     const snapshot: ArtifactSnapshot = {
       repositoryPath: '/app-data/artifacts',
       artifacts: [{
@@ -83,8 +83,8 @@ describe('ArtifactsPage', () => {
         attention: '# Attention\n\nMaintain review guidance.',
         modifiedAt: '2026-07-30T09:00:00.000Z',
         skill: {
-          outputPath: '/app-data/artifacts/review-skill/output',
-          documentPath: '/app-data/artifacts/review-skill/output/SKILL.md',
+          skillPath: '/app-data/artifacts/review-skill',
+          documentPath: '/app-data/artifacts/review-skill/SKILL.md',
           name: 'review',
           description: 'Review changes before delivery.',
           status: 'ready'
@@ -98,13 +98,13 @@ describe('ArtifactsPage', () => {
     expect(html).toContain('data-testid="artifact-skill-summary"')
     expect(html).toContain('review')
     expect(html).toContain('可绑定')
-    expect(html).toContain('/app-data/artifacts/review-skill/output')
+    expect(html).toContain('/app-data/artifacts/review-skill')
     expect(html).toContain('data-testid="manage-artifact-skill"')
     expect(html).toContain('在 Skills 中管理')
     expect(html).not.toContain('data-testid="bind-managed-skill"')
   })
 
-  it('shows an invalid Skill output as a diagnosable Artifact without binding controls', () => {
+  it('shows an invalid root Skill declaration as a diagnosable Artifact without binding controls', () => {
     const snapshot: ArtifactSnapshot = {
       repositoryPath: '/app-data/artifacts',
       artifacts: [{
@@ -113,9 +113,10 @@ describe('ArtifactsPage', () => {
         attention: '# Attention\n\nRepair this output.',
         modifiedAt: '2026-07-30T09:00:00.000Z',
         skill: {
-          outputPath: '/app-data/artifacts/broken-skill/output',
+          skillPath: '/app-data/artifacts/broken-skill',
+          documentPath: '/app-data/artifacts/broken-skill/SKILL.md',
           status: 'invalid',
-          issue: '缺少 output/SKILL.md'
+          issue: 'SKILL.md 缺少有效 name'
         }
       }],
       invalidDirectories: []
@@ -123,8 +124,8 @@ describe('ArtifactsPage', () => {
     const html = renderPage({ snapshot })
 
     expect(html).toContain('Skill')
-    expect(html).toContain('输出无效')
-    expect(html).toContain('缺少 output/SKILL.md')
+    expect(html).toContain('声明无效')
+    expect(html).toContain('SKILL.md 缺少有效 name')
     expect(html).toContain('在 Skills 中管理')
     expect(html).not.toContain('data-testid="bind-managed-skill"')
   })

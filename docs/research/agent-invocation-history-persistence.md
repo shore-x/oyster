@@ -1,12 +1,10 @@
 # Agent Invocation 历史持久化研究
 
-> 状态：已归档；当前结论已实施
+> 历史研究：保留当时的比较与证据，不作为当前实现规格。现行边界见 [Agent Runtime](../architecture/agent-runtime.md)。
 >
 > 初始研究：2026-08-06
 >
-> 更新：2026-08-11
->
-> 当前规范：[Oyster 术语与执行模型](../architecture/terminology.md)、[Agent Runtime](../architecture/agent-runtime.md)、[ADR-0002](../decisions/0002-unified-git-agent-collaboration.md)
+> 最后研究更新：2026-08-11
 
 ## 1. 研究问题
 
@@ -32,7 +30,7 @@
 
 共同点是“端到端活动与内部操作分层”，而不是某一套统一术语或数据库。Langfuse 的分析存储、OpenTelemetry exporter、采样和远端 Trace 后端服务于跨执行聚合；当前 Oyster 没有证据需要这些机制。
 
-## 3. 采用的领域模型
+## 3. 当时形成的模型
 
 Oyster 采用以下最小关系：
 
@@ -58,7 +56,7 @@ Agent Invocation ──ref──> Local Agent Debug Record
 
 Task 的活动态是 `open`；Invocation 的活动态是 `in_progress`。Invocation 终态不可继续追加，但失败或取消不会自动终结所属 Task。
 
-## 4. 当前持久化结论
+## 4. 当时形成的持久化结论
 
 ### 4.1 三层持久化
 
@@ -105,7 +103,7 @@ interface AgentInvocationRecord {
 
 Chat Conversation 使用 Pi `SessionManager` 的 append-only JSONL 保存完整 message、Tool Result 和 compaction。每次根 Invocation 在 envelope 中记录开始与结束 entry；子 Agent 使用带 `parentSession` 的独立持久化 Session，不把完整子 transcript 复制回父 Tool Result。
 
-Knowledge Maintainer 和 Reviewer 的每个 Invocation 也创建持久化 Session，位于 `tasks/<taskId>/pi-sessions/`。这消除了“Chat 持久化、Knowledge 内存态”的特殊分支，使所有 Agent 执行都能按 Pi 原生格式检查。
+当时方案让 Knowledge Maintainer 和 Reviewer 的 Invocation 也保存 Runtime 原生历史，以消除“Chat 持久化、Knowledge 内存态”的特殊分支。原文采用的具体 Task 路径与 Git 跟踪方式后来继续演进，不应从本文推导当前 Repository 契约。
 
 ### 4.3 本地 Debug Store
 
@@ -125,9 +123,9 @@ API Key、Authorization、Cookie 等 credential-bearing header 值不会写入�
 - 按实际启动顺序保存的全部精简 `agentInvocations` envelope；
 - 成功时保存结果和 Collaboration Round；Invocation 失败或取消时保存 `lastError` 并保持 `open`。
 
-Task start commit 保存初始记录，后续 Host checkpoint 追加 Invocation、Review 和结果历史。Task/Pi Session/Knowledge/Artifact 由同一 branch 跟踪。
+当时方案让 Task 定义、执行摘要和领域修改共享一条 Git 历史。后续已经改为由 Agent 自己维护 Git，Runtime 不再代替 Agent 创建 checkpoint；当前边界以架构文档为准。
 
-Source Snapshot 在 Task 接受前被拒绝时不创建 Task branch。Task 接受后的失败和取消保存为可恢复 checkpoint。历史从 `task/*` 和 `main:tasks/` 读取；旧版 Git 外记录只读兼容，不再删除。
+当时方案还把输入接受、失败保存与历史枚举绑定到特定 branch 和 checkpoint 机制。这些实现细节已经演进，本文只保留“Task 与 Invocation 生命周期需要分开”这一研究结论。
 
 ### 4.5 Chat Conversation 历史
 
@@ -159,4 +157,4 @@ Task 与 Chat 不需要共享一个全局 Invocation 数据库。它们各自拥
 
 ## 7. 结论
 
-当前设计用最薄的三层边界解决问题：Task / Conversation 记录业务，Invocation envelope 记录一次 Agent 生命周期，Pi Session 保存原生执行历史，Debug Record 保存本地检查所需的完整内部活动。Trace / Span 留给未来真正的遥测需求。早期 SQLite、单一大型 Invocation 快照、内存 Knowledge Session、`runId` 和平行 Provider transport 均不再是实现规范。
+这轮研究支持一个仍有效的边界：Task / Conversation 记录业务，Invocation 记录一次 Agent 生命周期，Runtime 原生历史保存继续执行所需的活动，Debug Record 保存本地检查所需的信息；Trace / Span 留给未来真正的遥测需求。文中的类型示例和存储位置只记录当时方案，不作为当前实现规范。

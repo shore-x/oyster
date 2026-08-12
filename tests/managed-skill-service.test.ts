@@ -56,9 +56,8 @@ async function writeArtifact(
 ): Promise<string> {
   const artifactPath = join(repository.artifactsPath, directoryName)
   await write(join(artifactPath, 'AGENTS.md'), '# Attention\n\nMaintain this Skill.\n')
-  await mkdir(join(artifactPath, 'output'), { recursive: true })
   if (skillDocument !== undefined) {
-    await write(join(artifactPath, 'output', 'SKILL.md'), skillDocument)
+    await write(join(artifactPath, 'SKILL.md'), skillDocument)
   }
   return artifactPath
 }
@@ -89,8 +88,8 @@ describe('ManagedSkillService', () => {
     expect(snapshot.skills).toEqual([expect.objectContaining({
       artifactDirectoryName: 'review-artifact',
       artifactPath,
-      outputPath: join(artifactPath, 'output'),
-      documentPath: join(artifactPath, 'output', 'SKILL.md'),
+      skillPath: artifactPath,
+      documentPath: join(artifactPath, 'SKILL.md'),
       name: 'review',
       description: 'Review changes before delivery.',
       status: 'ready'
@@ -142,10 +141,10 @@ describe('ManagedSkillService', () => {
     ])
   })
 
-  it('creates an absolute output symlink idempotently and removes only that link', async () => {
+  it('creates an absolute Artifact symlink idempotently and removes only that link', async () => {
     const { homeDirectory, repository, service } = await fixture()
     const artifactPath = await writeArtifact(repository, 'review-artifact', skillDocument())
-    const outputPath = join(artifactPath, 'output')
+    const skillPath = artifactPath
     const bindingPath = join(homeDirectory, '.claude', 'skills', 'review')
 
     const bound = await service.bind({
@@ -153,19 +152,19 @@ describe('ManagedSkillService', () => {
       targetId: 'claude:user'
     })
     expect((await lstat(bindingPath)).isSymbolicLink()).toBe(true)
-    expect(await readlink(bindingPath)).toBe(resolve(outputPath))
+    expect(await readlink(bindingPath)).toBe(resolve(skillPath))
     expect(bound.skills[0].targets.find((target) => target.id === 'claude:user')?.state).toBe('bound')
 
     await service.bind({ artifactDirectoryName: 'review-artifact', targetId: 'claude:user' })
-    await writeFile(join(outputPath, 'live.txt'), 'current output', 'utf8')
-    expect(await readFile(join(bindingPath, 'live.txt'), 'utf8')).toBe('current output')
+    await writeFile(join(skillPath, 'live.txt'), 'current content', 'utf8')
+    expect(await readFile(join(bindingPath, 'live.txt'), 'utf8')).toBe('current content')
 
     const unbound = await service.unbind({
       artifactDirectoryName: 'review-artifact',
       targetId: 'claude:user'
     })
     await expect(lstat(bindingPath)).rejects.toMatchObject({ code: 'ENOENT' })
-    expect((await lstat(outputPath)).isDirectory()).toBe(true)
+    expect((await lstat(skillPath)).isDirectory()).toBe(true)
     expect(unbound.skills[0].targets.find((target) => target.id === 'claude:user')?.state).toBe('unbound')
 
     await expect(service.unbind({
@@ -177,7 +176,7 @@ describe('ManagedSkillService', () => {
   it('finds and safely unbinds the old symlink after the Skill name changes or becomes invalid', async () => {
     const { homeDirectory, repository, service } = await fixture()
     const artifactPath = await writeArtifact(repository, 'review-artifact', skillDocument())
-    const documentPath = join(artifactPath, 'output', 'SKILL.md')
+    const documentPath = join(artifactPath, 'SKILL.md')
     const oldBindingPath = join(homeDirectory, '.claude', 'skills', 'review')
     await service.bind({ artifactDirectoryName: 'review-artifact', targetId: 'claude:user' })
 
@@ -205,14 +204,14 @@ describe('ManagedSkillService', () => {
     await expect(lstat(renamedBindingPath)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('does not guess which link to remove when multiple symlinks target one output', async () => {
+  it('does not guess which link to remove when multiple symlinks target one Artifact', async () => {
     const { homeDirectory, repository, service } = await fixture()
     const artifactPath = await writeArtifact(repository, 'review-artifact', skillDocument())
     const registrationRoot = join(homeDirectory, '.claude', 'skills')
     await service.bind({ artifactDirectoryName: 'review-artifact', targetId: 'claude:user' })
     const firstPath = join(registrationRoot, 'review')
     const secondPath = join(registrationRoot, 'review-copy')
-    await symlink(join(artifactPath, 'output'), secondPath, 'dir')
+    await symlink(artifactPath, secondPath, 'dir')
 
     const snapshot = await service.getSnapshot()
     expect(snapshot.skills[0].targets.find((target) => target.id === 'claude:user')).toMatchObject({
@@ -259,24 +258,18 @@ describe('ManagedSkillService', () => {
     expect(await readlink(bindingPath)).toBe(otherTarget)
   })
 
-  it('keeps an incomplete output visible but refuses to bind it', async () => {
+  it('does not treat an ordinary Artifact without root SKILL.md as a Skill', async () => {
     const { repository, service } = await fixture()
     const artifactPath = await writeArtifact(repository, 'incomplete-skill')
 
     const snapshot = await service.getSnapshot()
 
-    expect(snapshot.skills).toEqual([expect.objectContaining({
-      artifactDirectoryName: 'incomplete-skill',
-      status: 'invalid',
-      issue: expect.stringContaining('缺少普通文件 SKILL.md')
-    })])
-    await expect(service.getFolderPath('incomplete-skill')).resolves.toBe(
-      join(artifactPath, 'output')
-    )
+    expect(snapshot.skills).toEqual([])
+    await expect(service.getFolderPath('incomplete-skill')).rejects.toThrow('不是 Skill Artifact')
     await expect(service.bind({
       artifactDirectoryName: 'incomplete-skill',
       targetId: 'codex:user'
-    })).rejects.toThrow('缺少普通文件 SKILL.md')
+    })).rejects.toThrow('不是 Skill Artifact')
   })
 
   it('previews a regular entry document even when its metadata is not injectable', async () => {

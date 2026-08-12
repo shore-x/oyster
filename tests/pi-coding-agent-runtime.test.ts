@@ -93,7 +93,7 @@ describe('Pi Coding Agent runtime retry', () => {
       )
 
       expect(systemPrompt).toContain('Test bounded transient-error retries.')
-      expect(systemPrompt).toContain('Application language: English.')
+      expect(systemPrompt).toContain('Agent output language: English.')
     } finally {
       invocation.dispose()
     }

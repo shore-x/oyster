@@ -1,17 +1,15 @@
 import { Show, createEffect, createSignal, onCleanup } from 'solid-js'
 import { createKnowledgeController } from '../knowledge-controller'
-import { Button, Icon } from '../ui'
+import { Icon } from '../ui'
 import { KnowledgeStatementBrowser } from './KnowledgeStatementBrowser'
 import { uiText } from '../i18n'
 
 export function KnowledgeBrowserPage(props: {
   active: boolean
   navigationRequest?: { title: string; version: number }
-  onKnowledgeCleared(): void
 }) {
   const controller = createKnowledgeController()
   const [query, setQuery] = createSignal('')
-  const [clearDialogOpen, setClearDialogOpen] = createSignal(false)
 
   let handledNavigationVersion = 0
   createEffect(() => {
@@ -29,13 +27,6 @@ export function KnowledgeBrowserPage(props: {
     onCleanup(() => clearTimeout(timer))
   })
 
-  async function confirmClear(): Promise<void> {
-    if (await controller.clear()) {
-      setClearDialogOpen(false)
-      props.onKnowledgeCleared()
-    }
-  }
-
   return (
     <>
       <header class="page-header">
@@ -47,26 +38,10 @@ export function KnowledgeBrowserPage(props: {
             <span>{uiText('当前持久知识', 'Current durable Knowledge')}</span>
           </div>
         </div>
-        <div class="page-header__actions">
-          <Button
-            variant="danger"
-            icon="trash"
-            data-testid="clear-knowledge"
-            disabled={controller.clearing() || controller.result().total === 0}
-            onClick={() => setClearDialogOpen(true)}
-          >{controller.clearing() ? uiText('正在清空…', 'Clearing…') : uiText('清空知识', 'Clear Knowledge')}</Button>
-        </div>
       </header>
 
       <Show when={controller.error()}>
         <div class="page-error"><Icon name="warning" />{controller.error()}</div>
-      </Show>
-      <Show when={controller.clearResult()}>
-        {(result) => (
-          <div class="knowledge-browser__notice" role="status" data-testid="clear-knowledge-result">
-            {uiText('已清空', 'Cleared')} {result().deletedStatementCount} {uiText('条知识。', 'Knowledge Statements.')}
-          </div>
-        )}
       </Show>
 
       <section class="knowledge-browser" aria-label={uiText('当前知识库', 'Current Knowledge')}>
@@ -105,55 +80,6 @@ export function KnowledgeBrowserPage(props: {
           onLoadMore={() => void controller.browse(query(), true)}
         />
       </section>
-
-      <Show when={clearDialogOpen()}>
-        <div
-          class="confirmation-dialog-backdrop"
-          data-testid="clear-knowledge-dialog"
-          role="presentation"
-          onClick={(event) => {
-            if (event.target === event.currentTarget && !controller.clearing()) setClearDialogOpen(false)
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Escape' && !controller.clearing()) setClearDialogOpen(false)
-          }}
-        >
-          <section
-            class="confirmation-dialog"
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="clear-knowledge-dialog-title"
-            aria-describedby="clear-knowledge-dialog-description"
-          >
-            <div class="confirmation-dialog__body">
-              <h2 id="clear-knowledge-dialog-title">{uiText('清空知识？', 'Clear Knowledge?')}</h2>
-              <p id="clear-knowledge-dialog-description">
-                {uiText(
-                  '将删除知识库中的全部知识。此操作无法撤销。',
-                  'This deletes all Knowledge from the Knowledge Store. This action cannot be undone.'
-                )}
-              </p>
-            </div>
-            <div class="confirmation-dialog__actions">
-              <Button
-                variant="secondary"
-                icon="stop"
-                data-testid="cancel-clear-knowledge"
-                disabled={controller.clearing()}
-                autofocus
-                onClick={() => setClearDialogOpen(false)}
-              >{uiText('取消', 'Cancel')}</Button>
-              <Button
-                variant="danger"
-                icon="trash"
-                data-testid="confirm-clear-knowledge"
-                disabled={controller.clearing()}
-                onClick={() => void confirmClear()}
-              >{controller.clearing() ? uiText('正在清空…', 'Clearing…') : uiText('清空知识', 'Clear Knowledge')}</Button>
-            </div>
-          </section>
-        </div>
-      </Show>
     </>
   )
 }

@@ -1,72 +1,26 @@
-# AI Backend MVP
+# AI Connection 与模型选择
 
-> 状态：当前实现规格
->
-> 范围：支持 Codex Coding Plan 与 OpenAI-compatible API 的连接、认证、模型选择、思考强度和受控调用。
+## 概念边界
 
-## 1. 核心模型
+Oyster 将模型的认证与计费通道同 Agent 执行分开：
 
-AI Backend 是 Oyster 获得模型调用能力的边界。MVP 只区分两种计费与认证通道：
+- Provider 是模型能力的来源；
+- Connection 是用户授权的一条认证、传输和计费通道；
+- Model 是该 Connection 可调用的模型；
+- Default LLM 是新任务或对话默认捕获的 Connection、Model 与可选思考强度。
 
-- **Coding Plan**：使用用户已有的订阅额度；
-- **API**：使用用户配置的 Provider API 账户或自定义端点。
+Connection 不等于 Model，Coding Plan 也不是 Agent Runtime。Agent Runtime 消费已经选定的模型能力，Observation 来自哪里同使用哪个模型加工也没有绑定关系。
 
-四个概念保持独立：
+## 为什么采用这一模型
 
-- **Provider** 表示能力来源；
-- **Connection** 表示认证、传输与计费通道；
-- **Model** 表示该 Connection 当前可调用的具体模型；
-- **Default LLM** 表示应用级唯一的 Connection、Model 和可选思考强度组合。
+用户可能使用订阅额度，也可能使用 API Key 或兼容端点。保持 Connection 独立，可以明确费用与凭据来源，并让每个新 Chat Conversation 或 Knowledge Task 固定自己的选择，避免默认值变化静默改变正在进行的工作。
 
-Connection 不等于 Model。同一个 Connection 可以暴露多个 Model，用户在“AI 后端”页面明确保存一个 Default LLM。每个新 Knowledge Processing Task 或 Agent Preview 在开始时读取并固定相应 Agent binding；新建 Chat Conversation 在创建时固定 binding，已有 Conversation 不随默认值变化。通用 Agent Runtime 是执行方式，不是另一类 Backend；当前执行基础是 Pi Coding Agent SDK `AgentSession`，但不构成知识模型的一部分。
+当前支持 Codex Coding Plan 与 OpenAI-compatible API。实际 Provider transport 尽量复用 Pi 生态成熟实现，避免 Oyster 自己维护平行的流协议、重试和 payload 转换。
 
-Agent 数据来源与 AI Connection 也是两个独立概念。不建立 Subscription 领域对象；套餐和账号信息只是认证后显示的 Connection 上下文。
+## 选择与验证
 
-## 2. MVP 支持范围
+应用保存一个默认选择，但不会自动换到其他 Connection、Model 或计费来源。未知或自定义 Model 的能力不靠静态目录推断；在连接测试或实际调用时验证可用性即可。
 
-| Backend | Provider | 认证 | 模型目录 |
-| --- | --- | --- | --- |
-| Coding Plan | OpenAI Codex | Oyster 通过 Pi Provider 发起 Browser 或 Device Code OAuth，结构化凭据保存在系统 Keychain | Pi Provider 提供的 Codex 模型目录 |
-| API | OpenAI | API Key 保存在系统 Keychain | 标准 `GET /models` |
-| API | OpenAI-compatible | 可选 API Key；自定义 Base URL 与协议 | 标准 `GET /models`，不支持时可手填 Model ID |
+凭据由主进程与系统 Keychain 持有，不进入 Renderer、Prompt 或配置文件。Oyster 自己完成需要的授权，不扫描或复用其他 Agent Runtime 的 token。本地 Debug Record 可能包含请求上下文与 Provider 信息，因此只承诺采用简洁、成熟的 credential 过滤，不把它描述为无敏感数据日志。
 
-Oyster 可以通过官方 Codex App Server 发现本机 Runtime、账号和 Plan，帮助用户识别已有订阅；发现结果不授予调用权限，也不代表 Oyster 当前 OAuth 使用同一账号。实际模型调用使用 Oyster 自己完成的 OAuth，不读取、复制或复用 Codex Runtime 的 token。
-
-Coding Plan 在当前架构中是由 Pi 维护的 Direct Provider 兼容接入，不是公开的 OpenAI-compatible API，也不是官方 Codex Agent Runtime。Oyster 不复制其 OAuth endpoint 或传输协议；Provider 的兼容变化通过固定依赖版本、升级检查和真实连接测试处理。
-
-API 模型发现结果和 Coding Plan 模型目录是可重建的运行时索引，不是新的权威配置。API Connection 仍保存一个用于模型目录与测试的默认 Model；应用的 Default LLM 另行保存实际选择的 Model ID。刷新后若该 Connection 或 Model 已不可用，界面和运行会明确报错，不会静默替换。
-
-## 3. UI 与选择规则
-
-设置页先选择 Coding Plan 或 API，再展示与其兼容的 Provider，不提供任意笛卡尔组合。每条 Connection 都展示：
-
-- Backend、Provider、认证状态与计费上下文；
-- API Endpoint / Protocol，或明确标为“仅发现”的本机 Codex Account / Plan；
-- 当前可用 Model；
-- 测试实际使用的 Model 与思考强度。
-
-页面在 Connection 列表之外提供唯一的 Default LLM 设置。知识加工页和新建对话页只显示生效绑定，不再提供平行的 Connection、Model 或思考强度选择器。Prompt 仍由各 Agent 的配置拥有，不属于 Default LLM。界面仍展示阶段 Runtime，避免把通用 Agent Runtime 或其当前 Pi 实现与 Backend 混为一谈。
-
-只有模型明确声明支持的思考强度才可选择；“模型默认”不发送额外参数。系统不猜测未知或自定义模型的能力。测试与正式运行都只使用用户明确选择的组合，不自动选择或回退到其他 Connection、Model 或计费来源。
-
-Coding Plan 提供两个明确登录入口：Device Code 适合远程或 loopback 回调受限的环境，Browser 适合能够接收本机回调的桌面环境。认证中的设备码、验证地址和到期时间只是可丢弃的交互状态；用户可以随时取消，成功、失败、超时或取消后立即清除。
-
-## 4. 执行与安全边界
-
-主进程负责本机发现、OAuth、Keychain、模型目录与实际调用；Renderer 只通过 typed preload API 获得脱敏状态。Browser OAuth URL 由主进程直接交给系统浏览器；Device Code 的验证地址和用户码可以短暂显示在 Renderer，token 始终不经过 Renderer。API Key 首次输入时只经受信 IPC 用于发现或保存，之后不进入配置文件、日志、Prompt、Agent transcript 或 IPC 返回。
-
-Coding Plan 的直接生成和 Pi Coding Agent SDK Runtime 都复用同一个 `SelectedModelStream`：已选 Pi Model 与已经过 Oyster Connection 认证的 `StreamFn`。它不是另一种 Runtime。适配层把该 stream 注册为 request-local Pi `ModelRuntime` Provider，使 `AgentSession` 能使用 Extension hooks、工具循环与原生压缩；真实 credential 仍由 Oyster Connection / Keychain 持有，SDK 不读取默认 Pi auth 文件，也不形成嵌套的外部 Agent loop。角色能够读取的 Observation、Knowledge 与工具仍由 Oyster 当前调用授予，与 Backend 类型无关。
-
-OpenAI Chat Completions 与 Responses 的正式模型调用直接复用 `pi-ai` 原生 Provider transport；Oyster 不再维护 `guardedFetch`、自定义 SSE parser 或第二套 payload/timeout 语义。自定义远程 URL 的保存边界仍要求 HTTPS，只有用户显式填写的 localhost 端点可使用 HTTP；模型目录发现和连接测试继续使用各自的有界读取保护。正式 Agent 模型请求由 Pi `AgentSession` 对瞬时故障统一执行最多 3 次 Agent Turn 重试和 2、4、8 秒指数退避，Provider 请求层不再叠加重试；非瞬时错误立即失败。连接失效只影响该 Connection；应用可以继续启动，也不会自动切换计费来源。
-
-本地 Debug Store 可以保存 Extension hook 处理后的最终 Provider payload、脱敏后的请求 header 视图以及响应 status/header。API Key、Authorization 和 Cookie 等 credential-bearing 值不进入 Debug Store。该记录用于离线检查，不改变实际传输，也不引入 OpenTelemetry 或外部观测服务。
-
-## 5. 当前不做
-
-- Claude Pro/Max 或消费者 Gemini 订阅复用；
-- 扫描、导入或读取第三方 Runtime 凭据；
-- 任意 OAuth Provider 与任意自定义 Header；
-- 自动选择或自动回退 Backend / Model；
-- 持久化一份不可重建的全局模型目录；
-- 完整用量与账单管理。
-- 把官方 Codex Agent Runtime 伪装成 Pi 的无差别 Model Backend。
+精确认证流程、Provider 参数、错误映射、重试数和模型目录行为由当前代码与测试维护。

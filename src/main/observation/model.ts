@@ -1,4 +1,4 @@
-/** A transient, model-facing position in one immutable Raw Evidence revision. */
+/** A transient, model-facing position in one fixed Raw Evidence view. */
 export interface EvidenceLocation {
   /** One-based line in the Adapter's fixed Raw Evidence line model. */
   line: number
@@ -56,14 +56,14 @@ export interface CanonicalActivityAttachment {
   rawRange: EvidenceRange
 }
 
-/** Rebuildable, Harness-specific activity projection of one Raw Evidence revision. */
+/** Rebuildable, Harness-specific activity projection of one fixed Raw Evidence view. */
 export interface CanonicalActivity {
   formatVersion: string
   items: CanonicalActivityItem[]
   attachments: CanonicalActivityAttachment[]
 }
 
-/** The two observation-layer views derived from one immutable source revision. */
+/** The two observation-layer views derived from one successfully read source content. */
 export interface AgentObservation {
   rawEvidence: RawEvidence
   canonicalActivity: CanonicalActivity

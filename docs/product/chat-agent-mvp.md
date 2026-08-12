@@ -1,31 +1,23 @@
-# 通用 Chat Agent MVP
+# 通用 Chat Agent
 
-> 状态：当前实现
->
-> 日期：2026-08-11
->
-> 术语遵循：[Oyster 术语与执行模型](../architecture/terminology.md)
+## 角色
 
-Chat Agent 是一个基于 Pi Coding Agent SDK `AgentSession` 的普通工具使用 Agent。一个 Chat Conversation 是用户可持续追加消息的产品对话；它在创建时固定模型和 System Prompt，可以拥有多次 Agent Invocation。完整消息历史由 Pi Session 保存，Chat repository 只补充产品 binding 和精简 Invocation envelope。
+Chat 是用户与 Oyster 协作的主要入口。它使用一个通用 Coding Agent 理解对话和 Repository，根据目标跨零个、一个或多个 Knowledge Statement、Artifact 或 Task 工作；用户不需要先选择 Project、Workspace 或 Artifact 类型。
 
-每次用户消息触发一次新的 Agent Invocation。Invocation 覆盖该 Agent 的模型—工具循环；精简 envelope 记录生命周期、Pi Session entry 范围和调用计数，完整内部活动写入本地 Debug Store。取消当前执行只终止该 Invocation，不结束 Chat Conversation；下一条用户消息会产生新的 Invocation。
+一个 Chat Conversation 可以持续接收用户消息。每条消息产生新的 Agent Invocation；Runtime 原生历史保存模型与工具活动，业务记录只保留对话配置与必要执行摘要。子 Agent 是一次独立 Invocation，不是新的 Chat Conversation 或预设角色。
 
-Agent 的初始 `cwd` 是 `<Electron userData>/repository/`。它通过普通 `read`、`bash`、`edit`、`write` 直接理解和维护：
+## 为什么采用普通工具
 
-- `knowledge/**/*.md`：全局 Knowledge；
-- `artifacts/<artifact>/`：全局 Artifact；
-- `tasks/<taskId>/`：由 Task branch 跟踪的定义、输入、Pi Session 与协作历史。
+Knowledge 和 Artifact 已经以普通文件表达，因此 Chat 使用文件、Shell、Git、Todo 与通用委派能力，而不增加平行 Knowledge CRUD、Artifact router 或专用 Git 工具。这让 Agent 能够按照实际任务组合修改，并避免应用层过早固化模型可以自行完成的语义判断。
 
-Chat 不连接平行 SQLite Knowledge Store，也不安装 `search_knowledge`、`read_knowledge`、`upsert_knowledge` 写入协议；普通文件搜索、读取和编辑就是唯一事实层的访问方式。Shell 使用 Oyster 捆绑的标准 Git CLI。
+Agent 以 Repository 为初始工作坐标，按当前 OS 用户权限运行。该坐标不是访问沙箱；MVP 采用高信任 Agent 原则。
 
-Chat 仍拥有通用 Todo 与 `spawn_agent`。子 Agent 使用独立、持久化的 Pi Session，但继承相同 Repository 根、模型、System Prompt 和工具集合；Pi `parentSession` 和 Oyster `parentInvocationId` 分别连接 Session 与 Invocation。子 Invocation 不是新的 Chat Conversation，父 Tool Result 只保存其最终文本以及 `invocationId` / `sessionId`，不复制完整子 transcript。
+当前 Chat 直接修改用户主 checkout。文件变化会立即出现在知识库或工作台等文件视图中，但只有 commit 后才属于正式 Git revision，也只有已提交的 `main` 才能成为新 Knowledge Processing Task 的基线。
 
-应用语言由“设置 / 通用”中的单一应用设置控制。Chat Conversation 保存的 System Prompt binding 和用户自定义 Prompt 保持不变；每次 Invocation 创建时，Runtime 在有效 System Prompt 后追加当前语言要求，用于用户回复和新建或修改的自然语言 Repository 内容。已有 Conversation 无需重建，下一次 Invocation 即使用新语言；子 Agent 继承父 Invocation 的同一要求。代码、命令、路径、结构化格式、引用原文以及 Repository 或任务明确要求的语言不被强制翻译。
+## 当前与候选边界
 
-Chat 只启用 Pi 生态中的 Headless Extension 和普通 context file。应用把 `<Electron userData>/pi-agent/` 作为专属 `agentDir`，设置页直接管理其 Pi 原生 `settings.json`：Agent 配置页可以修改自动上下文压缩、Provider 传输方式和 HTTP 空闲超时，Pi Extensions 页可以添加、启用、停用和移除 Pi Package 或本地 Extension 路径。Package 中的 Skill、Prompt 和 Theme 被显式关闭，Runtime 也不加载 Skill、Prompt Template 或 Theme。
+当前 Chat Conversation 在创建时固定模型与 System Prompt，后续改变默认模型不静默替换已有 binding。UI 语言与 Agent 回复/Repository 内容语言分别设置；后者在每次 Invocation 建立时生效。
 
-Extension 注册的工具和 hooks 与内置工具处于同一个 `AgentSession` 生命周期；TUI renderer、shortcut 和交互组件不进入 Electron UI。Extension 在 Electron 主进程中按当前 OS 用户权限执行，本期采用“配置即信任”。Oyster 以 `projectTrusted: false` 创建 Pi 设置，因此 Repository 内的 `.pi/settings.json`、Package 和 Extension 不会自动生效，普通 `AGENTS.md` context file 仍按 Pi 规则加载。
+Chat 会读取 Pi 的普通 context file，并可加载用户显式配置、因而被信任的 Headless Extension；不把 Pi Skill、Prompt Template 或 Theme 作为 Oyster 的隐式业务配置。
 
-Chat repository 以 Coding Agent `SessionManager` JSONL 保存完整 transcript、Tool Result、持久化 compaction entry 和终态 Invocation envelope custom entry，并以 Oyster descriptor 保存 Chat binding 与空 Conversation。详情页再通过 `debugRecordId` 从 `<Electron userData>/agent-debug/invocations/` 读取 Context、模型/工具活动和最终 Provider 请求/响应。
-
-当前 MVP 不为 Chat 自动创建 branch、commit、merge、rollback 或权限沙箱。Agent 根据任务和 Repository 当前状态选择普通文件/Git 操作。
+**候选方向**：Chat Agent 未来也可以拥有独立 Git worktree/branch，并由 Agent 负责 commit、merge 或 rebase。该方向旨在让对话维护与结构化 Task 使用一致的 Repository 视图，但并未确定，不应据此承诺当前隔离或集成行为。

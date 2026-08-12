@@ -9,7 +9,7 @@ import { uiText } from './i18n'
 
 const EMPTY_CHAT_STATE: ChatStateView = {
   agent: {
-    id: 'chat_agent',
+    agentId: 'chat_agent',
     displayName: 'Conversation Agent',
     description: '',
     runtime: 'pi_coding_agent',
@@ -57,9 +57,9 @@ export function createChatController() {
 
   function replaceSummary(detail: ChatConversationDetail): void {
     setState((current) => {
-      const existing = current.conversations.some((candidate) => candidate.id === detail.id)
+      const existing = current.conversations.some((candidate) => candidate.conversationId === detail.conversationId)
       const conversations = existing
-        ? current.conversations.map((candidate) => candidate.id === detail.id ? detail : candidate)
+        ? current.conversations.map((candidate) => candidate.conversationId === detail.conversationId ? detail : candidate)
         : [detail, ...current.conversations]
       return { ...current, conversations }
     })
@@ -78,7 +78,7 @@ export function createChatController() {
     if (event.type === 'message_appended') {
       if (event.conversationId === selectedConversationId()) {
         setConversation((current) => {
-          if (!current || current.id !== event.conversationId) return current
+          if (!current || current.conversationId !== event.conversationId) return current
           const messages = current.messages.some((entry) => entry.id === event.entry.id)
             ? current.messages.map((entry) => entry.id === event.entry.id ? event.entry : entry)
             : [...current.messages, event.entry]
@@ -89,12 +89,12 @@ export function createChatController() {
     }
     if (event.conversationId === selectedConversationId()) {
       setConversation((current) => {
-        if (!current || current.id !== event.conversationId) return current
+        if (!current || current.conversationId !== event.conversationId) return current
         const invocations = current.invocations.some(
-          (invocation) => invocation.id === event.invocation.id
+          (invocation) => invocation.invocationId === event.invocation.invocationId
         )
           ? current.invocations.map((invocation) => (
-              invocation.id === event.invocation.id ? event.invocation : invocation
+              invocation.invocationId === event.invocation.invocationId ? event.invocation : invocation
             ))
           : [...current.invocations, event.invocation]
         return { ...current, invocations }
@@ -152,7 +152,7 @@ export function createChatController() {
         const first = initial.conversations
           .slice()
           .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]
-        if (first) void readConversation(first.id)
+        if (first) void readConversation(first.conversationId)
         else startNew()
       }),
       window.oyster.aiBackends.getSnapshot().then((initial) => {
@@ -173,7 +173,7 @@ export function createChatController() {
     setError(undefined)
     let conversationId = selectedConversationId()
     const previousMessageIds = new Set(
-      conversation()?.id === conversationId
+      conversation()?.conversationId === conversationId
         ? conversation()?.messages.map((entry) => entry.id)
         : []
     )
@@ -182,10 +182,10 @@ export function createChatController() {
         const created = await window.oyster.chat.createConversation({})
         selectionInitialized = true
         setCreatingNew(false)
-        setSelectedConversationId(created.id)
+        setSelectedConversationId(created.conversationId)
         setConversation(created)
         replaceSummary(created)
-        conversationId = created.id
+        conversationId = created.conversationId
       }
       const detail = await window.oyster.chat.sendMessage({ conversationId, text: normalized })
       if (selectedConversationId() === conversationId) setConversation(detail)
@@ -233,7 +233,7 @@ export function createChatController() {
     const local = invocationStates()[conversationId]?.status
     if (local) return local === 'in_progress'
     return state().conversations.find(
-      (candidate) => candidate.id === conversationId
+      (candidate) => candidate.conversationId === conversationId
     )?.hasActiveInvocation ?? false
   }
 

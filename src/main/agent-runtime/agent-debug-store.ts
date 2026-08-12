@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { AgentInvocationDebugRecord } from '../../shared/agent-runtime'
+import { AGENT_INVOCATION_FORMAT_VERSION } from '../../shared/agent-runtime'
 import { parseAgentInvocationDebugRecord } from './agent-invocation-record'
 
 const MAX_INVOCATION_ID_LENGTH = 256
@@ -37,7 +38,7 @@ export class FileAgentDebugStore implements AgentDebugStore {
 
   save(record: AgentInvocationDebugRecord): void {
     const parsed = parseAgentInvocationDebugRecord(record)
-    const target = this.recordPath(parsed.id)
+    const target = this.recordPath(parsed.invocationId)
     const temporary = `${target}.${randomUUID()}.tmp`
     writeFileSync(temporary, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8')
     renameSync(temporary, target)
@@ -46,10 +47,14 @@ export class FileAgentDebugStore implements AgentDebugStore {
   read(invocationId: string): AgentInvocationDebugRecord | undefined {
     const id = normalizedInvocationId(invocationId)
     try {
-      return parseAgentInvocationDebugRecord(
-        JSON.parse(readFileSync(this.recordPath(id), 'utf8')) as unknown,
-        id
-      )
+      const raw = JSON.parse(readFileSync(this.recordPath(id), 'utf8')) as unknown
+      const parsed = parseAgentInvocationDebugRecord(raw, id)
+      const persisted = raw as { formatVersion?: unknown; invocationId?: unknown }
+      if (
+        persisted.formatVersion !== AGENT_INVOCATION_FORMAT_VERSION
+        || persisted.invocationId !== parsed.invocationId
+      ) this.save(parsed)
+      return parsed
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
       throw error
@@ -63,7 +68,7 @@ export class InMemoryAgentDebugStore implements AgentDebugStore {
 
   save(record: AgentInvocationDebugRecord): void {
     const parsed = parseAgentInvocationDebugRecord(record)
-    this.records.set(parsed.id, parsed)
+    this.records.set(parsed.invocationId, parsed)
   }
 
   read(invocationId: string): AgentInvocationDebugRecord | undefined {

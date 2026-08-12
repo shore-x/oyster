@@ -3,7 +3,6 @@ import { chatChannels } from '../../shared/channels'
 import type {
   CancelChatInvocationInput,
   CreateChatConversationInput,
-  DeleteChatConversationInput,
   SaveChatDefaultInstructionsInput,
   SendChatMessageInput
 } from '../../shared/chat'
@@ -36,10 +35,6 @@ export function registerChatIpc(
   ipcMain.handle(chatChannels.readConversation, (event, conversationId: string) => {
     assertTrustedSender(event)
     return service.readConversation(conversationId)
-  })
-  ipcMain.handle(chatChannels.deleteConversation, (event, input: DeleteChatConversationInput) => {
-    assertTrustedSender(event)
-    return service.deleteConversation(input)
   })
   ipcMain.handle(chatChannels.sendMessage, (event, input: SendChatMessageInput) => {
     assertTrustedSender(event)

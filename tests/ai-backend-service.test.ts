@@ -19,9 +19,8 @@ import {
   ModelContextOverflowError
 } from '../src/main/ai-backends/model'
 import type {
-  AgentBackendAdapter,
+  CodexAccountDiscovery,
   AiBackendRepository,
-  AgentTaskRequest,
   ModelBackendAdapter,
   ModelGenerationRequest,
   SelectedModelStream,
@@ -49,9 +48,7 @@ function modelStream(modelId: string): SelectedModelStream {
   }
 }
 
-class FakeCodexDiscovery implements AgentBackendAdapter {
-  readonly id = 'codex' as const
-
+class FakeCodexDiscovery implements CodexAccountDiscovery {
   async inspect(): Promise<AiConnection> {
     return {
       id: 'runtime:codex',
@@ -68,10 +65,6 @@ class FakeCodexDiscovery implements AgentBackendAdapter {
     }
   }
 
-  async connect(): Promise<undefined> { return undefined }
-  cancelConnect(): void {}
-  async runTask(_request: AgentTaskRequest): Promise<{ text: string }> { return { text: 'DISCOVERY' } }
-  subscribe(_listener: () => void): () => void { return () => undefined }
   dispose(): void {}
 }
 

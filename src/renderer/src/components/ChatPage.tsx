@@ -4,26 +4,27 @@ import {
   createEffect,
   createMemo,
   createSignal,
-  onCleanup,
   type JSX
 } from 'solid-js'
 import type {
   ChatConversationDetail
 } from '../../../shared/chat'
+import type { AgentModelCallRecord } from '../../../shared/agent-runtime'
 import type { KnowledgeStatement } from '../../../shared/knowledge'
 import { createChatController } from '../chat-controller'
 import { backendLabel, connectionStatusLabel, reasoningLabel } from '../processing-configuration'
-import { Button, Icon } from '../ui'
-import { AgentInvocationExplorer } from './AgentInvocationView'
-import { parseStatementContent } from './KnowledgeStatementBrowser'
+import { Button, Icon, Inspector, Markdown } from '../ui'
+import { AgentInvocationExplorer, AgentModelCallInspector } from './AgentInvocationView'
 import { appLanguage, uiText } from '../i18n'
 
 export interface ChatPageProps {
   onOpenKnowledge?(title: string): void
 }
 
-function ChatKnowledgeInspector(props: {
+export function ChatKnowledgeInspector(props: {
   title: string
+  canGoBack: boolean
+  onBack(): void
   onOpen(title: string): void
   onClose(): void
 }) {
@@ -55,46 +56,29 @@ function ChatKnowledgeInspector(props: {
       })
   })
 
-  createEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') props.onClose()
-    }
-    document.addEventListener('keydown', closeOnEscape)
-    onCleanup(() => document.removeEventListener('keydown', closeOnEscape))
-  })
-
   return (
-    <aside class="chat-knowledge-inspector" role="complementary" aria-label={uiText('知识详情', 'Knowledge details')} data-testid="chat-knowledge-inspector">
-      <header class="context-inspector__toolbar">
-        <div>
-          <span>{uiText('知识库', 'Knowledge')}</span>
-          <strong>{props.title}</strong>
-        </div>
-        <button type="button" aria-label={uiText('关闭知识详情', 'Close Knowledge details')} onClick={props.onClose}>
-          <Icon name="close" />
-        </button>
-      </header>
-      <div class="chat-knowledge-inspector__content">
+    <Inspector
+      class="chat-knowledge-inspector"
+      size="narrow"
+      ariaLabel={uiText('知识详情', 'Knowledge details')}
+      eyebrow={uiText('知识库', 'Knowledge')}
+      title={props.title}
+      backLabel={uiText('返回上一条知识', 'Back to previous Knowledge')}
+      onBack={props.canGoBack ? props.onBack : undefined}
+      closeLabel={uiText('关闭', 'Close')}
+      onClose={props.onClose}
+      contentClass="chat-knowledge-inspector__content"
+      data-testid="chat-knowledge-inspector"
+    >
         <Show when={loading()}><div class="context-inspector__state">{uiText('正在读取知识…', 'Reading Knowledge…')}</div></Show>
         <Show when={error()}>{(message) => <div class="context-inspector__state context-inspector__state--error">{message()}</div>}</Show>
         <Show when={statement()}>{(current) => (
           <article>
             <h2>{current().title}</h2>
-            <div>
-              <For each={parseStatementContent(current().content)}>{(part) => (
-                <Show when={part.kind === 'link' ? part : undefined} fallback={part.kind === 'text' ? part.value : ''}>
-                  {(link) => (
-                    <button type="button" class="context-inspector__link" onClick={() => props.onOpen(link().target)}>
-                      {link().label}
-                    </button>
-                  )}
-                </Show>
-              )}</For>
-            </div>
+            <Markdown text={current().content} onOpenKnowledge={props.onOpen} />
           </article>
         )}</Show>
-      </div>
-    </aside>
+    </Inspector>
   )
 }
 
@@ -131,7 +115,19 @@ function ExistingBinding(props: { conversation: ChatConversationDetail }) {
 export function ChatPage(props: ChatPageProps) {
   const controller = createChatController()
   const [draft, setDraft] = createSignal('')
-  const [knowledgeTitle, setKnowledgeTitle] = createSignal<string>()
+  const [knowledgeHistory, setKnowledgeHistory] = createSignal<string[]>([])
+  const [modelCallSelection, setModelCallSelection] = createSignal<{
+    call: AgentModelCallRecord
+    index: number
+  }>()
+  const knowledgeTitle = () => knowledgeHistory().at(-1)
+  const openKnowledge = (title: string, replaceHistory = false): void => {
+    setModelCallSelection(undefined)
+    setKnowledgeHistory((current) => {
+      if (replaceHistory) return [title]
+      return current.at(-1) === title ? current : [...current, title]
+    })
+  }
   const sortedConversations = createMemo(() => controller.state().conversations
     .slice()
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)))
@@ -248,12 +244,12 @@ export function ChatPage(props: ChatPageProps) {
                   <button
                     type="button"
                     class="chat-conversation-item"
-                    aria-selected={!controller.creatingNew() && controller.selectedConversationId() === item.id}
-                    onClick={() => void controller.readConversation(item.id)}
+                    aria-selected={!controller.creatingNew() && controller.selectedConversationId() === item.conversationId}
+                    onClick={() => void controller.readConversation(item.conversationId)}
                   >
                     <span class="chat-conversation-item__title">
                       <strong>{item.title || uiText('未命名对话', 'Untitled Chat')}</strong>
-                      <Show when={controller.hasActiveInvocation(item.id)}><em>{uiText('调用中', 'Running')}</em></Show>
+                      <Show when={controller.hasActiveInvocation(item.conversationId)}><em>{uiText('调用中', 'Running')}</em></Show>
                     </span>
                     <span>{item.binding.modelId}</span>
                     <small>{formatTime(item.updatedAt)} · {item.messageCount} {uiText('条消息', 'messages')}</small>
@@ -315,8 +311,12 @@ export function ChatPage(props: ChatPageProps) {
                 compact
                 toolLabel={toolLabel}
                 onOpenKnowledge={(title) => {
-                  setKnowledgeTitle(title)
+                  openKnowledge(title, true)
                   props.onOpenKnowledge?.(title)
+                }}
+                onInspectModelCall={(call, index) => {
+                  setKnowledgeHistory([])
+                  setModelCallSelection({ call, index })
                 }}
               />
             )}</For>
@@ -364,9 +364,24 @@ export function ChatPage(props: ChatPageProps) {
       <Show when={knowledgeTitle()}>{(title) => (
         <ChatKnowledgeInspector
           title={title()}
-          onOpen={setKnowledgeTitle}
-          onClose={() => setKnowledgeTitle(undefined)}
+          canGoBack={knowledgeHistory().length > 1}
+          onBack={() => setKnowledgeHistory((current) => current.slice(0, -1))}
+          onOpen={openKnowledge}
+          onClose={() => setKnowledgeHistory([])}
         />
+      )}</Show>
+      <Show when={modelCallSelection()}>{(selection) => (
+        <Inspector
+          class="chat-model-call-inspector"
+          size="medium"
+          ariaLabel={uiText('模型调用详情', 'Model Call details')}
+          title={uiText('模型调用详情', 'Model Call Details')}
+          closeLabel={uiText('关闭', 'Close')}
+          onClose={() => setModelCallSelection(undefined)}
+          data-testid="chat-model-call-inspector"
+        >
+          <AgentModelCallInspector call={selection().call} index={selection().index} />
+        </Inspector>
       )}</Show>
     </div>
   )
