@@ -23,7 +23,10 @@ import type {
 } from './model'
 import { InMemoryKnowledgeProcessingConfigurationRepository } from './repository'
 import { KnowledgeProcessingService } from './knowledge-processing-service'
-import { KnowledgeTaskGitRepository } from './knowledge-task-git-repository'
+import {
+  KnowledgeTaskGitRepository,
+  TASK_FILE_NAME
+} from './knowledge-task-git-repository'
 import {
   ARTIFACT_GIT_BINARY_PATH,
   createArtifactGitEnvironment
@@ -143,10 +146,10 @@ export class FixtureKnowledgeMaintainerRuntime implements KnowledgeMaintainerRun
     input.onInvocationUpdate?.(inProgressFixtureInvocation(input, toolCalls, 2))
     await emitFixtureFrame()
     input.signal.throwIfAborted()
-    const progressPath = input.worktree.progressPath
+    const taskFilePath = join(input.worktree.taskPath, TASK_FILE_NAME)
     await writeFile(
-      progressPath,
-      (await readFile(progressPath, 'utf8')).replaceAll('- [ ]', '- [x]'),
+      taskFilePath,
+      (await readFile(taskFilePath, 'utf8')).replaceAll('- [ ]', '- [x]'),
       'utf8'
     )
     await Promise.all([
@@ -193,7 +196,9 @@ export class FixtureKnowledgeReviewerRuntime implements KnowledgeReviewerRuntime
     input: KnowledgeReviewerInvocationInput
   ): Promise<RepositoryAgentInvocationResult> {
     input.signal.throwIfAborted()
-    await git(['rebase', input.worktree.targetBranch], input.worktree.worktreePath)
+    await git([
+      'merge', '--quiet', '--no-edit', input.worktree.targetBranch
+    ], input.worktree.worktreePath)
     await git([
       'merge', '--ff-only', input.worktree.branchName
     ], input.worktree.repositoryPath)

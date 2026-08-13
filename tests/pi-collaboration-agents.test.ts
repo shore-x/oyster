@@ -30,16 +30,13 @@ async function taskWorktree(): Promise<KnowledgeTaskWorktree> {
   const taskPath = join(repositoryPath, 'tasks', 'worktree-test')
   const inputPath = join(taskPath, 'inputs')
   await mkdir(inputPath, { recursive: true })
-  await writeFile(join(taskPath, 'BRIEF.md'), '# Brief\n\nWorktree-specific instruction.\n')
-  await writeFile(join(taskPath, 'PROGRESS.md'), '# Progress\n')
+  await writeFile(join(taskPath, 'TASK.md'), '# Task\n\nWorktree-specific instruction.\n')
   return {
     taskId: 'worktree-test',
     repositoryPath,
     worktreePath: repositoryPath,
     runtimePath: join(repositoryPath, '.runtime'),
     taskPath,
-    briefPath: join(taskPath, 'BRIEF.md'),
-    progressPath: join(taskPath, 'PROGRESS.md'),
     inputPath,
     targetBranch: 'main',
     branchName: 'task/worktree-test',
@@ -81,12 +78,12 @@ describe('Pi collaboration Agents', () => {
           'read', 'bash', 'edit', 'write'
         ])
         expect(contextText(context)).toContain('current working directory')
-        expect(contextText(context)).toContain('tasks/worktree-test/BRIEF.md')
+        expect(contextText(context)).toContain('tasks/worktree-test/TASK.md')
         expect(contextText(context)).not.toContain('canonical activity')
         expect(contextText(context)).not.toContain('read_evidence')
         expect(contextText(context)).not.toContain('list_todos')
         return fauxAssistantMessage(
-          fauxToolCall('read', { path: 'tasks/worktree-test/BRIEF.md' }),
+          fauxToolCall('read', { path: 'tasks/worktree-test/TASK.md' }),
           { stopReason: 'toolUse' }
         )
       },
@@ -101,6 +98,7 @@ describe('Pi collaboration Agents', () => {
       systemPrompt: 'Maintain the collaboration tree.',
       worktree,
       previousRepositoryRevision: worktree.baseRepositoryRevision,
+      sourceRef: 'raw:fixture@sha256:test',
       invocationId: 'maintainer-invocation',
       signal: new AbortController().signal
     })
@@ -116,7 +114,8 @@ describe('Pi collaboration Agents', () => {
           'read', 'bash', 'edit', 'write'
         ])
         expect(context.systemPrompt).toContain('Agent output language: English.')
-        expect(contextText(context)).toContain('Review the current Task branch checkout')
+        expect(contextText(context)).toContain(`Review exact Task revision ${'c'.repeat(40)}`)
+        expect(contextText(context)).toContain(`main checkout used for final integration is \\"${worktree.repositoryPath}\\"`)
         expect(contextText(context)).not.toContain('read_evidence')
         expect(contextText(context)).not.toContain('Raw Evidence format')
         expect(contextText(context)).not.toContain('list_todos')
@@ -167,10 +166,9 @@ describe('Pi collaboration Agents', () => {
           rawRange: { start: { line: 1, offset: 0 }, end: { line: 1, offset: 5 } }
         }]
       }
-    }, 'raw:image@fixture', 100)
+    })
     const worktree = await new KnowledgeTaskGitRepository(repositoryPath).createWorktree({
       taskId: 'image-worktree',
-      sourceRef: 'raw:image@fixture',
       plan: inputPlan
     })
     const modelStream = fauxModelStream([
@@ -192,6 +190,7 @@ describe('Pi collaboration Agents', () => {
       systemPrompt: 'Maintain the collaboration tree.',
       worktree,
       previousRepositoryRevision: worktree.baseRepositoryRevision,
+      sourceRef: 'raw:image@fixture',
       invocationId: 'maintainer-image-invocation',
       signal: new AbortController().signal
     })

@@ -59,6 +59,8 @@ interface RepositoryAgentInvocationInput {
 
 export interface KnowledgeMaintainerInvocationInput extends RepositoryAgentInvocationInput {
   previousRepositoryRevision: string
+  sourceRef: string
+  attention?: string
 }
 
 export interface KnowledgeReviewerInvocationInput extends RepositoryAgentInvocationInput {

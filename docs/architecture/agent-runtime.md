@@ -30,8 +30,10 @@ Agent 使用普通文件、Shell 与 Git，并按桌面应用当前 OS 用户权
 三类记录回答不同问题：
 
 - Chat Conversation 或 Task 记录业务发生了什么；
-- Runtime 原生历史保存 Agent 继续工作所需的消息和工具活动；
+- Runtime 原生历史保存一次 Invocation 中模型继续工作所需的消息和工具活动；
 - Agent Debug Record 保存排查一次 Invocation 所需的完整 Context、模型调用、工具输入输出和 Provider 信息。
+
+Knowledge Processing 的 Maintainer 与 Reviewer 每次 Invocation 都建立独立 Runtime session。Task 跨轮继续依赖 Git revision、Task 文件和正式 Repository tree，不依赖 Session 身份或隐藏上下文；因此 Pi Session 只是 Runtime 私有实现，不是 Task 状态。
 
 Debug Record 不是“无正文日志”，可能包含敏感业务内容。实现应采用成熟、简洁的 credential 过滤，不承诺不存在所有敏感内容。当前倾向将调试数据保留在本地；**目标**是由统一模块和用户设置管理 Chat、Task 和 Preview 的调试数据保留。产品不需要让“删除对话”承担这项治理。
 

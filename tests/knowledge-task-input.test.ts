@@ -1,121 +1,123 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import {
-  activitySegmentCharacterLimit,
-  planKnowledgeTaskInput
-} from '../src/main/knowledge-processing/task-input'
-import type { AgentObservation } from '../src/main/observation/model'
+import { planKnowledgeTaskInput } from '../src/main/knowledge-processing/task-input'
+import type {
+  AgentObservation,
+  CanonicalActivityAttachment
+} from '../src/main/observation/model'
 
-function observation(contents: string[], attachmentAt?: number): AgentObservation {
-  const lines = contents.map((content) => JSON.stringify({ content }))
+function attachment(
+  id: string,
+  mimeType: string,
+  content: string,
+  line: number
+): CanonicalActivityAttachment {
   return {
-    rawEvidence: {
-      formatVersion: 'test-raw-v1',
-      lines,
-      skillHints: attachmentAt === undefined ? [] : [{
-        name: 'imagegen',
-        tool: 'Read',
-        source: 'tool_call',
-        location: { line: attachmentAt + 1, offset: 0 }
-      }]
-    },
-    canonicalActivity: {
-      formatVersion: 'test-activity-v1',
-      items: contents.map((content, index) => ({
-        kind: attachmentAt === index ? 'attachment' : 'user_message',
-        content,
-        rawRanges: [{
-          start: { line: index + 1, offset: 0 },
-          end: { line: index + 1, offset: lines[index].length }
-        }],
-        ...(attachmentAt === index ? { attachmentId: 'ATT000001' } : {})
-      })),
-      attachments: attachmentAt === undefined ? [] : [{
-        id: 'ATT000001',
-        mimeType: 'image/png',
-        data: Buffer.from('image').toString('base64'),
-        byteLength: 5,
-        sha256: createHash('sha256').update('image').digest('hex'),
-        rawRange: {
-          start: { line: attachmentAt + 1, offset: 0 },
-          end: { line: attachmentAt + 1, offset: lines[attachmentAt].length }
-        }
-      }]
+    id,
+    mimeType,
+    data: Buffer.from(content).toString('base64'),
+    byteLength: Buffer.byteLength(content),
+    sha256: createHash('sha256').update(content).digest('hex'),
+    rawRange: {
+      start: { line, offset: 0 },
+      end: { line, offset: content.length }
     }
   }
 }
 
-function plan(contents: string[], limit: number, attachmentAt?: number) {
-  return planKnowledgeTaskInput(
-    observation(contents, attachmentAt),
-    'raw:test@sha256:fixture',
-    limit
-  )
+function observation(): AgentObservation {
+  return {
+    rawEvidence: {
+      formatVersion: 'test-raw-v1',
+      lines: ['first raw line', '', 'third raw line'],
+      skillHints: [{
+        name: 'imagegen',
+        tool: 'Read',
+        source: 'tool_call',
+        location: { line: 2, offset: 0 }
+      }]
+    },
+    canonicalActivity: {
+      formatVersion: 'test-activity-v1',
+      items: [{
+        kind: 'user_message',
+        content: 'First activity',
+        rawRanges: [{
+          start: { line: 1, offset: 2 },
+          end: { line: 2, offset: 0 }
+        }]
+      }, {
+        kind: 'attachment',
+        content: 'Attached document',
+        rawRanges: [{
+          start: { line: 3, offset: 1 },
+          end: { line: 3, offset: 12 }
+        }],
+        attachmentId: 'ATT000001'
+      }],
+      attachments: [
+        attachment('ATT000001', 'application/pdf', 'document', 3),
+        attachment('ATT000002', 'application/x-custom', 'sidecar', 1)
+      ]
+    }
+  }
 }
 
-describe('Knowledge Task worktree plan', () => {
-  it('writes bounded Activity files and keeps complete activities together', () => {
-    const value = plan(['a'.repeat(7), 'b'.repeat(7)], 10)
+describe('Knowledge Task input plan', () => {
+  it('materializes one Activity document and exact Raw Evidence without indexes or pages', () => {
+    const input = observation()
+    const value = planKnowledgeTaskInput(input)
 
-    expect(value.activitySegmentCount).toBe(2)
-    expect(value.items[0]).toContain('inputs/activity/segment-000001-page-000001.md')
-    expect(value.items[0]).not.toContain('segment-000002')
-    expect(value.items[1]).toContain('inputs/activity/segment-000002-page-000001.md')
-    expect(value.files.find((file) => file.relativePath.includes('segment-000001'))?.content)
-      .toContain('a'.repeat(7))
+    expect(value.files.map((file) => file.relativePath)).toEqual([
+      'inputs/activity.md',
+      'inputs/evidence.txt',
+      'inputs/attachments/ATT000001.bin',
+      'inputs/attachments/ATT000002.bin'
+    ])
+    expect(value.files.find((file) => file.relativePath === 'inputs/evidence.txt')?.content)
+      .toBe(input.rawEvidence.lines.join('\n'))
+    expect(value.files.some((file) => /README|INDEX|segment|page-/.test(file.relativePath)))
+      .toBe(false)
+    expect(value.items).toEqual([
+      'Read `inputs/activity.md` through EOF and inspect every attachment it references.'
+    ])
   })
 
-  it('splits an oversized activity without breaking its identity or Unicode characters', () => {
-    const oversized = plan(['A😀B'.repeat(10)], 5)
+  it('keeps ordered activities, complete Raw Evidence ranges, formats and navigation hints', () => {
+    const value = planKnowledgeTaskInput(observation())
+    const activity = String(
+      value.files.find((file) => file.relativePath === 'inputs/activity.md')?.content
+    )
 
-    expect(oversized.activitySegmentCount).toBeGreaterThan(1)
-    const activityFiles = oversized.files.filter((file) => file.relativePath.includes('/activity/'))
-    expect(activityFiles).toHaveLength(oversized.activitySegmentCount)
-    expect(activityFiles.every((file) => String(file.content).includes('BEGIN_ACTIVITY A000001')))
-      .toBe(true)
-    expect(activityFiles.map((file) => String(file.content)).join('')).not.toContain('�')
+    expect(activity).toContain('Canonical Activity format: test-activity-v1')
+    expect(activity).toContain('Raw Evidence format: test-raw-v1')
+    expect(activity).toContain('Raw Evidence: inputs/evidence.txt')
+    expect(activity).toContain('Raw source: L000001:C2-L000002:C0')
+    expect(activity).toContain('Raw source: L000003:C1-L000003:C12')
+    expect(activity.indexOf('First activity')).toBeLessThan(activity.indexOf('Attached document'))
+    expect(activity).toContain('possible Skill activation “imagegen” · at L000002:C0 · via Read')
+    expect(activity).toContain('untrusted navigation aids')
   })
 
-  it('materializes Raw Evidence pages, an index, and real attachment bytes', () => {
-    const value = plan(['message', 'attachment'], 100, 1)
-    const attachment = value.files.find((file) => file.relativePath.endsWith('ATT000001.png'))
-    const evidenceIndex = value.files.find((file) => file.relativePath.endsWith('evidence/INDEX.md'))
+  it('lists and materializes every attachment, including unreferenced non-image sidecars', () => {
+    const value = planKnowledgeTaskInput(observation())
+    const activity = String(
+      value.files.find((file) => file.relativePath === 'inputs/activity.md')?.content
+    )
+    const pdf = value.files.find((file) => file.relativePath.endsWith('ATT000001.bin'))
+    const custom = value.files.find((file) => file.relativePath.endsWith('ATT000002.bin'))
 
-    expect(value.items[0]).toContain('inputs/attachments/ATT000001.png')
-    expect(value.items[0]).toContain('possible Skill activation “imagegen”')
-    expect(value.items[0]).toContain('inputs/evidence/INDEX.md')
-    expect(value.items[0]).not.toContain('read_activity')
-    expect(value.items[0]).not.toContain('read_evidence')
-    expect(Buffer.isBuffer(attachment?.content)).toBe(true)
-    expect(Buffer.from(attachment!.content).toString()).toBe('image')
-    expect(evidenceIndex?.content).toContain('L000001:C0')
-  })
-
-  it('creates a self-describing input guide inside this Task only', () => {
-    const value = plan(['message'], 100)
-    const guide = value.files.find((file) => file.relativePath === 'inputs/README.md')
-
-    expect(guide?.content).toContain('raw:test@sha256:fixture')
-    expect(guide?.content).toContain('fixed input view materialized when this Knowledge Processing Task is accepted')
-    expect(guide?.content).toContain('exact external content bytes successfully read')
-    expect(guide?.content).not.toContain('external source revision')
-    expect(value.files.every((file) => !file.relativePath.startsWith('/'))).toBe(true)
+    expect(activity).toContain('`inputs/attachments/ATT000001.bin` | application/pdf')
+    expect(activity).toContain('`inputs/attachments/ATT000002.bin` | application/x-custom')
+    expect(activity).toContain('Attachment: ATT000001 · inputs/attachments/ATT000001.bin')
+    expect(Buffer.from(pdf!.content).toString()).toBe('document')
+    expect(Buffer.from(custom!.content).toString()).toBe('sidecar')
   })
 
   it('rejects attachment bytes that do not match their metadata', () => {
-    const input = observation(['attachment'], 0)
+    const input = observation()
     input.canonicalActivity.attachments[0].sha256 = '0'.repeat(64)
 
-    expect(() => planKnowledgeTaskInput(input, 'raw:test', 100))
-      .toThrow('内容与 metadata 不一致')
-  })
-})
-
-describe('activitySegmentCharacterLimit', () => {
-  it('uses half of the declared context with an upper bound', () => {
-    expect(activitySegmentCharacterLimit(8_000)).toBe(4_000)
-    expect(activitySegmentCharacterLimit(128_000)).toBe(64_000)
-    expect(activitySegmentCharacterLimit(0)).toBe(16 * 1_024)
-    expect(activitySegmentCharacterLimit(1_000_000)).toBe(256 * 1_024)
+    expect(() => planKnowledgeTaskInput(input)).toThrow('内容与 metadata 不一致')
   })
 })

@@ -37,6 +37,11 @@ describe('DiscoveryService', () => {
       join(historyRoot, 'two.jsonl'),
       `${JSON.stringify({ sessionId: 'two', cwd: projectRoot, timestamp: '2026-07-02T00:00:00.000Z' })}\n`
     )
+    await mkdir(join(historyRoot, 'subagents'), { recursive: true })
+    await writeFile(
+      join(historyRoot, 'subagents', 'child.jsonl'),
+      `${JSON.stringify({ sessionId: 'one', cwd: projectRoot, timestamp: '2026-07-01T00:01:00.000Z' })}\n`
+    )
     await writeFile(join(historyRoot, 'unknown.jsonl'), '{"type":"other"}\n')
 
     const evidenceReader = new FileSourceEvidenceReader()

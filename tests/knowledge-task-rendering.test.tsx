@@ -29,8 +29,6 @@ function result(): KnowledgeTaskResult {
       worktreePath: '/worktrees/task-completed',
       runtimePath: '/runtime/task-completed',
       taskPath: '/worktrees/task-completed/tasks/task-completed',
-      briefPath: '/worktrees/task-completed/tasks/task-completed/BRIEF.md',
-      progressPath: '/worktrees/task-completed/tasks/task-completed/PROGRESS.md',
       inputPath: '/worktrees/task-completed/tasks/task-completed/inputs',
       branchName: 'task/task-completed',
       targetBranch: 'main',

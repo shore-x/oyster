@@ -52,15 +52,12 @@ function maintenanceResult(): KnowledgeMaintenanceResult {
   return {
     agentId: 'knowledge_maintainer',
     sourceRef: 'raw:source-conversation-1@sha256:test',
-    activitySegmentCount: 1,
     worktree: {
       taskId: 'task-1',
       repositoryPath: '/tmp/oyster-repository',
       worktreePath: '/tmp/oyster-worktrees/task-1',
       runtimePath: '/tmp/oyster-agent-runtime/task-1',
       taskPath: '/tmp/oyster-worktrees/task-1/tasks/task-1',
-      briefPath: '/tmp/oyster-worktrees/task-1/tasks/task-1/BRIEF.md',
-      progressPath: '/tmp/oyster-worktrees/task-1/tasks/task-1/PROGRESS.md',
       inputPath: '/tmp/oyster-worktrees/task-1/tasks/task-1/inputs',
       branchName: 'task/task-1',
       targetBranch: 'main',
@@ -144,7 +141,6 @@ describe('knowledge processing controller', () => {
           sourceConversationId: SOURCE_CONVERSATION.sourceConversationId,
           attention: 'Inspect Skill activations.'
         })
-        expect(controller.maintenanceResult()?.activitySegmentCount).toBe(1)
         expect(controller.maintenanceResult()?.candidateRepositoryRevision).toBe('c'.repeat(40))
         controller.invalidatePreviewResult()
         expect(controller.maintenanceResult()).toBeUndefined()

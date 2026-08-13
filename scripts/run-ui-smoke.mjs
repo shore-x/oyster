@@ -236,7 +236,7 @@ if (
 if (
   knowledge.browse.linkLabel !== '知识维护 Agent'
   || knowledge.browse.linkPreviewTitle !== 'Knowledge Maintenance Agent'
-  || !knowledge.browse.linkPreview?.includes('BRIEF.md、PROGRESS.md')
+  || !knowledge.browse.linkPreview?.includes('task.json、TASK.md')
 ) {
   throw new Error('Knowledge browser did not render the wikilink alias and hover preview')
 }
@@ -558,7 +558,7 @@ if (
 if (processing.knowledgeTaskActivity.overviewHasActivityExplorer) {
   throw new Error('The Knowledge Task overview still renders unbounded Agent activity details')
 }
-if (processing.knowledgeTaskActivity.summaryChangedPathCount !== '10') {
+if (processing.knowledgeTaskActivity.summaryChangedPathCount !== '7') {
   throw new Error('The knowledge-task overview does not expose the compact changed-file count')
 }
 if (!processing.knowledgeTaskActivity.activityExplorerExists || processing.knowledgeTaskActivity.activityEventCount !== 3) {
@@ -600,7 +600,7 @@ if (
   !processing.knowledgeTaskActivity.gitResultText?.includes('合并 revision')
   || !processing.knowledgeTaskActivity.gitResultText?.includes('变更文件')
   || !processing.knowledgeTaskActivity.gitResultText?.includes('耗时')
-  || processing.knowledgeTaskActivity.changedPathCount !== 10
+  || processing.knowledgeTaskActivity.changedPathCount !== 7
 ) {
   throw new Error('The Knowledge Task result does not expose its integrated revision, changed files, and duration')
 }
@@ -621,7 +621,7 @@ if (
   || !processing.history.resultText?.includes('合并 revision')
   || !processing.history.resultText?.includes('变更文件')
   || !processing.history.resultText?.includes('耗时')
-  || processing.history.changedPathCount !== 10
+  || processing.history.changedPathCount !== 7
 ) {
   throw new Error('Historical results do not expose the compact completed Task result')
 }
@@ -649,7 +649,7 @@ if (processing.promptValues.some((prompt) => typeof prompt !== 'string' || !prom
   throw new Error('A processing default prompt is empty')
 }
 const [maintainerPrompt] = processing.promptValues
-for (const requiredCopy of ['Knowledge Maintainer', 'BRIEF.md', 'inputs/README.md', 'Canonical Activity', 'ordinary evidence file', '[[canonical title]]', 'Use the existing branch and worktree', 'Do not delete PROGRESS.md']) {
+for (const requiredCopy of ['Knowledge Maintainer', 'TASK.md', 'inputs/activity.md', 'inputs/evidence.txt', '[[canonical title]]', 'Knowledge–Evidence', 'Use the existing branch and worktree', 'Do not delete TASK.md']) {
   if (!maintainerPrompt.includes(requiredCopy)) {
     throw new Error(`Knowledge Maintenance Agent prompt is missing its responsibility: ${requiredCopy}`)
   }
@@ -712,7 +712,7 @@ for (const requiredCopy of ['read', 'write', 'bash']) {
 }
 if (
   !processing.agentPreviewActivity.resultText?.includes('Repository')
-  || !processing.agentPreviewActivity.resultText?.includes('Task record')
+  || !processing.agentPreviewActivity.resultText?.includes('TASK.md')
   || !processing.agentPreviewActivity.resultText?.includes('Task branch')
   || !processing.agentPreviewActivity.resultText?.includes('当前 revision')
   || !processing.agentPreviewActivity.resultText?.includes('等待 Reviewer 处理')

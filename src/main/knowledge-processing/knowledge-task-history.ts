@@ -20,8 +20,6 @@ import {
   OysterRepository
 } from '../repository/oyster-repository'
 import {
-  TASK_BRIEF_FILE_NAME,
-  TASK_PROGRESS_FILE_NAME,
   TASK_RECORD_FILE_NAME,
   type KnowledgeTaskGitRepository,
   parseKnowledgeTaskDefinition
@@ -142,7 +140,6 @@ export class GitKnowledgeTaskHistory implements KnowledgeTaskHistory {
     taskTip: string
   ): Promise<KnowledgeTaskWorktreeView> {
     const start = await this.tasks.taskStartRevision(taskId, taskTip)
-    const base = await this.git(['rev-parse', `${start}^`])
     const worktreePath = join(this.tasks.worktreesPath, taskId)
     const taskPath = join(worktreePath, TASKS_DIRECTORY, taskId)
     return {
@@ -151,12 +148,10 @@ export class GitKnowledgeTaskHistory implements KnowledgeTaskHistory {
       worktreePath,
       runtimePath: join(this.tasks.runtimePath, taskId),
       taskPath,
-      briefPath: join(taskPath, TASK_BRIEF_FILE_NAME),
-      progressPath: join(taskPath, TASK_PROGRESS_FILE_NAME),
       inputPath: join(taskPath, 'inputs'),
       branchName: `task/${taskId}`,
       targetBranch: OYSTER_TARGET_BRANCH,
-      baseRepositoryRevision: base
+      baseRepositoryRevision: start
     }
   }
 
@@ -281,10 +276,6 @@ export class GitKnowledgeTaskHistory implements KnowledgeTaskHistory {
           worktreePath,
           runtimePath,
           taskPath,
-          briefPath: stringValue(legacyWorktree?.briefPath)
-            ?? join(taskPath, TASK_BRIEF_FILE_NAME),
-          progressPath: stringValue(legacyWorktree?.progressPath)
-            ?? join(taskPath, TASK_PROGRESS_FILE_NAME),
           inputPath: stringValue(legacyWorktree?.inputPath) ?? join(taskPath, 'inputs'),
           branchName: stringValue(legacyWorktree?.branchName) ?? `task/${taskId}`,
           targetBranch: stringValue(legacyWorktree?.targetBranch) ?? OYSTER_TARGET_BRANCH,

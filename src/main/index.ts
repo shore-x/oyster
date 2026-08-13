@@ -174,12 +174,12 @@ async function initializeFixtureKnowledge(store: FileKnowledgeStore): Promise<vo
     {
       path: 'oyster-processing.md',
       title: 'Oyster 知识加工链路',
-      content: 'Knowledge Processing Task 在独立 Task 分支与 linked worktree 中运行，[[Knowledge Maintenance Agent|知识维护 Agent]] 与 Reviewer 通过 PROGRESS.md 协作；Reviewer 把批准的修改合并到 main 后 Task 才完成，知识库与工作台始终读取 main 中的正式内容。'
+      content: 'Knowledge Processing Task 在独立 Task 分支与 linked worktree 中运行，[[Knowledge Maintenance Agent|知识维护 Agent]] 与 Reviewer 通过 TASK.md 协作；Reviewer 把批准的修改合并到 main 后 Task 才完成，知识库与工作台始终读取 main 中的正式内容。'
     },
     {
       path: 'knowledge-maintainer.md',
       title: 'Knowledge Maintenance Agent',
-      content: '从独立 Task worktree 读取 BRIEF.md、PROGRESS.md 与文件化 Canonical Activity，按需回溯[[Raw Evidence|原始证据]]并直接维护 Knowledge/Artifact 文件；Maintainer 自行提交完整变化。'
+      content: '从独立 Task worktree 读取 task.json、TASK.md 与文件化 Canonical Activity，按 locator 回溯[[Raw Evidence|原始证据]]并直接维护 Knowledge/Artifact 文件；Maintainer 在 TASK.md 记录 Knowledge–Evidence 关系并提交完整变化。'
     },
     {
       path: 'raw-evidence.md',

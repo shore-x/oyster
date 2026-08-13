@@ -159,6 +159,10 @@ function codexSkillHint(record: Record<string, unknown>): SkillHint | undefined 
     const name = injectedSkillName(payload.content)
     if (name) return { name, source: 'runtime_injection' }
   }
+  if (payload.type === 'user_message') {
+    const name = injectedSkillName(payload.message)
+    if (name) return { name, source: 'runtime_injection' }
+  }
   const payloadType = typeof payload.type === 'string'
     ? payload.type.toLowerCase().replace(/[^a-z]/g, '')
     : ''
@@ -200,7 +204,7 @@ interface ProjectionBuilder {
   items: CanonicalActivityItem[]
   attachments: CanonicalActivityAttachment[]
   nextAttachment: number
-  codexToolCalls: Map<string, CanonicalActivityItem>
+  codexToolCalls: Map<string, string>
   mirrorable: Array<{
     item: CanonicalActivityItem
     kind: CanonicalActivityKind
@@ -208,6 +212,24 @@ interface ProjectionBuilder {
     line: number
     source: 'primary' | 'event'
   }>
+}
+
+interface ParsedProjectionRecord {
+  record?: Record<string, unknown>
+  range: EvidenceRange
+  lineIndex: number
+  rawLine: string
+}
+
+interface TreeProjectionRecord extends ParsedProjectionRecord {
+  id: string
+  parentId?: string
+}
+
+interface ProjectionSection {
+  label: 'active' | 'alternate'
+  records: ParsedProjectionRecord[]
+  warning?: string
 }
 
 interface AttachmentCapture {
@@ -223,6 +245,95 @@ function physicalLineRange(lines: readonly string[], index: number): EvidenceRan
     start: { line: index + 1, offset: 0 },
     end: { line: index + 1, offset: lines[index].length }
   }
+}
+
+function parsedProjectionRecords(lines: readonly string[]): ParsedProjectionRecord[] {
+  return lines.map((rawLine, lineIndex) => {
+    const record = parsedRecord(rawLine)
+    return {
+      ...(record ? { record } : {}),
+      range: physicalLineRange(lines, lineIndex),
+      lineIndex,
+      rawLine
+    }
+  })
+}
+
+function treeProjectionSections(
+  records: readonly ParsedProjectionRecord[],
+  idField: string,
+  parentIdField: string,
+  preferredLeafId?: string,
+  isTreeRecord: (record: Record<string, unknown>) => boolean = () => true,
+  isFallbackLeaf: (record: Record<string, unknown>) => boolean = () => true
+): ProjectionSection[] {
+  const treeRecords = records.flatMap((entry): TreeProjectionRecord[] => {
+    if (!entry.record || !isTreeRecord(entry.record)) return []
+    const id = sourceToken(entry.record?.[idField])
+    if (!id) return []
+    const parentId = sourceToken(entry.record?.[parentIdField])
+    return [{ ...entry, id, ...(parentId ? { parentId } : {}) }]
+  })
+  if (!treeRecords.length) return [{ label: 'active', records: [...records] }]
+
+  const byId = new Map<string, TreeProjectionRecord>()
+  let valid = true
+  for (const entry of treeRecords) {
+    if (byId.has(entry.id)) valid = false
+    byId.set(entry.id, entry)
+  }
+  const resolved = new Set<string>()
+  for (const entry of treeRecords) {
+    if (resolved.has(entry.id)) continue
+    const chain: TreeProjectionRecord[] = []
+    const chainIds = new Set<string>()
+    let candidate: TreeProjectionRecord | undefined = entry
+    while (candidate && !resolved.has(candidate.id)) {
+      if (chainIds.has(candidate.id)) {
+        valid = false
+        break
+      }
+      chainIds.add(candidate.id)
+      chain.push(candidate)
+      if (!candidate.parentId) break
+      candidate = byId.get(candidate.parentId)
+      if (!candidate) valid = false
+    }
+    chain.forEach((item) => resolved.add(item.id))
+  }
+  const preferredLeaf = preferredLeafId ? byId.get(preferredLeafId) : undefined
+  const leaf = preferredLeaf
+    ?? [...treeRecords].reverse().find((entry) => entry.record && isFallbackLeaf(entry.record))
+  if (!leaf) valid = false
+  const activeReverse: TreeProjectionRecord[] = []
+  const visited = new Set<string>()
+  let current: TreeProjectionRecord | undefined = leaf
+  while (current) {
+    if (visited.has(current.id)) {
+      valid = false
+      break
+    }
+    visited.add(current.id)
+    activeReverse.push(current)
+    if (!current.parentId) break
+    current = byId.get(current.parentId)
+    if (!current) valid = false
+  }
+  if (!valid) return [{
+    label: 'active',
+    records: [...records],
+    warning: 'Conversation branches could not be reconstructed from the source IDs. Records follow physical source order.'
+  }]
+
+  const active = activeReverse.reverse()
+  const activeLines = new Set(active.map((entry) => entry.lineIndex))
+  const treeLines = new Set(treeRecords.map((entry) => entry.lineIndex))
+  const nonTreeRecords = records.filter((entry) => !treeLines.has(entry.lineIndex))
+  const alternate = treeRecords.filter((entry) => !activeLines.has(entry.lineIndex))
+  return [
+    { label: 'active', records: [...nonTreeRecords, ...active].sort((left, right) => left.lineIndex - right.lineIndex) },
+    ...(alternate.length ? [{ label: 'alternate' as const, records: alternate }] : [])
+  ]
 }
 
 function readableText(value: unknown): string | undefined {
@@ -339,6 +450,11 @@ function sanitizedValue(
   }
   const record = asRecord(value)
   if (!record) return value
+  const attachment = blockAttachment(builder, range, record, field)
+  if (attachment) {
+    captures.push(attachment)
+    return `[Attachment ${attachment.id}]`
+  }
   return Object.fromEntries(Object.entries(record).map(([key, entry]) => {
     const path = field ? `${field}.${key}` : key
     if (key === 'encrypted_content' && typeof entry === 'string') {
@@ -608,72 +724,187 @@ function appendMessageBlocks(
   }
 }
 
+function projectClaudeRecord(
+  projection: ProjectionBuilder,
+  entry: ParsedProjectionRecord
+): void {
+  const { record, range, rawLine } = entry
+  if (!record) {
+    if (rawLine.trim()) addUnparseableRecord(projection, 'Claude', rawLine, range)
+    return
+  }
+  const message = asRecord(record.message)
+  if ((record.type === 'user' || record.type === 'assistant') && message) {
+    if (message.role === 'user' && injectedSkillName(message.content)) return
+    appendMessageBlocks(projection, message.role ?? record.type, message.content, range, 'claude')
+    return
+  }
+  if (record.type === 'attachment') {
+    addValueItem(projection, 'attachment', 'Claude attachment record:', record.attachment ?? record, range, 'attachment')
+    return
+  }
+  if (record.type === 'system') {
+    addValueItem(projection, 'state', 'Claude system activity:', compactRecord(record, ['type']), range)
+    return
+  }
+  if (record.type === 'permission-mode') {
+    addValueItem(projection, 'state', 'Permission mode:', compactRecord(record, ['type', 'sessionId']), range)
+    return
+  }
+  if (record.type === 'file-history-snapshot' || record.type === 'last-prompt') {
+    addValueItem(projection, 'state', `Claude ${String(record.type)}:`, compactRecord(record, ['type']), range)
+    return
+  }
+  addValueItem(projection, 'unknown', `Unrecognized Claude record (${String(record.type ?? 'no type')}):`, record, range)
+}
+
 function projectClaude(lines: readonly string[]): CanonicalActivity {
   const projection = builder()
-  lines.forEach((line, index) => {
-    const record = parsedRecord(line)
-    const range = physicalLineRange(lines, index)
-    if (!record) {
-      if (line.trim()) addUnparseableRecord(projection, 'Claude', line, range)
+  const records = parsedProjectionRecords(lines)
+  const preferredLeafId = [...records].reverse().flatMap((entry): string[] => {
+    if (entry.record?.type !== 'last-prompt') return []
+    const leafUuid = sourceToken(entry.record.leafUuid)
+    return leafUuid ? [leafUuid] : []
+  }).at(0)
+  for (const section of treeProjectionSections(
+    records,
+    'uuid',
+    'parentUuid',
+    preferredLeafId,
+    () => true,
+    (record) => record.isSidechain !== true
+  )) {
+    if (section.warning) addItem(projection, 'state', `Claude: ${section.warning}`, section.records[0].range)
+    if (section.label === 'alternate') {
+      addItem(
+        projection,
+        'state',
+        'Claude alternate or abandoned source branches follow. They remain evidence of exploration, but do not represent the active conversation path.',
+        section.records[0].range
+      )
+    }
+    section.records.forEach((entry) => projectClaudeRecord(projection, entry))
+  }
+  return canonicalActivity('claude-canonical-activity-v3', projection)
+}
+
+function projectPiRecord(projection: ProjectionBuilder, entry: ParsedProjectionRecord): void {
+  const { record, range, rawLine } = entry
+  if (!record) {
+    if (rawLine.trim()) addUnparseableRecord(projection, 'Pi', rawLine, range)
+    return
+  }
+  if (record.type === 'message') {
+    const message = asRecord(record.message) ?? record
+    const role = message.role ?? record.role
+    const content = message.content ?? record.content
+    if (role === 'user' && injectedSkillName(content)) return
+    if (role === 'toolResult') {
+      const formatted = formattedValue(projection, range, content ?? '', 'message.content')
+      addItem(projection, 'tool_result', [
+        typeof message.toolName === 'string' ? `Tool: ${message.toolName}` : undefined,
+        typeof message.toolCallId === 'string' ? `Call ID: ${message.toolCallId}` : undefined,
+        message.isError === true
+          ? 'Status: error'
+          : message.isError === false
+            ? 'Status: success'
+            : undefined,
+        formatted.text
+      ].filter((part): part is string => Boolean(part)).join('\n'), range)
+      addCapturedAttachments(projection, formatted.captures, range)
       return
     }
-    const message = asRecord(record.message)
-    if ((record.type === 'user' || record.type === 'assistant') && message) {
-      appendMessageBlocks(projection, message.role ?? record.type, message.content, range, 'claude')
+    if (role === 'user' || role === 'assistant' || role === 'developer' || role === 'system') {
+      appendMessageBlocks(projection, role, content, range, 'pi')
+      if (
+        role === 'assistant'
+        && (message.stopReason === 'error' || message.stopReason === 'aborted' || message.errorMessage != null)
+      ) {
+        addValueItem(
+          projection,
+          'state',
+          'Pi assistant execution did not produce a message:',
+          compactRecord(message, ['role', 'content', 'usage']),
+          range
+        )
+      }
       return
     }
-    if (record.type === 'attachment') {
-      addValueItem(projection, 'attachment', 'Claude attachment record:', record.attachment ?? record, range, 'attachment')
+    if (role === 'bashExecution') {
+      const status = message.cancelled === true
+        ? 'cancelled'
+        : typeof message.exitCode === 'number'
+          ? message.exitCode === 0 ? 'success' : 'error'
+          : undefined
+      const formatted = formattedValue(projection, range, {
+        ...(typeof message.command === 'string' ? { command: message.command } : {}),
+        ...(message.output !== undefined ? { output: message.output } : {}),
+        ...(typeof message.exitCode === 'number' ? { exitCode: message.exitCode } : {}),
+        ...(message.cancelled === true ? { cancelled: true } : {}),
+        ...(message.truncated === true ? { truncated: true } : {}),
+        ...(typeof message.fullOutputPath === 'string' ? { fullOutputPath: message.fullOutputPath } : {})
+      }, 'message')
+      addItem(projection, 'tool_result', [
+        'Tool: bash',
+        status ? `Status: ${status}` : undefined,
+        formatted.text
+      ].filter((part): part is string => Boolean(part)).join('\n'), range)
+      addCapturedAttachments(projection, formatted.captures, range)
       return
     }
-    if (record.type === 'system') {
-      addValueItem(projection, 'instruction', 'Claude system activity:', compactRecord(record, ['type']), range)
+    if (role === 'branchSummary' || role === 'compactionSummary') {
+      addValueItem(projection, 'state', `Pi ${String(role)}:`, compactRecord(message, ['role', 'usage']), range)
       return
     }
-    if (record.type === 'permission-mode') {
-      addValueItem(projection, 'state', 'Permission mode:', compactRecord(record, ['type', 'sessionId']), range)
-      return
-    }
-    if (record.type === 'file-history-snapshot' || record.type === 'last-prompt') {
-      addValueItem(projection, 'state', `Claude ${String(record.type)}:`, compactRecord(record, ['type']), range)
-      return
-    }
-    addValueItem(projection, 'unknown', `Unrecognized Claude record (${String(record.type ?? 'no type')}):`, record, range)
-  })
-  return canonicalActivity('claude-canonical-activity-v2', projection)
+    addValueItem(
+      projection,
+      'unknown',
+      `Unrecognized Pi message role (${String(role ?? 'no role')}):`,
+      message,
+      range,
+      'message'
+    )
+    return
+  }
+  if (record.type === 'session') {
+    addValueItem(
+      projection,
+      'conversation_context',
+      'Pi conversation context:',
+      compactRecord(record, ['type', 'id', 'timestamp']),
+      range
+    )
+    return
+  }
+  if (record.type === 'model_change' || record.type === 'thinking_level_change') {
+    addValueItem(projection, 'state', `Pi ${String(record.type)}:`, compactRecord(record, ['type', 'id', 'parentId', 'timestamp']), range)
+    return
+  }
+  addValueItem(projection, 'unknown', `Unrecognized Pi record (${String(record.type ?? 'no type')}):`, record, range)
 }
 
 function projectPi(lines: readonly string[]): CanonicalActivity {
   const projection = builder()
-  lines.forEach((line, index) => {
-    const record = parsedRecord(line)
-    const range = physicalLineRange(lines, index)
-    if (!record) {
-      if (line.trim()) addUnparseableRecord(projection, 'Pi', line, range)
-      return
-    }
-    if (record.type === 'message') {
-      const message = asRecord(record.message) ?? record
-      appendMessageBlocks(projection, message.role ?? record.role, message.content ?? record.content, range, 'pi')
-      return
-    }
-    if (record.type === 'session') {
-      addValueItem(
+  const records = parsedProjectionRecords(lines)
+  for (const section of treeProjectionSections(
+    records,
+    'id',
+    'parentId',
+    undefined,
+    (record) => record.type !== 'session'
+  )) {
+    if (section.warning) addItem(projection, 'state', `Pi: ${section.warning}`, section.records[0].range)
+    if (section.label === 'alternate') {
+      addItem(
         projection,
-        'conversation_context',
-        'Pi conversation context:',
-        compactRecord(record, ['type', 'id', 'timestamp']),
-        range
+        'state',
+        'Pi alternate or abandoned source branches follow. They remain evidence of exploration, but do not represent the active conversation path.',
+        section.records[0].range
       )
-      return
     }
-    if (record.type === 'model_change' || record.type === 'thinking_level_change') {
-      addValueItem(projection, 'state', `Pi ${String(record.type)}:`, compactRecord(record, ['type', 'id', 'parentId', 'timestamp']), range)
-      return
-    }
-    addValueItem(projection, 'unknown', `Unrecognized Pi record (${String(record.type ?? 'no type')}):`, record, range)
-  })
-  return canonicalActivity('pi-canonical-activity-v2', projection)
+    section.records.forEach((entry) => projectPiRecord(projection, entry))
+  }
+  return canonicalActivity('pi-canonical-activity-v3', projection)
 }
 
 function codexConversationContext(payload: Record<string, unknown>): string {
@@ -686,33 +917,54 @@ function appendCompactCodexToolCall(
   projection: ProjectionBuilder,
   name: string,
   callId: string | undefined,
+  status: string | undefined,
+  argumentsText: string,
   range: EvidenceRange
 ): void {
-  const item = addItem(
-    projection,
-    'tool_call',
-    `Tool used: ${name}. Arguments and results remain available through the Raw source locators.`,
-    range
-  )
-  if (item && callId) projection.codexToolCalls.set(callId, item)
+  addItem(projection, 'tool_call', [
+    `Tool: ${name}`,
+    callId ? `Call ID: ${callId}` : undefined,
+    status ? `Status: ${status}` : undefined,
+    'Arguments:',
+    argumentsText
+  ].filter((part): part is string => Boolean(part)).join('\n'), range)
+  if (callId) projection.codexToolCalls.set(callId, name)
 }
 
 function appendCompactCodexToolResult(
   projection: ProjectionBuilder,
   callId: string | undefined,
+  status: string | undefined,
+  resultText: string,
   range: EvidenceRange
 ): void {
-  const call = callId ? projection.codexToolCalls.get(callId) : undefined
-  if (call) {
-    call.rawRanges.push(range)
-    return
+  const toolName = callId ? projection.codexToolCalls.get(callId) : undefined
+  addItem(projection, 'tool_result', [
+    toolName ? `Tool: ${toolName}` : undefined,
+    callId ? `Call ID: ${callId}` : undefined,
+    status ? `Status: ${status}` : undefined,
+    'Result:',
+    resultText
+  ].filter((part): part is string => Boolean(part)).join('\n'), range)
+}
+
+function codexToolStatus(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    const record = asRecord(value)
+    if (!record) continue
+    if (record.is_error === true || record.isError === true || record.success === false || record.error != null) {
+      return 'error'
+    }
+    if (record.is_error === false || record.isError === false || record.success === true) {
+      return 'success'
+    }
+    if (typeof record.status === 'string' && record.status) return record.status
+    if (Object.prototype.hasOwnProperty.call(record, 'Error') || Object.prototype.hasOwnProperty.call(record, 'Err')) {
+      return 'error'
+    }
+    if (Object.prototype.hasOwnProperty.call(record, 'Ok')) return 'success'
   }
-  addItem(
-    projection,
-    'tool_result',
-    'Tool result recorded without a matching visible call. The payload remains available through the Raw source locator.',
-    range
-  )
+  return undefined
 }
 
 function appendCodexToolCall(
@@ -721,6 +973,9 @@ function appendCodexToolCall(
   range: EvidenceRange
 ): void {
   const name = typeof payload.name === 'string' ? payload.name : 'unknown tool'
+  const qualifiedName = typeof payload.namespace === 'string' && payload.namespace
+    ? `${payload.namespace}.${name}`
+    : name
   const callId = typeof payload.call_id === 'string'
     ? payload.call_id
     : typeof payload.id === 'string'
@@ -729,7 +984,14 @@ function appendCodexToolCall(
   const rawArguments = payload.arguments ?? payload.input ?? {}
   const args = typeof rawArguments === 'string' ? parseStructuredString(rawArguments) : rawArguments
   const formatted = formattedValue(projection, range, args, 'arguments')
-  appendCompactCodexToolCall(projection, name, callId, range)
+  appendCompactCodexToolCall(
+    projection,
+    qualifiedName,
+    callId,
+    codexToolStatus(payload),
+    formatted.text,
+    range
+  )
   addCapturedAttachments(projection, formatted.captures, range)
 }
 
@@ -743,14 +1005,48 @@ function appendCodexToolResult(
     : typeof payload.id === 'string'
       ? payload.id
       : undefined
+  const rawResult = payload.output ?? payload.content ?? payload.result ?? ''
+  const parsedResult = typeof rawResult === 'string' ? parseStructuredString(rawResult) : rawResult
   const formatted = formattedValue(
     projection,
     range,
-    unwrappedToolResult(payload.output ?? payload.content ?? ''),
+    unwrappedToolResult(parsedResult),
     'output'
   )
-  appendCompactCodexToolResult(projection, callId, range)
+  appendCompactCodexToolResult(
+    projection,
+    callId,
+    codexToolStatus(payload, parsedResult),
+    formatted.text,
+    range
+  )
   addCapturedAttachments(projection, formatted.captures, range)
+}
+
+function appendCodexEventToolResult(
+  projection: ProjectionBuilder,
+  payload: Record<string, unknown>,
+  range: EvidenceRange
+): void {
+  const type = typeof payload.type === 'string' ? payload.type : 'tool_event'
+  const callId = typeof payload.call_id === 'string' ? payload.call_id : undefined
+  const omitted = ['type', 'call_id', 'turn_id']
+  let imageCapture: AttachmentCapture | undefined
+  if (type === 'image_generation_end' && typeof payload.result === 'string' && payload.result) {
+    imageCapture = captureAttachment(projection, range, 'image/png', payload.result, 'result')
+    omitted.push('result')
+  }
+  const value = compactRecord(payload, omitted)
+  const formatted = formattedValue(projection, range, value, `event.${type}`)
+  addItem(projection, 'tool_result', [
+    `Codex tool event: ${type}`,
+    callId ? `Call ID: ${callId}` : undefined,
+    codexToolStatus(payload, payload.result) ? `Status: ${codexToolStatus(payload, payload.result)}` : undefined,
+    'Result:',
+    formatted.text
+  ].filter((part): part is string => Boolean(part)).join('\n'), range)
+  addCapturedAttachments(projection, formatted.captures, range)
+  if (imageCapture) addCapturedAttachments(projection, [imageCapture], range)
 }
 
 function codexCompactionContent(payload: Record<string, unknown>): string {
@@ -786,9 +1082,7 @@ function codexInterAgentMessage(value: unknown): string | undefined {
   )
   if (!match) return undefined
   const payload = match[1].trim()
-  return /^Agent errored:|^Agent was interrupted|^This agent's turn failed\b/i.test(payload)
-    ? ''
-    : payload
+  return payload
 }
 
 function projectCodex(lines: readonly string[]): CanonicalActivity {
@@ -824,6 +1118,7 @@ function projectCodex(lines: readonly string[]): CanonicalActivity {
         const role = payload.role ?? (type === 'agent_message' ? 'assistant' : undefined)
         if (role === 'developer' || role === 'system') return
         if (role === 'user' && isCodexRuntimeInjectedMessage(payload.content)) return
+        if (role === 'user' && injectedSkillName(payload.content)) return
         if (type === 'agent_message') {
           const interAgentMessage = codexInterAgentMessage(payload.content)
           if (interAgentMessage !== undefined) {
@@ -853,6 +1148,13 @@ function projectCodex(lines: readonly string[]): CanonicalActivity {
         appendCodexToolResult(projection, payload, range)
         return
       }
+      addValueItem(
+        projection,
+        'unknown',
+        `Unrecognized Codex response item (${type || 'no type'}):`,
+        payload,
+        range
+      )
       return
     }
     if (record.type === 'event_msg') {
@@ -863,13 +1165,45 @@ function projectCodex(lines: readonly string[]): CanonicalActivity {
       }
       if (type === 'user_message' && typeof payload.message === 'string') {
         if (isCodexRuntimeInjectedMessage(payload.message)) return
+        if (injectedSkillName(payload.message)) return
         addMirrorableItem(projection, 'user_message', payload.message, range, 'event')
         return
       }
       if (
         type === 'token_count'
         || type === 'task_started'
+        || type === 'context_compacted'
+        || type === 'thread_settings_applied'
       ) return
+      if (type === 'sub_agent_activity') {
+        if (payload.kind === 'started' || payload.kind === 'interacted') return
+        if (payload.kind === 'interrupted') {
+          addValueItem(
+            projection,
+            'state',
+            'Codex subagent activity was interrupted:',
+            compactRecord(payload, ['type']),
+            range
+          )
+        } else {
+          addValueItem(
+            projection,
+            'unknown',
+            `Unrecognized Codex subagent activity (${String(payload.kind ?? 'no kind')}):`,
+            payload,
+            range
+          )
+        }
+        return
+      }
+      if (
+        type === 'patch_apply_end'
+        || type === 'mcp_tool_call_end'
+        || type === 'image_generation_end'
+      ) {
+        appendCodexEventToolResult(projection, payload, range)
+        return
+      }
       if (type === 'task_complete') {
         const message = typeof payload.last_agent_message === 'string'
           ? payload.last_agent_message
@@ -877,12 +1211,22 @@ function projectCodex(lines: readonly string[]): CanonicalActivity {
             ? payload.message
             : undefined
         if (message) addMirrorableItem(projection, 'assistant_message', message, range, 'event')
+        if (payload.error != null || payload.success === false || payload.status === 'error' || payload.status === 'failed') {
+          addValueItem(projection, 'state', 'Codex task failed:', compactRecord(payload, ['type', 'last_agent_message', 'message']), range)
+        }
         return
       }
       if (type === 'turn_aborted' || type === 'thread_rolled_back') {
         addValueItem(projection, 'state', `Codex event (${type}):`, compactRecord(payload, ['type']), range)
         return
       }
+      addValueItem(
+        projection,
+        'unknown',
+        `Unrecognized Codex event (${type || 'no type'}):`,
+        payload,
+        range
+      )
       return
     }
     if (record.type === 'turn_context') {
@@ -894,7 +1238,7 @@ function projectCodex(lines: readonly string[]): CanonicalActivity {
     if (record.type === 'inter_agent_communication_metadata') return
     addValueItem(projection, 'unknown', `Unrecognized Codex record (${String(record.type ?? type ?? 'no type')}):`, record, range)
   })
-  return canonicalActivity('codex-canonical-activity-v3', projection)
+  return canonicalActivity('codex-canonical-activity-v4', projection)
 }
 
 function createClaudeRawEvidence(rawContent: string): RawEvidence {

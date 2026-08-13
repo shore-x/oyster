@@ -2,7 +2,9 @@
 
 ## 产品定位
 
-Oyster 是一个本地优先、独立于具体 Agent Harness 的知识与协作产物中心。它帮助同时使用 Claude Code、Pi、Codex 等工具的用户，从分散的活动中形成能够长期复用的 Knowledge，并与 Agent 一起持续维护 Artifact。
+Oyster 是一个本地优先、Agent 无关的 Knowledge 与 Artifact 策展和持续维护系统。它从 Claude Code、Pi、Codex 等不同 Harness 的活动与用户提供的材料中提炼可复用理解，生产或修订真实产物，并把二者作为同一 Repository 中可继续演进的正式内容。
+
+这里的“持续演进”指 Repository 中的 Knowledge 和 Artifact 能跨 Conversation 被补充、纠正、合并和维护；来源 Agent、负责加工的 Agent 与未来消费结果的 Agent 可以彼此不同。它不是让某个被观察 Agent 通过在线重试、多个 rollout 或 test-time scaling 改进当前任务表现。Skill 只是 Artifact 的一种消费形态，不是 Artifact 的默认目标。
 
 对话是主要协作入口；知识库用于浏览形成的理解；工作台用于浏览和维护协作产物。三者共享同一个 Repository，但不因此成为同一种信息。
 
@@ -18,14 +20,15 @@ Oyster 追求以下体验：
 
 1. **发现而不吞并来源**：识别本机 Agent 活动，并将人类指令纳入可选 Observation 输入形态；系统保留来源身份，只在消费具体来源时读取必要正文；
 2. **把活动加工成理解**：让 Agent 从 Observation 中维护精炼、可关联、可修订的 Knowledge，而不是把摘要自动当作事实；
-3. **保留可核查出处**：Knowledge 最终应能解释依据了哪些 Observation 或输入知识。这是核心承诺；具体记录结构和校验方式尚待设计，当前能力不能被描述为已经完整兑现；
-4. **持续维护真实产物**：Artifact 保留任意文件形式和用户已经接纳的修改，由用户通过对话与 Agent 共同创建和维护；
+3. **保留可核查出处**：Knowledge 最终应能解释依据了哪些 Observation 或输入知识。Knowledge Processing Task 把固定 Evidence、与变更共同版本化的自然语言关系记录和 Git history 作为当前机制；它是可读、可核查的线索，不声称是机器校验的 Statement 级 Schema；
+4. **持续维护真实产物**：Artifact 保留任意文件形式和用户已经接纳的修改，可以由 Observation 中的经验、现有 Knowledge 或用户的新目标驱动创建和维护；
 5. **让结果可被再次使用**：知识浏览、Skill 绑定以及未来的检索接口都应使用同一正式内容，而不是创建难以同步的副本。
 
 ## 设计边界
 
 - Observation、Knowledge 和 Artifact 是三种信息形态，不是三套彼此隔离的数据库；
 - Task 是一次加工或协作过程，不是第四种信息形态，也不拥有 Knowledge 或 Artifact 的副本；
+- Agent 轨迹是可能的 Observation 来源，不是产品要复现、训练或优化的 Agent 本身；轨迹中的任务成败、奖励和重试次数不构成 Oyster 的 Knowledge 模型；
 - Oyster 不引入 Project 或 Workspace 领域实体。外部 Harness 提供的 `projectPath` 只是来源定位和展示元数据；
 - Artifact 由当前名字和目录表达身份。需要稳定重命名、引用迁移或跨设备同步时再增加治理能力；
 - Agent 以当前 OS 用户权限使用普通文件、Shell 和 Git。MVP 优先信任 Agent 维护 Repository 的能力，不提前增加 selector、router、锁、路径沙箱或大量固定流程；
@@ -36,7 +39,7 @@ Oyster 追求以下体验：
 
 **当前**产品正在验证本地来源发现、对话协作、统一 Git Repository、Knowledge 加工、Artifact 工作台、外部 Skill 发现与绑定能否组成一条有价值的个人闭环。Discovery 已能识别人类指令，但 Knowledge Processing 的结构化选择入口仍只支持 Conversation；人类指令的加工入口属于已确认但尚未实现的目标。实现细节和当前可操作入口以各功能文档及代码为准。
 
-**目标**体验包括：应用启动后自动探测本机 Agent 状态及其他可发现信息，并由一个统一的启动探测机制管理这些任务；为 Knowledge 建立可核查出处。
+**目标**体验包括：应用启动后自动探测本机 Agent 状态及其他可发现信息，并由一个统一的启动探测机制管理这些任务；在不增加平行映射存储的前提下，改善对 Knowledge 自然语言出处记录的阅读和核查体验。
 
 **候选**方向包括：
 
@@ -47,4 +50,4 @@ Oyster 追求以下体验：
 
 ## 非目标
 
-当前阶段不以替代浏览器或外部 Agent Harness 为目标，也不建设多用户数据平台、企业治理系统、云同步、固定的自主 Agent 编排、全局 Artifact 类型体系或 Project 模型。安全与恢复能力会随真实风险演进，但不以未经验证的治理规则牺牲架构简洁性。
+当前阶段不以替代浏览器或外部 Agent Harness 为目标，也不建设多用户数据平台、企业治理系统、云同步、固定的自主 Agent 编排、全局 Artifact 类型体系或 Project 模型。它不以多 rollout、任务重试、episode reward 或测试时扩展作为知识加工闭环。安全与恢复能力会随真实风险演进，但不以未经验证的治理规则牺牲架构简洁性。

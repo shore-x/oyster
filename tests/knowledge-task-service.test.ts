@@ -25,6 +25,7 @@ import {
   REVIEW_MARKER_COMMENT,
   REVIEW_MARKER_END,
   REVIEW_MARKER_START,
+  TASK_FILE_NAME,
   type KnowledgeTaskWorktree
 } from '../src/main/knowledge-processing/knowledge-task-git-repository'
 import type {
@@ -260,9 +261,10 @@ class RequestChangesOnceReviewer implements KnowledgeReviewerRuntime {
       ''
     ].join('\n')
     await writeFile(statementPath, marker, 'utf8')
+    const taskFile = join(input.worktree.taskPath, TASK_FILE_NAME)
     await writeFile(
-      input.worktree.progressPath,
-      `${await readFile(input.worktree.progressPath, 'utf8')}\n- [ ] Resolve the Reviewer request.\n`,
+      taskFile,
+      `${await readFile(taskFile, 'utf8')}\n- [ ] Resolve the Reviewer request.\n`,
       'utf8'
     )
     await git(['add', '-A'], input.worktree.worktreePath)
@@ -365,7 +367,6 @@ describe('KnowledgeTaskService', () => {
 
     const sharedWorktree = {
       taskPath: result.worktree.taskPath,
-      briefPath: result.worktree.briefPath,
       inputPath: result.worktree.inputPath,
       baseRepositoryRevision: result.worktree.baseRepositoryRevision
     }
@@ -401,8 +402,7 @@ describe('KnowledgeTaskService', () => {
     const result = await service.start(input, BINDINGS)
 
     expect(await readdir(result.worktree.taskPath)).toEqual(expect.arrayContaining([
-      'BRIEF.md',
-      'PROGRESS.md',
+      'TASK.md',
       'inputs',
       'task.json'
     ]))
@@ -480,8 +480,8 @@ describe('KnowledgeTaskService', () => {
 
     expect(failure).toMatchObject({ message: 'Maintainer failed after creating reserved task.json' })
     expect(historyWrites).toBe(0)
-    await expect(readFile(maintainer.worktree!.briefPath, 'utf8'))
-      .resolves.toContain('Knowledge Processing Task')
+    await expect(readFile(join(maintainer.worktree!.taskPath, TASK_FILE_NAME), 'utf8'))
+      .resolves.toContain('## Checklist')
   })
 
   it('keeps one Task failure isolated while another Task completes', async () => {

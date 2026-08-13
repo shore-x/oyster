@@ -47,8 +47,6 @@ function validateBaseInput(input: KnowledgeMaintainerInvocationInput | Knowledge
     || !input.worktree.worktreePath
     || !input.worktree.runtimePath
     || !input.worktree.taskPath
-    || !input.worktree.briefPath
-    || !input.worktree.progressPath
     || !input.worktree.inputPath
     || !input.worktree.branchName
   ) {
@@ -132,14 +130,18 @@ async function invokeRepositoryAgent(
 function maintainerTaskPrompt(_input: KnowledgeMaintainerInvocationInput): string {
   return [
     'The current working directory is the root of this Knowledge Processing Task checkout.',
-    `Read tasks/${_input.worktree.taskId}/BRIEF.md and tasks/${_input.worktree.taskId}/PROGRESS.md with the ordinary read tool, then carry out the Maintainer responsibility described by your System Prompt. All task-specific input is under tasks/${_input.worktree.taskId}/.`
+    `Read tasks/${_input.worktree.taskId}/TASK.md and tasks/${_input.worktree.taskId}/task.json when it exists, then carry out the Maintainer responsibility described by your System Prompt. All task-specific input is under tasks/${_input.worktree.taskId}/.`,
+    `Source reference: ${_input.sourceRef}`,
+    _input.attention?.trim()
+      ? `Additional focus from the user: ${_input.attention.trim()}`
+      : 'The user supplied no additional focus.'
   ].join('\n\n')
 }
 
 function reviewerTaskPrompt(_input: KnowledgeReviewerInvocationInput): string {
   return [
     'The current working directory is the root of this Knowledge Processing Task checkout.',
-    `Read tasks/${_input.worktree.taskId}/BRIEF.md and tasks/${_input.worktree.taskId}/PROGRESS.md with the ordinary read tool, then carry out the Reviewer responsibility described by your System Prompt. Review the current Task branch checkout.`
+    `Read tasks/${_input.worktree.taskId}/TASK.md and tasks/${_input.worktree.taskId}/task.json with the ordinary read tool, then carry out the Reviewer responsibility described by your System Prompt. Do not read tasks/${_input.worktree.taskId}/inputs/. Review exact Task revision ${_input.reviewedRepositoryRevision}. The main checkout used for final integration is ${JSON.stringify(_input.worktree.repositoryPath)}.`
   ].join('\n\n')
 }
 

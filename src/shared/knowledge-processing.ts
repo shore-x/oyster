@@ -130,18 +130,16 @@ export interface KnowledgeTaskWorktreeView {
   /** Runtime-only Pi state outside Git. */
   runtimePath: string
   taskPath: string
-  briefPath: string
-  progressPath: string
   inputPath: string
   branchName: string
   targetBranch: string
+  /** Revision first presented to an Agent; for a Task, the immutable Host-created Task-start commit. */
   baseRepositoryRevision: string
 }
 
 export interface KnowledgeMaintenanceResult {
   agentId: 'knowledge_maintainer'
   sourceRef: string
-  activitySegmentCount: number
   worktree: KnowledgeTaskWorktreeView
   previousRepositoryRevision: string
   candidateRepositoryRevision: string

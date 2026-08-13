@@ -22,7 +22,9 @@ Artifact 内容不会仅因存在而成为 Knowledge。一次有意义的维护�
 
 Knowledge Processing Task 在自己的 branch/worktree 中修改正式 Artifact，但不复制 Artifact 树。Task 中临时使用的 Maintainer、Reviewer 或 subagent 也不会变成 Artifact Domain 的固定角色。
 
-Skill 作为 Artifact 的一种实际用途，继续保持完整目录与普通 Artifact 规则。如何声明 Skill intent 以及如何绑定到外部 Agent，由[Skill 文件系统绑定](skill-symlink-injection-mvp.md)单独说明。
+Artifact 的目标不限于把经验转成 Skill。文档、配置、代码、模板、数据与其他可维护产物都可以由 Observation 中提炼的理解、现有 Knowledge 或用户目标驱动创建和修订。Skill 只是 Artifact 的一种实际用途，继续保持完整目录与普通 Artifact 规则；如何声明 Skill intent 以及如何绑定到外部 Agent，由[Skill 文件系统绑定](skill-symlink-injection-mvp.md)单独说明。
+
+经 Knowledge Processing Task 创建或修订的 Artifact 与该 Task 共处 Git 历史，因此具备文件和变更集级审计；用户、普通编辑器或 Chat Agent 的其他修改只有普通 Git 历史。这不表示任意 Artifact 内部已经具有内容级 provenance。MVP 的正式内容级出处承诺首先面向 Knowledge Statement。具体 Artifact 若需要更细出处，应由其自身格式表达，避免为任意目录和二进制强加统一 Schema。
 
 ## 待验证的候选方向
 

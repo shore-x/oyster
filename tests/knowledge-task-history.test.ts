@@ -59,28 +59,25 @@ async function fixture(taskId = 'task-history') {
   const worktree = await tasks.createWorktree({
     taskId,
     kind: 'task',
-    sourceRef: 'raw:test@revision',
     taskDefinition: openRecord(taskId),
     plan: {
-      files: [{ relativePath: 'inputs/README.md', content: '# Inputs\n' }],
+      files: [{ relativePath: 'inputs/activity.md', content: '# Activity\n' }],
       items: ['Inspect input.'],
-      activitySegmentCount: 1,
-      activityPageCount: 1,
-      evidencePageCount: 1,
-      attachmentCount: 0,
-      canonicalActivityFormat: 'test-activity-v1',
-      rawEvidenceFormat: 'test-raw-v1',
-      activityCount: 1,
-      rawEvidenceLineCount: 1
     }
   })
   const history = new GitKnowledgeTaskHistory(repository, tasks)
   return { root, repository, tasks, worktree, history }
 }
 
-async function agentCommit(worktree: KnowledgeTaskWorktree, message: string): Promise<void> {
+async function agentCommit(
+  worktree: KnowledgeTaskWorktree,
+  message: string,
+  allowEmpty = false
+): Promise<void> {
   await runArtifactGit(['add', '-A'], worktree.worktreePath)
-  await runArtifactGit(['commit', '--quiet', '--no-gpg-sign', '-m', message], worktree.worktreePath)
+  await runArtifactGit([
+    'commit', '--quiet', ...(allowEmpty ? ['--allow-empty'] : []), '--no-gpg-sign', '-m', message
+  ], worktree.worktreePath)
 }
 
 afterEach(async () => {
@@ -92,7 +89,7 @@ afterEach(async () => {
 describe('GitKnowledgeTaskHistory', () => {
   it('derives open while the Task tip remains outside main and ignores JSON lifecycle fields', async () => {
     const { worktree, history } = await fixture()
-    await agentCommit(worktree, 'maintainer: candidate')
+    await agentCommit(worktree, 'maintainer: candidate', true)
 
     const record = await history.read(worktree.taskId)
     expect(record).toMatchObject({
@@ -134,7 +131,7 @@ describe('GitKnowledgeTaskHistory', () => {
 
   it('keeps a completed Task completed after main advances again', async () => {
     const { repository, worktree, history } = await fixture('ancestor-task')
-    await agentCommit(worktree, 'maintainer: candidate')
+    await agentCommit(worktree, 'maintainer: candidate', true)
     const approved = await gitOutput(['rev-parse', 'HEAD'], worktree.worktreePath)
     await runArtifactGit(['merge', '--quiet', '--ff-only', worktree.branchName], repository.rootPath)
     await writeFile(join(repository.rootPath, 'knowledge', 'later.md'), '# Later\n\nMain change.\n')
@@ -151,32 +148,25 @@ describe('GitKnowledgeTaskHistory', () => {
     })
   })
 
-  it('hides a Task until its first Agent commit without poisoning other history', async () => {
+  it('lists each Task as open from its Host-owned Task-start commit', async () => {
     const pending = await fixture('pending-first-commit')
     const committed = await pending.tasks.createWorktree({
       taskId: 'committed-task',
       kind: 'task',
-      sourceRef: 'raw:test@revision',
       taskDefinition: openRecord('committed-task'),
       plan: {
-        files: [{ relativePath: 'inputs/README.md', content: '# Inputs\n' }],
+        files: [{ relativePath: 'inputs/activity.md', content: '# Activity\n' }],
         items: ['Inspect input.'],
-        activitySegmentCount: 1,
-        activityPageCount: 1,
-        evidencePageCount: 1,
-        attachmentCount: 0,
-        canonicalActivityFormat: 'test-activity-v1',
-        rawEvidenceFormat: 'test-raw-v1',
-        activityCount: 1,
-        rawEvidenceLineCount: 1
       }
     })
-    await agentCommit(committed, 'maintainer: committed task')
-
-    await expect(pending.history.read(pending.worktree.taskId)).resolves.toBeUndefined()
-    await expect(pending.history.list()).resolves.toEqual([
-      expect.objectContaining({ taskId: committed.taskId, status: 'open' })
-    ])
+    await expect(pending.history.read(pending.worktree.taskId)).resolves.toMatchObject({
+      taskId: pending.worktree.taskId,
+      status: 'open'
+    })
+    await expect(pending.history.list()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ taskId: committed.taskId, status: 'open' }),
+      expect.objectContaining({ taskId: pending.worktree.taskId, status: 'open' })
+    ]))
   })
 
   it('isolates malformed committed Tasks in list but reports direct reads', async () => {
@@ -186,41 +176,21 @@ describe('GitKnowledgeTaskHistory', () => {
     const valid = await tasks.createWorktree({
       taskId: 'valid-task',
       kind: 'task',
-      sourceRef: 'raw:test@revision',
       taskDefinition: openRecord('valid-task'),
       plan: {
-        files: [{ relativePath: 'inputs/README.md', content: '# Inputs\n' }],
+        files: [{ relativePath: 'inputs/activity.md', content: '# Activity\n' }],
         items: ['Inspect input.'],
-        activitySegmentCount: 1,
-        activityPageCount: 1,
-        evidencePageCount: 1,
-        attachmentCount: 0,
-        canonicalActivityFormat: 'test-activity-v1',
-        rawEvidenceFormat: 'test-raw-v1',
-        activityCount: 1,
-        rawEvidenceLineCount: 1
       }
     })
-    await agentCommit(valid, 'maintainer: valid task')
     const deleted = await tasks.createWorktree({
       taskId: 'deleted-definition',
       kind: 'task',
-      sourceRef: 'raw:test@revision',
       taskDefinition: openRecord('deleted-definition'),
       plan: {
-        files: [{ relativePath: 'inputs/README.md', content: '# Inputs\n' }],
+        files: [{ relativePath: 'inputs/activity.md', content: '# Activity\n' }],
         items: ['Inspect input.'],
-        activitySegmentCount: 1,
-        activityPageCount: 1,
-        evidencePageCount: 1,
-        attachmentCount: 0,
-        canonicalActivityFormat: 'test-activity-v1',
-        rawEvidenceFormat: 'test-raw-v1',
-        activityCount: 1,
-        rawEvidenceLineCount: 1
       }
     })
-    await agentCommit(deleted, 'maintainer: initial definition')
     await rm(join(deleted.taskPath, 'task.json'))
     await agentCommit(deleted, 'corrupt: delete definition')
     await runArtifactGit(['branch', 'task/invalid.name'], repository.rootPath)
@@ -232,19 +202,26 @@ describe('GitKnowledgeTaskHistory', () => {
     await expect(history.read(deleted.taskId)).resolves.toBeUndefined()
   })
 
-  it('excludes unrelated latest-main changes from rebased Task changed paths', async () => {
-    const { repository, worktree, history } = await fixture('rebased-task')
+  it('excludes unrelated latest-main changes after main is merged into the Task', async () => {
+    const { repository, worktree, history } = await fixture('merged-task')
     await writeFile(join(repository.rootPath, 'knowledge', 'unrelated.md'), '# Unrelated\n\nMain.\n')
     await runArtifactGit(['add', '-A'], repository.rootPath)
     await runArtifactGit(['commit', '--quiet', '--no-gpg-sign', '-m', 'main: unrelated'], repository.rootPath)
     await writeFile(join(worktree.worktreePath, 'knowledge', 'owned.md'), '# Owned\n\nTask.\n')
     await agentCommit(worktree, 'maintainer: owned')
-    await runArtifactGit(['rebase', 'main'], worktree.worktreePath)
+    await runArtifactGit(['merge', '--quiet', '--no-edit', 'main'], worktree.worktreePath)
+    await writeFile(join(worktree.worktreePath, 'knowledge', 'after-merge.md'), [
+      '# After merge', '', 'Task follow-up.', ''
+    ].join('\n'))
+    await agentCommit(worktree, 'reviewer: verify merged tree')
     await runArtifactGit(['merge', '--quiet', '--ff-only', worktree.branchName], repository.rootPath)
 
-    const changedPaths = (await history.read(worktree.taskId))?.result?.changedPaths
+    const record = await history.read(worktree.taskId)
+    const changedPaths = record?.result?.changedPaths
     expect(changedPaths).toContain('knowledge/owned.md')
+    expect(changedPaths).toContain('knowledge/after-merge.md')
     expect(changedPaths).not.toContain('knowledge/unrelated.md')
+    expect(record?.result?.worktree.baseRepositoryRevision).toBe(worktree.baseRepositoryRevision)
   })
 
   it('reads old v2 task.json fields without rewriting them', async () => {

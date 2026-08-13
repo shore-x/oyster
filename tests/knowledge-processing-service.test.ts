@@ -182,21 +182,19 @@ describe('KnowledgeProcessingService', () => {
 
     expect(maintainer.calls).toHaveLength(1)
     expect(maintainer.calls[0].systemPrompt).toBe(KNOWLEDGE_MAINTENANCE_AGENT_PROMPT)
-    expect(await readFile(result.worktree.briefPath, 'utf8'))
-      .toContain('raw:source-conversation-one@sha256:revision')
-    expect(await readFile(result.worktree.briefPath, 'utf8'))
-      .toContain('Inspect the repository model.')
-    expect(await readFile(join(result.worktree.inputPath, 'README.md'), 'utf8'))
-      .toContain('fixed input view materialized when this Knowledge Processing Task is accepted')
-    expect(await readdir(join(result.worktree.inputPath, 'activity'))).toEqual([
-      'segment-000001-page-000001.md'
+    expect(maintainer.calls[0]).toMatchObject({
+      sourceRef: 'raw:source-conversation-one@sha256:revision',
+      attention: 'Inspect the repository model.'
+    })
+    expect(await readdir(result.worktree.inputPath)).toEqual([
+      'activity.md', 'evidence.txt'
     ])
-    expect(await readdir(join(result.worktree.inputPath, 'evidence'))).toEqual([
-      'INDEX.md', 'page-000001.txt'
-    ])
+    expect(await readFile(join(result.worktree.inputPath, 'evidence.txt'), 'utf8'))
+      .toBe('first line\nsecond line')
+    expect(await readFile(join(result.worktree.inputPath, 'activity.md'), 'utf8'))
+      .toContain('Raw Evidence: inputs/evidence.txt')
     await expect(collaborations.assertWorktree(maintainer.calls[0].worktree))
       .resolves.toBeUndefined()
-    expect(result.activitySegmentCount).toBe(1)
     expect(result.previousRepositoryRevision).toBe(result.worktree.baseRepositoryRevision)
     expect(result.candidateRepositoryRevision).not.toBe(result.previousRepositoryRevision)
     expect(result.changedPaths).toEqual(expect.arrayContaining([
@@ -204,6 +202,7 @@ describe('KnowledgeProcessingService', () => {
     ]))
     expect(result.worktree.repositoryPath).toBe(maintainer.calls[0].worktree.repositoryPath)
     expect(await readdir(result.worktree.taskPath)).not.toContain('task.json')
+    expect(await readdir(result.worktree.taskPath)).not.toContain('task-summary.sha256')
     expect(await collaborations.currentRevision()).toBe(baseRepositoryRevision)
     expect(service.stateView().liveInvocations[0]?.invocation.invocationId).toBe(result.agentInvocationId)
   })
@@ -287,8 +286,10 @@ describe('KnowledgeProcessingService', () => {
       { worktree: first.worktree, previousRepositoryRevision: first.candidateRepositoryRevision }
     )).resolves.toMatchObject({ worktree: { taskId: first.worktree.taskId } })
     expect(maintainer.calls).toHaveLength(2)
-    await expect(readFile(first.worktree.briefPath, 'utf8')).resolves.toContain('session:first')
-    await expect(readFile(first.worktree.briefPath, 'utf8')).resolves.not.toContain('session:different')
+    await expect(readFile(join(first.worktree.inputPath, 'evidence.txt'), 'utf8'))
+      .resolves.toContain('first')
+    await expect(readFile(join(first.worktree.inputPath, 'evidence.txt'), 'utf8'))
+      .resolves.not.toContain('different')
   })
 
   it('keeps the tracked Task-start checklist across later turns', async () => {

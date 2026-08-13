@@ -141,8 +141,8 @@ export function KnowledgeTaskWorktree(props: KnowledgeTaskWorktreeProps) {
       <div class="knowledge-task__boundary" data-testid="git-collaboration-boundary">
         <span class="git-collaboration-badge">{uiText('Git 协作测试', 'Git Collaboration Test')}</span>
         <p>{uiText(
-          'Knowledge Processing Task 使用独立 Task 分支；Maintainer 与 Reviewer 通过 PROGRESS.md 协作，Reviewer 将批准的修改合并到 main 后 Task 才会完成。',
-          'A Knowledge Processing Task uses an independent Task branch. The Maintainer and Reviewer collaborate through PROGRESS.md, and the Task completes only after the Reviewer integrates approved changes into main.'
+          'Knowledge Processing Task 使用独立 Task 分支；Maintainer 与 Reviewer 通过 TASK.md 协作，Reviewer 将批准的修改合并到 main 后 Task 才会完成。',
+          'A Knowledge Processing Task uses an independent Task branch. The Maintainer and Reviewer collaborate through TASK.md, and the Task completes only after the Reviewer integrates approved changes into main.'
         )}</p>
       </div>
 

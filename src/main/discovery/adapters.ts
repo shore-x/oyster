@@ -109,7 +109,11 @@ async function readJsonLinesHead(filePath: string): Promise<Record<string, unkno
   }
 }
 
-async function* walkJsonl(rootPath: string, signal: AbortSignal): AsyncGenerator<string> {
+async function* walkJsonl(
+  rootPath: string,
+  signal: AbortSignal,
+  excludedDirectoryNames: ReadonlySet<string> = new Set()
+): AsyncGenerator<string> {
   signal.throwIfAborted()
   const directory = await opendir(rootPath)
   for await (const entry of directory) {
@@ -117,7 +121,8 @@ async function* walkJsonl(rootPath: string, signal: AbortSignal): AsyncGenerator
     if (entry.isSymbolicLink()) continue
     const entryPath = join(rootPath, entry.name)
     if (entry.isDirectory()) {
-      yield* walkJsonl(entryPath, signal)
+      if (excludedDirectoryNames.has(entry.name)) continue
+      yield* walkJsonl(entryPath, signal, excludedDirectoryNames)
     } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.jsonl')) {
       yield entryPath
     }
@@ -391,7 +396,7 @@ export class ClaudeHistoryAdapter implements AgentHistoryAdapter {
     context?: DetectionContext
   ): AsyncGenerator<ScanEntry> {
     const projectPaths = new Set<string>()
-    for await (const filePath of walkJsonl(rootPath, signal)) {
+    for await (const filePath of walkJsonl(rootPath, signal, new Set(['subagents']))) {
       const metadata = await stat(filePath)
       const records = await readJsonLinesHead(filePath)
       const header = records.find((record) => stringValue(record.sessionId, record.session_id))

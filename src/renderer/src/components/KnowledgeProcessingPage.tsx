@@ -37,8 +37,8 @@ function maintainerCapability(value: string): string {
   const translations: Record<string, string> = {
     '读取 Task 文件工作面': 'Read the Task file workspace',
     '完整扫描 Canonical Activity': 'Scan all Canonical Activity',
-    '按 locator 回查 Evidence page': 'Trace Evidence pages by locator',
-    '检查图片附件': 'Inspect image attachments',
+    '按 locator 回查 Raw Evidence': 'Trace Raw Evidence by locator',
+    '检查附件': 'Inspect attachments',
     '直接维护 Repository': 'Maintain the Repository directly'
   }
   return appLanguage() === 'en-US' ? translations[value] ?? value : value
@@ -53,9 +53,7 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
       </div>
       <dl class="knowledge-task-details">
         <div><dt>Repository</dt><dd>{props.result.worktree.repositoryPath}</dd></div>
-        <div><dt>Task record</dt><dd>{props.result.worktree.taskPath}</dd></div>
-        <div><dt>BRIEF.md</dt><dd>{props.result.worktree.briefPath}</dd></div>
-        <div><dt>PROGRESS.md</dt><dd>{props.result.worktree.progressPath}</dd></div>
+        <div><dt>TASK.md</dt><dd>{`${props.result.worktree.taskPath}/TASK.md`}</dd></div>
         <div><dt>Inputs</dt><dd>{props.result.worktree.inputPath}</dd></div>
         <div><dt>Task branch</dt><dd>{props.result.worktree.branchName}</dd></div>
         <div><dt>{uiText('前一 revision', 'Previous Revision')}</dt><dd>{props.result.previousRepositoryRevision}</dd></div>
@@ -66,7 +64,6 @@ function MaintenanceResult(props: { result: KnowledgeMaintenanceResult }) {
         <div><dt>Provider</dt><dd>{providerLabel(props.result.invocation.providerId)}</dd></div>
         <div><dt>Model</dt><dd>{props.result.invocation.model}</dd></div>
         <div><dt>Runtime</dt><dd>{runtimeLabel(props.result.invocation.runtime)}</dd></div>
-        <div><dt>{uiText('活动段', 'Activity Segments')}</dt><dd>{props.result.activitySegmentCount}</dd></div>
         <div><dt>{uiText('模型调用', 'Model Calls')}</dt><dd>{props.result.invocation.modelCallCount}</dd></div>
         <div><dt>{uiText('耗时', 'Duration')}</dt><dd>{formatDuration(props.result.durationMs)}</dd></div>
         <div><dt>{uiText('完成时间', 'Completed At')}</dt><dd>{formatTime(props.result.completedAt)}</dd></div>
@@ -300,8 +297,8 @@ export function KnowledgeProcessingPage() {
                   <div class="processing-worktree-panel agent-preview__input" aria-label={uiText('Agent Preview 输入', 'Agent Preview input')}>
                     <section class="processing-input" aria-label={uiText('知识维护输入', 'Knowledge maintenance input')}>
                       <div class="processing-input__heading"><h3>{uiText(
-                        '独立 Task worktree 中的 BRIEF.md、PROGRESS.md、文件化 Observation 与 Task branch',
-                        'BRIEF.md, PROGRESS.md, file-based Observations, and the Task branch in an isolated Task worktree'
+                        '独立 Task worktree 中的 task.json、TASK.md、文件化 Observation 与 Task branch',
+                        'task.json, TASK.md, file-based Observations, and the Task branch in an isolated Task worktree'
                       )}</h3><span>{uiText('不会自动调用', 'Never runs automatically')}</span></div>
                       <SourceConversationPicker
                         conversations={controller.sourceConversations()}

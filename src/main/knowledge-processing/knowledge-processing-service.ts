@@ -34,10 +34,7 @@ import type {
   StoredKnowledgeAgent
 } from './model'
 import { KNOWLEDGE_AGENT_DEFINITIONS, knowledgeAgentDefinition } from './prompts'
-import {
-  activitySegmentCharacterLimit,
-  planKnowledgeTaskInput
-} from './task-input'
+import { planKnowledgeTaskInput } from './task-input'
 import {
   KnowledgeTaskGitRepository,
   type KnowledgeTaskWorktree
@@ -201,8 +198,6 @@ function worktreeView(worktree: KnowledgeTaskWorktree) {
     worktreePath: worktree.worktreePath,
     runtimePath: worktree.runtimePath,
     taskPath: worktree.taskPath,
-    briefPath: worktree.briefPath,
-    progressPath: worktree.progressPath,
     inputPath: worktree.inputPath,
     branchName: worktree.branchName,
     targetBranch: worktree.targetBranch,
@@ -504,15 +499,9 @@ export class KnowledgeProcessingService {
             && !modelStream.model.input?.includes('image')
           ) throw new Error('所选 Maintainer Model 不支持图片输入')
           const taskId = options.worktree?.taskId ?? options.taskId ?? randomUUID()
-          const inputPlan = planKnowledgeTaskInput(
-            observation,
-            sourceRef,
-            activitySegmentCharacterLimit(modelStream.model.contextWindow)
-          )
+          const inputPlan = planKnowledgeTaskInput(observation)
           const worktreeInput = {
             taskId,
-            sourceRef,
-            attention: normalizedAttention,
             plan: inputPlan,
             kind: invocation.origin === 'knowledge_task' ? 'task' as const : 'preview' as const,
             taskDefinition: options.taskDefinition
@@ -533,6 +522,8 @@ export class KnowledgeProcessingService {
             systemPrompt: binding.instructions,
             worktree,
             previousRepositoryRevision,
+            sourceRef,
+            ...(normalizedAttention ? { attention: normalizedAttention } : {}),
             reasoningEffort: binding.reasoningEffort,
             invocationId: invocation.invocationId,
             onInvocationUpdate: (record) => this.recordInvocation(invocation, record),
@@ -546,7 +537,6 @@ export class KnowledgeProcessingService {
           return {
             agentId: 'knowledge_maintainer' as const,
             sourceRef,
-            activitySegmentCount: inputPlan.activitySegmentCount,
             worktree: worktreeView(worktree),
             previousRepositoryRevision: handoff.previousRepositoryRevision,
             candidateRepositoryRevision: handoff.candidateRepositoryRevision,
@@ -603,6 +593,7 @@ export class KnowledgeProcessingService {
             worktree,
             reviewedRepositoryRevision
           )
+          const targetRevisionBeforeReview = await this.tasks.currentRevision()
           const result = await (options.agent ?? this.reviewer).invoke({
             modelStream,
             systemPrompt: binding.instructions,
@@ -615,7 +606,8 @@ export class KnowledgeProcessingService {
           })
           const decision = await this.tasks.inspectReview(
             worktree,
-            actualReviewedRepositoryRevision
+            actualReviewedRepositoryRevision,
+            targetRevisionBeforeReview
           )
           this.settleInvocation(invocation, result.invocation)
           return {

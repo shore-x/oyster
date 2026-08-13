@@ -6,9 +6,9 @@
 
 ### Observation
 
-Observation 是对外部活动或人类输入的保真记录。它可以来自 Agent Conversation，也可以来自人类编写的指令。人类指令已经确定为可选输入形态；当前结构化 Knowledge Processing 入口仍只支持 Conversation，不能据此把指令加工描述成已经实现。Observation 回答“发生了什么、输入是什么”，不把模型解释伪装成来源事实。
+Observation 是对外部活动或人类输入的保真记录。它可以来自 Agent Conversation，也可以来自人类编写的指令。人类指令已经确定为可选输入形态；当前结构化 Knowledge Processing 入口仍只支持 Conversation，不能据此把指令加工描述成已经实现。Observation 回答“发生了什么、输入是什么”，不把模型解释伪装成来源事实。这里的保真要求是内容不被静默改写或丢弃并且任何派生视图可以回到证据位置，不等于每种 Task 表示都必须逐字节复制外部文件。
 
-外部来源仍拥有原始正文。Oyster 的发现 catalog 保存身份和定位信息；用户接受某份输入后，Task 可以把本次需要的材料固定在 Git revision 中。实现可以产生便于阅读的确定性视图，但这些视图仍属于 Observation 的表示，不是新的领域实体。
+外部来源仍拥有原始正文。Oyster 的发现 catalog 保存身份和定位信息；接受某份输入时，原始外部字节由内容引用标识，Knowledge Processing Task 会在 `inputs/activity.md`、`inputs/evidence.txt` 和可选 `inputs/attachments/` 中物化本次使用的 Canonical Activity、归一化 Raw Evidence 和附件。后两种文本是同一 Observation 的确定性表示，不是新的领域实体，也不能被描述成外部原始字节的副本。
 
 ### Knowledge
 
@@ -16,7 +16,7 @@ Knowledge 是 Oyster 当前接纳、可复用且可修订的理解。一个 Know
 
 正文以自然语言为主；除普通 Markdown 和 wikilink 扩展外，不为知识表达增加新的结构化语法。当前名称表达内容身份，文件路径只是 locator。标题重命名、大小写与 Unicode 规范化以及引用迁移是未来治理能力，目前不预设方案。
 
-正式 Knowledge 能够追溯到 Observation 或输入 Knowledge 是产品的核心目标，但具体 provenance 模型尚未确定，当前不虚构已经存在的字段或保证。
+正式 Knowledge 能够追溯到 Observation 或输入 Knowledge 是产品的核心目标。Task 中的固定 Evidence 提供留存基础；Maintainer 在 `TASK.md` 中用自然语言把重要 Knowledge 变更连接到具体 Raw Evidence locator 或作为直接依据的既有 Knowledge revision，Reviewer 负责保持记录自足且清楚。关系与变更一起被 Git 跟踪；当前不增加专用 provenance 实体、Knowledge version 到 Evidence 的映射存储或专用查询工具。
 
 ### Artifact
 
@@ -28,7 +28,9 @@ Artifact 是用户与 Agent 持续维护的实际产物，可以包含文档、�
 
 ### Knowledge Processing Task
 
-Task 是一次持续的知识加工和协作过程。它固定输入、记录进度，并在自己的 Git branch/worktree 中修改同一 Repository 中的 Knowledge、Artifact 和 Task 文件。Task 目录只保存任务定义、材料、进度和必要摘要，不复制完整 Knowledge 或 Artifact 树。
+Task 是一次持续的知识加工和协作过程。它承载本次接受的输入、记录进度，并在自己的 Git branch/worktree 中修改同一 Repository 中的 Knowledge、Artifact 和 Task 文件。Task 目录的最小结构是不可变的机器定义 `task.json`、可变的协作记录 `TASK.md`，以及不可变的 `inputs/`；它不复制完整 Knowledge 或 Artifact 树。Host 在 Agent 开始前把它们创建为 Task-start commit。
+
+`TASK.md` 承载 checklist、`## Knowledge–Evidence` 关系和必要 handoff；`inputs/` 只含 `activity.md`、`evidence.txt` 和可选 `attachments/`。这些文件边界表达生命周期与读取方式，不是额外的领域实体或输入类型分类。
 
 Task 与某次模型调用不是一回事；一次 Task 可以包含多次 Agent Invocation。Task 只有在预期变化进入目标分支后才完成；具体 Git 协作见[统一 Git 协作设计](unified-git-agent-collaboration.md)。
 
