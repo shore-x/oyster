@@ -57,6 +57,20 @@ Agent 负责需要语义判断的 Git 工作：
 
 Repository 协作服务除初始化 Repository 和创建纯机械的 Task-start commit 外，不代理 Maintainer 或 Reviewer 的语义 commit，也不替 Agent 解决 merge 冲突。冲突涉及内容意图，由能够阅读上下文的 Agent 处理更清晰；服务只验证不可协商的结构性结果。Agent Runtime 只负责模型与工具执行，不理解这套 Git 业务语义。
 
+## Agent 交接循环
+
+Maintainer 和 Reviewer 使用同一种交接机制，不各自定义完成协议：
+
+1. Agent 在普通模型—工具循环中工作并自然停止；
+2. Host 从 Git 和 Repository tree 检查当前角色的交接条件；
+3. 检查通过时，当前 Invocation 才完成，并由下一角色接手或完成 Task；
+4. 检查失败但仍有修复机会时，Host 把具体错误反馈给同一 Pi Session，Agent 在同一 Invocation 中继续工作；
+5. 当前两次 Host 反馈后仍未通过时，Invocation 失败，Task 保持 `open`，不自动回滚或伪造交接结果。
+
+Maintainer 的条件包括产生新 Task commit、worktree clean、历史连续、固定输入未变且 Repository tree 有效。Reviewer 要求修改时必须把反馈和进度提交在 Task 历史中；批准时必须保留被审阅 revision 与 Task first-parent 历史、包含审阅开始时的目标 revision，并使 clean 的目标 checkout 精确停在最终 Task revision。两者只是同一循环使用不同的事实检查，不是两套流程。
+
+自然停止本身不是业务完成信号，也不需要新增专用 finish 工具。Host 不执行 commit、merge、rebase 或冲突解决来替 Agent 补齐结果；它只在每次自然停止后检查事实。Agent 因此能根据真实错误使用普通 `read`、`bash`、`edit`、`write` 处理异常，同时 Git 仍是唯一权威状态。
+
 ## Review、批准与完成
 
 Reviewer 的角色指令要求它不读取 `inputs/`，Host 也不把 Observation 正文注入其 Prompt。它只根据 `task.json`、`TASK.md` 和候选 Repository tree 判断结果能否脱离原始对话而自我解释。`TASK.md` 可以记录哪些变更依据哪些 locator，但不复制 Evidence 正文；Reviewer 检查关系是否清楚，不因此承担证据忠实性核查。这样可以检验 Knowledge 和 Artifact 是否真正成为可复用内容，而不是只有看过来源的人才能理解的摘要。这是 Agent 行为约束，不是权限边界；Reviewer 与 Maintainer 使用相同的普通工具和 OS 权限。
@@ -68,7 +82,7 @@ Reviewer 的角色指令要求它不读取 `inputs/`，Host 也不把 Observatio
 3. `main` 能够 fast-forward 到最终 Task revision；
 4. Repository 协作服务验证正式分支包含该结果。
 
-只有变化进入 `main` 后，Task 才是 `completed`。Reviewer 的口头结论、一次成功 Invocation 或停留在 Task branch 上的候选 revision 都不表示完成；其他工作保持 `open`。状态由 Task branch tip 是否已经进入 `main` 推导，而不是写进第二套状态记录。显式放弃与清理尚未形成当前生命周期。
+只有变化进入 `main` 后，Task 才是 `completed`。Reviewer 的口头结论、一次成功 Invocation 或停留在 Task branch 上的候选 revision 都不表示完成；其他工作保持 `open`。状态由 Task branch tip 是否已经进入 `main` 推导，而不是写进第二套状态记录。完成后保留 Task branch 和进入 `main` 的正式文件，回收 linked worktree 与该 Task 的 Runtime Session；显式放弃仍未形成当前生命周期。
 
 ## 并发原则
 
@@ -85,10 +99,10 @@ Task 的 Git 记录用于理解“为什么发生这次修改”，而不是复�
 - Task 定义、初始 `TASK.md` 和业务证据输入从 Task-start commit 起版本化；完成 Task 进入 `main` 后继续保留；
 - `task.json` 只保存创建时的 Task 定义与来源摘要，执行状态由 Git 历史推导；
 - Knowledge 和 Artifact 结果从 Git revision 读取，不写入 `task.json` 形成完整副本；
-- Pi Session 位于 Repository 外，只保存单次 Invocation 的 Runtime 上下文；Task 的跨轮交接依赖 Git 和 Task 文件；
+- Pi Session 位于 Repository 外，只保存单次 Invocation 的 Runtime 上下文；Task 的跨轮交接依赖 Git 和 Task 文件，完成后不需要保留该 Task 的 Session；
 - Agent Invocation 明细与 Debug Record 位于 Repository 外，只服务执行检查和故障诊断。
 
-Pi Session 和 Debug Record 可能包含完整业务上下文，不应因为 Task 可审计就自动进入长期 Git 历史。它们的保留与清理属于统一调试数据治理，而不是 Task 领域模型。
+Pi Session 和 Debug Record 可能包含完整业务上下文，不应因为 Task 可审计就自动进入长期 Git 历史。完成 Task 的 Session 随 worktree 回收；Task/Preview Debug Record 在下一次启动时按持久 Chat 引用清理。具体本机目录边界见[应用数据](application-data.md)。
 
 Task 输入与 Knowledge/Artifact 修改共处 Git 历史，可以关联成功 Task 的证据材料与修改路径。Repository 协作服务在每次 Agent 接手前和交接后验证原始 Task-start commit 仍在历史中，且 `inputs/` 与 `task.json` 没有偏离它。Reviewer 把最新 `main` merge 进 Task branch，因此既能保留这条接受时证据基线，也不需要新增持久字段、digest 或 ref。Task changed paths 以最近一次合入的 `main` revision 为比较基线，避免把其他并行变化算作本 Task 的修改。Git 不会自动解释“某项 Knowledge 变更依据哪段证据”；Maintainer 应在 `TASK.md` 中用自然语言把 Knowledge 变更路径与 Raw Evidence locator 或输入 Knowledge revision 连接起来，Reviewer 在不读取原始 Evidence 的前提下维护该记录的清晰性。Git history 保存每个版本的关系记录，不再从 commit 共现或 blame 中猜测，也不需要另一套 Knowledge version 到 Evidence 的映射存储。
 
@@ -98,4 +112,4 @@ Task 输入与 Knowledge/Artifact 修改共处 Git 历史，可以关联成功 T
 
 **当前限制**：通用 Chat Agent 仍从用户主 checkout 工作。它产生的 working-tree 变化会被知识库和工作台的文件读取立即看到，但提交前不属于正式 Git revision，也不会自动成为新 Task 的基线。
 
-**候选方向**：未来可以让 Chat 使用独立 writer branch/worktree，并由 Agent 负责 rebase 或 merge。该方向仍需结合用户编辑、接受和冲突体验验证，不是当前架构承诺。
+**候选方向**：当产品未来允许用户直接编辑 Repository 文件时，可以为用户与 Chat 提供独立的可改写工作分支和 worktree，并为 Host 保留 clean 的 `main` 集成坐标。`main` 继续表示正式接受的 Knowledge、Artifact 与 Task 历史；Task branch 继续保留不可改写的加工和证据历史；用户工作分支只表达尚未正式接受的编辑，可以在工作区 clean 且没有冲突时 rebase 到最新 `main`。发生冲突时应由用户或能够理解内容的 Agent 解决，Host 不应自动 stash、reset 或猜测用户意图。用户修改还需要经过明确接受才进入 `main`；不能因为 rebase 了正式变化，就把用户分支本身当作正式内容边界。当前 App 尚未提供用户直接修改文件的能力，这只是未来隔离正式集成与交互编辑的候选方向，不是当前实现合同。

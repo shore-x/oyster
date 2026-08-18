@@ -99,7 +99,10 @@ for (const navigationItem of ['Chat', 'Knowledge', 'Workbench', 'Sources', 'Proc
     throw new Error(`English primary navigation is missing: ${navigationItem}`)
   }
 }
-const persistedAppSettings = JSON.parse(await readFile(join(userDataPath, 'app-settings.json'), 'utf8'))
+const persistedAppSettings = JSON.parse(await readFile(
+  join(userDataPath, 'config', 'app-settings.json'),
+  'utf8'
+))
 if (persistedAppSettings.uiLanguage !== 'en-US' || persistedAppSettings.agentLanguage !== 'zh-CN') {
   throw new Error('Independent UI and Agent languages were not persisted')
 }
@@ -107,7 +110,13 @@ const englishSettingsImage = await readFile(join(dirname(capturePath), 'settings
 if (englishSettingsImage.length === 0) throw new Error('English Settings screenshot is empty')
 
 const skills = semantics.skills
-const expectedSkillProjectPath = join(userDataPath, 'skill-fixture-home', 'projects', 'oyster')
+const expectedSkillProjectPath = join(
+  userDataPath,
+  'runtime',
+  'fixture-home',
+  'projects',
+  'oyster'
+)
 if (skills?.title !== 'Skills' || skills.skillCount !== 6) {
   throw new Error(`Skill discovery page did not render all fixture registrations: ${skills?.skillCount ?? 'missing'}`)
 }

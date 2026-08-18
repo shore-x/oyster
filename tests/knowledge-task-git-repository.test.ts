@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -127,6 +127,50 @@ describe('KnowledgeTaskGitRepository', () => {
     expect(await repository.prepareAgentTurn(worktree, start)).toBe(start)
     expect(await repository.currentRevision()).toBe(base)
     expect(await gitOutput(['status', '--short'], repositoryPath)).toBe('')
+  })
+
+  it('reclaims a completed Task checkout and its runtime without deleting formal history', async () => {
+    const { repositoryPath, repository } = await fixture()
+    const worktree = await repository.createWorktree(input('completed-cleanup'))
+    await completeTask(worktree)
+    await writeFile(join(worktree.worktreePath, 'knowledge', 'cleanup.md'), '# Cleanup\n\nKept.\n')
+    const revision = await agentCommit(worktree, 'maintainer: complete cleanup task')
+    await runArtifactGit(['merge', '--quiet', '--ff-only', worktree.branchName], repositoryPath)
+
+    await repository.releaseCompletedWorktree(worktree)
+
+    await expect(access(worktree.worktreePath)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(access(worktree.runtimePath)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(runArtifactGit([
+      'rev-parse', '--verify', worktree.branchName
+    ], repositoryPath)).resolves.toBeUndefined()
+    expect(await gitOutput(['rev-parse', worktree.branchName], repositoryPath)).toBe(revision)
+    expect(await gitOutput(['show', `${revision}:knowledge/cleanup.md`], repositoryPath))
+      .toContain('Kept.')
+    expect(await gitOutput(['rev-parse', 'main'], repositoryPath)).toBe(revision)
+  })
+
+  it('cleans abandoned Previews on startup while retaining open Tasks', async () => {
+    const { repository, repositoryPath } = await fixture()
+    const preview = await repository.createWorktree({
+      taskId: 'discarded-preview',
+      kind: 'preview',
+      plan: {
+        files: [{ relativePath: 'inputs/activity.md', content: '# Preview\n' }],
+        items: ['Inspect.']
+      }
+    })
+    const openTask = await repository.createWorktree(input('open-task'))
+
+    await expect(repository.cleanupInactiveWorktrees()).resolves.toEqual(['discarded-preview'])
+
+    await expect(access(preview.worktreePath)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(access(preview.runtimePath)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(runArtifactGit([
+      'rev-parse', '--verify', preview.branchName
+    ], repositoryPath)).rejects.toThrow()
+    await expect(access(openTask.worktreePath)).resolves.toBeUndefined()
+    expect(await gitOutput(['branch', '--show-current'], openTask.worktreePath)).toBe(openTask.branchName)
   })
 
   it('validates a clean Maintainer commit and derives all Task changed paths', async () => {

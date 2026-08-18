@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { lstat, mkdir, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 import type {
@@ -305,6 +305,87 @@ export class KnowledgeTaskGitRepository {
 
   async currentRevision(): Promise<string> {
     return this.git(['rev-parse', OYSTER_TARGET_BRANCH])
+  }
+
+  private async removeOwnedWorktree(
+    worktreePath: string,
+    runtimePath: string,
+    branchName: string,
+    force: boolean
+  ): Promise<void> {
+    await this.git([
+      'worktree', 'remove', ...(force ? ['--force'] : []), worktreePath
+    ])
+    await rm(runtimePath, { recursive: true, force: true })
+    // Completed Task refs own their exact durable history projection. Preview refs are disposable.
+    if (force) await this.git(['branch', '-D', branchName])
+  }
+
+  /** Reclaims a clean Task checkout only after its exact branch tip is part of main. */
+  releaseCompletedWorktree(worktree: KnowledgeTaskWorktree): Promise<void> {
+    const release = async (): Promise<void> => {
+      this.assertWorktreeCoordinates(worktree)
+      await this.assertWorktree(worktree)
+      await this.assertWorktreeBranch(worktree)
+      if (await this.worktreeStatus(worktree)) {
+        throw new Error('已完成 Task 的 worktree 仍有未提交变化，拒绝清理')
+      }
+      const integrated = await this.gitSucceeds([
+        'merge-base', '--is-ancestor', worktree.branchName, OYSTER_TARGET_BRANCH
+      ], this.repositoryPath)
+      if (!integrated) throw new Error('Task branch 尚未进入 main，拒绝清理')
+      await this.removeOwnedWorktree(
+        worktree.worktreePath,
+        worktree.runtimePath,
+        worktree.branchName,
+        false
+      )
+    }
+    const result = this.worktreeMutationQueue.then(release, release)
+    this.worktreeMutationQueue = result.then(() => undefined, () => undefined)
+    return result
+  }
+
+  /** Startup cleanup for completed Tasks and disposable Previews left by an earlier process. */
+  cleanupInactiveWorktrees(): Promise<string[]> {
+    const cleanup = async (): Promise<string[]> => {
+      await this.initialize()
+      const cleaned: string[] = []
+      const entries = await readdir(this.worktreesPath, { withFileTypes: true })
+      for (const entry of entries) {
+        if (!entry.isDirectory() || entry.isSymbolicLink() || !/^[a-zA-Z0-9_-]+$/.test(entry.name)) {
+          continue
+        }
+        const taskId = entry.name
+        const worktreePath = childPath(this.worktreesPath, taskId)
+        const runtimePath = childPath(this.runtimePath, taskId)
+        if (!await this.gitSucceeds(['rev-parse', '--is-inside-work-tree'], worktreePath)) continue
+        const branchName = await this.git(['branch', '--show-current'], worktreePath)
+        const kind = branchName === `task/${taskId}`
+          ? 'task'
+          : branchName === `preview/${taskId}` ? 'preview' : undefined
+        if (!kind) continue
+        if (kind === 'task') {
+          const status = await this.git([
+            'status', '--porcelain', '--untracked-files=all', '--ignore-submodules=none'
+          ], worktreePath)
+          if (status || !await this.gitSucceeds([
+            'merge-base', '--is-ancestor', branchName, OYSTER_TARGET_BRANCH
+          ], this.repositoryPath)) continue
+        }
+        await this.removeOwnedWorktree(
+          worktreePath,
+          runtimePath,
+          branchName,
+          kind === 'preview'
+        )
+        cleaned.push(taskId)
+      }
+      return cleaned
+    }
+    const result = this.worktreeMutationQueue.then(cleanup, cleanup)
+    this.worktreeMutationQueue = result.then(() => undefined, () => undefined)
+    return result
   }
 
   createWorktree(input: CreateKnowledgeTaskWorktreeInput): Promise<KnowledgeTaskWorktree> {

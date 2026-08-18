@@ -7,7 +7,7 @@ import {
 import {
   createPiCodingAgentInvocation,
   piCodingAgentFinalAssistant,
-  promptPiCodingAgent,
+  promptPiCodingAgentUntilHandoff,
   SessionManager
 } from '../agent-runtime/pi-coding-agent-runtime'
 import { REASONING_EFFORTS } from '../../shared/ai-backends'
@@ -62,6 +62,7 @@ interface InvokeRepositoryAgentInput {
   language: AppLanguage
   taskPrompt: string
   worktree: KnowledgeTaskWorktree
+  validateHandoff: () => Promise<void>
   reasoningEffort?: KnowledgeMaintainerInvocationInput['reasoningEffort']
   invocationId: string
   onInvocationUpdate?: (record: AgentInvocationDebugRecord) => void
@@ -95,7 +96,13 @@ async function invokeRepositoryAgent(
     todoTools: false
   })
   try {
-    await promptPiCodingAgent(invocation, input.taskPrompt, input.signal, 'Knowledge Agent')
+    await promptPiCodingAgentUntilHandoff(
+      invocation,
+      input.taskPrompt,
+      input.validateHandoff,
+      input.signal,
+      'Knowledge Agent'
+    )
     if (input.signal.aborted) throw asError(input.signal.reason, 'Agent Invocation 已取消')
     const finalMessage = piCodingAgentFinalAssistant(invocation)
     if (finalMessage?.stopReason === 'length') {
@@ -131,6 +138,7 @@ function maintainerTaskPrompt(_input: KnowledgeMaintainerInvocationInput): strin
   return [
     'The current working directory is the root of this Knowledge Processing Task checkout.',
     `Read tasks/${_input.worktree.taskId}/TASK.md and tasks/${_input.worktree.taskId}/task.json when it exists, then carry out the Maintainer responsibility described by your System Prompt. All task-specific input is under tasks/${_input.worktree.taskId}/.`,
+    `Host-owned handoff contract: remain on branch ${JSON.stringify(_input.worktree.branchName)} in this existing worktree; never modify tasks/${_input.worktree.taskId}/task.json or tasks/${_input.worktree.taskId}/inputs/. Before finishing naturally, commit every intended Task change and leave the worktree clean. The Host validates the Git handoff after each natural stop and may return concrete failures in the same Pi Session for correction.`,
     `Source reference: ${_input.sourceRef}`,
     _input.attention?.trim()
       ? `Additional focus from the user: ${_input.attention.trim()}`
@@ -141,7 +149,8 @@ function maintainerTaskPrompt(_input: KnowledgeMaintainerInvocationInput): strin
 function reviewerTaskPrompt(_input: KnowledgeReviewerInvocationInput): string {
   return [
     'The current working directory is the root of this Knowledge Processing Task checkout.',
-    `Read tasks/${_input.worktree.taskId}/TASK.md and tasks/${_input.worktree.taskId}/task.json with the ordinary read tool, then carry out the Reviewer responsibility described by your System Prompt. Do not read tasks/${_input.worktree.taskId}/inputs/. Review exact Task revision ${_input.reviewedRepositoryRevision}. The main checkout used for final integration is ${JSON.stringify(_input.worktree.repositoryPath)}.`
+    `Read tasks/${_input.worktree.taskId}/TASK.md and tasks/${_input.worktree.taskId}/task.json with the ordinary read tool, then carry out the Reviewer responsibility described by your System Prompt. Do not read tasks/${_input.worktree.taskId}/inputs/. Review exact Task revision ${_input.reviewedRepositoryRevision}.`,
+    `Host-owned handoff contract: the Task branch is ${JSON.stringify(_input.worktree.branchName)}, the target branch is ${JSON.stringify(_input.worktree.targetBranch)}, the Task worktree is ${JSON.stringify(_input.worktree.worktreePath)}, and the clean target checkout used for final integration is ${JSON.stringify(_input.worktree.repositoryPath)}. Preserve the reviewed revision on the Task first-parent history and never rebase or otherwise rewrite Task history. If requesting changes, commit the REVIEW markers and unchecked TASK.md items and finish naturally. If approving, commit all Task-side bookkeeping first, merge the latest target branch into the Task branch and resolve any conflicts, then make promotion the final write: from the target checkout fast-forward-only merge the exact Task branch. Do not create worktrees, reset, clean, stash, or push. The Host validates the Git handoff after each natural stop and may return concrete failures in the same Pi Session for correction.`
   ].join('\n\n')
 }
 
@@ -160,6 +169,7 @@ export class PiKnowledgeMaintainerAgent implements KnowledgeMaintainerRuntime {
       language: this.getLanguage(),
       taskPrompt: maintainerTaskPrompt(input),
       worktree: input.worktree,
+      validateHandoff: input.validateHandoff,
       reasoningEffort: input.reasoningEffort,
       invocationId: input.invocationId,
       onInvocationUpdate: input.onInvocationUpdate,
@@ -186,6 +196,7 @@ export class PiKnowledgeReviewerAgent implements KnowledgeReviewerRuntime {
       language: this.getLanguage(),
       taskPrompt: reviewerTaskPrompt(input),
       worktree: input.worktree,
+      validateHandoff: input.validateHandoff,
       reasoningEffort: input.reasoningEffort,
       invocationId: input.invocationId,
       onInvocationUpdate: input.onInvocationUpdate,

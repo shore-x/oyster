@@ -41,6 +41,9 @@ const AGENT_TURN_RETRY = {
   provider: { maxRetries: 0 }
 } as const
 
+/** Initial handoff attempt plus two Host feedback turns. */
+export const MAX_AGENT_HANDOFF_FEEDBACKS = 2
+
 export type PiCodingAgentResourceMode = 'ecosystem' | 'disabled'
 
 export interface CreatePiCodingAgentInvocationOptions {
@@ -206,6 +209,16 @@ function runtimeFeedback(reasons: readonly string[]): AgentMessage {
   } as AgentMessage
 }
 
+function handoffFeedback(error: unknown, feedbackNumber: number): AgentMessage {
+  const reason = error instanceof Error
+    ? error.message
+    : (typeof error === 'string' && error ? error : 'Unknown handoff validation failure')
+  return runtimeFeedback([
+    `The Host rejected this handoff: ${reason}`,
+    `This is handoff feedback ${feedbackNumber} of ${MAX_AGENT_HANDOFF_FEEDBACKS}. Inspect the current repository state, correct every related issue, commit all intended changes, and finish naturally again.`
+  ])
+}
+
 export function isPiCodingAgentRuntimeFeedback(message: AgentMessage): boolean {
   return message.role === 'custom'
     && (message as AgentMessage & { customType?: string }).customType === RUNTIME_FEEDBACK_CUSTOM_TYPE
@@ -287,9 +300,9 @@ export async function createPiCodingAgentInvocation(
   }
 }
 
-export async function promptPiCodingAgent(
+async function runPiCodingAgentPrompt(
   invocation: PiCodingAgentInvocation,
-  prompt: string,
+  prompt: string | AgentMessage,
   signal: AbortSignal,
   label: string
 ): Promise<void> {
@@ -297,7 +310,9 @@ export async function promptPiCodingAgent(
   const abort = (): void => { void invocation.session.abort() }
   signal.addEventListener('abort', abort, { once: true })
   try {
-    const active = invocation.session.prompt(prompt)
+    const active = typeof prompt === 'string'
+      ? invocation.session.prompt(prompt)
+      : invocation.session.agent.prompt(prompt)
     if (signal.aborted) await invocation.session.abort()
     await active
     await invocation.session.waitForIdle()
@@ -310,6 +325,49 @@ export async function promptPiCodingAgent(
   const final = finalAssistantMessage(invocation.session.messages)
   if (!final || final.stopReason === 'error') {
     throw new Error(final?.errorMessage || invocation.session.state.errorMessage || `${label} 模型调用失败`)
+  }
+}
+
+export async function promptPiCodingAgent(
+  invocation: PiCodingAgentInvocation,
+  prompt: string,
+  signal: AbortSignal,
+  label: string
+): Promise<void> {
+  await runPiCodingAgentPrompt(invocation, prompt, signal, label)
+}
+
+/**
+ * Keeps one Pi Session and Invocation alive until the Agent's natural handoff satisfies the
+ * Host-owned boundary check. A failed check becomes ordinary runtime feedback, not a new role
+ * invocation or collaboration round.
+ */
+export async function promptPiCodingAgentUntilHandoff(
+  invocation: PiCodingAgentInvocation,
+  prompt: string,
+  validateHandoff: () => Promise<void>,
+  signal: AbortSignal,
+  label: string
+): Promise<void> {
+  let nextPrompt: string | AgentMessage = prompt
+  for (let feedbackCount = 0; ; feedbackCount += 1) {
+    await runPiCodingAgentPrompt(invocation, nextPrompt, signal, label)
+
+    try {
+      await validateHandoff()
+      return
+    } catch (error) {
+      if (feedbackCount >= MAX_AGENT_HANDOFF_FEEDBACKS) {
+        const reason = error instanceof Error
+          ? error.message
+          : (typeof error === 'string' && error ? error : '未知错误')
+        throw new Error(
+          `Agent 交接在 ${MAX_AGENT_HANDOFF_FEEDBACKS} 次 Host 反馈后仍未通过：${reason}`,
+          { cause: error }
+        )
+      }
+      nextPrompt = handoffFeedback(error, feedbackCount + 1)
+    }
   }
 }
 

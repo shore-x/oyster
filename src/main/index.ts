@@ -1,3 +1,4 @@
+import { mkdirSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -65,8 +66,16 @@ import { registerPiAgentSettingsIpc } from './agent-runtime/pi-agent-settings-ip
 import { AppSettingsService } from './app-settings/app-settings-service'
 import { registerAppSettingsIpc } from './app-settings/ipc'
 import type { AppLanguage } from '../shared/app-settings'
+import {
+  createAppDataPaths,
+  migrateLegacyAppData
+} from './app-data/app-data-paths'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
+const appDataPaths = createAppDataPaths(app.getPath('userData'))
+mkdirSync(appDataPaths.chromiumPath, { recursive: true })
+app.setPath('userData', appDataPaths.chromiumPath)
+app.setPath('sessionData', appDataPaths.chromiumPath)
 let mainWindow: BrowserWindow | undefined
 let aiBackendService: AiBackendService | undefined
 let knowledgeProcessingService: KnowledgeProcessingService | undefined
@@ -87,7 +96,7 @@ function createService(): DiscoveryService {
   const fixtureState = useFixtures ? createFixtureState() : undefined
   const repository = useFixtures
     ? new InMemoryDiscoveryRepository(fixtureState!)
-    : new JsonDiscoveryRepository(join(app.getPath('userData'), 'discovery-state.json'))
+    : new JsonDiscoveryRepository(appDataPaths.discoveryStatePath)
   const evidenceReader = useFixtures
     ? new MemorySourceEvidenceReader([{
         sourceConversationId: FIXTURE_SOURCE_CONVERSATION_ID,
@@ -107,7 +116,7 @@ function createBackendService(): AiBackendService {
   if (fixtureMode()) return createFixtureAiBackendService()
   const credentials = new KeychainCredentialStore()
   return new AiBackendService(
-    new JsonAiBackendRepository(join(app.getPath('userData'), 'ai-connections.json')),
+    new JsonAiBackendRepository(appDataPaths.aiConnectionsPath),
     credentials,
     new CodexAccountDiscovery(app.getPath('home')),
     new OpenAiCompatibleAdapter(),
@@ -120,7 +129,7 @@ function createBackendService(): AiBackendService {
 
 function skillDiscoveryHomeDirectory(): string {
   return fixtureMode()
-    ? join(app.getPath('userData'), 'skill-fixture-home')
+    ? appDataPaths.fixtureHomePath
     : app.getPath('home')
 }
 
@@ -252,7 +261,7 @@ function createKnowledgeProcessingService(
   }
   return new KnowledgeProcessingService(
     new JsonKnowledgeProcessingConfigurationRepository(
-      join(app.getPath('userData'), 'knowledge-processing.json')
+      appDataPaths.knowledgeProcessingPath
     ),
     aiBackend,
     processingRepository,
@@ -1697,18 +1706,19 @@ async function createMainWindow(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  await migrateLegacyAppData(appDataPaths)
   const appSettingsService = new AppSettingsService(
-    join(app.getPath('userData'), 'app-settings.json')
+    appDataPaths.appSettingsPath
   )
   await appSettingsService.initialize()
   const service = createService()
   const skillDiscoveryService = createSkillDiscoveryService(service)
   if (fixtureMode()) await initializeFixtureSkills(skillDiscoveryHomeDirectory())
-  const repository = new OysterRepository(join(app.getPath('userData'), 'repository'))
+  const repository = new OysterRepository(appDataPaths.repositoryPath)
   await repository.initialize()
   if (fixtureMode()) await initializeFixtureArtifact(repository)
   const agentDebugStore = new FileAgentDebugStore(
-    join(app.getPath('userData'), 'agent-debug', 'invocations')
+    appDataPaths.agentDebugPath
   )
   const artifactService = new ArtifactService(repository)
   const folderBrowser = new FolderBrowserService()
@@ -1719,9 +1729,10 @@ app.whenReady().then(async () => {
   aiBackendService = createBackendService()
   knowledgeStore = new FileKnowledgeStore(repository.knowledgePath)
   const processingRepository = new KnowledgeTaskGitRepository(repository, {
-    worktreesPath: join(app.getPath('userData'), 'worktrees'),
-    runtimePath: join(app.getPath('userData'), 'agent-runtime')
+    worktreesPath: appDataPaths.worktreesPath,
+    runtimePath: appDataPaths.agentRuntimePath
   })
+  await processingRepository.cleanupInactiveWorktrees()
   knowledgeTaskHistory = new GitKnowledgeTaskHistory(repository, processingRepository)
   knowledgeProcessingService = createKnowledgeProcessingService(
     aiBackendService,
@@ -1730,20 +1741,27 @@ app.whenReady().then(async () => {
     () => appSettingsService.agentLanguageSetting
   )
   chatConversationRepository = new PiChatConversationRepository(
-    join(app.getPath('userData'), 'chat-conversations'),
+    appDataPaths.chatConversationsPath,
     agentDebugStore
   )
+  try {
+    agentDebugStore.deleteUnreferenced(
+      await chatConversationRepository.referencedDebugRecordIds()
+    )
+  } catch (error) {
+    console.warn('Agent 调试记录引用检查失败；本次启动不执行清理。', error)
+  }
   chatAgentService = new ChatAgentService({
     conversations: chatConversationRepository,
     configuration: new JsonChatConfigurationRepository(
-      join(app.getPath('userData'), 'chat-agent.json')
+      appDataPaths.chatAgentPath
     ),
     aiBackend: aiBackendService,
     repositoryPath: repository.rootPath,
     debugStore: agentDebugStore,
     agent: new PiChatAgent(
       repository.rootPath,
-      join(app.getPath('userData'), 'pi-agent'),
+      appDataPaths.piAgentPath,
       agentDebugStore,
       () => appSettingsService.agentLanguageSetting
     )
@@ -1783,11 +1801,11 @@ app.whenReady().then(async () => {
   registerChatIpc(chatAgentService, () => mainWindow)
   registerAppSettingsIpc(appSettingsService, () => mainWindow)
   registerPiExtensionConfigurationIpc(
-    new PiExtensionConfigurationService(join(app.getPath('userData'), 'pi-agent')),
+    new PiExtensionConfigurationService(appDataPaths.piAgentPath),
     () => mainWindow
   )
   registerPiAgentSettingsIpc(
-    new PiAgentSettingsService(join(app.getPath('userData'), 'pi-agent')),
+    new PiAgentSettingsService(appDataPaths.piAgentPath),
     () => mainWindow
   )
   await createMainWindow()

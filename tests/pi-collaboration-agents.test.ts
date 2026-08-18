@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -18,9 +18,11 @@ import {
 } from '../src/main/knowledge-processing/pi-collaboration-agents'
 import {
   KnowledgeTaskGitRepository,
+  TASK_FILE_NAME,
   type KnowledgeTaskWorktree
 } from '../src/main/knowledge-processing/knowledge-task-git-repository'
 import { planKnowledgeTaskInput } from '../src/main/knowledge-processing/task-input'
+import { runArtifactGit } from '../src/main/artifacts/git-runtime'
 
 const temporaryDirectories: string[] = []
 
@@ -97,6 +99,7 @@ describe('Pi collaboration Agents', () => {
       modelStream,
       systemPrompt: 'Maintain the collaboration tree.',
       worktree,
+      validateHandoff: async () => undefined,
       previousRepositoryRevision: worktree.baseRepositoryRevision,
       sourceRef: 'raw:fixture@sha256:test',
       invocationId: 'maintainer-invocation',
@@ -115,7 +118,8 @@ describe('Pi collaboration Agents', () => {
         ])
         expect(context.systemPrompt).toContain('Agent output language: English.')
         expect(contextText(context)).toContain(`Review exact Task revision ${'c'.repeat(40)}`)
-        expect(contextText(context)).toContain(`main checkout used for final integration is \\"${worktree.repositoryPath}\\"`)
+        expect(contextText(context)).toContain(`clean target checkout used for final integration is \\"${worktree.repositoryPath}\\"`)
+        expect(contextText(context)).toContain(`Task branch is \\"${worktree.branchName}\\"`)
         expect(contextText(context)).not.toContain('read_evidence')
         expect(contextText(context)).not.toContain('Raw Evidence format')
         expect(contextText(context)).not.toContain('list_todos')
@@ -127,12 +131,152 @@ describe('Pi collaboration Agents', () => {
       modelStream,
       systemPrompt: 'Review the collaboration tree without reading inputs/.',
       worktree,
+      validateHandoff: async () => undefined,
       reviewedRepositoryRevision: 'c'.repeat(40),
       invocationId: 'reviewer-invocation',
       signal: new AbortController().signal
     })
 
     expect(result.toolCalls).toEqual([])
+  })
+
+  it('returns a failed Maintainer handoff to the same Pi Session before completing', async () => {
+    const worktree = await taskWorktree()
+    let checks = 0
+    const modelStream = fauxModelStream([
+      () => fauxAssistantMessage('The handoff is ready.'),
+      (context) => {
+        expect(contextText(context)).toContain('The Host rejected this handoff')
+        expect(contextText(context)).toContain('Task worktree is dirty')
+        expect(contextText(context)).toContain('handoff feedback 1 of 2')
+        return fauxAssistantMessage('The handoff is now corrected.')
+      }
+    ])
+
+    const result = await new PiKnowledgeMaintainerAgent().invoke({
+      modelStream,
+      systemPrompt: 'Maintain the collaboration tree.',
+      worktree,
+      validateHandoff: async () => {
+        checks += 1
+        if (checks === 1) throw new Error('Task worktree is dirty')
+      },
+      previousRepositoryRevision: worktree.baseRepositoryRevision,
+      sourceRef: 'raw:fixture@sha256:test',
+      invocationId: 'maintainer-handoff-feedback',
+      signal: new AbortController().signal
+    })
+
+    expect(checks).toBe(2)
+    expect(result.modelCallCount).toBe(2)
+  })
+
+  it('bounds Reviewer handoff feedback without requiring a finish tool', async () => {
+    const worktree = await taskWorktree()
+    let checks = 0
+    const modelStream = fauxModelStream([
+      () => fauxAssistantMessage('Approved.'),
+      (context) => {
+        expect(contextText(context)).toContain('handoff feedback 1 of 2')
+        return fauxAssistantMessage('Promotion corrected once.')
+      },
+      (context) => {
+        expect(contextText(context)).toContain('handoff feedback 2 of 2')
+        return fauxAssistantMessage('Promotion corrected twice.')
+      }
+    ])
+
+    await expect(new PiKnowledgeReviewerAgent().invoke({
+      modelStream,
+      systemPrompt: 'Review the collaboration tree.',
+      worktree,
+      validateHandoff: async () => {
+        checks += 1
+        throw new Error('main does not contain the exact Task revision')
+      },
+      reviewedRepositoryRevision: 'c'.repeat(40),
+      invocationId: 'reviewer-handoff-feedback-limit',
+      signal: new AbortController().signal
+    })).rejects.toThrow('2 次 Host 反馈后仍未通过')
+
+    expect(checks).toBe(3)
+  })
+
+  it('lets the Reviewer repair a rejected real Git promotion in the same Pi Session', async () => {
+    const rootPath = await mkdtemp(join(tmpdir(), 'oyster-pi-review-handoff-'))
+    temporaryDirectories.push(rootPath)
+    const repository = new KnowledgeTaskGitRepository(join(rootPath, 'repository'))
+    const taskId = 'reviewer-repairs-promotion'
+    const worktree = await repository.createWorktree({
+      taskId,
+      kind: 'task',
+      taskDefinition: {
+        formatVersion: 3,
+        taskId,
+        startedAt: '2026-08-13T00:00:00.000Z',
+        input: { sourceConversationId: 'source-1' },
+        sourceRef: 'raw:source@revision',
+        configuration: {
+          maintainer: { connectionId: 'connection', modelId: 'model' },
+          reviewer: { connectionId: 'connection', modelId: 'model' }
+        }
+      },
+      plan: {
+        files: [{ relativePath: 'inputs/activity.md', content: '# Activity\n' }],
+        items: ['Maintain the candidate.']
+      }
+    })
+    const taskFilePath = join(worktree.taskPath, TASK_FILE_NAME)
+    await writeFile(
+      taskFilePath,
+      (await readFile(taskFilePath, 'utf8')).replaceAll('- [ ]', '- [x]')
+    )
+    await writeFile(
+      join(worktree.worktreePath, 'knowledge', 'reviewed.md'),
+      '# Reviewed\n\nReady for promotion.\n'
+    )
+    await runArtifactGit(['add', '-A'], worktree.worktreePath)
+    await runArtifactGit([
+      'commit', '--quiet', '--no-gpg-sign', '-m', 'maintainer: prepare reviewed candidate'
+    ], worktree.worktreePath)
+    const reviewed = (await repository.inspectAgentCommit(
+      worktree,
+      worktree.baseRepositoryRevision
+    )).candidateRepositoryRevision
+    const targetRevisionBeforeReview = await repository.currentRevision()
+    let checks = 0
+    const promotionCommand = [
+      'git merge --quiet --no-edit main',
+      `git -C ${JSON.stringify(worktree.repositoryPath)} merge --ff-only ${JSON.stringify(worktree.branchName)}`
+    ].join(' && ')
+    const modelStream = fauxModelStream([
+      () => fauxAssistantMessage('Approved without promotion.'),
+      (context) => {
+        expect(contextText(context)).toContain('Reviewer 批准后必须将精确 Task revision 快进合并到目标分支')
+        return fauxAssistantMessage(
+          fauxToolCall('bash', { command: promotionCommand }),
+          { stopReason: 'toolUse' }
+        )
+      },
+      () => fauxAssistantMessage('The exact Task revision is now promoted.')
+    ])
+
+    const result = await new PiKnowledgeReviewerAgent().invoke({
+      modelStream,
+      systemPrompt: 'Review the collaboration tree.',
+      worktree,
+      validateHandoff: async () => {
+        checks += 1
+        await repository.inspectReview(worktree, reviewed, targetRevisionBeforeReview)
+      },
+      reviewedRepositoryRevision: reviewed,
+      invocationId: 'reviewer-real-git-handoff',
+      signal: new AbortController().signal
+    })
+
+    expect(checks).toBe(2)
+    expect(result.modelCallCount).toBe(3)
+    expect(await repository.currentRevision()).toBe(reviewed)
   })
 
   it('uses the ordinary read tool to send a materialized image to the model', async () => {
@@ -189,6 +333,7 @@ describe('Pi collaboration Agents', () => {
       modelStream,
       systemPrompt: 'Maintain the collaboration tree.',
       worktree,
+      validateHandoff: async () => undefined,
       previousRepositoryRevision: worktree.baseRepositoryRevision,
       sourceRef: 'raw:image@fixture',
       invocationId: 'maintainer-image-invocation',

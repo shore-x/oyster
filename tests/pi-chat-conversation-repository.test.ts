@@ -118,6 +118,9 @@ describe('PiChatConversationRepository', () => {
     const completed = completedAgentInvocation('chat-completed', [], 1, 'chat_agent')
     await repository.appendInvocation(metadata.id, completed)
     expect((await repository.detail(metadata.id)).invocations).toEqual([completed])
+    await expect(repository.referencedDebugRecordIds()).resolves.toEqual(
+      new Set([completed.debugRecordId])
+    )
 
     await repository.dispose()
   })

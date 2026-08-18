@@ -237,6 +237,29 @@ export class PiChatConversationRepository implements ChatConversationRepository 
     private readonly debugStore: AgentDebugStore = new InMemoryAgentDebugStore()
   ) {}
 
+  /** Returns the Debug Records reachable from durable Chat Invocation envelopes. */
+  async referencedDebugRecordIds(): Promise<Set<string>> {
+    const ids = new Set<string>()
+    const readManager = (manager: SessionManager): void => {
+      for (const invocation of invocationEntries(manager.getEntries())) {
+        ids.add(invocation.debugRecordId)
+      }
+    }
+    const knownFiles = new Set<string>()
+    for (const descriptor of await this.descriptors()) {
+      const manager = this.managerForDescriptor(descriptor)
+      readManager(manager)
+      const file = manager.getSessionFile()
+      if (file) knownFiles.add(resolve(file))
+    }
+    for (const file of await jsonlFiles(this.rootPath)) {
+      if (knownFiles.has(resolve(file))) continue
+      const manager = SessionManager.open(file, dirname(file), this.rootPath)
+      readManager(manager)
+    }
+    return ids
+  }
+
   private async writeDescriptor(descriptor: ChatConversationDescriptor): Promise<void> {
     await mkdir(this.rootPath, { recursive: true })
     const target = descriptorPath(this.rootPath, descriptor.conversationId)

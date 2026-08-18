@@ -20,4 +20,4 @@ Agent 以 Repository 为初始工作坐标，按当前 OS 用户权限运行。�
 
 Chat 会读取 Pi 的普通 context file，并可加载用户显式配置、因而被信任的 Headless Extension；不把 Pi Skill、Prompt Template 或 Theme 作为 Oyster 的隐式业务配置。
 
-**候选方向**：Chat Agent 未来也可以拥有独立 Git worktree/branch，并由 Agent 负责 commit、merge 或 rebase。该方向旨在让对话维护与结构化 Task 使用一致的 Repository 视图，但并未确定，不应据此承诺当前隔离或集成行为。
+**候选方向**：当产品未来允许用户直接编辑 Repository 文件时，用户与 Chat 可以共享独立的可改写工作分支和 worktree，而 Host 使用 clean 的 `main` 作为正式集成坐标。用户工作分支可以在合适时机 rebase 到最新 `main`，冲突由用户或能够理解内容的 Agent 处理；用户修改只有经过明确接受并进入 `main` 后才成为正式 Knowledge 或 Artifact。Task branch 的证据与协作历史仍不可改写，不与用户工作分支采用相同的 rebase 语义。当前 App 尚未提供用户直接修改文件的能力，这一方向不表示现有 Chat 已获得隔离、同步或自动集成保证。

@@ -517,10 +517,17 @@ export class KnowledgeProcessingService {
             worktree,
             expectedRepositoryRevision
           )
+          const validateHandoff = async (): Promise<void> => {
+            await this.tasks.inspectAgentCommit(
+              worktree,
+              previousRepositoryRevision
+            )
+          }
           const result = await (options.agent ?? this.maintainer).invoke({
             modelStream,
             systemPrompt: binding.instructions,
             worktree,
+            validateHandoff,
             previousRepositoryRevision,
             sourceRef,
             ...(normalizedAttention ? { attention: normalizedAttention } : {}),
@@ -529,7 +536,9 @@ export class KnowledgeProcessingService {
             onInvocationUpdate: (record) => this.recordInvocation(invocation, record),
             signal: controller.signal
           })
-          const handoff = await this.tasks.inspectAgentCommit(
+          // The Runtime may use validateHandoff to continue one Session after a failed natural
+          // stop. Re-read the final state here so the Service never trusts Runtime call ordering.
+          const acceptedHandoff = await this.tasks.inspectAgentCommit(
             worktree,
             previousRepositoryRevision
           )
@@ -538,9 +547,9 @@ export class KnowledgeProcessingService {
             agentId: 'knowledge_maintainer' as const,
             sourceRef,
             worktree: worktreeView(worktree),
-            previousRepositoryRevision: handoff.previousRepositoryRevision,
-            candidateRepositoryRevision: handoff.candidateRepositoryRevision,
-            changedPaths: handoff.changedPaths,
+            previousRepositoryRevision: acceptedHandoff.previousRepositoryRevision,
+            candidateRepositoryRevision: acceptedHandoff.candidateRepositoryRevision,
+            changedPaths: acceptedHandoff.changedPaths,
             agentInvocationId: result.invocation.invocationId,
             durationMs: Date.now() - startedAt,
             completedAt: new Date().toISOString(),
@@ -594,17 +603,25 @@ export class KnowledgeProcessingService {
             reviewedRepositoryRevision
           )
           const targetRevisionBeforeReview = await this.tasks.currentRevision()
+          const validateHandoff = async (): Promise<void> => {
+            await this.tasks.inspectReview(
+              worktree,
+              actualReviewedRepositoryRevision,
+              targetRevisionBeforeReview
+            )
+          }
           const result = await (options.agent ?? this.reviewer).invoke({
             modelStream,
             systemPrompt: binding.instructions,
             worktree,
+            validateHandoff,
             reviewedRepositoryRevision: actualReviewedRepositoryRevision,
             reasoningEffort: binding.reasoningEffort,
             invocationId: invocation.invocationId,
             onInvocationUpdate: (record) => this.recordInvocation(invocation, record),
             signal: controller.signal
           })
-          const decision = await this.tasks.inspectReview(
+          const acceptedDecision = await this.tasks.inspectReview(
             worktree,
             actualReviewedRepositoryRevision,
             targetRevisionBeforeReview
@@ -612,13 +629,13 @@ export class KnowledgeProcessingService {
           this.settleInvocation(invocation, result.invocation)
           return {
             agentId: 'knowledge_reviewer' as const,
-            decision: decision.kind,
-            reviewedRepositoryRevision: decision.reviewedRepositoryRevision,
-            candidateRepositoryRevision: decision.candidateRepositoryRevision,
-            changedPaths: decision.kind === 'changes_requested' ? decision.changedPaths : [],
-            markerPaths: decision.kind === 'changes_requested' ? decision.markerPaths : [],
-            ...(decision.kind === 'approved'
-              ? { integratedRepositoryRevision: decision.integratedRepositoryRevision }
+            decision: acceptedDecision.kind,
+            reviewedRepositoryRevision: acceptedDecision.reviewedRepositoryRevision,
+            candidateRepositoryRevision: acceptedDecision.candidateRepositoryRevision,
+            changedPaths: acceptedDecision.kind === 'changes_requested' ? acceptedDecision.changedPaths : [],
+            markerPaths: acceptedDecision.kind === 'changes_requested' ? acceptedDecision.markerPaths : [],
+            ...(acceptedDecision.kind === 'approved'
+              ? { integratedRepositoryRevision: acceptedDecision.integratedRepositoryRevision }
               : {}),
             agentInvocationId: result.invocation.invocationId,
             durationMs: Date.now() - startedAt,

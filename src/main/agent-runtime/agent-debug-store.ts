@@ -1,5 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { AgentInvocationDebugRecord } from '../../shared/agent-runtime'
 import { AGENT_INVOCATION_FORMAT_VERSION } from '../../shared/agent-runtime'
@@ -59,6 +66,25 @@ export class FileAgentDebugStore implements AgentDebugStore {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
       throw error
     }
+  }
+
+  /** Removes debug-only records that no durable Chat Invocation references. */
+  deleteUnreferenced(retainedInvocationIds: ReadonlySet<string>): number {
+    let deleted = 0
+    for (const entry of readdirSync(this.rootPath, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue
+      let invocationId: string
+      try {
+        invocationId = normalizedInvocationId(decodeURIComponent(entry.name.slice(0, -'.json'.length)))
+      } catch {
+        // Unknown files may still be recoverable debug data; cleanup never guesses their identity.
+        continue
+      }
+      if (retainedInvocationIds.has(invocationId)) continue
+      unlinkSync(join(this.rootPath, entry.name))
+      deleted += 1
+    }
+    return deleted
   }
 }
 

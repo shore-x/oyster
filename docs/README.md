@@ -8,7 +8,8 @@
 2. [领域概念](architecture/terminology.md)：Observation、Knowledge、Artifact 等名词的含义；
 3. [信息模型](architecture/knowledge-model-and-projection.md)：三种信息形态为什么分开，以及如何在同一 Repository 中协作；
 4. [Agent Runtime](architecture/agent-runtime.md)：Agent 执行层的职责和高信任边界；
-5. [统一 Repository 与 Agent Git 协作](architecture/unified-git-agent-collaboration.md)：Task、revision 与 worktree 的协作模型。
+5. [统一 Repository 与 Agent Git 协作](architecture/unified-git-agent-collaboration.md)：Task、revision 与 worktree 的协作模型；
+6. [应用数据边界](architecture/application-data.md)：正式 Repository、本机状态、Runtime、诊断与 Chromium 数据如何分开。
 
 按功能继续阅读：
 

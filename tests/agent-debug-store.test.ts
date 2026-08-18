@@ -57,4 +57,20 @@ describe('FileAgentDebugStore', () => {
     expect(migrated).toMatchObject({ formatVersion: 4, invocationId: current.invocationId })
     expect(migrated).not.toHaveProperty('id')
   })
+
+  it('removes only records not referenced by durable Chat Invocations', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'oyster-agent-debug-retention-'))
+    temporaryPaths.push(root)
+    const store = new FileAgentDebugStore(root)
+    const retained = completedAgentInvocation('invocation:chat')
+    const disposable = completedAgentInvocation('invocation:task')
+    store.save(retained)
+    store.save(disposable)
+    await writeFile(join(root, '%ZZ.json'), '{}\n', 'utf8')
+
+    expect(store.deleteUnreferenced(new Set([retained.invocationId]))).toBe(1)
+    expect(store.read(retained.invocationId)).toEqual(retained)
+    expect(store.read(disposable.invocationId)).toBeUndefined()
+    await expect(readFile(join(root, '%ZZ.json'), 'utf8')).resolves.toBe('{}\n')
+  })
 })

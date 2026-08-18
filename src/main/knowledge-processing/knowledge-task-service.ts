@@ -135,7 +135,7 @@ export class KnowledgeTaskService {
           }
           controller.signal.throwIfAborted()
           const completedAt = new Date().toISOString()
-          return {
+          const result: KnowledgeTaskResult = {
             taskId,
             sourceConversation: structuredClone(material.sourceConversation),
             sourceRef: material.sourceRef,
@@ -149,6 +149,13 @@ export class KnowledgeTaskService {
             durationMs: Date.now() - startedAt,
             completedAt
           }
+          try {
+            await this.tasks.releaseCompletedWorktree(taskWorktree)
+          } catch (error) {
+            // main already owns the completed Task; cleanup failure must not falsify that fact.
+            console.warn('已完成 Knowledge Task 的临时 worktree 清理失败。', error)
+          }
+          return result
         }
 
         const maintenanceContext = createInvocationContext()

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -400,15 +400,20 @@ describe('KnowledgeTaskService', () => {
       sourceRevision: 'legacy-selection-revision'
     }
     const result = await service.start(input, BINDINGS)
+    const formalTaskPath = join(
+      result.worktree.repositoryPath,
+      'tasks',
+      result.taskId
+    )
 
-    expect(await readdir(result.worktree.taskPath)).toEqual(expect.arrayContaining([
+    expect(await readdir(formalTaskPath)).toEqual(expect.arrayContaining([
       'TASK.md',
       'inputs',
       'task.json'
     ]))
-    expect(await readdir(result.worktree.taskPath)).not.toContain('pi-sessions')
+    expect(await readdir(formalTaskPath)).not.toContain('pi-sessions')
     const definition = JSON.parse(await readFile(
-      join(result.worktree.taskPath, 'task.json'),
+      join(formalTaskPath, 'task.json'),
       'utf8'
     )) as Record<string, unknown>
     expect(definition).toMatchObject({ formatVersion: 3, taskId: result.taskId })
@@ -435,6 +440,8 @@ describe('KnowledgeTaskService', () => {
     })
     expect(readModel?.sourceConversation).not.toHaveProperty('sourceRevision')
     expect(readModel?.result?.sourceConversation).not.toHaveProperty('sourceRevision')
+    await expect(access(result.worktree.worktreePath)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(access(result.worktree.runtimePath)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('preserves failed Agent working-tree facts without rewriting task.json', async () => {

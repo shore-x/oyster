@@ -55,13 +55,15 @@ Reviewer 要求修改时，直接在可定位的位置或统一进度记录中�
 
 两个角色当前复用同一种通用 Coding Agent 环境：每次 Invocation 都是新的 Runtime session，以 Task linked worktree 根为 `cwd`，只启用普通 `read`、`bash`、`edit`、`write` 工具，不加载外部 Agent resources、Extension、Skill 或 Host Todo。Session 和 Debug Record 位于 Repository 外；Task 的跨轮连续性来自 Git revision、`TASK.md` 与正式文件，而不是共享模型上下文。这个 worktree 是写入坐标，不是权限沙箱；Agent 仍以应用的 OS 权限运行。
 
+Maintainer 和 Reviewer 也复用同一个 Agent 交接循环。Agent 自然停止后，Host 检查当前角色所需的 Git 事实；通过后才结束 Invocation，失败则把具体原因送回同一 Pi Session，让 Agent 在同一 Invocation 中修复。当前最多反馈两次，之后仍不满足条件则 Invocation 失败而 Task 保持 `open`。只有 Maintainer 与 Reviewer 真正交接时才创建新的 Invocation。这里不增加角色专用 finish 工具，也不把 Agent 的自然停止或口头结论当成新的业务状态。
+
 当前执行链路保持一个简单闭环：
 
 1. Repository 协作服务创建 Task-start revision 并校验固定输入；
 2. Maintainer 把 `activity.md` 读到 EOF，必要时按 locator 回查 `evidence.txt`，搜索并维护正式内容，更新 `TASK.md` 后提交；
-3. Repository 协作服务验证 clean worktree、commit 祖先关系、固定输入与 Repository tree；
+3. Maintainer 自然停止后，Repository 协作服务验证 clean worktree、commit 祖先关系、固定输入与 Repository tree；未通过时在同一 Session 反馈并有界重试；
 4. Reviewer 在新的、按角色约束为 evidence-blind 的 Invocation 中检查候选 tree；有问题则提交可执行反馈，没有问题则把最新 `main` merge 进 Task branch、处理冲突、重新检查并从主 checkout fast-forward 整合；
-5. Repository 协作服务验证最终 revision 已进入 clean 的 `main`，否则 Task 仍为 `open`。
+5. Reviewer 每次自然停止后，Repository 协作服务验证要求修改的 commit 或批准后的精确 promotion；未通过时使用相同交接循环，最终 revision 进入 clean 的 `main` 后 Task 才完成，否则仍为 `open`。
 
 这里不再拆出更多内容处理或专用 Git 角色：Maintainer 负责“证据是否值得进入长期内容”，Reviewer 负责“长期内容脱离证据后是否仍可用”，Repository 协作服务只承担机械边界。普通文件和 Git commit 就是两者的交接面。
 
@@ -72,7 +74,7 @@ Reviewer 要求修改时，直接在可定位的位置或统一进度记录中�
 - `open` 表示工作仍未进入正式分支，可以继续；
 - `completed` 表示 Reviewer 接受的精确结果已经进入 `main`；
 
-显式放弃和清理是后续生命周期设计，不在当前模型中预留无法到达的状态。
+Task 完成后保留 branch 与进入 `main` 的正式记录，linked worktree 和该 Task 的 Runtime Session 被回收；显式放弃仍是后续生命周期设计，不在当前模型中预留无法到达的状态。
 
 Agent Invocation 的成功、失败或取消只描述一次执行。Reviewer 说“批准”但尚未把结果整合进 `main` 时，Task 仍不是 `completed`。这使知识库和工作台能够把 `main` 作为一致的正式内容边界，不需要再解释“已完成但尚未生效”的中间状态。
 
@@ -82,7 +84,7 @@ Git 保存理解业务变化所需的 Task 材料、协作进度以及 Knowledge
 
 成功 Task 的 Git 记录提供证据留存、固定输入完整性和 Task 级审计基础。Maintainer 还应在 `TASK.md` 中用自然语言记录重要 Knowledge 变更与 Raw Evidence locator 或输入 Knowledge revision 之间的关系；Git 使这份记录与它所解释的变更共同版本化。这就是当前的可溯源机制：它能被人和通用 Agent 直接阅读，但不声称是已经由机器校验的 Statement 级 provenance Schema。不新增 Knowledge version 到 Evidence 的映射数据或专用查询工具；需要理解时直接读取 `TASK.md`、其所引 locator 与 Git history。Artifact 仍遵循文件和变更集级审计边界，不在这里扩展通用内容级出处合同。
 
-Pi Session、Agent Invocation 明细和 Debug Record 回答的是如何继续或诊断一次执行，可能包含完整上下文、工具结果和 Provider 数据。它们位于 Repository 外，不随 Task Git 历史传播。调试数据的保留期限尚未确定，后续应由统一设置和清理模块治理。
+Pi Session、Agent Invocation 明细和 Debug Record 回答的是如何继续或诊断一次执行，可能包含完整上下文、工具结果和 Provider 数据。它们位于 Repository 外，不随 Task Git 历史传播。Task 完成后不依赖 Pi Session；Task 与 Preview 的 Debug Record 只服务当前进程，下一次启动清理没有持久 Chat 引用的记录。具体目录和保留边界见[应用数据](../architecture/application-data.md)。
 
 当前归一化 Raw Evidence 仍可能包含隐藏推理、Runtime envelope、敏感文件正文、绝对路径或其他不应随 Repository 传播的信息。证据留存是核心需要，但不意味着执行引擎的全部轨迹都应永久进入 Git；在支持共享、同步或长期清理前，产品必须明确接受 Task 会复制什么、哪些内容只属于调试、删除如何影响历史，以及大附件和敏感内容的边界。
 

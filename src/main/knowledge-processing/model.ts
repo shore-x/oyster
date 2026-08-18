@@ -51,6 +51,8 @@ interface RepositoryAgentInvocationInput {
   modelStream: SelectedModelStream
   systemPrompt: string
   worktree: KnowledgeTaskWorktree
+  /** Host-owned boundary check run whenever the Agent naturally attempts to hand off. */
+  validateHandoff: () => Promise<void>
   reasoningEffort?: ReasoningEffort
   invocationId: string
   onInvocationUpdate?: (record: AgentInvocationDebugRecord) => void
